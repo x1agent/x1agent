@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/x1agent/x1agent/compare/v1.1.1...v1.1.2) (2026-04-18)
+
+
+### Bug Fixes
+
+* **docs:** rename mermaid node 'graph' to 'graphProv' ([af43726](https://github.com/x1agent/x1agent/commit/af43726c298a05a4d7287f03833bb04ba3bdb45c))
+
 ## [1.1.1](https://github.com/x1agent/x1agent/compare/v1.1.0...v1.1.1) (2026-04-18)
 
 
