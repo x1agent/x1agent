@@ -1,0 +1,109 @@
+# DEV ONLY — applied by devspace against OrbStack. Prod path is the Helm
+# chart at deploy/helm/x1agent. Differences from prod:
+#  - Single replica, Recreate strategy, no HPA
+#  - Runs the image's baked /app (node_modules + manifests + source).
+#    Devspace file-sync overlays packages/ on top of it for hot reload.
+#  - imagePullPolicy: IfNotPresent with a locally-built dev image
+#  - Env injected from developer's .env.local via devspace vars; prod uses
+#    External Secrets Operator against GSM/AWS SM/Vault
+#  - Permissive RBAC sufficient for creating session Jobs; prod tightens
+#    per-role bindings and adds NetworkPolicy
+#  - No TLS, no ingress, no NATS mTLS — all of those are prod-chart concerns
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x1agent-api
+  labels:
+    app: x1agent-api
+---
+# Least-privilege role for the api pod. Two buckets today:
+#  1. Read own namespace (debugging/self-awareness)
+#  2. Create/list/get/delete session Jobs (for the sessions milestone)
+# Kept in one role rather than split — it's always one SA's permissions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: x1agent-api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: x1agent-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: x1agent-api
+subjects:
+  - kind: ServiceAccount
+    name: x1agent-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 30001
+      targetPort: 30001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      serviceAccountName: x1agent-api
+      containers:
+        - name: api
+          image: x1agent-api
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 30001
+          env:
+            - name: DATABASE_URL
+              value: postgres://x1agent:x1agent@postgres:5432/x1agent
+            - name: API_PORT
+              value: "30001"
+            - name: API_PUBLIC_URL
+              value: http://localhost:30001
+            - name: PUBLIC_URL
+              value: http://localhost:4322
+            - name: PLATFORM_NAME
+              value: x1agent
+            - name: NODE_ENV
+              value: development
+          # Secrets come in via devspace env-var injection at dev time so
+          # values never land in committed manifests.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 30001
+            initialDelaySeconds: 10
+            periodSeconds: 5

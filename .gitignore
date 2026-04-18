@@ -5,3 +5,4 @@ CLAUDE.local.md
 node_modules/
 dist/
 .devspace/
+MEMORY.md

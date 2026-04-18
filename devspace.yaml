@@ -1,0 +1,139 @@
+version: v2beta1
+name: x1agent
+
+# Local dev puts the API (and Postgres) into the OrbStack K8s cluster so
+# that session Jobs can be created from the same ServiceAccount + NATS bus
+# that prod will use. The Astro app runs on the host (Vite HMR is snappier
+# outside a container, and the app only talks to the API over HTTP).
+#
+# This config is DEV ONLY. Prod deployment goes through the Helm chart at
+# deploy/helm/x1agent/. Secrets here flow from .env.local → mise →
+# devspace vars → pod env; prod uses External Secrets Operator.
+
+vars:
+  JWT_SECRET:
+    source: env
+  GOOGLE_OAUTH_CLIENT_ID:
+    source: env
+  GOOGLE_OAUTH_CLIENT_SECRET:
+    source: env
+  ALLOWED_DOMAINS:
+    source: env
+    default: ""
+  PLATFORM_ADMIN_EMAILS:
+    source: env
+    default: ""
+  AUTH_BYPASS:
+    source: env
+    default: "false"
+  TEST_USER:
+    source: env
+    default: ""
+  GITHUB_APP_ID:
+    source: env
+    default: ""
+  GITHUB_APP_SLUG:
+    source: env
+    default: ""
+  GITHUB_APP_CLIENT_ID:
+    source: env
+    default: ""
+  GITHUB_APP_CLIENT_SECRET:
+    source: env
+    default: ""
+  GITHUB_APP_PRIVATE_KEY:
+    source: env
+    default: ""
+  GITHUB_APP_WEBHOOK_SECRET:
+    source: env
+    default: ""
+  ANTHROPIC_API_KEY:
+    source: env
+    default: ""
+
+images:
+  api:
+    image: x1agent-api
+    dockerfile: ./deploy/docker/api.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
+
+deployments:
+  postgres:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/postgres.yaml
+  api:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/api.yaml
+
+dev:
+  # Port-forward Postgres to the host so integration tests + migration
+  # tools (`bun run migrate` from the host) can reach the cluster DB.
+  postgres:
+    labelSelector:
+      app: postgres
+    ports:
+      - port: "5432"
+
+  api:
+    labelSelector:
+      app: api
+    devImage: x1agent-api
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - .astro
+          - "*.log"
+        startContainer: true
+      - path: ./deploy/migrations:/app/deploy/migrations
+    ports:
+      - port: "30001"
+    # The image already has node_modules installed; file sync overlays
+    # packages/ with the host's current source. We just migrate + start.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app
+        (cd packages/api && bun run migrate)
+        exec bun --hot run packages/api/src/index.ts
+    env:
+      - name: JWT_SECRET
+        value: ${JWT_SECRET}
+      - name: GOOGLE_OAUTH_CLIENT_ID
+        value: ${GOOGLE_OAUTH_CLIENT_ID}
+      - name: GOOGLE_OAUTH_CLIENT_SECRET
+        value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      - name: ALLOWED_DOMAINS
+        value: ${ALLOWED_DOMAINS}
+      - name: PLATFORM_ADMIN_EMAILS
+        value: ${PLATFORM_ADMIN_EMAILS}
+      - name: AUTH_BYPASS
+        value: ${AUTH_BYPASS}
+      - name: TEST_USER
+        value: ${TEST_USER}
+      - name: GITHUB_APP_ID
+        value: ${GITHUB_APP_ID}
+      - name: GITHUB_APP_SLUG
+        value: ${GITHUB_APP_SLUG}
+      - name: GITHUB_APP_CLIENT_ID
+        value: ${GITHUB_APP_CLIENT_ID}
+      - name: GITHUB_APP_CLIENT_SECRET
+        value: ${GITHUB_APP_CLIENT_SECRET}
+      - name: GITHUB_APP_PRIVATE_KEY
+        value: ${GITHUB_APP_PRIVATE_KEY}
+      - name: GITHUB_APP_WEBHOOK_SECRET
+        value: ${GITHUB_APP_WEBHOOK_SECRET}
+      - name: ANTHROPIC_API_KEY
+        value: ${ANTHROPIC_API_KEY}
+
+pipelines:
+  dev: |-
+    run_dependencies --all
+    create_deployments --all
+    start_dev --all

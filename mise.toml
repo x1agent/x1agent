@@ -1,6 +1,74 @@
 [tools]
 node = "22"
+bun = "latest"
 
+[env]
+# Load committed defaults first, then developer overrides.
+# Both files are optional; mise silently skips missing ones.
+_.file = [".env", ".env.local"]
+
+# Scope kubectl/devspace/helm to OrbStack for everything run through mise
+# (or in a mise-activated shell inside this directory). Prevents accidental
+# deploys to a real cluster.
+KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
+
+# Where the app (running on host) finds the cluster-side API.
+# devspace port-forwards 30001 from the api pod to localhost.
+PUBLIC_API_URL = "http://localhost:30001"
+
+# ----------------------------------------------------------------------------
+# Cluster-side dev: Postgres + api Deployment + file-sync + port-forward.
+# Blocks until you Ctrl-C; keep it running in its own terminal.
+# ----------------------------------------------------------------------------
+[tasks."dev:cluster"]
+description = "Start api + postgres in OrbStack with hot file-sync (blocks)"
+run = "devspace dev --namespace x1agent"
+
+[tasks."dev:cluster:stop"]
+description = "Tear down the devspace-managed cluster dev stack"
+run = "devspace purge --namespace x1agent"
+
+[tasks."dev:cluster:logs"]
+description = "Tail api pod logs"
+run = "kubectl logs -n x1agent -l app=api -f --tail=200"
+
+# ----------------------------------------------------------------------------
+# Host-side dev: Astro app. Assumes dev:cluster is already running so
+# localhost:30001 is port-forwarded.
+# ----------------------------------------------------------------------------
+[tasks."dev:app"]
+description = "Start the Astro app on :4322 (talks to localhost:30001)"
+run = "cd packages/app && bun run dev"
+
+# The one-command orchestration: kick the cluster off in a tmux-style
+# background, then run the app in the foreground. Ctrl-C stops the app;
+# run dev:cluster:stop to tear down the cluster-side stack.
+[tasks.dev]
+description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
+run = [
+  "devspace dev --namespace x1agent &",
+  "sleep 6 && cd packages/app && bun run dev",
+]
+
+# ----------------------------------------------------------------------------
+# Tests
+# ----------------------------------------------------------------------------
+[tasks.test]
+description = "Run all unit + integration tests across packages"
+run = """
+for pkg in kernel domains/auth domains/workspaces domains/invitations domains/agents api; do
+  echo "=== $pkg ==="
+  (cd packages/$pkg && bun test) || exit 1
+done
+"""
+
+[tasks."test:e2e"]
+description = "Run Playwright e2e (requires dev stack running)"
+run = "cd packages/app && bun run test:e2e"
+
+# ----------------------------------------------------------------------------
+# Docs site
+# ----------------------------------------------------------------------------
 [tasks.docs]
 description = "Run the docs site locally"
 run = "cd docs && npm run dev"
