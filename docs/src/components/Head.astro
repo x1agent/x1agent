@@ -1,0 +1,52 @@
+---
+import Default from '@astrojs/starlight/components/Head.astro';
+---
+
+<Default><slot /></Default>
+
+<script>
+  import mermaid from 'mermaid';
+
+  const themeName = () =>
+    document.documentElement.dataset.theme === 'light' ? 'default' : 'dark';
+
+  async function render() {
+    const fresh = document.querySelectorAll<HTMLElement>(
+      'pre.mermaid:not([data-processed])'
+    );
+    if (fresh.length === 0) return;
+    fresh.forEach((el) => {
+      if (!el.dataset.source) el.dataset.source = el.textContent ?? '';
+    });
+    mermaid.initialize({ startOnLoad: false, theme: themeName() });
+    await mermaid.run({ nodes: Array.from(fresh) });
+  }
+
+  async function rerender() {
+    const all = document.querySelectorAll<HTMLElement>('pre.mermaid');
+    all.forEach((el) => {
+      const src = el.dataset.source;
+      if (src !== undefined) {
+        el.textContent = src;
+        el.removeAttribute('data-processed');
+      }
+    });
+    await render();
+  }
+
+  const start = () => {
+    render();
+    new MutationObserver(rerender).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+
+  document.addEventListener('astro:page-load', render);
+</script>
