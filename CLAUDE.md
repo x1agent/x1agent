@@ -6,9 +6,17 @@ Open-source, Kubernetes-native agent platform. Runs LLM agents in isolated pods 
 
 1. **Documentation first.** Every feature starts with documentation. Check out a branch, write the docs, then implement. A PR without doc updates is incomplete. The docs in `docs/` are the source of truth for what the system does and why. Code examples in docs must be real -- if you show a config snippet, it must work.
 
-2. **Never work on main.** All work happens on feature branches. Create a branch, do the work, open a PR. Direct commits to main are only for releases (automated by semantic-release). Branch naming: `feat/short-description`, `fix/short-description`, `docs/short-description`.
+   **The architecture described in `docs/architecture/` and `docs/providers/` is binding on the code.** Every provider domain named in the docs (`auth`, `graph`, `files`, `messaging`, `calendar`, `email`, `ai`, `storage`, `vector`) is a swappable contract, not a hardcoded integration. Any code path that assumes a specific implementation -- "Google OAuth only", "SurrealDB only", "GCS only" -- is a bug to be fixed, not shipped. If implementation reality diverges from the docs, update the docs first (propose the new boundary), then refactor.
 
-3. **Docs are the product.** The `docs/` directory builds into the public documentation site. Write for operators and contributors, not for ourselves. No internal jargon without definition. No "see Slack" references. Everything a reader needs is in the docs or linked from them.
+2. **Domain-driven design.** Each bounded context (auth, workspaces, invitations, agents, sessions) lives in its own `packages/domains/<name>/` with a four-layer structure: `domain/` (pure entities and value objects, zero I/O), `application/` (use cases that orchestrate domain logic), `ports/` (interfaces for everything external), `adapters/` (implementations of those ports -- one per infrastructure choice). Cross-cutting value objects (`Email`, `Role`, `WorkspaceSlug`, etc.) live in `packages/kernel/`. The `packages/api/` Hono service is a composition root: it wires adapters together but contains no domain logic. See [Testing] below for what each layer must prove.
+
+3. **Test coverage for every layer.** Domain logic is 100% unit-tested with no I/O. Application services are unit-tested with mocked ports. Adapters have integration tests against the real infrastructure they adapt (Postgres, NATS, HTTP). Every port with multiple adapters has a **contract-test suite** in the port's package; every adapter runs that suite to prove it satisfies the contract. "I'll add tests later" is not acceptable for merged code.
+
+4. **Never work on main.** All work happens on feature branches. Create a branch, do the work, open a PR. Direct commits to main are only for releases (automated by semantic-release). Branch naming: `feat/short-description`, `fix/short-description`, `docs/short-description`.
+
+5. **Docs are the product.** The `docs/` directory builds into the public documentation site. Write for operators and contributors, not for ourselves. No internal jargon without definition. No "see Slack" references. Everything a reader needs is in the docs or linked from them.
+
+6. **Local dev runs in OrbStack K8s via devspace.** Postgres, NATS, provider deployments, and (eventually) agent session Jobs all run as real Kubernetes resources in OrbStack, deployed and hot-reloaded by `devspace`. API + app are served by `devspace` with file-sync so code changes reflect without restart. All tests and local verification MUST go through `mise run dev` against OrbStack — never fall back to bare docker containers, never run a service-under-test on the host just because the cluster is slow. If OrbStack is broken, fix OrbStack (`orbctl stop k8s && orbctl start k8s`, or a full OrbStack app restart), don't route around it. The `mise.toml` `KUBECONFIG` override ensures every tool launched through mise can only see the `orbstack` context, so "accidentally deploying to prod" is not a failure mode — stalled-cluster symptoms are.
 
 ## Commits
 
@@ -60,11 +68,24 @@ The review agents are in `.claude/commands/`. The pre-push hook is in `.githooks
 ## Repository structure
 
 ```
-docs/                   Documentation site content (Astro Starlight)
-packages/               Framework packages (core, runtime, sidecar, api, app, etc.)
-deploy/                 Helm charts, docker-compose, migrations
+docs/                   Documentation site content (Astro Starlight). Architecture binding.
+packages/
+  kernel/               Shared value objects (Email, Role, WorkspaceSlug, Clock)
+  domains/              Bounded contexts — each one is domain/application/ports/adapters
+    auth/
+    workspaces/
+    invitations/
+    agents/
+    sessions/
+  infrastructure/       Shared infrastructure adapters (postgres, nats, kubernetes)
+  api/                  Hono composition root — wires adapters, owns HTTP surface
+  app/                  Astro + React + zustand frontend
+  shared/               Wire DTOs shared with the browser (types only)
+deploy/                 Helm charts, manifests, migrations, devspace
 examples/               Reference implementations (gitignored, symlinked)
 ```
+
+A package either belongs to a bounded context (under `domains/`) or supports them (kernel, infrastructure, api, app). There is no "utils" or "lib" dumping ground. Shared code that crosses domains lives in `kernel/`; shared infrastructure lives under `infrastructure/`.
 
 ## Documentation site
 
