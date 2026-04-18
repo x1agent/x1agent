@@ -1,0 +1,8 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { AccountRoot } from "../features/auth/AccountRoot";
+---
+
+<Layout title="Account · x1agent">
+  <AccountRoot client:only="react" />
+</Layout>

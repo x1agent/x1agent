@@ -1,0 +1,10 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { AcceptInvitationRoot } from "../../features/invitations/AcceptInvitationRoot";
+
+const { token } = Astro.params;
+---
+
+<Layout title="Invitation · x1agent">
+  <AcceptInvitationRoot client:only="react" token={token ?? ""} />
+</Layout>

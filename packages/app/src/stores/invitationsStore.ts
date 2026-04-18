@@ -1,0 +1,72 @@
+import { create } from "zustand";
+import type {
+  InvitationDTO,
+  InvitationListResponse,
+  Role,
+} from "@x1agent/shared";
+import { apiFetch } from "../lib/api";
+
+interface InvitationsState {
+  bySlug: Record<string, InvitationDTO[]>;
+  loadingSlug: string | null;
+  errorBySlug: Record<string, string | null>;
+
+  load(slug: string): Promise<void>;
+  create(slug: string, email: string, role: Role): Promise<InvitationDTO>;
+  revoke(slug: string, id: string): Promise<void>;
+}
+
+export const useInvitationsStore = create<InvitationsState>((set, get) => ({
+  bySlug: {},
+  loadingSlug: null,
+  errorBySlug: {},
+
+  async load(slug) {
+    set({ loadingSlug: slug });
+    try {
+      const res = await apiFetch<InvitationListResponse>(
+        `/api/workspaces/${slug}/invitations`,
+      );
+      set((s) => ({
+        bySlug: { ...s.bySlug, [slug]: res.invitations },
+        errorBySlug: { ...s.errorBySlug, [slug]: null },
+        loadingSlug: null,
+      }));
+    } catch (err) {
+      set((s) => ({
+        errorBySlug: { ...s.errorBySlug, [slug]: (err as Error).message },
+        loadingSlug: null,
+      }));
+    }
+  },
+
+  async create(slug, email, role) {
+    const res = await apiFetch<{ invitation: InvitationDTO }>(
+      `/api/workspaces/${slug}/invitations`,
+      {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      },
+    );
+    set((s) => ({
+      bySlug: {
+        ...s.bySlug,
+        [slug]: [res.invitation, ...(s.bySlug[slug] ?? [])],
+      },
+    }));
+    return res.invitation;
+  },
+
+  async revoke(slug, id) {
+    await apiFetch(`/api/workspaces/${slug}/invitations/${id}`, {
+      method: "DELETE",
+    });
+    const current = get().bySlug[slug] ?? [];
+    set((s) => ({
+      bySlug: {
+        ...s.bySlug,
+        [slug]: current.filter((i) => i.id !== id),
+      },
+    }));
+  },
+}));
