@@ -18,7 +18,11 @@ import Default from '@astrojs/starlight/components/Head.astro';
     fresh.forEach((el) => {
       if (!el.dataset.source) el.dataset.source = el.textContent ?? '';
     });
-    mermaid.initialize({ startOnLoad: false, theme: themeName() });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: themeName(),
+      securityLevel: 'loose',
+    });
     await mermaid.run({ nodes: Array.from(fresh) });
   }
 
