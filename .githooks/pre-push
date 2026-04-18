@@ -4,6 +4,12 @@
 
 set -e
 
+# Skip in CI. This hook invokes the Claude Code CLI, which isn't installed on
+# GitHub runners, so semantic-release's tag push would fail the hook.
+if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ]; then
+  exit 0
+fi
+
 # Get the remote and branch being pushed to
 remote="$1"
 url="$2"
