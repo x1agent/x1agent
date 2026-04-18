@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/select";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
+import { AgentReposSection } from "../github/AgentReposSection";
 
 interface Props {
   workspaceSlug: string;
@@ -250,6 +251,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
             </CardContent>
           </Card>
         )}
+
+        <AgentReposSection
+          workspaceSlug={workspaceSlug}
+          agentId={existing?.id ?? null}
+        />
 
         {error && <div className="text-sm text-red-400">{error}</div>}
 
