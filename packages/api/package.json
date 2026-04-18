@@ -1,0 +1,28 @@
+{
+  "name": "@x1agent/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun --hot run src/index.ts",
+    "start": "bun run src/index.ts",
+    "migrate": "bun run src/db/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@x1agent/domain-agents": "workspace:*",
+    "@x1agent/domain-auth": "workspace:*",
+    "@x1agent/domain-invitations": "workspace:*",
+    "@x1agent/domain-workspaces": "workspace:*",
+    "@x1agent/kernel": "workspace:*",
+    "@x1agent/shared": "workspace:*",
+    "hono": "^4.6.0",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.7",
+    "typescript": "^5.6.0"
+  }
+}
