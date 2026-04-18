@@ -1,0 +1,22 @@
+[tools]
+node = "22"
+
+[tasks.docs]
+description = "Run the docs site locally"
+run = "cd docs && npm run dev"
+
+[tasks."docs:build"]
+description = "Build the docs site"
+run = "cd docs && npm run build"
+
+[tasks."docs:preview"]
+description = "Preview the built docs site"
+run = "cd docs && npm run preview"
+
+[tasks.review]
+description = "Run Claude code review on staged changes"
+run = "claude --print .claude/commands/review.md"
+
+[tasks.lint]
+description = "Run commitlint on the last commit message"
+run = "npx --no-install commitlint --last"

@@ -1,0 +1,5 @@
+examples/
+.env.*
+CLAUDE.local.md
+node_modules/
+dist/

@@ -1,0 +1,44 @@
+#!/bin/bash
+# Pre-push hook: runs Claude code review on changes being pushed
+# Install: git config core.hooksPath .githooks
+
+set -e
+
+# Get the remote and branch being pushed to
+remote="$1"
+url="$2"
+
+# Only review when pushing to the remote (not local operations)
+if [ -z "$remote" ]; then
+  exit 0
+fi
+
+# Check if there are commits to push that differ from origin/main
+CHANGES=$(git diff --stat origin/main 2>/dev/null || echo "")
+if [ -z "$CHANGES" ]; then
+  echo "No changes to review."
+  exit 0
+fi
+
+echo "============================================"
+echo "  Running pre-push code review..."
+echo "============================================"
+
+# Run the Claude review in one-shot mode
+# --print flag makes it output findings and exit
+claude --print ".claude/commands/review.md" 2>&1
+
+REVIEW_EXIT=$?
+
+if [ $REVIEW_EXIT -ne 0 ]; then
+  echo ""
+  echo "============================================"
+  echo "  Code review failed. Push aborted."
+  echo "  Fix the issues above and try again."
+  echo "============================================"
+  exit 1
+fi
+
+echo ""
+echo "Code review complete. Pushing..."
+exit 0
