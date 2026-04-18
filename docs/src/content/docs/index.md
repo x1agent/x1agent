@@ -29,7 +29,7 @@ graph TB
     pg["PostgreSQL"]
 
     subgraph providers["Provider Services"]
-        graph["Graph Provider"]
+        graphProv["Graph Provider"]
         files["File Provider"]
         msg["Messaging Provider"]
     end

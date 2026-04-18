@@ -37,14 +37,14 @@ graph TB
     nats["NATS"]
 
     subgraph providers["Provider Deployments"]
-        graph["Graph Provider"]
+        graphProv["Graph Provider"]
         files["File Provider"]
         ms["Microsoft 365 Provider"]
     end
 
     agent -- "localhost" --> sidecar
     sidecar <--> nats
-    nats <--> graph
+    nats <--> graphProv
     nats <--> files
     nats <--> ms
 ```
