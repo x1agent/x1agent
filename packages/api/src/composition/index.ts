@@ -26,6 +26,15 @@ import {
   createAgentRoutes,
 } from "@x1agent/domain-agents";
 import {
+  OctokitGitHubAppClient,
+  PostgresInstallationRepository,
+  PostgresAgentRepoStore,
+  createGitHubInstallRoutes,
+  createInstallationApiRoutes,
+  createAgentRepoRoutes,
+  type GitHubAppClient,
+} from "@x1agent/domain-github";
+import {
   systemClock,
   WorkspaceSlug,
   type Email,
@@ -44,6 +53,9 @@ export interface Composition {
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
   agentRoutes: Hono;
+  githubInstallRoutes: Hono;
+  installationApiRoutes: Hono;
+  agentRepoRoutes: Hono;
   tokenizer: SessionTokenizer;
   users: UserRepository;
 }
@@ -60,6 +72,11 @@ export interface CompositionEnv {
   authBypass: boolean;
   testUserEmail: string;
   platformName: string;
+  githubAppId: string;
+  githubAppSlug: string;
+  githubAppPrivateKey: string;
+  /** Optional: inject a fake GitHubAppClient for tests; overrides octokit. */
+  githubAppClient?: GitHubAppClient;
 }
 
 export function compose(env: CompositionEnv): Composition {
@@ -70,6 +87,8 @@ export function compose(env: CompositionEnv): Composition {
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
+  const installations = new PostgresInstallationRepository(env.sql);
+  const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
 
   const google = new GoogleAuthProvider({
@@ -89,6 +108,19 @@ export function compose(env: CompositionEnv): Composition {
       name: env.testUserEmail,
     });
   }
+
+  // GitHub App client — either the test fake or the real Octokit-backed one.
+  // Octokit construction is gated on presence of all three values to keep
+  // early local dev working before the user has set up the App.
+  const githubClient: GitHubAppClient | null =
+    env.githubAppClient ??
+    (env.githubAppId && env.githubAppPrivateKey && env.githubAppSlug
+      ? new OctokitGitHubAppClient({
+          appId: Number(env.githubAppId),
+          privateKey: env.githubAppPrivateKey,
+          appSlug: env.githubAppSlug,
+        })
+      : null);
 
   const authRoutes = createAuthRoutes({
     authProvider: google,
@@ -141,11 +173,45 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  // If the GitHub App isn't configured, return stub routes that 503 so
+  // boot doesn't fail. Frontend reads /auth/github/config to check.
+  const githubRoutesConfig = githubClient
+    ? {
+        client: githubClient,
+        installations,
+        agentRepos,
+        appUrl: env.appUrl,
+        requireAuth,
+        getActor,
+      }
+    : null;
+
+  const unconfigured = (route: string) => {
+    const app = new (require("hono").Hono)();
+    app.all("*", (c: Context) =>
+      c.json({ error: "github_not_configured", route }, 503),
+    );
+    return app;
+  };
+
+  const githubInstallRoutes = githubRoutesConfig
+    ? createGitHubInstallRoutes(githubRoutesConfig)
+    : unconfigured("/auth/github");
+  const installationApiRoutes = githubRoutesConfig
+    ? createInstallationApiRoutes(githubRoutesConfig)
+    : unconfigured("/api/installations");
+  const agentRepoRoutes = githubRoutesConfig
+    ? createAgentRepoRoutes(githubRoutesConfig)
+    : unconfigured("/api/workspaces/:slug/agents/:agentId/repos");
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     agentRoutes,
+    githubInstallRoutes,
+    installationApiRoutes,
+    agentRepoRoutes,
     tokenizer,
     users,
   };

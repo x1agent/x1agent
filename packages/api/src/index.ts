@@ -16,6 +16,9 @@ const {
   workspaceInvitationRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  githubInstallRoutes,
+  installationApiRoutes,
+  agentRepoRoutes,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -34,6 +37,9 @@ const {
   authBypass: process.env.AUTH_BYPASS === "true",
   testUserEmail: process.env.TEST_USER || "",
   platformName: process.env.PLATFORM_NAME || "x1agent",
+  githubAppId: process.env.GITHUB_APP_ID || "",
+  githubAppSlug: process.env.GITHUB_APP_SLUG || "",
+  githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
 });
 
 const app = new Hono();
@@ -48,10 +54,23 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.get("/auth/github/config", (c) =>
+  c.json({
+    configured:
+      !!process.env.GITHUB_APP_ID &&
+      !!process.env.GITHUB_APP_PRIVATE_KEY &&
+      !!process.env.GITHUB_APP_SLUG,
+    app_slug: process.env.GITHUB_APP_SLUG || null,
+  }),
+);
+
 app.route("/auth", authRoutes);
+app.route("/auth/github", githubInstallRoutes);
 app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
+app.route("/api/installations", installationApiRoutes);
 
 await seedIfDev().catch((err) => {
   console.warn("[seed] skipped:", (err as Error).message);
