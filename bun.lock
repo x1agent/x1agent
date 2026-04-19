@@ -51,6 +51,7 @@
         "@x1agent/domain-auth": "workspace:*",
         "@x1agent/domain-github": "workspace:*",
         "@x1agent/domain-invitations": "workspace:*",
+        "@x1agent/domain-permissions": "workspace:*",
         "@x1agent/domain-sessions": "workspace:*",
         "@x1agent/domain-workspaces": "workspace:*",
         "@x1agent/kernel": "workspace:*",
