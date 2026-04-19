@@ -100,7 +100,6 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
 
   return (
     <AppShell
-      title="Sessions"
       breadcrumbs={[
         { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
         { label: "Sessions" },
