@@ -29,6 +29,7 @@ import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
   createSessionRoutes,
+  createWorkspaceSessionRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
   type SessionEventRepository,
@@ -63,6 +64,7 @@ export interface Composition {
   publicInvitationRoutes: Hono;
   agentRoutes: Hono;
   sessionRoutes: Hono;
+  workspaceSessionRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
@@ -199,16 +201,19 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  const sessionRoutes = createSessionRoutes({
+  const sessionsConfig = {
     agents,
     sessions,
     events: sessionEvents,
     adminGuard: new WorkspaceAdminGuard(memberships),
-    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    resolveWorkspace: async (slug: string) =>
+      resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
     clock: systemClock,
-  });
+  };
+  const sessionRoutes = createSessionRoutes(sessionsConfig);
+  const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
 
   const tickScheduler = () =>
     scheduleDueSessions({ agents, sessions, clock: systemClock });
@@ -256,6 +261,7 @@ export function compose(env: CompositionEnv): Composition {
     publicInvitationRoutes,
     agentRoutes,
     sessionRoutes,
+    workspaceSessionRoutes,
     internalRoutes,
     githubInstallRoutes,
     installationApiRoutes,

@@ -7,6 +7,7 @@ import { Label } from "../../components/ui/label";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
@@ -204,36 +205,49 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
         <Card>
           <CardHeader>
-            <CardTitle>Prompts</CardTitle>
+            <CardTitle>System prompt</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="agent-system" className="mb-1 block">
-                System prompt
-              </Label>
-              <textarea
-                id="agent-system"
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                rows={4}
-                className="flex w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500 focus-visible:outline-none"
-              />
+          <CardContent>
+            <Label htmlFor="agent-system" className="mb-1 block">
+              Identity + always-on instructions
+            </Label>
+            <textarea
+              id="agent-system"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={5}
+              className="flex w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500 focus-visible:outline-none"
+            />
+            <div className="mt-2 text-xs text-zinc-500">
+              Applied on every session regardless of trigger. Runtime
+              instructions that change per task live in the repo's own
+              CLAUDE.md, cloned into /workspace at session start.
             </div>
-            <div>
-              <Label htmlFor="agent-heartbeat" className="mb-1 block">
-                heartbeat.md
-              </Label>
+          </CardContent>
+        </Card>
+
+        {schedule.trim() && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Heartbeat instructions</CardTitle>
+              <CardDescription>
+                Sent as the first user message on every scheduler tick.
+                Only relevant because a cadence is set — manual-only
+                agents wait for you to type in the session.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <textarea
                 id="agent-heartbeat"
                 value={heartbeatMd}
                 onChange={(e) => setHeartbeatMd(e.target.value)}
                 rows={8}
-                placeholder="Instructions the agent reads on every scheduled tick."
+                placeholder="Every tick: read the latest dashboard, summarize changes, post to #ops."
                 className="flex w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500 focus-visible:outline-none"
               />
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {!isCreate && (
           <Card>

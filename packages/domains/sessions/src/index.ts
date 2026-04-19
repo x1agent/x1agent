@@ -28,7 +28,10 @@ export * from "./application/list-session-events.js";
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";
 export { PostgresSessionEventRepository } from "./adapters/postgres/postgres-session-event-repository.js";
-export { createSessionRoutes } from "./adapters/hono/routes.js";
+export {
+  createSessionRoutes,
+  createWorkspaceSessionRoutes,
+} from "./adapters/hono/routes.js";
 
 // Fakes
 export * from "./application/fakes.js";

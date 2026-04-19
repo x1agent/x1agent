@@ -1,0 +1,14 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { SessionRoot } from "../../../../features/sessions/SessionRoot";
+
+const { slug, id } = Astro.params;
+---
+
+<Layout title={`session · x1agent`}>
+  <SessionRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+    sessionId={id ?? ""}
+  />
+</Layout>

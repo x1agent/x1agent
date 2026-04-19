@@ -245,3 +245,101 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
 
   return app;
 }
+
+/**
+ * Workspace-scoped session routes — addressable by session id alone.
+ * The session detail page URL is `/workspaces/:slug/sessions/:id`
+ * (no agent id), so callers use this mount instead of the
+ * agent-scoped one above.
+ */
+export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
+  const app = new Hono();
+  app.use("*", cfg.requireAuth);
+
+  const resolveWs = async (slug: string) => {
+    try {
+      return await cfg.resolveWorkspace(WorkspaceSlug(slug));
+    } catch {
+      return null;
+    }
+  };
+
+  const loadScoped = async (
+    slug: string,
+    sessionId: string,
+    actorId: UserId,
+  ) => {
+    const wsId = await resolveWs(slug);
+    if (!wsId) return { error: "workspace_not_found" as const };
+    const session = await cfg.sessions.findById(SessionId(sessionId));
+    if (!session) return { error: "session_not_found" as const };
+    const agent = await cfg.agents.findById(session.agentId);
+    if (!agent || agent.workspaceId !== wsId)
+      return { error: "session_not_found" as const };
+    try {
+      await cfg.adminGuard.assertAdmin(actorId, agent.workspaceId);
+    } catch (err) {
+      return { error: "forbidden" as const, raised: err };
+    }
+    return { session, agent };
+  };
+
+  app.get("/:sessionId", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      if (scope.error === "forbidden")
+        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
+      return c.json({ error: scope.error }, 404);
+    }
+    return c.json({
+      session: serialize(scope.session),
+      agent: {
+        id: scope.agent.id,
+        slug: scope.agent.slug,
+        name: scope.agent.name,
+      },
+    });
+  });
+
+  app.get("/:sessionId/events", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      if (scope.error === "forbidden")
+        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
+      return c.json({ error: scope.error }, 404);
+    }
+    const afterRaw = c.req.query("after_seq");
+    const limitRaw = c.req.query("limit");
+    const limit = Math.max(
+      1,
+      Math.min(5000, limitRaw !== undefined ? Number(limitRaw) : 1000),
+    );
+    const events = await cfg.events.listBySession(scope.session.id, {
+      afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
+      limit,
+    });
+    return c.json({
+      session: serialize(scope.session),
+      agent: {
+        id: scope.agent.id,
+        slug: scope.agent.slug,
+        name: scope.agent.name,
+      },
+      events: events.map(serializeEvent),
+    });
+  });
+
+  return app;
+}

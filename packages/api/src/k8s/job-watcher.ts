@@ -162,13 +162,19 @@ async function launchSession(
       }))
     : [];
 
+  // Scheduler-triggered sessions get heartbeat_md as the first user
+  // message. User-triggered sessions start empty and wait for inject —
+  // the detail page's MessageInput drives the conversation.
+  const isScheduled = session.triggeredBy === "scheduler";
+  const initialPrompt = isScheduled ? agent.heartbeatMd : "";
+
   const job = buildSessionJob({
     sessionId: session.id,
     agentId: agent.id,
     agentSlug: agent.slug,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
-    agentPrompt: agent.heartbeatMd || "Start your scheduled work.",
+    agentPrompt: initialPrompt,
     systemPromptText: agent.systemPrompt,
     heartbeatMd: agent.heartbeatMd,
     sessionMode: "interactive",
