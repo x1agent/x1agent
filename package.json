@@ -7,6 +7,7 @@
     "packages/*",
     "packages/domains/*",
     "packages/infrastructure/*",
+    "packages/providers/*",
     "docs"
   ],
   "scripts": {
@@ -19,5 +20,10 @@
     "@semantic-release/git": "^10.0.1",
     "conventional-changelog-conventionalcommits": "^7.0.2",
     "semantic-release": "^24.0.0"
+  },
+  "dependencies": {
+    "@octokit/app": "^16.1.2",
+    "@octokit/auth-app": "^8.2.0",
+    "@octokit/rest": "^22.0.1"
   }
 }

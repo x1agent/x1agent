@@ -65,6 +65,11 @@ vars:
   HOST_CLAUDE_CREDENTIALS_FILE:
     source: env
     default: ""
+  # Phase 1 messaging provider credential. Phase 2 replaces this with
+  # per-workspace OAuth + credential proxy.
+  SLACK_BOT_TOKEN:
+    source: env
+    default: ""
 
 images:
   api:
@@ -88,6 +93,13 @@ images:
     dockerfile: ./packages/sidecar/Dockerfile
     context: ./packages/sidecar
     rebuildStrategy: ignoreContextChanges
+  messaging-slack:
+    image: x1agent-provider-messaging-slack
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/messaging-slack.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
 
 deployments:
   postgres:
@@ -102,6 +114,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/api.yaml
+  messaging-slack:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/messaging-slack.yaml
 
 dev:
   # Port-forward Postgres to the host so integration tests + migration
@@ -193,6 +209,30 @@ dev:
         value: ${HOST_HOME_DIR}
       - name: HOST_CLAUDE_CREDENTIALS_FILE
         value: ${HOST_CLAUDE_CREDENTIALS_FILE}
+
+  messaging-slack:
+    labelSelector:
+      app: messaging-slack
+    devImage: x1agent-provider-messaging-slack
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - "*.log"
+        startContainer: true
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app
+        exec bun --hot run packages/providers/messaging-slack/src/index.ts
+    env:
+      - name: NATS_URL
+        value: nats://nats:4222
+      - name: SLACK_BOT_TOKEN
+        value: ${SLACK_BOT_TOKEN}
 
 pipelines:
   dev: |-

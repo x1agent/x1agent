@@ -1,0 +1,52 @@
+# DEV ONLY — messaging/Slack provider deployment. Prod path is the
+# Helm chart at deploy/helm/providers/messaging-slack.
+#
+# This is a standalone provider per docs/providers/overview.md: the
+# session pod never imports Slack code. The agent calls its sidecar,
+# the sidecar publishes on x1.provider.messaging.post_message, this
+# service replies on the NATS inbox.
+#
+# Phase 1 config: SLACK_BOT_TOKEN is injected from .env.local via
+# devspace. Phase 2 replaces this with per-workspace OAuth +
+# credential proxy.
+apiVersion: v1
+kind: Service
+metadata:
+  name: messaging-slack
+  labels:
+    app: messaging-slack
+spec:
+  # Headless — the provider only speaks NATS, nobody dials it on TCP.
+  clusterIP: None
+  selector:
+    app: messaging-slack
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: messaging-slack
+  labels:
+    app: messaging-slack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: messaging-slack
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: messaging-slack
+    spec:
+      containers:
+        - name: provider
+          image: x1agent-provider-messaging-slack
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: nats://nats:4222
+            # SLACK_BOT_TOKEN is supplied by devspace dev.env.
+          # No readiness probe: the provider has no HTTP surface; NATS
+          # subscription readiness is observable from the requester side
+          # (timeout → no subscriber).
