@@ -4,6 +4,7 @@ import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { Textarea } from "../../components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -20,8 +21,6 @@ import {
 } from "../../components/ui/select";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
-import { AgentReposSection } from "../github/AgentReposSection";
-import { RecentRunsSection } from "../sessions/RecentRunsSection";
 
 interface Props {
   workspaceSlug: string;
@@ -86,6 +85,26 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     );
   }
 
+  const breadcrumbs = isCreate
+    ? [
+        { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
+        { label: "Agents", href: `/workspaces/${workspaceSlug}` },
+        { label: "New" },
+      ]
+    : [
+        { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
+        { label: "Agents", href: `/workspaces/${workspaceSlug}` },
+        {
+          label: existing?.name ?? agentSlug ?? "Agent",
+          href: `/workspaces/${workspaceSlug}/agents/${agentSlug}`,
+        },
+        { label: "Edit" },
+      ];
+
+  const cancelHref = isCreate
+    ? `/workspaces/${workspaceSlug}`
+    : `/workspaces/${workspaceSlug}/agents/${agentSlug}`;
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -100,6 +119,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
         });
+        window.location.href = `/workspaces/${workspaceSlug}/agents/${slugInput.trim()}`;
       } else if (existing) {
         await update(workspaceSlug, existing.id, {
           name: name.trim(),
@@ -109,8 +129,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           schedule: schedule.trim() ? schedule.trim() : null,
           is_active: isActive,
         });
+        window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
-      window.location.href = `/workspaces/${workspaceSlug}`;
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -126,24 +146,15 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   };
 
   return (
-    <AppShell>
-      <form onSubmit={onSubmit} className="p-8 space-y-6 max-w-2xl">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-zinc-500">
-            {isCreate ? "New agent" : "Edit agent"}
-          </div>
-          <h1 className="text-2xl font-semibold">{name || "Untitled"}</h1>
-        </div>
-
+    <AppShell breadcrumbs={breadcrumbs}>
+      <form onSubmit={onSubmit} className="space-y-6 p-6 max-w-3xl">
         <Card>
           <CardHeader>
             <CardTitle>Identity</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="agent-name" className="mb-1 block">
-                Name
-              </Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-name">Name</Label>
               <Input
                 id="agent-name"
                 required
@@ -152,10 +163,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 placeholder="Heartbeat"
               />
             </div>
-            <div>
-              <Label htmlFor="agent-slug" className="mb-1 block">
-                Slug
-              </Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-slug">Slug</Label>
               <Input
                 id="agent-slug"
                 required
@@ -165,13 +174,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 placeholder="heartbeat"
               />
             </div>
-            <div>
-              <Label className="mb-1 block">Runtime</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-runtime">Runtime</Label>
               <Select
                 value={runtimeType}
                 onValueChange={(v) => setRuntimeType(v as RuntimeType)}
               >
-                <SelectTrigger>
+                <SelectTrigger id="agent-runtime">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -186,43 +195,37 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         <Card>
           <CardHeader>
             <CardTitle>Schedule</CardTitle>
+            <CardDescription>
+              Cron expression or macro like <code>@hourly</code> or{" "}
+              <code>@every 15m</code>. Leave blank for manual runs only.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <Label htmlFor="agent-schedule" className="mb-1 block">
-              Cron or macro
-            </Label>
             <Input
               id="agent-schedule"
               value={schedule}
               onChange={(e) => setSchedule(e.target.value)}
               placeholder="@hourly, @every 15m, or 0 9 * * mon-fri"
             />
-            <div className="mt-2 text-xs text-zinc-500">
-              Leave blank for manual runs only.
-            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <CardTitle>System prompt</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Label htmlFor="agent-system" className="mb-1 block">
-              Identity + always-on instructions
-            </Label>
-            <textarea
-              id="agent-system"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={5}
-              className="flex w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500 focus-visible:outline-none"
-            />
-            <div className="mt-2 text-xs text-zinc-500">
+            <CardDescription>
               Applied on every session regardless of trigger. Runtime
               instructions that change per task live in the repo's own
               CLAUDE.md, cloned into /workspace at session start.
-            </div>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Textarea
+              id="agent-system"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={6}
+            />
           </CardContent>
         </Card>
 
@@ -237,13 +240,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <textarea
+              <Textarea
                 id="agent-heartbeat"
                 value={heartbeatMd}
                 onChange={(e) => setHeartbeatMd(e.target.value)}
                 rows={8}
                 placeholder="Every tick: read the latest dashboard, summarize changes, post to #ops."
-                className="flex w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500 focus-visible:outline-none"
+                className="font-mono text-xs"
               />
             </CardContent>
           </Card>
@@ -267,28 +270,14 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           </Card>
         )}
 
-        <AgentReposSection
-          workspaceSlug={workspaceSlug}
-          agentId={existing?.id ?? null}
-        />
-
-        <RecentRunsSection
-          workspaceSlug={workspaceSlug}
-          agentId={existing?.id ?? null}
-        />
-
         {error && <div className="text-sm text-red-400">{error}</div>}
 
         <div className="flex items-center gap-2">
           <Button type="submit" disabled={submitting}>
             {submitting ? "Saving…" : isCreate ? "Create agent" : "Save"}
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            asChild
-          >
-            <a href={`/workspaces/${workspaceSlug}`}>Cancel</a>
+          <Button type="button" variant="outline" asChild>
+            <a href={cancelHref}>Cancel</a>
           </Button>
           {!isCreate && (
             <Button

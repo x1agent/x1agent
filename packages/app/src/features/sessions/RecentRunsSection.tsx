@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionDTO, SessionStatus } from "@x1agent/shared";
+import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
   Card,
@@ -15,11 +16,11 @@ interface Props {
   agentId: string | null;
 }
 
-const STATUS_STYLES: Record<SessionStatus, string> = {
-  pending: "bg-zinc-700 text-zinc-200",
-  running: "bg-blue-700 text-blue-50",
-  complete: "bg-emerald-700 text-emerald-50",
-  failed: "bg-red-800 text-red-50",
+const STATUS_VARIANT: Record<SessionStatus, BadgeVariant> = {
+  pending: "secondary",
+  running: "info",
+  complete: "success",
+  failed: "danger",
 };
 
 function fmtTime(iso: string): string {
@@ -43,15 +44,9 @@ function RunRow({
   return (
     <a
       href={`/workspaces/${workspaceSlug}/sessions/${session.id}`}
-      className="-mx-3 flex items-center gap-3 rounded border-t border-zinc-800 px-3 py-2 text-sm first:border-t-0 hover:bg-zinc-900/60"
+      className="flex items-center gap-3 border-t border-zinc-900 px-4 py-2 text-sm first:border-t-0 hover:bg-zinc-900/40"
     >
-      <span
-        className={`inline-flex rounded px-2 py-0.5 text-[11px] font-medium ${
-          STATUS_STYLES[session.status]
-        }`}
-      >
-        {session.status}
-      </span>
+      <Badge variant={STATUS_VARIANT[session.status]}>{session.status}</Badge>
       <span className="text-zinc-400">{who}</span>
       <span className="ml-auto text-xs text-zinc-500">
         {fmtTime(session.triggered_at)}
@@ -66,7 +61,7 @@ function RunRow({
 }
 
 /**
- * Recent runs for an agent. Only visible once the agent exists (edit mode).
+ * Recent runs for an agent. Only visible once the agent exists (detail page).
  * Poll-light: loads on mount and after a trigger. Replace with SSE/NATS
  * later when live events land with the executor.
  */
@@ -88,8 +83,6 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
     setBusy(true);
     try {
       const session = await trigger(workspaceSlug, agentId);
-      // Jump to the detail page so the user can start talking to the
-      // agent as soon as the pod boots.
       window.location.href = `/workspaces/${workspaceSlug}/sessions/${session.id}`;
     } catch (err) {
       setError((err as Error).message);
@@ -112,14 +105,16 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
-        {error && <div className="mb-2 text-sm text-red-400">{error}</div>}
+      <CardContent className="p-0">
+        {error && (
+          <div className="px-4 pt-3 text-sm text-red-400">{error}</div>
+        )}
         {rows.length === 0 ? (
-          <div className="py-3 text-sm text-zinc-500">
+          <div className="p-4 text-sm text-zinc-500">
             No runs yet. Click "Run now" to trigger one.
           </div>
         ) : (
-          <div className="divide-y divide-zinc-800">
+          <div>
             {rows.map((s) => (
               <RunRow key={s.id} session={s} workspaceSlug={workspaceSlug} />
             ))}
