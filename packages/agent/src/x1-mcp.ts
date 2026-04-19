@@ -299,12 +299,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
-    case "end_session":
-      await postToSidecar("session.completed", {
-        result: String(a?.summary ?? "Session ended by agent"),
-      });
-      setTimeout(() => process.exit(0), 1000);
+    case "end_session": {
+      // POST to the agent's /shutdown so the parent process terminates
+      // cleanly — one session.completed event, no 15-minute idle-timer
+      // drift afterwards. Do not exit this subprocess; the agent's
+      // shutdown() will kill the container, this MCP included.
+      const summary = String(a?.summary ?? "Session ended by agent");
+      const agentUrl = process.env.AGENT_INJECT_URL || "http://localhost:8788";
+      try {
+        await fetch(`${agentUrl}/shutdown`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ summary, is_success: true }),
+        });
+      } catch (err) {
+        console.error(
+          `[x1-mcp] /shutdown POST failed: ${(err as Error).message}`,
+        );
+      }
       return { content: [{ type: "text" as const, text: "Session ending." }] };
+    }
 
     default:
       return {

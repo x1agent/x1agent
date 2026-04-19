@@ -277,6 +277,29 @@ const injectServer = http.createServer(async (req, res) => {
     resetIdleTimer();
     res.writeHead(200);
     res.end("ok");
+  } else if (url.pathname === "/shutdown" && req.method === "POST") {
+    // Graceful shutdown path. Called by the x1agent MCP's end_session
+    // tool. Respond immediately, then drive shutdown() asynchronously —
+    // the response has to land before the process exits.
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let parsed: {
+      summary?: string;
+      is_success?: boolean;
+      error?: string;
+    } = {};
+    try {
+      parsed = JSON.parse(body || "{}");
+    } catch {
+      // tolerate empty / malformed bodies
+    }
+    res.writeHead(200);
+    res.end("ok");
+    void shutdown(
+      parsed.is_success !== false,
+      parsed.summary ?? "Session ended by agent",
+      parsed.error,
+    );
   } else if (url.pathname === "/health") {
     res.writeHead(200);
     res.end("ok");
@@ -292,18 +315,14 @@ injectServer.listen(8788, "0.0.0.0", () => {
 
 // ── Idle timeout ────────────────────────────────────────
 
+let shuttingDown = false;
+
 const idleTimer = new IdleTimer(idleTimeoutMs, sessionMode === "interactive", {
-  onTimeout: async () => {
+  onTimeout: () => {
     console.log(
       `[agent] idle timeout (${idleTimeoutMs / 1000}s) — closing session`,
     );
-    await postToSidecar("session.completed", {
-      result: "Session closed due to inactivity",
-    });
-    await new Promise((r) => setTimeout(r, 500));
-    streamServer.close();
-    injectServer.close();
-    process.exit(0);
+    void shutdown(true, "Session closed due to inactivity");
   },
 });
 
@@ -311,17 +330,30 @@ function resetIdleTimer() {
   idleTimer.reset();
 }
 
+/**
+ * Single, idempotent terminal path. Emits exactly one session.completed
+ * (or session.failed) to the sidecar, gives NATS a moment to flush, and
+ * kills the process. All callers — MCP end_session via /shutdown, idle
+ * timeout, oneshot result — funnel through here so there is never a
+ * double terminal event.
+ */
 async function shutdown(
   isSuccess: boolean,
   result?: unknown,
   error?: string,
 ): Promise<never> {
+  if (shuttingDown) {
+    // A second caller on the same path. Park forever; the first caller
+    // will take the process down.
+    await new Promise(() => {});
+  }
+  shuttingDown = true;
   idleTimer.dispose();
   await postToSidecar(isSuccess ? "session.completed" : "session.failed", {
     result,
     error,
   });
-  await new Promise((r) => setTimeout(r, 1000));
+  await new Promise((r) => setTimeout(r, 500));
   streamServer.close();
   injectServer.close();
   process.exit(isSuccess ? 0 : 1);
