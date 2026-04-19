@@ -7,6 +7,7 @@ import { useSessionDetailStore } from "../../stores/sessionDetailStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
 import { MessageInput } from "./MessageInput";
+import { Badge, type BadgeVariant } from "../../components/ui/badge";
 
 interface Props {
   workspaceSlug: string;
@@ -26,11 +27,20 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
   failed: "text-red-400",
 };
 
+const STATUS_VARIANT: Record<SessionStatus, BadgeVariant> = {
+  pending: "secondary",
+  running: "info",
+  complete: "success",
+  failed: "danger",
+};
+
 export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const { status: authStatus, fetchMe } = useAuthStore();
   const {
     sessionsById,
     agentsBySession,
+    parentBySession,
+    childrenBySession,
     eventsBySession,
     errorBySession,
     loadInitial,
@@ -44,6 +54,8 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
 
   const session = sessionsById[sessionId];
   const agent = agentsBySession[sessionId];
+  const parent = parentBySession[sessionId] ?? null;
+  const children = childrenBySession[sessionId] ?? [];
   const events = eventsBySession[sessionId] ?? [];
   const error = errorBySession[sessionId];
 
@@ -185,22 +197,68 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       ]}
     >
       <div className="flex h-full min-h-[calc(100svh-56px)] flex-col">
-        <div className="flex items-center justify-end gap-3 border-b border-zinc-900 px-4 py-2 text-xs">
-          {session && (
-            <span className={STATUS_COLOR[session.status]}>
-              {session.status}
+        <div className="flex flex-wrap items-center gap-3 border-b border-zinc-900 px-4 py-2 text-xs">
+          {parent && (
+            <a
+              href={`/workspaces/${workspaceSlug}/sessions/${parent.session_id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+              title={`spawned by session ${parent.session_id.slice(0, 8)}`}
+            >
+              <span className="text-zinc-500">from</span>
+              <span>{parent.agent.name}</span>
+            </a>
+          )}
+          {children.length > 0 && (
+            <span className="text-zinc-500">
+              {children.length}{" "}
+              {children.length === 1 ? "child" : "children"}
             </span>
           )}
-          <span className="text-zinc-600">{events.length} events</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setVerbose((v) => !v)}
-            className="h-7 text-[11px] text-zinc-400"
-          >
-            {verbose ? "Compact" : "Verbose"}
-          </Button>
+          <div className="ml-auto flex items-center gap-3">
+            {session && (
+              <span className={STATUS_COLOR[session.status]}>
+                {session.status}
+              </span>
+            )}
+            <span className="text-zinc-600">{events.length} events</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVerbose((v) => !v)}
+              className="h-7 text-[11px] text-zinc-400"
+            >
+              {verbose ? "Compact" : "Verbose"}
+            </Button>
+          </div>
         </div>
+
+        {children.length > 0 && (
+          <div className="border-b border-zinc-900 bg-zinc-950 px-4 py-2">
+            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+              Children
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {children.map((ch) => (
+                <a
+                  key={ch.id}
+                  href={`/workspaces/${workspaceSlug}/sessions/${ch.id}`}
+                  className="inline-flex items-center gap-2 rounded-md border border-zinc-800 px-2 py-1 text-xs hover:border-zinc-700 hover:bg-zinc-900/60"
+                >
+                  <Badge variant={STATUS_VARIANT[ch.status]}>
+                    {ch.status}
+                  </Badge>
+                  <span className="text-zinc-200">{ch.agent.name}</span>
+                  <span className="text-zinc-600">
+                    {new Date(ch.triggered_at).toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="border-b border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">

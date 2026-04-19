@@ -84,6 +84,12 @@ export class InMemorySessionRepository implements SessionRepository {
       .slice(0, limit);
   }
 
+  async listChildren(parentSessionId: SessionId): Promise<readonly Session[]> {
+    return this.rows
+      .filter((r) => r.parentSessionId === parentSessionId)
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+  }
+
   async lastSchedulerRunFor(agentId: AgentId): Promise<Session | null> {
     const scoped = this.rows
       .filter((r) => r.agentId === agentId && r.triggeredBy === "scheduler")

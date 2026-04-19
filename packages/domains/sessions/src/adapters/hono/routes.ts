@@ -52,6 +52,8 @@ function serialize(s: Session) {
     agent_id: s.agentId,
     triggered_by: s.triggeredBy,
     triggered_by_user_id: s.triggeredByUserId,
+    parent_session_id: s.parentSessionId,
+    parent_agent_id: s.parentAgentId,
     triggered_at: s.triggeredAt.toISOString(),
     status: s.status,
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
@@ -361,6 +363,48 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
       limit,
     });
+
+    let parent: {
+      session_id: string;
+      agent: { id: string; slug: string; name: string };
+    } | null = null;
+    if (scope.session.parentSessionId && scope.session.parentAgentId) {
+      const parentAgent = await cfg.agents.findById(
+        scope.session.parentAgentId,
+      );
+      if (parentAgent) {
+        parent = {
+          session_id: scope.session.parentSessionId,
+          agent: {
+            id: parentAgent.id,
+            slug: parentAgent.slug,
+            name: parentAgent.name,
+          },
+        };
+      }
+    }
+
+    const childRows = await cfg.sessions.listChildren(scope.session.id);
+    const childAgentIds = Array.from(
+      new Set(childRows.map((r) => r.agentId)),
+    );
+    const childAgents = await Promise.all(
+      childAgentIds.map((id) => cfg.agents.findById(id)),
+    );
+    const byId = new Map(
+      childAgents
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
+    );
+    const children = childRows
+      .filter((r) => byId.has(r.agentId))
+      .map((r) => ({
+        id: r.id,
+        status: r.status,
+        triggered_at: r.triggeredAt.toISOString(),
+        agent: byId.get(r.agentId)!,
+      }));
+
     return c.json({
       session: serialize(scope.session),
       agent: {
@@ -369,6 +413,8 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
         name: scope.agent.name,
       },
       events: events.map(serializeEvent),
+      parent,
+      children,
     });
   });
 

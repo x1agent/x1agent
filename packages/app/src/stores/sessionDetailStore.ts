@@ -8,12 +8,20 @@ import { apiFetch } from "../lib/api";
 
 type ConnStatus = "connecting" | "live" | "ended" | "error";
 
+type AgentRef = { id: string; slug: string; name: string };
+type ParentRef = { session_id: string; agent: AgentRef };
+type ChildRef = {
+  id: string;
+  status: SessionDTO["status"];
+  triggered_at: string;
+  agent: AgentRef;
+};
+
 interface SessionDetailState {
   sessionsById: Record<string, SessionDTO>;
-  agentsBySession: Record<
-    string,
-    { id: string; slug: string; name: string }
-  >;
+  agentsBySession: Record<string, AgentRef>;
+  parentBySession: Record<string, ParentRef | null>;
+  childrenBySession: Record<string, ChildRef[]>;
   eventsBySession: Record<string, SessionEventDTO[]>;
   maxSeqBySession: Record<string, number>;
   statusBySession: Record<string, ConnStatus>;
@@ -34,6 +42,8 @@ interface SessionDetailState {
 export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   sessionsById: {},
   agentsBySession: {},
+  parentBySession: {},
+  childrenBySession: {},
   eventsBySession: {},
   maxSeqBySession: {},
   statusBySession: {},
@@ -55,6 +65,14 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
       set((s) => ({
         sessionsById: { ...s.sessionsById, [sessionId]: res.session },
         agentsBySession: { ...s.agentsBySession, [sessionId]: res.agent },
+        parentBySession: {
+          ...s.parentBySession,
+          [sessionId]: res.parent ?? null,
+        },
+        childrenBySession: {
+          ...s.childrenBySession,
+          [sessionId]: res.children ?? [],
+        },
         eventsBySession: { ...s.eventsBySession, [sessionId]: res.events },
         maxSeqBySession: {
           ...s.maxSeqBySession,
