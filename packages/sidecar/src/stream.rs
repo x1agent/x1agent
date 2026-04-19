@@ -73,5 +73,13 @@ pub async fn agent_stream_consumer(
         }
     }
 
-    Ok(())
+    // The agent container has exited (cleanly or via error). There's no
+    // more work for the sidecar — pending NATS publishes have a short
+    // moment to flush, then we exit so the Job can transition to
+    // Succeeded. Without this, the sidecar runs until the pod hits
+    // activeDeadlineSeconds.
+    tracing::info!("Agent stream closed — sidecar winding down");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let _ = state.nc.drain().await;
+    std::process::exit(0);
 }
