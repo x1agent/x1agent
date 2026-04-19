@@ -34,9 +34,11 @@ const sessionId = process.env.SESSION_ID;
 const agentId = process.env.AGENT_ID || "generic";
 const sidecarUrl = process.env.SIDECAR_URL || "http://localhost:9090";
 const maxTurns = Number.parseInt(process.env.MAX_TURNS || "200", 10);
-const prompt =
-  process.env.AGENT_PROMPT ||
-  "You are a helpful assistant. Introduce yourself and ask how you can help.";
+// Empty = no auto-prompt; the SDK blocks on the input channel until the
+// user's first inject arrives. Scheduler-triggered sessions populate
+// this with the agent's heartbeat_md; user-triggered sessions leave it
+// empty so the browser's MessageInput drives the first turn.
+const prompt = process.env.AGENT_PROMPT || "";
 const sessionMode = process.env.SESSION_MODE || "interactive";
 const idleTimeoutMs = Number.parseInt(
   process.env.IDLE_TIMEOUT_MS || "900000",
@@ -120,8 +122,10 @@ streamServer.listen(3100, "0.0.0.0", () => {
 // ── Input channel → SDK ─────────────────────────────────
 
 const inputChannel = createInputChannel();
-// First turn is the configured initial prompt.
-inputChannel.push(prompt);
+// Only seed the initial prompt when one was configured (scheduler
+// sessions, mostly). User-triggered sessions leave this empty — the
+// SDK will block on the channel until the browser injects a message.
+if (prompt) inputChannel.push(prompt);
 
 // ── Sidecar credential bootstrap for gh CLI ────────────
 

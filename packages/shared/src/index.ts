@@ -90,3 +90,18 @@ export interface SessionListResponse {
 export interface SessionResponse {
   session: SessionDTO;
 }
+
+export interface SessionEventDTO {
+  id: string;
+  session_id: string;
+  seq: number;
+  type: string;
+  payload: unknown;
+  timestamp: string;
+}
+
+export interface SessionEventListResponse {
+  session: SessionDTO;
+  agent: { id: string; slug: string; name: string };
+  events: SessionEventDTO[];
+}

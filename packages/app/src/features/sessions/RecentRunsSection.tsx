@@ -32,11 +32,19 @@ function fmtTime(iso: string): string {
   });
 }
 
-function RunRow({ session }: { session: SessionDTO }) {
-  const who =
-    session.triggered_by === "user" ? "manual" : "scheduler";
+function RunRow({
+  session,
+  workspaceSlug,
+}: {
+  session: SessionDTO;
+  workspaceSlug: string;
+}) {
+  const who = session.triggered_by === "user" ? "manual" : "scheduler";
   return (
-    <div className="flex items-center gap-3 border-t border-zinc-800 py-2 text-sm first:border-t-0">
+    <a
+      href={`/workspaces/${workspaceSlug}/sessions/${session.id}`}
+      className="-mx-3 flex items-center gap-3 rounded border-t border-zinc-800 px-3 py-2 text-sm first:border-t-0 hover:bg-zinc-900/60"
+    >
       <span
         className={`inline-flex rounded px-2 py-0.5 text-[11px] font-medium ${
           STATUS_STYLES[session.status]
@@ -53,7 +61,7 @@ function RunRow({ session }: { session: SessionDTO }) {
           (error)
         </span>
       )}
-    </div>
+    </a>
   );
 }
 
@@ -79,12 +87,12 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
     setError(null);
     setBusy(true);
     try {
-      await trigger(workspaceSlug, agentId);
-      // Re-fetch so the list reflects the server's ordering.
-      await load(workspaceSlug, agentId);
+      const session = await trigger(workspaceSlug, agentId);
+      // Jump to the detail page so the user can start talking to the
+      // agent as soon as the pod boots.
+      window.location.href = `/workspaces/${workspaceSlug}/sessions/${session.id}`;
     } catch (err) {
       setError((err as Error).message);
-    } finally {
       setBusy(false);
     }
   };
@@ -113,7 +121,7 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
         ) : (
           <div className="divide-y divide-zinc-800">
             {rows.map((s) => (
-              <RunRow key={s.id} session={s} />
+              <RunRow key={s.id} session={s} workspaceSlug={workspaceSlug} />
             ))}
           </div>
         )}
