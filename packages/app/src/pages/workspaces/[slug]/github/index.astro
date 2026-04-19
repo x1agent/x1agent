@@ -1,0 +1,13 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { WorkspaceGitHubRoot } from "../../../../features/github/WorkspaceGitHubRoot";
+
+const { slug } = Astro.params;
+---
+
+<Layout title={`github · ${slug} · x1agent`}>
+  <WorkspaceGitHubRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+  />
+</Layout>
