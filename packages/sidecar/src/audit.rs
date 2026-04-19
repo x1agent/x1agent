@@ -1,0 +1,66 @@
+//! Sidecar audit middleware.
+//!
+//! Wraps every axum route. After the handler runs we publish one
+//! NATS message on `x1.session.{id}.audit` with the method, route,
+//! and status. The api subscribes to that subject in
+//! startSessionAuditSubscriber and persists rows into audit_events.
+//!
+//! Skipped routes:
+//!   - /health: kubelet probe, would fill the audit table with
+//!     useless rows
+//!   - /event: agent-emitted display events (status, artifact). Those
+//!     already land in session_events; auditing them too is noise.
+
+use async_nats::Client as NatsClient;
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::response::Response;
+use std::sync::Arc;
+
+use crate::AppState;
+
+const AUDIT_DENYLIST: &[&str] = &["/health", "/event"];
+
+pub async fn audit_layer(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+
+    let response = next.run(request).await;
+    let status = response.status();
+
+    if !AUDIT_DENYLIST.iter().any(|d| path == *d) {
+        publish_audit(&state.nc, &state.session_id, &method.to_string(), &path, status)
+            .await;
+    }
+
+    response
+}
+
+async fn publish_audit(
+    nc: &NatsClient,
+    session_id: &str,
+    method: &str,
+    route: &str,
+    status: StatusCode,
+) {
+    let body = serde_json::json!({
+        "session_id": session_id,
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "method": method,
+        "route": route,
+        "status": status.as_u16(),
+    });
+    let payload = match serde_json::to_vec(&body) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let subject = format!("x1.session.{}.audit", session_id);
+    if let Err(e) = nc.publish(subject, payload.into()).await {
+        tracing::warn!("audit publish failed: {}", e);
+    }
+}
