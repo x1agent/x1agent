@@ -20,5 +20,12 @@ export {
   type GraphProviderContractFixture,
 } from "./contract-tests/graph-provider.contract.js";
 
+// Adapters
+export {
+  SurrealClient,
+  type SurrealClientConfig,
+} from "./adapters/surrealdb/surreal-client.js";
+export { SurrealGraphProvider } from "./adapters/surrealdb/surreal-graph-provider.js";
+
 // Fakes
 export * from "./application/fakes.js";

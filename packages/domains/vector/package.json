@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@x1agent/domain-graph": "workspace:*",
     "@x1agent/kernel": "workspace:*"
   },
   "devDependencies": {
