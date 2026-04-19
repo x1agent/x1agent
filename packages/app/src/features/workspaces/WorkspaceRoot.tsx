@@ -8,7 +8,6 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { useAuthStore } from "../../stores/authStore";
-import { InvitationsPanel } from "../invitations/InvitationsPanel";
 import { AgentsPanel } from "../agents/AgentsPanel";
 
 interface Props {
@@ -70,11 +69,6 @@ export function WorkspaceRoot({ slug }: Props) {
 
         <AgentsPanel
           workspaceSlug={slug}
-          canManage={ws.role === "admin" || ws.role === "owner"}
-        />
-
-        <InvitationsPanel
-          slug={slug}
           canManage={ws.role === "admin" || ws.role === "owner"}
         />
 
