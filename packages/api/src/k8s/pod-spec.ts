@@ -173,6 +173,19 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 // root, so the agent runs as the Dockerfile's uid 1000.
                 runAsUser: 1000,
                 runAsGroup: 1000,
+                runAsNonRoot: true,
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+                // The agent writes to /workspace (emptyDir) and to
+                // /home/node/.claude (hostPath in dev). Both are
+                // mounted volumes; the rest of the FS can stay
+                // read-only — Claude Code's caches that need writable
+                // paths inside $HOME live under .claude already.
+                // readOnlyRootFilesystem: true is being deferred —
+                // Claude Code writes to a few host paths under
+                // node_modules at startup and turning RO root on
+                // requires audit + tmpfs mounts; tracked as a
+                // follow-up.
               },
               env: agentEnv,
               volumeMounts: [
@@ -206,6 +219,14 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               name: "sidecar",
               image: spec.sidecarImage,
               imagePullPolicy,
+              securityContext: {
+                // Sidecar still runs as root (alpine image default)
+                // because git wants to chown /workspace contents to
+                // uid 1000 to match the agent. Switching the sidecar
+                // image to a dedicated non-root user is a follow-up.
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+              },
               env: sidecarEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
