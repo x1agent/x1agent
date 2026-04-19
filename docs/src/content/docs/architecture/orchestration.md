@@ -5,13 +5,77 @@ sidebar:
   order: 4
 ---
 
-An orchestrator is an agent whose job is to run other agents. It picks a task, spawns a worker session to do the work, watches the worker's output, injects follow-up messages when needed, and keeps a record of what it started and why. The platform treats an orchestrator as a long-lived session: it doesn't time out while its workers are busy, and it survives pod crashes.
+An orchestrator is an agent that runs other agents. It picks a task, spawns a worker session to do the work, reads the worker's output, injects follow-up messages when needed, and keeps a record of what it started and why. The platform treats an orchestrator as a long-lived session: it doesn't time out while its workers are busy, and it survives pod crashes.
 
-This page describes the data model, the tools an orchestrator calls, and the failure modes. Execution details (pod spec, sidecar) live in [Architecture Overview](./overview); session fundamentals live in [Sessions and the scheduler](./sessions).
+This page describes the data model, the six tools an orchestrator calls, how the capability is configured per agent, and the failure modes. Execution details (pod spec, sidecar) live in [Architecture Overview](./overview); session fundamentals live in [Sessions and the scheduler](./sessions).
+
+## Capability is per-agent, not a role
+
+There is no binary orchestrator/worker distinction. Every agent starts as a worker. An agent becomes an orchestrator by being granted permission to spawn one or more specific other agents — always referenced by slug, always within the same workspace.
+
+The permission lives in a join table:
+
+```sql
+CREATE TABLE agent_spawn_permissions (
+  parent_agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  child_agent_id  UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (parent_agent_id, child_agent_id),
+  CHECK (parent_agent_id <> child_agent_id)
+);
+```
+
+An agent with zero rows in this table is a pure worker. An agent with one or more rows is an orchestrator with respect to exactly those child agents; spawning anything else returns `agent_not_permitted`.
+
+### Edit screen
+
+A "Can spawn" card on the agent edit page lists every other agent in the workspace with a checkbox. Selected agents are written to `agent_spawn_permissions`; unchecked ones are removed. The card sits below the repos card and above the schedule card.
+
+An agent granting itself permission to spawn itself is rejected by the DB-layer CHECK constraint.
+
+### Auto-injected system prompt
+
+When an agent has at least one row in `agent_spawn_permissions`, the Job watcher appends a fixed block to the agent's system prompt. The agent doesn't have to be told to read the block; it's there on every session the orchestrator runs.
+
+The exact text the orchestrator sees:
+
+```
+## Other agents you can spawn
+
+You can start and supervise sessions of these agents:
+
+- <agent-slug-1> — <agent-name-1>
+- <agent-slug-2> — <agent-name-2>
+
+Tools:
+- spawn_session(agent_slug, prompt) → session_id. Starts a new session
+  of one of the agents listed above. Returns immediately; the child
+  pod boots in the background.
+- read_session(session_id, after_seq?) → { events, status, last_seq }.
+  Pulls the child session's event log. Pass after_seq to read only
+  events newer than a cursor.
+- message_session(session_id, text). Sends text to a child as if it
+  were a user message. The child receives it the same way a human
+  operator would.
+- await_children(session_ids) → { <session_id>: { status, result } }.
+  Blocks until every listed child has reached `complete` or `failed`.
+
+Rules:
+- Only the agents listed above can be spawned. Anything else returns
+  `agent_not_permitted`.
+- Children run in this workspace. Cross-workspace spawning is not
+  allowed.
+- Do not spawn children in a loop. If you need many similar tasks,
+  write them as one prompt to a single child.
+- Children inherit this workspace's git installations. They can clone
+  and push the same repos this agent can.
+```
+
+The Job watcher interpolates the bullet list from the permissions table at pod creation time. The list is snapshotted to the pod env — adding or removing permissions while a session is running does not change what the agent sees until the session restarts.
 
 ## Parent and child
 
-Every session has an optional parent. The parent is another session — the one whose agent called a spawn tool to create this session.
+Every session has an optional parent. The parent is another session — the one whose agent called `spawn_session` to create this one.
 
 ```sql
 ALTER TABLE sessions
@@ -22,38 +86,30 @@ ALTER TABLE sessions
 
 - `parent_session_id` is `NULL` for top-level sessions.
 - `parent_tool_use_id` records which specific tool call spawned the child, so a parent with several open children can route messages back to the right conversation turn.
-- A child inherits the parent's workspace. Cross-workspace spawning is out of scope.
+- A child inherits the parent's workspace. Cross-workspace spawning is rejected at the api layer.
 - Cycles are rejected at spawn time: a session cannot spawn an ancestor.
 
-## Roles
+## Runtime differences for orchestrator sessions
 
-A new column on `agents` captures intent:
-
-```sql
-ALTER TABLE agents
-  ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'
-  CHECK (role IN ('worker', 'orchestrator'));
-```
-
-The role changes how the Job watcher provisions the pod:
+The Job watcher checks whether the session's agent has any `agent_spawn_permissions` rows. If yes, the pod spec changes:
 
 | Property                     | Worker             | Orchestrator            |
 |------------------------------|--------------------|--------------------------|
 | `activeDeadlineSeconds`      | 3600               | unset (no hard deadline) |
 | `restartPolicy`              | `Never`            | `OnFailure`              |
 | `backoffLimit`               | 0                  | 6                        |
-| Idle timeout                 | 15 min default     | paused when children are active |
-| Spawn tools exposed          | no                 | yes                      |
+| Idle timeout                 | 15 min default     | paused while children are active |
+| Workspace volume             | `emptyDir`         | per-session `PersistentVolumeClaim` |
+| Extra MCP tools exposed      | none               | spawn / read / message / await |
+| System prompt addition       | none               | "Other agents you can spawn" block |
 
-Both roles share the same agent container image and the same wire event schema. The difference is the lifetime contract and which MCP tools the agent sees.
+Both shapes share the same agent container image and the same wire event schema. The difference is the lifetime contract and which tools the agent sees.
 
-## Five operations
+## Six operations
 
-Everything an orchestrator does reduces to five operations. Each one is a single MCP tool call; the sidecar translates the call into a platform action.
+Everything an orchestrator does reduces to six operations. Each is a single MCP tool call; the sidecar translates the call into a platform action.
 
 ### 1. Spawn a child
-
-The orchestrator calls `x1agent.spawn_session`:
 
 ```
 spawn_session({
@@ -63,7 +119,7 @@ spawn_session({
 })
 ```
 
-The sidecar POSTs to the api's internal endpoint:
+The sidecar POSTs:
 
 ```
 POST /api/internal/sessions
@@ -77,7 +133,7 @@ POST /api/internal/sessions
 }
 ```
 
-The api creates a new `sessions` row with `status='pending'` and `parent_session_id` set. The Job watcher picks it up on the next tick. The tool call returns the child's `session_id` — that's the handle the orchestrator uses for the next four operations.
+The api checks `agent_spawn_permissions` — if the parent agent has no row for the requested child agent, the call returns `agent_not_permitted`. Otherwise it creates a pending session and the Job watcher picks it up on the next tick.
 
 ```mermaid
 sequenceDiagram
@@ -85,30 +141,57 @@ sequenceDiagram
     participant OS as Orchestrator sidecar
     participant A as api
     participant JW as Job watcher
-    participant C as Child pod (later)
+    participant C as Child pod
 
     O->>OS: spawn_session(agent_slug, prompt)
     OS->>A: POST /api/internal/sessions
-    A->>A: INSERT sessions (status=pending, parent_session_id=...)
+    A->>A: verify agent_spawn_permissions
+    A->>A: INSERT sessions (pending, parent_session_id=...)
     A-->>OS: { session_id }
     OS-->>O: { session_id }
-    Note over A,JW: Job watcher picks up the pending row
     A->>JW: next tick
     JW->>C: create Job
 ```
 
-### 2. Child reports to parent
+### 2. Read a child's events
 
-The child agent calls `x1agent.report_to_parent`:
+```
+read_session({
+  session_id: "019d...",
+  after_seq: 42        // optional cursor
+})
+```
+
+Returns:
+
+```
+{
+  status: "pending" | "running" | "complete" | "failed",
+  last_seq: 57,
+  events: [
+    { seq, type, payload, timestamp }, ...
+  ]
+}
+```
+
+The sidecar handles the call by querying the api's internal endpoint `GET /api/internal/sessions/:id/events?after_seq=N`. Events are returned oldest-first, up to a server-side cap of 1000 per call. The orchestrator uses `last_seq` as the next `after_seq` cursor.
+
+`read_session` is the pull-based inspection path. It complements `report_to_parent` (below), which is push-based: workers voluntarily send messages when they need the orchestrator's attention. An orchestrator can read at any time without the child having to do anything special.
+
+Permission: the parent can read any session in its own workspace whose `parent_session_id` is the caller's session id — nothing else. No reading of other orchestrators' children.
+
+### 3. Report to parent (called by the child)
+
+The child agent calls:
 
 ```
 report_to_parent({
   text: "I found three call sites that use the old validator. Should I update all of them?",
-  suggested_response_options: ["yes, update all", "list them first"]
+  options: ["yes, update all", "list them first"]
 })
 ```
 
-The child sidecar publishes to `x1.session.{parent_session_id}.input` with a payload tagged `from_session_id`:
+The child sidecar publishes to `x1.session.{parent_session_id}.input` with the caller tagged:
 
 ```json
 {
@@ -120,11 +203,11 @@ The child sidecar publishes to `x1.session.{parent_session_id}.input` with a pay
 }
 ```
 
-The parent sidecar injects the message into its agent. The orchestrator sees it as a user message; the UI renders it like a user bubble but with a chip showing the child agent's name and a link to the child session. The `request_id` matches the `parent_tool_use_id` from the spawn so the SDK routes the answer to the right tool call when the orchestrator responds.
+The parent sidecar injects the message into its agent. The orchestrator sees it as a user message; the UI renders it with a chip showing the child agent's name and a link to the child session. The `request_id` matches the `parent_tool_use_id` from the spawn, so the SDK routes the answer to the right tool call when the orchestrator responds.
 
-### 3. Parent messages child
+`report_to_parent` is always enabled for a child that has a parent — it doesn't need a capability row.
 
-The orchestrator calls `x1agent.message_session`:
+### 4. Message a child
 
 ```
 message_session({
@@ -133,22 +216,33 @@ message_session({
 })
 ```
 
-The sidecar POSTs to the api's internal endpoint, which publishes to `x1.session.{child_id}.input`. The child agent sees it as a user message. No special routing — the child treats the orchestrator exactly like a human operator.
+The sidecar POSTs to the api's internal endpoint, which publishes to `x1.session.{child_id}.input`. The child treats the orchestrator's message exactly like a human operator's.
 
-### 4. Keep-alive while children run
+Permission check is the same as `read_session`: the target session must have `parent_session_id = orchestrator's session id`.
 
-A session's idle timer is paused whenever it has at least one non-terminal child. The pause is enforced in the sidecar:
+### 5. Await children
 
-- Every event flowing through `x1.session.{child_id}.events` that belongs to a child of this session calls `/keepalive` on the parent agent.
-- `session.completed` and `session.failed` from a child decrement an internal active-children counter. When it reaches zero, the idle timer resumes.
+```
+await_children({ session_ids: ["019d...", "019e..."] })
+```
 
-If the orchestrator wants to block explicitly instead of polling, it calls `x1agent.await_children({ session_ids: [...] })`. The tool returns only when every listed child has reached a terminal status. The sidecar implements this by subscribing to the children's event subjects and resolving the tool call on the first terminal event per child.
+Blocks until every listed child has reached `complete` or `failed`. The sidecar subscribes to each child's event subject and resolves the tool call on the first terminal event per child. Returns a map of `session_id → { status, result }`.
 
-### 5. Resume after crash
+Useful for "spawn N, wait for all, then aggregate." For a push-based alternative, the orchestrator can sit idle and let `report_to_parent` messages drive it; the idle timer is paused while children are active either way.
 
-Orchestrators pin their SDK `session_id` to the platform session id. On pod restart, the agent container reads `SESSION_ID` from env, passes it to `query({ resume: SESSION_ID, ... })`, and the Claude Agent SDK rehydrates the conversation from the SDK's own transcript on the pod's persistent volume.
+### 6. Cancel a child
 
-For the pod to have a persistent volume, orchestrator session pods switch from `emptyDir` to a per-session `PersistentVolumeClaim`:
+```
+cancel_session({ session_id: "019d..." })
+```
+
+Flips the child's session row to `failed` and terminates its pod. The orchestrator can call this on any child it spawned. The platform does not auto-cancel children when the parent completes — orphaned children run until they finish or the reaper catches them.
+
+## Resume after crash
+
+Orchestrators pin their SDK session id to the platform session id. On pod restart, the agent container reads `SESSION_ID` from env, passes it to `query({ resume: SESSION_ID, ... })`, and the Claude Agent SDK rehydrates the conversation from the transcript on the pod's persistent volume.
+
+For the pod to have a persistent volume, orchestrator pods switch from `emptyDir` to a per-session `PersistentVolumeClaim`:
 
 ```yaml
 volumes:
@@ -157,30 +251,31 @@ volumes:
       claimName: x1-session-{sessionId}
 ```
 
-The PVC is created by the Job watcher when `role='orchestrator'`. The `restartPolicy: OnFailure` + `backoffLimit: 6` combination lets the pod come back on node failure without the watcher noticing.
+The PVC is created by the Job watcher when the agent has any `agent_spawn_permissions` rows. The `restartPolicy: OnFailure` + `backoffLimit: 6` combination lets the pod come back on node failure without the watcher noticing.
 
 Worker pods do not use PVCs. They're short-lived; a crashed worker is a failed session, not a restart.
 
 ## What's persisted
 
-Every orchestration signal lives in one of two places:
+Every orchestration signal lives in one of three places:
 
 | Kind                         | Location                                          |
 |------------------------------|---------------------------------------------------|
+| "Agent X can spawn Y"        | `agent_spawn_permissions(X, Y)`                  |
 | "I spawned X"                | `sessions.parent_session_id` on the child        |
-| "X told me Y"                | `session_events` on the parent (as a user message) |
-| "I told X Y"                 | `session_events` on X (as a user message)         |
-| "X finished"                 | `session_events.type = 'session.completed'` on X  |
+| "X told me Y"                | `session_events` on the parent (as a user message with `from_session_id`) |
+| "I told X Y"                 | `session_events` on X (as a user message)        |
+| "X finished"                 | `session_events.type = 'session.completed'` on X |
 | "My conversation so far"     | Claude Agent SDK transcript on the PVC            |
 
-The api has no separate "orchestration log" table. Everything an orchestrator knows is recoverable from `sessions` plus `session_events` plus the SDK transcript. Recovery on restart is: re-enumerate pending/running children of this session id, resume the SDK transcript, carry on.
+The api has no separate "orchestration log" table. Everything an orchestrator knows is recoverable from `sessions` plus `session_events` plus the SDK transcript. Recovery on restart: re-enumerate children of this session id via `SELECT * FROM sessions WHERE parent_session_id = ?`, resume the SDK transcript, carry on.
 
 ## UI rendering
 
 A session detail page shows:
 
 - Its own events in the main stream.
-- A **Children** panel listing direct child sessions with status pills and links to their detail pages.
+- A **Children** panel listing direct child sessions with status pills, linking to each child's detail page.
 - In the event stream, `user.message` events whose payload carries `from_session_id` render with a child-session chip (agent name, short session id, clickable). They still sort by `seq` with everything else.
 
 The child session detail page has a breadcrumb back to its parent. No nested stream rendering — the parent's page is the index, the child's page is the full log.
@@ -189,22 +284,24 @@ The child session detail page has a breadcrumb back to its parent. No nested str
 
 **Orchestrator pod dies mid-spawn.** The child's `sessions` row either doesn't exist yet (transaction rolled back) or exists with `status='pending'` and no pod. The resumed orchestrator re-enumerates children; the Job watcher picks up the pending row and starts a pod. Idempotency on `parent_tool_use_id` prevents duplicate spawns — the api rejects a second spawn with the same `(parent_session_id, parent_tool_use_id)`.
 
-**Child sidecar dies while running.** The parent stops receiving events. The active-children counter doesn't decrement. The parent's idle timer stays paused indefinitely. A reaper job in the api flips children whose pod has been gone more than N minutes to `status='failed'` and emits a synthetic `session.failed` event, which decrements the parent's counter through the normal path.
+**Child sidecar dies while running.** The parent stops receiving `report_to_parent` messages. `read_session` still works — it reads from DB — so the orchestrator can poll until it sees a terminal status. A reaper in the api flips children whose pod has been gone more than N minutes to `status='failed'` and emits a synthetic `session.failed` event.
 
-**Orchestrator dies with children still running.** Children keep running; their events keep flowing to NATS and landing in `session_events`. When the orchestrator resumes, it catches up on child events and sees any terminal ones as already-completed `await_children` returns.
+**Orchestrator dies with children still running.** Children keep running; their events keep flowing to NATS and landing in `session_events`. When the orchestrator resumes, it reads past events via `read_session` and sees terminal ones as already-completed `await_children` returns.
 
-**Infinite spawn loop.** An orchestrator that spawns children that spawn grandchildren. Depth is capped at 1 for now: `spawn_session` rejects calls from any session whose `parent_session_id` is non-null. Deep nesting is deliberately out of scope until we have a use case that needs it.
+**Infinite spawn loop.** Depth is capped at one for now: `spawn_session` rejects calls from any session whose `parent_session_id` is non-null. Deep nesting is out of scope until we have a use case.
 
 **Cross-workspace spawn.** Rejected at the api layer. `spawn_session` returns `workspace_mismatch` if the requested agent's workspace doesn't match the orchestrator's.
 
+**Permission revoked mid-session.** The allowlist is snapshotted into pod env when the Job is created. Removing a row in `agent_spawn_permissions` while a session is running does not retroactively disallow spawns already enumerated in the agent's system prompt. It does gate future `spawn_session` calls at the api — the next spawn returns `agent_not_permitted` even if the agent's prompt still lists the now-removed child. The agent may be confused. Documented, not fixed.
+
 ## Out of scope
 
-These are design decisions taken intentionally and documented here so they aren't re-opened casually:
+Intentional non-goals:
 
-- **Multi-level nesting.** Orchestrators cannot spawn orchestrators. Two levels (orchestrator → worker) only.
+- **Multi-level nesting.** Orchestrators cannot spawn orchestrators. Two levels only.
 - **Cross-workspace orchestration.** A worker spawned by an orchestrator lives in the same workspace.
-- **Broadcast messaging.** There is no "message all children" primitive. Orchestrators loop over session ids.
-- **Child cancellation from the parent.** The cancellation path still flows through `POST /sessions/:id/cancel` on the HTTP surface. The orchestrator can call `cancel_session`; the platform does not auto-cancel children when the parent completes. Orphaned children run until they finish or the reaper catches them.
+- **Broadcast messaging.** No "message all children" primitive. Orchestrators loop over session ids.
+- **Automatic child cancellation on parent completion.** The orchestrator explicitly calls `cancel_session` if it wants children stopped.
 
 ## Permission model
 
