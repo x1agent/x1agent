@@ -43,6 +43,10 @@ spec:
         - name: provider
           image: x1agent-provider-messaging-slack
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: NATS_URL
               value: nats://nats:4222

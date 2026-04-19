@@ -84,6 +84,10 @@ spec:
         - name: api
           image: x1agent-api
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 30001
           env:
