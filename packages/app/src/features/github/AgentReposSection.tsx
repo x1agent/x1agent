@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import {
   Select,
@@ -41,10 +42,12 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
     agentRepos,
     loadAgentRepos,
     attachRepo,
+    updateRepo,
     detachRepo,
   } = useGitHubStore();
 
   const [selectedInstall, setSelectedInstall] = useState<number | null>(null);
+  const [branchDraft, setBranchDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +81,9 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
   const availableRepos = useMemo(() => {
     if (!activeInstall) return [];
     const all = reposById[activeInstall] ?? [];
-    const attached = new Set(agentState?.repos ?? []);
+    const attached = new Set(
+      (agentState?.repos ?? []).map((r) => r.repo_full_name),
+    );
     return all.filter((r) => !attached.has(r.full_name));
   }, [activeInstall, reposById, agentState?.repos]);
 
@@ -96,16 +101,34 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
     );
   }
 
-  const onAttach = async (repoFullName: string) => {
+  const onAttach = async (repoFullName: string, defaultBranch: string) => {
     if (!activeInstall) return;
     setError(null);
     setBusy(true);
     try {
-      await attachRepo(workspaceSlug, agentId, activeInstall, repoFullName);
+      const branch = (branchDraft[repoFullName] || defaultBranch).trim();
+      await attachRepo(workspaceSlug, agentId, activeInstall, repoFullName, {
+        branch: branch || defaultBranch,
+      });
+      setBranchDraft((d) => {
+        const next = { ...d };
+        delete next[repoFullName];
+        return next;
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onUpdateBranch = async (repoFullName: string, branch: string) => {
+    try {
+      await updateRepo(workspaceSlug, agentId, repoFullName, {
+        branch: branch.trim() || "main",
+      });
+    } catch (err) {
+      setError((err as Error).message);
     }
   };
 
@@ -170,21 +193,55 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
             <ul className="divide-y divide-zinc-800 rounded-md border border-zinc-800">
               {agentState!.repos.map((repo) => (
                 <li
-                  key={repo}
-                  className="flex items-center justify-between px-3 py-2 text-sm"
+                  key={repo.repo_full_name}
+                  className="flex items-center gap-3 px-3 py-2 text-sm"
                 >
-                  <span className="text-zinc-100">{repo}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-zinc-100">
+                      {repo.repo_full_name}
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      /workspace/{repo.mount_path}
+                    </div>
+                  </div>
+                  <Input
+                    className="h-7 w-44 text-xs"
+                    defaultValue={repo.branch}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (next && next !== repo.branch) {
+                        onUpdateBranch(repo.repo_full_name, next);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    placeholder="branch"
+                    aria-label={`Branch for ${repo.repo_full_name}`}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => detachRepo(workspaceSlug, agentId, repo)}
+                    onClick={() =>
+                      detachRepo(workspaceSlug, agentId, repo.repo_full_name)
+                    }
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </li>
               ))}
             </ul>
+            <p className="mt-1 text-xs text-zinc-500">
+              At session start the sidecar clones each repo to
+              <code className="mx-1 rounded bg-zinc-800 px-1 py-0.5">
+                /workspace/&lt;mount_path&gt;
+              </code>
+              and checks out the branch (created locally if it doesn't exist
+              remotely).
+            </p>
           </div>
         )}
 
@@ -204,21 +261,35 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
                 {availableRepos.map((repo) => (
                   <li
                     key={repo.full_name}
-                    className="flex items-center justify-between px-3 py-2 text-sm"
+                    className="flex items-center gap-3 px-3 py-2 text-sm"
                   >
-                    <div>
-                      <div className="text-zinc-100">{repo.full_name}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-zinc-100">
+                        {repo.full_name}
+                      </div>
                       <div className="text-xs text-zinc-500">
                         {repo.private ? "private · " : ""}
-                        {repo.default_branch}
+                        default: {repo.default_branch}
                       </div>
                     </div>
+                    <Input
+                      className="h-7 w-44 text-xs"
+                      value={branchDraft[repo.full_name] ?? ""}
+                      onChange={(e) =>
+                        setBranchDraft((d) => ({
+                          ...d,
+                          [repo.full_name]: e.target.value,
+                        }))
+                      }
+                      placeholder={repo.default_branch}
+                      aria-label={`Branch for ${repo.full_name}`}
+                    />
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
                       disabled={busy}
-                      onClick={() => onAttach(repo.full_name)}
+                      onClick={() => onAttach(repo.full_name, repo.default_branch)}
                     >
                       Attach
                     </Button>

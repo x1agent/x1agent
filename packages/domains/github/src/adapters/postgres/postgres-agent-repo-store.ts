@@ -1,9 +1,18 @@
 import type postgres from "postgres";
 import { UserId } from "@x1agent/kernel";
-import type { AgentRepoStore } from "../../ports/agent-repo-store.js";
+import type {
+  AgentRepoStore,
+  AttachRepoOptions,
+  LinkedRepo,
+} from "../../ports/agent-repo-store.js";
 import { InstallationId } from "../../domain/installation.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
+
+function defaultMountPath(repoFullName: string): string {
+  const slash = repoFullName.indexOf("/");
+  return slash < 0 ? repoFullName : repoFullName.slice(slash + 1);
+}
 
 /**
  * Thin adapter onto the agents + agent_repos tables. Lives in the github
@@ -29,11 +38,34 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
     `;
   }
 
-  async attachRepo(agentId: string, repo: string) {
+  async attachRepo(
+    agentId: string,
+    repo: string,
+    options: AttachRepoOptions = {},
+  ) {
+    const branch = options.branch ?? "main";
+    const mountPath = options.mountPath ?? defaultMountPath(repo);
+    const autoPush = options.autoPush ?? false;
     await this.sql`
-      INSERT INTO agent_repos (agent_id, repo_full_name)
-      VALUES (${agentId}, ${repo})
+      INSERT INTO agent_repos
+        (agent_id, repo_full_name, branch, mount_path, auto_push)
+      VALUES
+        (${agentId}, ${repo}, ${branch}, ${mountPath}, ${autoPush})
       ON CONFLICT (agent_id, repo_full_name) DO NOTHING
+    `;
+  }
+
+  async updateRepo(
+    agentId: string,
+    repo: string,
+    patch: AttachRepoOptions,
+  ) {
+    await this.sql`
+      UPDATE agent_repos SET
+        branch     = COALESCE(${patch.branch ?? null}, branch),
+        mount_path = COALESCE(${patch.mountPath ?? null}, mount_path),
+        auto_push  = COALESCE(${patch.autoPush ?? null}, auto_push)
+      WHERE agent_id = ${agentId} AND repo_full_name = ${repo}
     `;
   }
 
@@ -44,13 +76,26 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
     `;
   }
 
-  async listRepos(agentId: string) {
-    const rows = await this.sql<{ repo_full_name: string }[]>`
-      SELECT repo_full_name FROM agent_repos
+  async listRepos(agentId: string): Promise<readonly LinkedRepo[]> {
+    const rows = await this.sql<
+      {
+        repo_full_name: string;
+        branch: string;
+        mount_path: string;
+        auto_push: boolean;
+      }[]
+    >`
+      SELECT repo_full_name, branch, mount_path, auto_push
+      FROM agent_repos
       WHERE agent_id = ${agentId}
       ORDER BY created_at
     `;
-    return rows.map((r) => r.repo_full_name);
+    return rows.map((r) => ({
+      repoFullName: r.repo_full_name,
+      branch: r.branch,
+      mountPath: r.mount_path,
+      autoPush: r.auto_push,
+    }));
   }
 
   async getAgentWorkspaceAndOwner(agentId: string) {

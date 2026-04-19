@@ -189,7 +189,12 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
     const installationId = await cfg.agentRepos.getLinkedInstallation(agentId);
     return c.json({
       installation_id: installationId ?? null,
-      repos,
+      repos: repos.map((r) => ({
+        repo_full_name: r.repoFullName,
+        branch: r.branch,
+        mount_path: r.mountPath,
+        auto_push: r.autoPush,
+      })),
     });
   });
 
@@ -199,6 +204,9 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
     const body = (await c.req.json().catch(() => ({}))) as {
       installation_id?: number;
       repo_full_name?: string;
+      branch?: string;
+      mount_path?: string;
+      auto_push?: boolean;
     };
     if (!body.installation_id || !body.repo_full_name)
       return c.json({ error: "missing_fields" }, 400);
@@ -214,12 +222,42 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
           agentId: c.req.param("agentId")!,
           installationId: InstallationId(body.installation_id),
           repoFullName: body.repo_full_name,
+          branch: body.branch,
+          mountPath: body.mount_path,
+          autoPush: body.auto_push,
         },
       );
       return c.json({ ok: true }, 201);
     } catch (err) {
       return c.json(errBody(err), errStatus(err) as 400);
     }
+  });
+
+  app.patch("/:repoFullName{.+}", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      branch?: string;
+      mount_path?: string;
+      auto_push?: boolean;
+    };
+    try {
+      await cfg.agentRepos.updateRepo(
+        c.req.param("agentId")!,
+        decodeURIComponent(c.req.param("repoFullName")!),
+        {
+          branch: body.branch,
+          mountPath: body.mount_path,
+          autoPush: body.auto_push,
+        },
+      );
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+    // actor is parsed but workspace-admin gating is enforced by the
+    // wrapping compose() — same as attach/detach.
+    void actor;
   });
 
   app.delete("/:repoFullName{.+}", async (c) => {

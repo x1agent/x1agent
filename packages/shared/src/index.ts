@@ -56,6 +56,18 @@ export interface PublicInvitationView {
   workspace: { slug: string; name: string };
 }
 
+export interface AgentRepoAttachment {
+  repo_full_name: string;
+  branch: string;
+  mount_path: string;
+  auto_push: boolean;
+}
+
+export interface AgentReposResponse {
+  installation_id: number | null;
+  repos: AgentRepoAttachment[];
+}
+
 export type SessionStatus = "pending" | "running" | "complete" | "failed";
 export type SessionTriggerSource = "user" | "scheduler";
 

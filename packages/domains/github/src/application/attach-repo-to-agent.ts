@@ -37,6 +37,9 @@ export async function attachRepoToAgent(
     agentId: string;
     installationId: InstallationId;
     repoFullName: string;
+    branch?: string;
+    mountPath?: string;
+    autoPush?: boolean;
   },
 ): Promise<void> {
   const install = await deps.installations.findByInstallationId(
@@ -52,7 +55,8 @@ export async function attachRepoToAgent(
   const accessible = await deps.client.listInstallationRepos(
     input.installationId,
   );
-  if (!accessible.some((r) => r.fullName === input.repoFullName)) {
+  const match = accessible.find((r) => r.fullName === input.repoFullName);
+  if (!match) {
     throw new RepoNotInInstallationError(
       input.repoFullName,
       input.installationId,
@@ -75,5 +79,12 @@ export async function attachRepoToAgent(
       input.installationId,
     );
   }
-  await deps.agentRepos.attachRepo(input.agentId, input.repoFullName);
+  // If the caller didn't specify a branch, default to the repo's own
+  // default branch rather than a hardcoded "main" — private repos often
+  // use "master" or a custom default.
+  await deps.agentRepos.attachRepo(input.agentId, input.repoFullName, {
+    branch: input.branch ?? match.defaultBranch,
+    mountPath: input.mountPath,
+    autoPush: input.autoPush,
+  });
 }

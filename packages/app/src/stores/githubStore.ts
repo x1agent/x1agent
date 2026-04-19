@@ -32,6 +32,13 @@ interface GitHubState {
     agentId: string,
     installationId: number,
     repoFullName: string,
+    options?: { branch?: string; auto_push?: boolean },
+  ): Promise<void>;
+  updateRepo(
+    workspaceSlug: string,
+    agentId: string,
+    repoFullName: string,
+    patch: { branch?: string; auto_push?: boolean },
   ): Promise<void>;
   detachRepo(
     workspaceSlug: string,
@@ -96,7 +103,7 @@ export const useGitHubStore = create<GitHubState>((set, get) => ({
     set((s) => ({ agentRepos: { ...s.agentRepos, [agentId]: res } }));
   },
 
-  async attachRepo(workspaceSlug, agentId, installationId, repoFullName) {
+  async attachRepo(workspaceSlug, agentId, installationId, repoFullName, options) {
     await apiFetch(
       `/api/workspaces/${workspaceSlug}/agents/${agentId}/repos`,
       {
@@ -104,8 +111,18 @@ export const useGitHubStore = create<GitHubState>((set, get) => ({
         body: JSON.stringify({
           installation_id: installationId,
           repo_full_name: repoFullName,
+          branch: options?.branch,
+          auto_push: options?.auto_push,
         }),
       },
+    );
+    await get().loadAgentRepos(workspaceSlug, agentId);
+  },
+
+  async updateRepo(workspaceSlug, agentId, repoFullName, patch) {
+    await apiFetch(
+      `/api/workspaces/${workspaceSlug}/agents/${agentId}/repos/${encodeURIComponent(repoFullName)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
     );
     await get().loadAgentRepos(workspaceSlug, agentId);
   },

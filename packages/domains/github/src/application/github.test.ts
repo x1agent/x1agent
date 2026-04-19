@@ -100,7 +100,30 @@ describe("attachRepoToAgent", () => {
     expect(await agentRepos.getLinkedInstallation(ALICE_AGENT)).toBe(
       1001 as ReturnType<typeof InstallationId>,
     );
-    expect(await agentRepos.listRepos(ALICE_AGENT)).toEqual(["alice/proj-one"]);
+    const rows = await agentRepos.listRepos(ALICE_AGENT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.repoFullName).toBe("alice/proj-one");
+    expect(rows[0]!.branch).toBe("main");
+    expect(rows[0]!.mountPath).toBe("proj-one");
+    expect(rows[0]!.autoPush).toBe(false);
+  });
+
+  it("records an explicit branch when provided", async () => {
+    await seed();
+    await attachRepoToAgent(
+      { client, installations, agentRepos },
+      {
+        actor: ALICE,
+        agentId: ALICE_AGENT,
+        installationId: InstallationId(1001),
+        repoFullName: "alice/proj-one",
+        branch: "agent/heartbeat",
+        autoPush: true,
+      },
+    );
+    const rows = await agentRepos.listRepos(ALICE_AGENT);
+    expect(rows[0]!.branch).toBe("agent/heartbeat");
+    expect(rows[0]!.autoPush).toBe(true);
   });
 
   it("allows a second repo from the same installation", async () => {
@@ -219,5 +242,28 @@ describe("detachRepoFromAgent", () => {
       { actor: ALICE, agentId: ALICE_AGENT, repoFullName: "alice/proj-one" },
     );
     expect(await agentRepos.listRepos(ALICE_AGENT)).toEqual([]);
+  });
+
+  it("updates branch + auto_push on an existing attachment", async () => {
+    await recordInstallation(
+      { client, installations },
+      { installationId: InstallationId(1001), actor: ALICE },
+    );
+    await attachRepoToAgent(
+      { client, installations, agentRepos },
+      {
+        actor: ALICE,
+        agentId: ALICE_AGENT,
+        installationId: InstallationId(1001),
+        repoFullName: "alice/proj-one",
+      },
+    );
+    await agentRepos.updateRepo(ALICE_AGENT, "alice/proj-one", {
+      branch: "develop",
+      autoPush: true,
+    });
+    const rows = await agentRepos.listRepos(ALICE_AGENT);
+    expect(rows[0]!.branch).toBe("develop");
+    expect(rows[0]!.autoPush).toBe(true);
   });
 });

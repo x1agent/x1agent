@@ -4,7 +4,11 @@ import type {
   GitHubInstallationInfo,
 } from "../ports/github-app-client.js";
 import type { InstallationRepository } from "../ports/installation-repository.js";
-import type { AgentRepoStore } from "../ports/agent-repo-store.js";
+import type {
+  AgentRepoStore,
+  AttachRepoOptions,
+  LinkedRepo,
+} from "../ports/agent-repo-store.js";
 import type { InstallationRepo } from "../domain/repo.js";
 import {
   InstallationId,
@@ -114,9 +118,14 @@ export class InMemoryInstallationRepository implements InstallationRepository {
   }
 }
 
+function defaultMountPath(repo: string): string {
+  const slash = repo.indexOf("/");
+  return slash < 0 ? repo : repo.slice(slash + 1);
+}
+
 export class InMemoryAgentRepoStore implements AgentRepoStore {
   readonly agentInstalls = new Map<string, InstallationId>();
-  readonly agentRepos = new Map<string, Set<string>>();
+  readonly agentRepos = new Map<string, Map<string, LinkedRepo>>();
   readonly agentMeta = new Map<
     string,
     { workspaceId: string; createdBy: UserId | null }
@@ -128,16 +137,41 @@ export class InMemoryAgentRepoStore implements AgentRepoStore {
   async setLinkedInstallation(agentId: string, id: InstallationId) {
     this.agentInstalls.set(agentId, id);
   }
-  async attachRepo(agentId: string, repo: string) {
-    const s = this.agentRepos.get(agentId) ?? new Set<string>();
-    s.add(repo);
+  async attachRepo(
+    agentId: string,
+    repo: string,
+    options: AttachRepoOptions = {},
+  ) {
+    const s = this.agentRepos.get(agentId) ?? new Map<string, LinkedRepo>();
+    if (!s.has(repo)) {
+      s.set(repo, {
+        repoFullName: repo,
+        branch: options.branch ?? "main",
+        mountPath: options.mountPath ?? defaultMountPath(repo),
+        autoPush: options.autoPush ?? false,
+      });
+    }
     this.agentRepos.set(agentId, s);
+  }
+  async updateRepo(
+    agentId: string,
+    repo: string,
+    patch: AttachRepoOptions,
+  ) {
+    const cur = this.agentRepos.get(agentId)?.get(repo);
+    if (!cur) return;
+    this.agentRepos.get(agentId)!.set(repo, {
+      ...cur,
+      branch: patch.branch ?? cur.branch,
+      mountPath: patch.mountPath ?? cur.mountPath,
+      autoPush: patch.autoPush ?? cur.autoPush,
+    });
   }
   async detachRepo(agentId: string, repo: string) {
     this.agentRepos.get(agentId)?.delete(repo);
   }
   async listRepos(agentId: string) {
-    return [...(this.agentRepos.get(agentId) ?? [])];
+    return [...(this.agentRepos.get(agentId)?.values() ?? [])];
   }
   async getAgentWorkspaceAndOwner(agentId: string) {
     return this.agentMeta.get(agentId) ?? null;

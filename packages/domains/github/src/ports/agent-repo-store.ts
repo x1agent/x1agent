@@ -2,6 +2,23 @@ import type { UserId } from "@x1agent/kernel";
 import type { InstallationId } from "../domain/installation.js";
 
 /**
+ * A linked repo with the on-disk placement and git branching configuration
+ * the sidecar needs to clone and check out at session start.
+ */
+export interface LinkedRepo {
+  repoFullName: string;
+  branch: string;
+  mountPath: string;
+  autoPush: boolean;
+}
+
+export interface AttachRepoOptions {
+  branch?: string;
+  mountPath?: string;
+  autoPush?: boolean;
+}
+
+/**
  * Narrow port onto the agents domain for repo linking. The composition
  * root implements this by delegating to agents' PostgresAgentRepository
  * + a small raw-SQL insert/delete on agent_repos. Keeps the github
@@ -21,12 +38,28 @@ export interface AgentRepoStore {
     installationId: InstallationId,
   ): Promise<void>;
 
-  /** Add (or no-op) a repo attachment for the agent. */
-  attachRepo(agentId: string, repoFullName: string): Promise<void>;
+  /**
+   * Add (or no-op) a repo attachment for the agent. `branch` defaults to
+   * 'main' when not provided; `mountPath` defaults to the repo name
+   * (everything after the slash in `owner/repo`); `autoPush` defaults to
+   * false.
+   */
+  attachRepo(
+    agentId: string,
+    repoFullName: string,
+    options?: AttachRepoOptions,
+  ): Promise<void>;
+
+  /** Patch branch / mount_path / auto_push on an existing attachment. */
+  updateRepo(
+    agentId: string,
+    repoFullName: string,
+    patch: AttachRepoOptions,
+  ): Promise<void>;
 
   detachRepo(agentId: string, repoFullName: string): Promise<void>;
 
-  listRepos(agentId: string): Promise<readonly string[]>;
+  listRepos(agentId: string): Promise<readonly LinkedRepo[]>;
 
   /** Used by the admin guard check — returns the workspace an agent belongs to. */
   getAgentWorkspaceAndOwner(agentId: string): Promise<{
