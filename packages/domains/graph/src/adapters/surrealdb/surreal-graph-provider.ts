@@ -1,0 +1,287 @@
+import {
+  CollectionNotProvisionedError,
+  InvalidGraphQueryError,
+} from "../../domain/errors.js";
+import {
+  DEFAULT_RECORD_TYPES,
+  type RecordField,
+  type RecordRelationship,
+  type RecordType,
+} from "../../domain/record-type.js";
+import type {
+  GraphEdge,
+  GraphRecord,
+  RecordProvenance,
+} from "../../domain/record.js";
+import type { CollectionHandle } from "../../domain/collection-handle.js";
+import type {
+  GraphProvider,
+  QueryInput,
+  QueryResult,
+  RelateInput,
+  ResolveInput,
+  WriteInput,
+} from "../../ports/graph-provider.js";
+import { SurrealClient } from "./surreal-client.js";
+
+/** SurrealDB returns one result envelope per statement: { result, status, ... }. */
+interface SurrealResultEnvelope {
+  result?: unknown;
+  status?: "OK" | "ERR";
+  detail?: string;
+}
+
+function unwrapSingle(body: unknown): unknown {
+  if (!Array.isArray(body) || body.length === 0) return null;
+  const env = body[body.length - 1] as SurrealResultEnvelope;
+  if (env.status === "ERR")
+    throw new InvalidGraphQueryError(env.detail ?? "SurrealDB rejected the query");
+  return env.result ?? null;
+}
+
+/** SurrealQL string literal escaping — double every backslash, escape single quotes. */
+function quote(raw: string): string {
+  return `'${raw.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+function jsonify(value: unknown): string {
+  return JSON.stringify(value ?? null);
+}
+
+function recordTypeFromEnvelope(row: unknown): RecordType | null {
+  if (typeof row !== "object" || row === null) return null;
+  const r = row as Record<string, unknown>;
+  const name = typeof r["name"] === "string" ? r["name"] : null;
+  const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+  if (!name || !slug) return null;
+  return {
+    name,
+    slug,
+    description:
+      typeof r["description"] === "string" ? r["description"] : "",
+    icon: typeof r["icon"] === "string" ? r["icon"] : null,
+    fields: Array.isArray(r["fields"])
+      ? (r["fields"] as RecordField[])
+      : [],
+    relationships: Array.isArray(r["relationships"])
+      ? (r["relationships"] as RecordRelationship[])
+      : [],
+  };
+}
+
+function parseProvenance(
+  raw: Record<string, unknown> | undefined,
+): RecordProvenance {
+  if (!raw)
+    return {
+      createdBy: "unknown",
+      createdByUserId: null,
+      confidence: 1,
+      source: null,
+      derivedFrom: [],
+      createdAt: new Date(),
+    };
+  return {
+    createdBy: String(raw["created_by"] ?? "unknown"),
+    createdByUserId:
+      typeof raw["created_by_user"] === "string"
+        ? (raw["created_by_user"] as string)
+        : null,
+    confidence:
+      typeof raw["confidence"] === "number" ? raw["confidence"] : 1,
+    source: typeof raw["source"] === "string" ? raw["source"] : null,
+    derivedFrom: Array.isArray(raw["derived_from"])
+      ? (raw["derived_from"] as string[])
+      : [],
+    createdAt:
+      typeof raw["created_at"] === "string"
+        ? new Date(raw["created_at"])
+        : new Date(),
+  };
+}
+
+function parseRecord(
+  recordType: string,
+  row: Record<string, unknown>,
+): GraphRecord {
+  const provenance = parseProvenance(
+    row["_provenance"] as Record<string, unknown> | undefined,
+  );
+  const data: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (k === "id" || k.startsWith("_")) continue;
+    data[k] = v;
+  }
+  return {
+    id: String(row["id"] ?? ""),
+    recordType,
+    data,
+    provenance,
+  };
+}
+
+/**
+ * SurrealDB implementation of the GraphProvider port. One SurrealDB
+ * database per collection; the handle is the db name. Records live in
+ * tables named after their record type slug.
+ */
+export class SurrealGraphProvider implements GraphProvider {
+  readonly id = "surrealdb";
+
+  constructor(private readonly client: SurrealClient) {}
+
+  async provision(handle: CollectionHandle): Promise<void> {
+    // SurrealDB v3 syntax. DEFINE NAMESPACE IF NOT EXISTS is harmless
+    // when the namespace is already there; same for DATABASE.
+    await this.client.sql(
+      `DEFINE NAMESPACE IF NOT EXISTS ${this.client.cfg.namespace};`,
+    );
+    await this.client.sql(
+      `DEFINE DATABASE IF NOT EXISTS ${handle};`,
+      this.client.cfg.namespace,
+    );
+
+    // Seed the record-type registry. Upserts on name so a re-provision
+    // won't duplicate rows.
+    const ddl: string[] = [
+      `DEFINE TABLE IF NOT EXISTS _record_types SCHEMAFULL;`,
+      `DEFINE FIELD IF NOT EXISTS name ON _record_types TYPE string;`,
+      `DEFINE FIELD IF NOT EXISTS slug ON _record_types TYPE string;`,
+      `DEFINE FIELD IF NOT EXISTS description ON _record_types TYPE string;`,
+      `DEFINE FIELD IF NOT EXISTS icon ON _record_types TYPE option<string>;`,
+      `DEFINE FIELD IF NOT EXISTS fields ON _record_types TYPE array;`,
+      `DEFINE FIELD IF NOT EXISTS relationships ON _record_types TYPE array;`,
+      `DEFINE INDEX IF NOT EXISTS _record_types_slug_idx ON _record_types FIELDS slug UNIQUE;`,
+    ];
+    for (const seed of DEFAULT_RECORD_TYPES) {
+      ddl.push(`DEFINE TABLE IF NOT EXISTS ${seed.slug} SCHEMALESS;`);
+      ddl.push(
+        `UPSERT _record_types SET name = ${quote(seed.name)}, slug = ${quote(seed.slug)}, description = ${quote(seed.description)}, icon = ${seed.icon ? quote(seed.icon) : "NONE"}, fields = ${jsonify(seed.fields)}, relationships = ${jsonify(seed.relationships)} WHERE slug = ${quote(seed.slug)};`,
+      );
+    }
+    await this.client.sql(ddl.join("\n"), handle);
+  }
+
+  async deprovision(handle: CollectionHandle): Promise<void> {
+    try {
+      await this.client.sql(
+        `REMOVE DATABASE IF EXISTS ${handle};`,
+        this.client.cfg.namespace,
+      );
+    } catch (err) {
+      // Idempotent — we don't want deprovision-then-deprovision to throw.
+      // But upstream errors (auth, network) still bubble.
+      const code = (err as { code?: string })?.code;
+      if (code === "graph_provider_unreachable") throw err;
+      if (code === "graph_unauthorized") throw err;
+    }
+  }
+
+  async query(input: QueryInput): Promise<QueryResult> {
+    const body = await this.client.sql(input.query, input.collection);
+    return { rows: body };
+  }
+
+  async write(input: WriteInput): Promise<GraphRecord> {
+    const provenance = {
+      created_by: `session:${input.provenance.sessionId}`,
+      created_by_user: input.provenance.userId,
+      confidence: input.provenance.confidence,
+      source: input.provenance.source,
+      derived_from: input.provenance.derivedFrom,
+      created_at: new Date().toISOString(),
+    };
+    const data = { ...input.data, _provenance: provenance };
+    const createSql = `CREATE ${input.recordType} CONTENT ${jsonify(data)};`;
+
+    const body = (await this.client.sql(
+      createSql,
+      input.collection,
+    )) as SurrealResultEnvelope[];
+    const row = unwrapSingle(body) as
+      | Record<string, unknown>
+      | Record<string, unknown>[]
+      | null;
+    if (!row) throw new InvalidGraphQueryError("CREATE returned no row");
+
+    const record = parseRecord(
+      input.recordType,
+      Array.isArray(row) ? (row[0] as Record<string, unknown>) : row,
+    );
+
+    // Auto-register the record type on first use — same upsert-by-slug
+    // that provision() uses so every write path converges on the same
+    // registry shape.
+    const fields = Object.keys(input.data)
+      .filter((k) => !k.startsWith("_"))
+      .map((name) => ({ name, type: "string", required: false }));
+    const registerSql = `UPSERT _record_types SET name = ${quote(input.recordType)}, slug = ${quote(input.recordType)}, description = '', fields = ${jsonify(fields)}, relationships = [] WHERE slug = ${quote(input.recordType)};`;
+    try {
+      await this.client.sql(registerSql, input.collection);
+    } catch {
+      // Registration is best-effort; the write itself succeeded.
+    }
+    return record;
+  }
+
+  async relate(input: RelateInput): Promise<GraphEdge> {
+    const props = jsonify(input.properties ?? {});
+    const q = `RELATE ${input.from}->${input.edge}->${input.to} CONTENT ${props};`;
+    const body = (await this.client.sql(
+      q,
+      input.collection,
+    )) as SurrealResultEnvelope[];
+    const row = unwrapSingle(body);
+    if (!row || typeof row !== "object")
+      throw new InvalidGraphQueryError("RELATE returned no row");
+    const obj = Array.isArray(row)
+      ? (row[0] as Record<string, unknown>)
+      : (row as Record<string, unknown>);
+    return {
+      id: String(obj["id"] ?? ""),
+      from: String(obj["in"] ?? input.from),
+      to: String(obj["out"] ?? input.to),
+      edge: input.edge,
+      properties: { ...input.properties },
+    };
+  }
+
+  async resolve(input: ResolveInput): Promise<GraphRecord | null> {
+    const wheres: string[] = [];
+    if (input.email)
+      wheres.push(`email = ${quote(input.email)}`);
+    if (input.name) wheres.push(`name = ${quote(input.name)}`);
+    for (const [k, v] of Object.entries(input.attributes ?? {})) {
+      if (typeof v === "string") wheres.push(`${k} = ${quote(v)}`);
+      else wheres.push(`${k} = ${jsonify(v)}`);
+    }
+    if (wheres.length === 0) return null;
+    const q = `SELECT * FROM ${input.recordType} WHERE ${wheres.join(" OR ")} LIMIT 1;`;
+    const body = (await this.client.sql(
+      q,
+      input.collection,
+    )) as SurrealResultEnvelope[];
+    const rows = unwrapSingle(body);
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return parseRecord(
+      input.recordType,
+      rows[0] as Record<string, unknown>,
+    );
+  }
+
+  async discover(
+    handle: CollectionHandle,
+  ): Promise<readonly RecordType[]> {
+    const body = (await this.client.sql(
+      `SELECT * FROM _record_types ORDER BY slug;`,
+      handle,
+    )) as SurrealResultEnvelope[];
+    const rows = unwrapSingle(body);
+    if (!Array.isArray(rows)) {
+      throw new CollectionNotProvisionedError(handle);
+    }
+    return rows
+      .map(recordTypeFromEnvelope)
+      .filter((x): x is RecordType => x !== null);
+  }
+}

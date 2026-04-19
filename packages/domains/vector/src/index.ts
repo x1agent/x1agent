@@ -18,5 +18,8 @@ export {
   type VectorProviderContractFixture,
 } from "./contract-tests/vector-provider.contract.js";
 
+// Adapters
+export { SurrealVectorProvider } from "./adapters/surrealdb/surreal-vector-provider.js";
+
 // Fakes
 export * from "./application/fakes.js";
