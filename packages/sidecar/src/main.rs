@@ -20,6 +20,7 @@ use std::sync::Arc;
 mod channel;
 mod git;
 mod nats_bridge;
+mod orchestration;
 mod stream;
 
 #[derive(Clone)]
@@ -125,6 +126,8 @@ async fn main() {
     let app = Router::new()
         .route("/event", routing::post(handle_event))
         .route("/git/credential", routing::get(git::handle_git_credential))
+        .route("/spawn", routing::post(orchestration::handle_spawn))
+        .route("/spawnable", routing::get(orchestration::handle_spawnable))
         .route("/health", routing::get(|| async { "ok" }))
         .with_state(state);
 

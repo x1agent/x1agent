@@ -157,6 +157,37 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
   });
 
+  // List the child agents a given session is allowed to spawn. Derived
+  // from permission_grants by looking up active spawn grants held by
+  // the session's agent; returned enriched with agent name + slug so the
+  // orchestrator can pick one without another round trip.
+  app.get("/sessions/:sessionId/spawnable", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const session = await cfg.sessions.findById(sessionId);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+    const parentAgent = await cfg.agents.findById(session.agentId);
+    if (!parentAgent) return c.json({ error: "agent_not_found" }, 404);
+
+    const grants = await cfg.grants.listActive({
+      workspaceId: parentAgent.workspaceId,
+      subject: { kind: "agent", agentId: parentAgent.id },
+      grantType: SPAWN_GRANT_TYPE as never,
+    });
+
+    const childIds = grants
+      .map((g) => g.details["child_agent_id"])
+      .filter((v): v is string => typeof v === "string");
+    const unique = Array.from(new Set(childIds));
+    const children = await Promise.all(
+      unique.map((id) => cfg.agents.findById(AgentId(id))),
+    );
+    const spawnable = children
+      .filter((a): a is NonNullable<typeof a> => a !== null)
+      .map((a) => ({ id: a.id, slug: a.slug, name: a.name }));
+
+    return c.json({ spawnable });
+  });
+
   // Mint a short-lived GitHub App installation token for the sidecar.
   // Returns it in git's credential-helper shape: (username, token).
   app.get("/git-credential", async (c) => {
