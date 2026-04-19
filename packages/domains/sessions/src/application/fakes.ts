@@ -44,6 +44,8 @@ export class InMemorySessionRepository implements SessionRepository {
       agentId: input.agentId,
       triggeredBy: input.triggeredBy,
       triggeredByUserId: input.triggeredByUserId,
+      parentSessionId: input.parentSessionId,
+      parentAgentId: input.parentAgentId,
       triggeredAt: input.triggeredAt,
       status: "pending",
       completedAt: null,

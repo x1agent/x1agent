@@ -20,6 +20,10 @@ export interface Session {
   agentId: AgentId;
   triggeredBy: TriggerSource;
   triggeredByUserId: UserId | null;
+  /** Set only when triggeredBy === "agent" — the orchestrator session. */
+  parentSessionId: SessionId | null;
+  /** Set only when triggeredBy === "agent" — the orchestrator's agent. */
+  parentAgentId: AgentId | null;
   triggeredAt: Date;
   status: SessionStatus;
   completedAt: Date | null;

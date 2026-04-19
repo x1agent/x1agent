@@ -182,6 +182,8 @@ describe("scheduleDueSessions", () => {
       agentId,
       triggeredBy: "scheduler",
       triggeredByUserId: null,
+      parentSessionId: null,
+      parentAgentId: null,
       triggeredAt: at,
     });
   }

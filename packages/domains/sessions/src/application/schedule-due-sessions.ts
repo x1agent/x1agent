@@ -56,6 +56,8 @@ export async function scheduleDueSessions(
           agentId: agent.id,
           triggeredBy: "scheduler",
           triggeredByUserId: null,
+          parentSessionId: null,
+          parentAgentId: null,
           triggeredAt: due,
         });
         result.created += 1;

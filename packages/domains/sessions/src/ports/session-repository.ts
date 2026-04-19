@@ -8,6 +8,10 @@ export interface CreateSessionInput {
   agentId: AgentId;
   triggeredBy: TriggerSource;
   triggeredByUserId: UserId | null;
+  /** Required when triggeredBy === "agent". Null otherwise. */
+  parentSessionId: SessionId | null;
+  /** Required when triggeredBy === "agent". Null otherwise. */
+  parentAgentId: AgentId | null;
   triggeredAt: Date;
 }
 

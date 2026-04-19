@@ -31,6 +31,8 @@ export async function triggerSession(
     agentId: agent.id,
     triggeredBy: "user",
     triggeredByUserId: input.actor,
+    parentSessionId: null,
+    parentAgentId: null,
     triggeredAt: deps.clock.now(),
   });
 }

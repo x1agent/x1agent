@@ -226,6 +226,9 @@ export function compose(env: CompositionEnv): Composition {
 
   const internalRoutes = createInternalRoutes({
     events: sessionEvents,
+    sessions,
+    agents,
+    grants: permissionGrants,
     githubClient,
     internalToken: env.internalToken ?? "",
   });
