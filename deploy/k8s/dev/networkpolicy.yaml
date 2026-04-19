@@ -1,0 +1,233 @@
+# DEV — pod-level NetworkPolicies. Enforces egress + ingress per role.
+#
+# IMPORTANT — OrbStack's built-in CNI does NOT enforce NetworkPolicy.
+# These resources apply cleanly (`kubectl describe` shows the rules)
+# but cluster traffic is not actually filtered in dev. They serve two
+# purposes today:
+#   1. Document the intended pod-traffic shape so the rules ship
+#      ready for prod, where Calico / Cilium / Antrea / GKE Dataplane
+#      v2 enforce them uniformly.
+#   2. Catch policy regressions at PR time — `kubectl apply` rejects
+#      malformed selectors or invalid CIDRs.
+#
+# The mTLS layer (NATS) is what actually blocks the meaningful agent
+# → NATS bypass in dev. NetworkPolicy is defence-in-depth and the
+# enforcement layer in prod.
+#
+# Per-container isolation (agent container deny-NATS, sidecar
+# allow-NATS) needs Cilium or an in-pod egress proxy and lands in
+# a follow-up.
+---
+# ── Default deny everything in the namespace ────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: x1agent
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# ── DNS allow (every pod needs to resolve `nats`, `postgres`, etc.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: x1agent
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# ── api: egress to postgres, nats, github.com, slack.com (oauth) ─
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+  namespace: x1agent
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: ["api", "api-devspace"] }
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: postgres } }
+      ports: [{ port: 5432, protocol: TCP }]
+    - to:
+        - podSelector: { matchLabels: { app: nats } }
+      ports: [{ port: 4222, protocol: TCP }]
+    # External APIs — GitHub, Google OAuth, etc. CNI policies cannot
+    # match by hostname so we allow all egress to non-cluster IPs.
+    # NetworkPolicy is the wrong layer for hostname allowlisting;
+    # an egress proxy (Envoy/Squid) is the prod answer.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+  ingress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  namespace: x1agent
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: ["api", "api-devspace"] }
+  policyTypes:
+    - Ingress
+  ingress:
+    - {}
+---
+# ── postgres: only api may connect ──────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: postgres } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: ["api", "api-devspace"] }
+      ports: [{ port: 5432, protocol: TCP }]
+---
+# ── nats: api, all session sidecars, and providers may connect ──
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: nats } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values:
+                  ["api", "api-devspace", "messaging-slack",
+                   "graph-surrealdb"] }
+        - podSelector:
+            matchLabels:
+              component: agent-session
+      ports: [{ port: 4222, protocol: TCP }]
+    # WebSocket subscriber: the browser hits :8080 via devspace
+    # port-forward. The traffic still originates from the dev host,
+    # which appears to the cluster as the kubelet IP — allow any
+    # in-cluster source on 8080 in dev.
+    - ports: [{ port: 8080, protocol: TCP }]
+---
+# ── surrealdb: only graph-surrealdb may connect ─────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: surrealdb-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: surrealdb } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: graph-surrealdb } }
+      ports: [{ port: 8000, protocol: TCP }]
+---
+# ── messaging-slack: egress to nats + slack.com only ────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: messaging-slack-egress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: messaging-slack } }
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: nats } }
+      ports: [{ port: 4222, protocol: TCP }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+---
+# ── graph-surrealdb: egress to nats + surrealdb only ────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: graph-surrealdb-egress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: graph-surrealdb } }
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: nats } }
+      ports: [{ port: 4222, protocol: TCP }]
+    - to:
+        - podSelector: { matchLabels: { app: surrealdb } }
+      ports: [{ port: 8000, protocol: TCP }]
+---
+# ── session pods: egress to nats + api + outside (github + slack)
+# The agent container shares this namespace with the sidecar; per-
+# container isolation needs Cilium or a proxy. Today both containers
+# get the same pod-level egress allowlist.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-session-egress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { component: agent-session } }
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: nats } }
+      ports: [{ port: 4222, protocol: TCP }]
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: ["api", "api-devspace"] }
+      ports: [{ port: 30001, protocol: TCP }]
+    # External: github (gh, git), npm/jsr (package installs), Anthropic
+    # / OpenAI (LLM calls if not via provider), generic web.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+  ingress:
+    - {}
