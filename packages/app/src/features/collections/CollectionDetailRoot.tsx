@@ -129,6 +129,8 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
           loading={rtLoading}
           error={rtError}
           types={recordTypes}
+          workspaceSlug={workspaceSlug}
+          collectionSlug={collectionSlug}
         />
       </div>
     </AppShell>
@@ -160,10 +162,14 @@ function RecordTypesCard({
   loading,
   error,
   types,
+  workspaceSlug,
+  collectionSlug,
 }: {
   loading: boolean;
   error: string | null;
   types: RecordTypeDTO[];
+  workspaceSlug: string;
+  collectionSlug: string;
 }) {
   return (
     <Card>
@@ -198,9 +204,20 @@ function RecordTypesCard({
             </TableHeader>
             <TableBody>
               {types.map((t) => (
-                <TableRow key={t.slug} className="hover:bg-transparent">
+                <TableRow
+                  key={t.slug}
+                  className="cursor-pointer hover:bg-zinc-900/40"
+                  onClick={() => {
+                    window.location.href = `/workspaces/${workspaceSlug}/collections/${collectionSlug}/types/${t.slug}`;
+                  }}
+                >
                   <TableCell>
-                    <div className="text-zinc-200">{t.name}</div>
+                    <a
+                      className="text-zinc-200 hover:underline"
+                      href={`/workspaces/${workspaceSlug}/collections/${collectionSlug}/types/${t.slug}`}
+                    >
+                      {t.name}
+                    </a>
                     <div className="font-mono text-[11px] text-zinc-600">
                       {t.slug}
                     </div>

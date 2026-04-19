@@ -2,6 +2,7 @@ import { connect, StringCodec, type NatsConnection } from "nats";
 import type {
   CollectionProviderType,
   ProviderGateway,
+  ProviderRecord,
   ProviderRecordType,
 } from "@x1agent/domain-collections";
 import type { CollectionHandle } from "@x1agent/domain-graph";
@@ -130,6 +131,73 @@ export class NatsProviderGateway implements ProviderGateway {
           }>)
         : [],
     }));
+  }
+
+  async listRecords(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+    recordType: string,
+    limit: number,
+  ): Promise<readonly ProviderRecord[]> {
+    void providerType;
+    // Record-type slugs come from the provider's own registry (the
+    // record-id form uses the slug directly), so we can splice them
+    // into the query. We still reject anything other than
+    // lowercase-snake to keep the query layer injection-free.
+    if (!/^[a-z][a-z0-9_]*$/.test(recordType)) {
+      throw Object.assign(new Error("invalid_record_type"), {
+        code: "invalid_record_type",
+      });
+    }
+    const safeLimit = Math.max(1, Math.min(500, limit));
+    const queryResult = (await this.request("x1.provider.graph.query", {
+      handle,
+      query: `SELECT * FROM ${recordType} ORDER BY _provenance.created_at DESC LIMIT ${safeLimit};`,
+      vars: {},
+    })) as { rows?: unknown } | null;
+
+    // SurrealDB returns [{ result: [...], status: 'OK' }]; unwrap the
+    // last envelope's result.
+    const outer = (queryResult?.rows ?? null) as unknown;
+    if (!Array.isArray(outer) || outer.length === 0) return [];
+    const last = outer[outer.length - 1] as { result?: unknown };
+    const rows = Array.isArray(last?.result) ? last.result : [];
+    return rows.map((raw) => this.toRecord(raw, recordType));
+  }
+
+  private toRecord(raw: unknown, recordType: string): ProviderRecord {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const prov = (r["_provenance"] ?? {}) as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (k === "id" || k.startsWith("_")) continue;
+      data[k] = v;
+    }
+    return {
+      id: String(r["id"] ?? ""),
+      recordType,
+      data,
+      provenance: {
+        createdBy: String(prov["created_by"] ?? ""),
+        createdByUserId:
+          typeof prov["created_by_user"] === "string"
+            ? (prov["created_by_user"] as string)
+            : null,
+        confidence:
+          typeof prov["confidence"] === "number"
+            ? (prov["confidence"] as number)
+            : 1,
+        source:
+          typeof prov["source"] === "string" ? (prov["source"] as string) : null,
+        derivedFrom: Array.isArray(prov["derived_from"])
+          ? (prov["derived_from"] as string[])
+          : [],
+        createdAt:
+          typeof prov["created_at"] === "string"
+            ? (prov["created_at"] as string)
+            : "",
+      },
+    };
   }
 
   private async request(

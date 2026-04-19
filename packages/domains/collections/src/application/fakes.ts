@@ -225,4 +225,29 @@ export class RecordingProviderGateway implements ProviderGateway {
   async discover() {
     return this.recordTypes;
   }
+
+  records: Array<{
+    id: string;
+    recordType: string;
+    data: Record<string, unknown>;
+    provenance: {
+      createdBy: string;
+      createdByUserId: string | null;
+      confidence: number;
+      source: string | null;
+      derivedFrom: readonly string[];
+      createdAt: string;
+    };
+  }> = [];
+
+  async listRecords(
+    _providerType: CollectionProviderType,
+    _handle: CollectionHandle,
+    recordType: string,
+    limit: number,
+  ) {
+    return this.records
+      .filter((r) => r.recordType === recordType)
+      .slice(0, limit);
+  }
 }

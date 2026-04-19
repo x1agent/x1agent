@@ -1,0 +1,15 @@
+---
+import Layout from "../../../../../../layouts/Layout.astro";
+import { RecordTypeRoot } from "../../../../../../features/collections/RecordTypeRoot";
+
+const { slug, collectionSlug, typeSlug } = Astro.params;
+---
+
+<Layout title={`${typeSlug} · ${collectionSlug} · ${slug} · x1agent`}>
+  <RecordTypeRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+    collectionSlug={collectionSlug ?? ""}
+    typeSlug={typeSlug ?? ""}
+  />
+</Layout>

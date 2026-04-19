@@ -322,6 +322,10 @@ export function compose(env: CompositionEnv): Composition {
       providerUnavailable();
       return [];
     },
+    async listRecords() {
+      providerUnavailable();
+      return [];
+    },
   };
 
   const collectionRoutes = createCollectionRoutes({

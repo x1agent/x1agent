@@ -40,6 +40,33 @@ export interface ProviderGateway {
     providerType: CollectionProviderType,
     handle: CollectionHandle,
   ): Promise<readonly ProviderRecordType[]>;
+
+  /**
+   * Return every record of the named type, newest-first, capped at
+   * `limit`. Powers the record-browser UI; agents get the same data
+   * through graph_query.
+   */
+  listRecords(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+    recordType: string,
+    limit: number,
+  ): Promise<readonly ProviderRecord[]>;
+}
+
+/** Provider-opaque record shape — mirrors @x1agent/domain-graph's GraphRecord. */
+export interface ProviderRecord {
+  id: string;
+  recordType: string;
+  data: Record<string, unknown>;
+  provenance: {
+    createdBy: string;
+    createdByUserId: string | null;
+    confidence: number;
+    source: string | null;
+    derivedFrom: readonly string[];
+    createdAt: string;
+  };
 }
 
 /**
