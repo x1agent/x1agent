@@ -125,7 +125,23 @@ const inputChannel = createInputChannel();
 // Only seed the initial prompt when one was configured (scheduler
 // sessions, mostly). User-triggered sessions leave this empty — the
 // SDK will block on the channel until the browser injects a message.
-if (prompt) inputChannel.push(prompt);
+if (prompt) {
+  // Queue a synthetic user.message event for the stream so the session
+  // detail UI shows what the agent was asked. The SDK doesn't emit a
+  // wire event when we feed its input iterator, so without this the
+  // scheduler-triggered runs open on "agent.text" with no context for
+  // what it's responding to. We push to the buffer directly rather
+  // than via emitToStream — at this point in module init the idle
+  // timer doesn't exist yet, and the sidecar isn't connected either,
+  // so the listener-notify + idle-reset paths inside emitToStream
+  // would either no-op or throw. The sidecar will pick this up on its
+  // first SSE-stream connection via the buffer replay.
+  eventBuffer.push({
+    type: "user.message",
+    payload: { text: prompt },
+  });
+  inputChannel.push(prompt);
+}
 
 // ── Sidecar credential bootstrap for gh CLI ────────────
 
