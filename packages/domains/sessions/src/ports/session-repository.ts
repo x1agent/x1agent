@@ -48,6 +48,12 @@ export interface SessionRepository {
    */
   lastSchedulerRunFor(agentId: AgentId): Promise<Session | null>;
 
+  /**
+   * Child sessions spawned by the given parent. Newest-first. Powers the
+   * "Children" panel on the session detail page.
+   */
+  listChildren(parentSessionId: SessionId): Promise<readonly Session[]>;
+
   updateStatus(
     id: SessionId,
     patch: UpdateSessionStatusInput,

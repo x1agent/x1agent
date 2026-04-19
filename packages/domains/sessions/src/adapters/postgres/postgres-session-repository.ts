@@ -131,6 +131,15 @@ export class PostgresSessionRepository implements SessionRepository {
     return rows.map(toSession);
   }
 
+  async listChildren(parentSessionId: SessionId): Promise<readonly Session[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE parent_session_id = ${parentSessionId}
+      ORDER BY triggered_at DESC
+    `;
+    return rows.map(toSession);
+  }
+
   async lastSchedulerRunFor(agentId: AgentId): Promise<Session | null> {
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM sessions

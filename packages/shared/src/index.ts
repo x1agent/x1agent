@@ -69,13 +69,15 @@ export interface AgentReposResponse {
 }
 
 export type SessionStatus = "pending" | "running" | "complete" | "failed";
-export type SessionTriggerSource = "user" | "scheduler";
+export type SessionTriggerSource = "user" | "scheduler" | "agent";
 
 export interface SessionDTO {
   id: string;
   agent_id: string;
   triggered_by: SessionTriggerSource;
   triggered_by_user_id: string | null;
+  parent_session_id: string | null;
+  parent_agent_id: string | null;
   triggered_at: string;
   status: SessionStatus;
   completed_at: string | null;
@@ -112,6 +114,21 @@ export interface SessionEventListResponse {
   session: SessionDTO;
   agent: { id: string; slug: string; name: string };
   events: SessionEventDTO[];
+  /**
+   * Populated only when the session has a parent_session_id. The agent
+   * name is resolved so the UI doesn't have to chase another round-trip.
+   */
+  parent: {
+    session_id: string;
+    agent: { id: string; slug: string; name: string };
+  } | null;
+  /** Child sessions this session spawned. May be empty. */
+  children: Array<{
+    id: string;
+    status: SessionStatus;
+    triggered_at: string;
+    agent: { id: string; slug: string; name: string };
+  }>;
 }
 
 export type GrantScope = "once" | "session" | "persistent";

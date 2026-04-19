@@ -211,7 +211,11 @@ function SessionRow({
         )}
       </TableCell>
       <TableCell className="text-zinc-400">
-        {row.triggered_by === "user" ? "manual" : "scheduler"}
+        {row.triggered_by === "user"
+          ? "manual"
+          : row.triggered_by === "agent"
+            ? "agent"
+            : "scheduler"}
       </TableCell>
       <TableCell className="text-zinc-400">
         {fmtDuration(row.triggered_at, row.completed_at)}
