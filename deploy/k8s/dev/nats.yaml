@@ -1,7 +1,9 @@
-# DEV ONLY — plain (no TLS) NATS with WebSocket gateway enabled so the
-# browser can subscribe directly. Prod deploys NATS via the nats-io Helm
-# chart with mTLS and JetStream persistence; this manifest is not in the
-# Helm chart.
+# DEV — NATS with mTLS on :4222 + plain WebSocket on :8080 for the
+# browser. The browser can't present a client cert easily so the
+# WebSocket path stays open today; it's addressable only from
+# localhost (devspace port-forward) and carries session events only.
+# Prod deploys NATS via the nats-io Helm chart with full mTLS + the
+# WebSocket gateway behind an ingress with its own TLS.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,9 +15,20 @@ data:
     port: 4222
     http_port: 8222
 
-    # WebSocket gateway — the session viewer uses nats.ws to subscribe
-    # to x1.session.{id}.events live. :8080 is the convention for
-    # in-cluster dev; prod is fronted by an ingress with TLS.
+    # Cluster-internal clients (api, sidecars, providers) must
+    # present a client cert signed by our dev CA. Without a cert the
+    # TLS handshake fails before any NATS protocol runs. The agent
+    # container has no cert — which is the whole point.
+    tls {
+      cert_file: "/etc/nats-tls/server.crt"
+      key_file:  "/etc/nats-tls/server.key"
+      ca_file:   "/etc/nats-tls/ca.crt"
+      verify:    true
+      timeout:   2
+    }
+
+    # Browser WebSocket — no client cert. Used only by the session
+    # viewer; auth is enforced upstream in the app layer.
     websocket {
       port: 8080
       no_tls: true
@@ -81,7 +94,13 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/nats
+            - name: tls
+              mountPath: /etc/nats-tls
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: nats-config
+        - name: tls
+          secret:
+            secretName: nats-tls

@@ -46,7 +46,21 @@ spec:
           env:
             - name: NATS_URL
               value: nats://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
             # SLACK_BOT_TOKEN is supplied by devspace dev.env.
           # No readiness probe: the provider has no HTTP surface; NATS
           # subscription readiness is observable from the requester side
           # (timeout → no subscriber).
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-tls

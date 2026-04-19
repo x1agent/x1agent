@@ -1,13 +1,32 @@
 use crate::{AppState, SessionMessage};
-use async_nats::Client as NatsClient;
+use async_nats::{Client as NatsClient, ConnectOptions};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+/// Build connect options. When NATS_CLIENT_CERT, NATS_CLIENT_KEY, and
+/// NATS_CA_FILE are all set, the sidecar speaks mTLS and presents its
+/// client cert; the NATS server's `verify: true` setting drops any
+/// peer that doesn't. Without those env vars we fall back to plain
+/// TCP — only valid for one-shot tests outside a cluster.
+fn build_options() -> ConnectOptions {
+    let cert = std::env::var("NATS_CLIENT_CERT").ok();
+    let key = std::env::var("NATS_CLIENT_KEY").ok();
+    let ca = std::env::var("NATS_CA_FILE").ok();
+    match (cert, key, ca) {
+        (Some(cert), Some(key), Some(ca)) => ConnectOptions::new()
+            .require_tls(true)
+            .add_root_certificates(PathBuf::from(ca))
+            .add_client_certificate(PathBuf::from(cert), PathBuf::from(key)),
+        _ => ConnectOptions::new(),
+    }
+}
 
 /// Connect to NATS with retries. Sidecar starts before NATS may be
 /// ready in the same pod/cluster; a small retry loop hides that race.
 pub async fn connect_with_retry(url: &str, max_retries: u32) -> NatsClient {
     for attempt in 1..=max_retries {
-        match async_nats::connect(url).await {
+        match build_options().connect(url).await {
             Ok(nc) => return nc,
             Err(e) => {
                 tracing::warn!("NATS connect attempt {}/{}: {}", attempt, max_retries, e);

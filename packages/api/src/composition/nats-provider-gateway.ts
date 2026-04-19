@@ -223,6 +223,26 @@ export class NatsProviderGateway implements ProviderGateway {
   }
 }
 
+/**
+ * Build NATS connect options, optionally with mTLS. Callers that want
+ * TLS set NATS_CLIENT_CERT + NATS_CLIENT_KEY + NATS_CA_FILE to paths
+ * mounted from the `nats-tls` Secret; without them the client speaks
+ * plain text. Prod MUST set all three — nats.conf `verify: true`
+ * rejects unauthenticated clients at the TLS handshake.
+ */
+export function natsConnectOpts(url: string) {
+  const certFile = process.env.NATS_CLIENT_CERT;
+  const keyFile = process.env.NATS_CLIENT_KEY;
+  const caFile = process.env.NATS_CA_FILE;
+  if (certFile && keyFile && caFile) {
+    return {
+      servers: url,
+      tls: { certFile, keyFile, caFile },
+    } as const;
+  }
+  return { servers: url } as const;
+}
+
 export async function connectNats(url: string): Promise<NatsConnection> {
-  return connect({ servers: url });
+  return connect(natsConnectOpts(url));
 }

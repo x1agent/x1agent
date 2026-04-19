@@ -5,6 +5,7 @@ import {
   type SessionEventRepository,
   type SessionRepository,
 } from "@x1agent/domain-sessions";
+import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
 
 /**
  * Subscribe to `x1.session.*.events`, parse the envelope published by
@@ -43,7 +44,7 @@ export async function startSessionEventSubscriber(
   opts: StartSubscriberOptions,
 ): Promise<Subscriber> {
   const nc = await connect({
-    servers: opts.natsUrl,
+    ...natsConnectOpts(opts.natsUrl),
     name: "x1agent-api-event-ingester",
     reconnect: true,
     maxReconnectAttempts: -1,

@@ -108,8 +108,18 @@ async function handlePostMessage(
   }
 }
 
+function natsOpts() {
+  const certFile = process.env.NATS_CLIENT_CERT;
+  const keyFile = process.env.NATS_CLIENT_KEY;
+  const caFile = process.env.NATS_CA_FILE;
+  if (certFile && keyFile && caFile) {
+    return { servers: NATS_URL, tls: { certFile, keyFile, caFile } } as const;
+  }
+  return { servers: NATS_URL } as const;
+}
+
 async function main() {
-  const nc: NatsConnection = await connect({ servers: NATS_URL });
+  const nc: NatsConnection = await connect(natsOpts());
   const sc = StringCodec();
   console.log(`[messaging-slack] connected to ${NATS_URL}`);
 

@@ -94,6 +94,11 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
   const sidecarEnv = [
     { name: "SESSION_ID", value: spec.sessionId },
     { name: "NATS_URL", value: spec.natsUrl },
+    // mTLS to NATS — sidecar mounts the shared `nats-tls` Secret at
+    // /etc/nats-tls; agent container deliberately does not.
+    { name: "NATS_CA_FILE", value: "/etc/nats-tls/ca.crt" },
+    { name: "NATS_CLIENT_CERT", value: "/etc/nats-tls/client.crt" },
+    { name: "NATS_CLIENT_KEY", value: "/etc/nats-tls/client.key" },
     { name: "AGENT_STREAM_URL", value: "http://localhost:3100" },
     { name: "CHANNEL_URL", value: "http://localhost:8788" },
     { name: "API_URL", value: spec.apiUrl },
@@ -131,6 +136,11 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
           },
           volumes: [
             { name: "workspace", emptyDir: {} },
+            // NATS mTLS material — only the sidecar mounts this. The
+            // agent container has no NATS cert and no way to pick one
+            // up, so any direct NATS connect from the agent container
+            // fails the TLS handshake.
+            { name: "nats-tls", secret: { secretName: "nats-tls" } },
               ? [
                   {
                     hostPath: {
@@ -199,6 +209,11 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               env: sidecarEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                {
+                  name: "nats-tls",
+                  mountPath: "/etc/nats-tls",
+                  readOnly: true,
+                },
               ],
               resources: {
                 requests: { memory: "128Mi", cpu: "100m" },
