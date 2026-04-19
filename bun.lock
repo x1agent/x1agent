@@ -146,6 +146,17 @@
         "typescript": "^5.6.0",
       },
     },
+    "packages/domains/graph": {
+      "name": "@x1agent/domain-graph",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/kernel": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/domains/invitations": {
       "name": "@x1agent/domain-invitations",
       "version": "0.0.0",
@@ -195,6 +206,17 @@
         "cron-parser": "^4.9.0",
         "hono": "^4.6.0",
         "postgres": "^3.4.4",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
+    "packages/domains/vector": {
+      "name": "@x1agent/domain-vector",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/kernel": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -970,6 +992,8 @@
 
     "@x1agent/domain-github": ["@x1agent/domain-github@workspace:packages/domains/github"],
 
+    "@x1agent/domain-graph": ["@x1agent/domain-graph@workspace:packages/domains/graph"],
+
     "@x1agent/domain-invitations": ["@x1agent/domain-invitations@workspace:packages/domains/invitations"],
 
     "@x1agent/domain-messaging": ["@x1agent/domain-messaging@workspace:packages/domains/messaging"],
@@ -977,6 +1001,8 @@
     "@x1agent/domain-permissions": ["@x1agent/domain-permissions@workspace:packages/domains/permissions"],
 
     "@x1agent/domain-sessions": ["@x1agent/domain-sessions@workspace:packages/domains/sessions"],
+
+    "@x1agent/domain-vector": ["@x1agent/domain-vector@workspace:packages/domains/vector"],
 
     "@x1agent/domain-workspaces": ["@x1agent/domain-workspaces@workspace:packages/domains/workspaces"],
 
