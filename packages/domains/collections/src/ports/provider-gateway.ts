@@ -14,9 +14,16 @@ import type { CollectionProviderType } from "../domain/collection.js";
  * hides that.
  */
 export interface ProviderGateway {
+  /**
+   * `settings` is the collection's settings jsonb passed through
+   * verbatim. Adapters look at `settings.vector.dimension` /
+   * `settings.vector.metric` to size the vector index, etc. An empty
+   * object means "use provider defaults".
+   */
   provision(
     providerType: CollectionProviderType,
     handle: CollectionHandle,
+    settings: Record<string, unknown>,
   ): Promise<void>;
 
   deprovision(
