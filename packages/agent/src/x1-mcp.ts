@@ -183,6 +183,139 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "list_collections",
+      description:
+        "List the knowledge collections this session can read and write. Returns [{id, slug, backend_handle, provider_type, is_default}]. The default is the write target for graph_write / vector_upsert when you don't pass an explicit `collection`.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "graph_query",
+      description:
+        "Run a read-only SurrealQL query against a collection. Pass `collection` as a slug ('ideas') or id; omit to hit the default. Returns the raw provider result under `result.rows`.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          query: { type: "string" },
+          vars: { type: "object" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "graph_write",
+      description:
+        "Create a record in a collection with provenance automatically stamped (session + confidence + source + derived_from). `record_type` is a slug ('person', 'decision', or a new one the agent introduces). `data` is the record's fields; provenance goes to `_provenance` under the hood.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          record_type: { type: "string" },
+          data: { type: "object" },
+          confidence: {
+            type: "number",
+            description: "0..1 self-reported confidence in the fact. Default 1.",
+          },
+          source: {
+            type: "string",
+            description: "Free-form origin of the fact — URL, doc id, 'manual'.",
+          },
+          derived_from: {
+            type: "array",
+            items: { type: "string" },
+            description: "Ids of other records this one came from.",
+          },
+        },
+        required: ["record_type", "data"],
+      },
+    },
+    {
+      name: "graph_relate",
+      description:
+        "Create an edge between two existing records. `from` and `to` are record ids (the full 'table:hash' SurrealDB returns), `edge` is the label ('WORKS_ON', 'PART_OF').",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          from: { type: "string" },
+          edge: { type: "string" },
+          to: { type: "string" },
+          properties: { type: "object" },
+        },
+        required: ["from", "edge", "to"],
+      },
+    },
+    {
+      name: "graph_resolve",
+      description:
+        "Look up a single record by fuzzy hints (name + email + attributes, OR-matched). Returns `null` if nothing matches. Use before graph_write to avoid duplicating a person / org you already recorded.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          record_type: { type: "string" },
+          name: { type: "string" },
+          email: { type: "string" },
+          attributes: { type: "object" },
+        },
+        required: ["record_type"],
+      },
+    },
+    {
+      name: "graph_discover",
+      description:
+        "List every record type registered in a collection — the default seed types plus any the agent introduced. Use before picking `record_type` for a write.",
+      inputSchema: {
+        type: "object" as const,
+        properties: { collection: { type: "string" } },
+      },
+    },
+    {
+      name: "vector_upsert",
+      description:
+        "Write an embedding into a collection's vector store. `id` is caller-supplied and idempotent (re-upsert replaces). Vector dimension must match what the collection was provisioned with.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          id: { type: "string" },
+          vector: { type: "array", items: { type: "number" } },
+          metadata: { type: "object" },
+        },
+        required: ["id", "vector"],
+      },
+    },
+    {
+      name: "vector_search",
+      description:
+        "Top-K nearest-neighbour search. Returns [{id, score, metadata}] ranked so higher score = better match regardless of distance metric. `filter` is an AND of metadata equality predicates.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          vector: { type: "array", items: { type: "number" } },
+          top_k: { type: "number" },
+          filter: { type: "object" },
+        },
+        required: ["vector"],
+      },
+    },
+    {
+      name: "vector_delete",
+      description: "Remove a vector by caller-supplied id.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          collection: { type: "string" },
+          id: { type: "string" },
+        },
+        required: ["id"],
+      },
+    },
+    {
       name: "post_message",
       description:
         "Send a message to a channel via the workspace's messaging provider (Slack, Teams, etc — set by platform config). Channel format depends on the provider — Slack accepts #channel, @user, or the raw Cxxxx id. Returns { ok, message_id, channel, posted_at } or { ok: false, error }. Common error codes: channel_not_found, messaging_unauthorized, messaging_provider_unreachable, provider_timeout.",
@@ -416,6 +549,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `request_permission failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "list_collections": {
+      try {
+        const res = await fetch(`${sidecarUrl}/collections`);
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `list_collections failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "graph_query":
+    case "graph_write":
+    case "graph_relate":
+    case "graph_resolve":
+    case "graph_discover":
+    case "vector_upsert":
+    case "vector_search":
+    case "vector_delete": {
+      // Every graph_*/vector_* tool maps to the same-named sidecar
+      // route with the same body shape, so a single switch arm
+      // covers them all. Sidecar validates collection attachment
+      // and forwards to NATS.
+      const [domain, action] = name.split("_");
+      try {
+        const res = await fetch(`${sidecarUrl}/${domain}/${action}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(a ?? {}),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `${name} failed: ${(err as Error).message}`,
             },
           ],
           isError: true,

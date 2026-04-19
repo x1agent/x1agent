@@ -12,7 +12,12 @@ import type {
   AgentRepoStore,
   InstallationId,
 } from "@x1agent/domain-github";
-import { buildSessionJob, type LinkedRepoForPod } from "./pod-spec.js";
+import type { CollectionRepository } from "@x1agent/domain-collections";
+import {
+  buildSessionJob,
+  type AttachedCollectionForPod,
+  type LinkedRepoForPod,
+} from "./pod-spec.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -21,6 +26,7 @@ export interface JobWatcherConfig {
   agents: AgentRepository;
   sessions: SessionRepository;
   agentRepos: AgentRepoStore;
+  collections: CollectionRepository;
   namespace: string;
   agentImage: string;
   sidecarImage: string;
@@ -170,6 +176,19 @@ async function launchSession(
       }))
     : [];
 
+  const attachedCollections = await cfg.collections.listCollectionsForAgent(
+    agent.id,
+  );
+  const collections: AttachedCollectionForPod[] = attachedCollections.map(
+    (c) => ({
+      id: c.id,
+      slug: c.slug,
+      backend_handle: c.backendHandle,
+      provider_type: c.providerType,
+      is_default: c.isDefault,
+    }),
+  );
+
   // Scheduler-triggered sessions get heartbeat_md as the first user
   // message. User-triggered sessions start empty and wait for inject —
   // the detail page's MessageInput drives the conversation.
@@ -189,6 +208,7 @@ async function launchSession(
     idleTimeoutMs: 900_000,
     maxTurns: 200,
     repos,
+    collections,
     apiUrl: cfg.apiUrl,
     apiInternalToken: cfg.apiInternalToken,
     natsUrl: cfg.natsUrl,

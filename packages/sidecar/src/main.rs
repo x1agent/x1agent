@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod channel;
 mod git;
+mod collections;
 mod messaging;
 mod nats_bridge;
 mod orchestration;
@@ -130,16 +131,46 @@ async fn main() {
         .route("/spawn", routing::post(orchestration::handle_spawn))
         .route("/spawnable", routing::get(orchestration::handle_spawnable))
         .route(
-            "/child/:child_id/events",
+            "/child/{child_id}/events",
             routing::get(orchestration::handle_read_child),
         )
         .route(
-            "/child/:child_id/inject",
+            "/child/{child_id}/inject",
             routing::post(orchestration::handle_inject_child),
         )
         .route(
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
+        )
+        .route(
+            "/collections",
+            routing::get(collections::handle_list_collections),
+        )
+        .route("/graph/query", routing::post(collections::handle_graph_query))
+        .route("/graph/write", routing::post(collections::handle_graph_write))
+        .route(
+            "/graph/relate",
+            routing::post(collections::handle_graph_relate),
+        )
+        .route(
+            "/graph/resolve",
+            routing::post(collections::handle_graph_resolve),
+        )
+        .route(
+            "/graph/discover",
+            routing::post(collections::handle_graph_discover),
+        )
+        .route(
+            "/vector/upsert",
+            routing::post(collections::handle_vector_upsert),
+        )
+        .route(
+            "/vector/search",
+            routing::post(collections::handle_vector_search),
+        )
+        .route(
+            "/vector/delete",
+            routing::post(collections::handle_vector_delete),
         )
         .route("/health", routing::get(|| async { "ok" }))
         .with_state(state);
