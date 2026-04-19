@@ -47,7 +47,17 @@ COPY git-credential-x1.sh /usr/local/bin/git-credential-x1
 RUN chmod +x /usr/local/bin/git-credential-x1
 COPY gitconfig /etc/gitconfig
 
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace && chmod 777 /workspace
+
+# Claude Code refuses --dangerously-skip-permissions as root. The
+# node:22-slim base image already ships a `node` user at uid 1000; we
+# reuse it and give them a home dir so Claude Code writes settings and
+# debug logs somewhere writable.
+RUN mkdir -p /home/node/.claude \
+  && chown -R node:node /app /workspace /home/node
+USER node
+ENV HOME=/home/node
+
 WORKDIR /workspace
 
 ENTRYPOINT ["tsx", "/app/src/run.ts"]

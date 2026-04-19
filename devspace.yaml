@@ -53,10 +53,24 @@ vars:
   API_INTERNAL_TOKEN:
     source: env
     default: "dev-internal-token-change-me"
+  # Dev-only: host home dir. On macOS this is /Users/<you>. The Job
+  # watcher passes this into agent containers as a hostPath mount of
+  # ~/.claude + ~/.claude.json so Claude Code picks up settings.
+  HOST_HOME_DIR:
+    source: env
+    default: ""
+  # Dev-only: host path to exported Max OAuth credentials file. macOS
+  # stores credentials in the Keychain, not ~/.claude/; export once
+  # with `mise run dev:claude-creds`.
+  HOST_CLAUDE_CREDENTIALS_FILE:
+    source: env
+    default: ""
 
 images:
   api:
     image: x1agent-api
+    tags:
+      - latest
     dockerfile: ./deploy/docker/api.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
@@ -175,6 +189,10 @@ dev:
         value: x1agent
       - name: IMAGE_PULL_POLICY
         value: IfNotPresent
+      - name: HOST_HOME_DIR
+        value: ${HOST_HOME_DIR}
+      - name: HOST_CLAUDE_CREDENTIALS_FILE
+        value: ${HOST_CLAUDE_CREDENTIALS_FILE}
 
 pipelines:
   dev: |-

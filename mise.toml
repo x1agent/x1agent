@@ -32,6 +32,22 @@ run = "devspace purge --namespace x1agent"
 description = "Tail api pod logs"
 run = "kubectl logs -n x1agent -l app=api -f --tail=200"
 
+# macOS-only: export the Claude Code Max OAuth credentials from the
+# Keychain to a file so the Job watcher can mount it into agent pods as
+# /root/.claude/.credentials.json. Re-run when the token refreshes (the
+# file is also refreshed automatically by Claude Code inside the pod
+# because the hostPath mount is read/write).
+[tasks."dev:claude-creds"]
+description = "Export ~/.claude Max credentials from Keychain for agent pods"
+run = """
+dest="${HOST_CLAUDE_CREDENTIALS_FILE:-$HOME/.x1agent-dev/claude-credentials.json}"
+mkdir -p "$(dirname "$dest")"
+security find-generic-password -s "Claude Code-credentials" -a "$USER" -w > "$dest"
+chmod 600 "$dest"
+echo "Wrote Max credentials to $dest"
+echo "Set HOST_CLAUDE_CREDENTIALS_FILE=$dest in your shell or .env.local"
+"""
+
 # ----------------------------------------------------------------------------
 # Host-side dev: Astro app. Assumes dev:cluster is already running so
 # localhost:30001 is port-forwarded.
