@@ -264,6 +264,37 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     }
   };
 
+  // List every session across every agent in the workspace, newest first.
+  app.get("/", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    try {
+      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+    const limitRaw = c.req.query("limit");
+    const limit = Math.max(1, Math.min(500, Number(limitRaw ?? 100)));
+    const sessions = await cfg.sessions.listByWorkspace(wsId, limit);
+    // Enrich each row with the agent slug + name so the UI table can
+    // render "which agent ran this" without a second fetch.
+    const agentIds = Array.from(new Set(sessions.map((s) => s.agentId)));
+    const agents = await Promise.all(agentIds.map((id) => cfg.agents.findById(id)));
+    const byId = new Map(
+      agents
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
+    );
+    return c.json({
+      sessions: sessions.map((s) => ({
+        ...serialize(s),
+        agent: byId.get(s.agentId) ?? null,
+      })),
+    });
+  });
+
   const loadScoped = async (
     slug: string,
     sessionId: string,

@@ -87,6 +87,14 @@ export interface SessionListResponse {
   sessions: SessionDTO[];
 }
 
+export interface WorkspaceSessionRow extends SessionDTO {
+  agent: { id: string; slug: string; name: string } | null;
+}
+
+export interface WorkspaceSessionListResponse {
+  sessions: WorkspaceSessionRow[];
+}
+
 export interface SessionResponse {
   session: SessionDTO;
 }
