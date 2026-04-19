@@ -3,6 +3,7 @@ import {
   SessionId,
   appendSessionEvent,
   type SessionEventRepository,
+  type SessionRepository,
 } from "@x1agent/domain-sessions";
 
 /**
@@ -10,12 +11,19 @@ import {
  * the sidecar (see packages/sidecar/src/nats_bridge.rs), and append
  * each event to Postgres. Idempotent on (session_id, seq).
  *
+ * On terminal events (session.completed / session.failed) the
+ * subscriber also flips sessions.status to the matching terminal
+ * state, so the UI reflects "done" the same instant the event lands
+ * in DB. Pods that crash without emitting a terminal event fall
+ * through to the K8s Job reaper (see k8s/job-watcher.ts).
+ *
  * Runs alongside the scheduler inside the api process. Reconnects are
  * handled by the NATS client itself; we log disconnects and keep going.
  */
 export interface StartSubscriberOptions {
   natsUrl: string;
   events: SessionEventRepository;
+  sessions: SessionRepository;
 }
 
 export interface Subscriber {
@@ -66,11 +74,12 @@ export async function startSessionEventSubscriber(
         console.warn(`[nats] malformed event on ${m.subject}`);
         continue;
       }
+      const sessionId = SessionId(parsed.session_id);
       try {
         await appendSessionEvent(
           { events: opts.events },
           {
-            sessionId: SessionId(parsed.session_id),
+            sessionId,
             seq: parsed.sequence,
             type: parsed.type,
             payload: parsed.payload ?? {},
@@ -87,6 +96,40 @@ export async function startSessionEventSubscriber(
         console.warn(
           `[nats] failed to persist event type=${parsed.type} seq=${parsed.sequence}: ${(err as Error).message}`,
         );
+      }
+
+      // Terminal events flip sessions.status so the UI and listing
+      // queries see "done" immediately. Idempotent — running → terminal
+      // transitions only, and a second terminal event on the same row
+      // is a no-op at the application layer.
+      if (
+        parsed.type === "session.completed" ||
+        parsed.type === "session.failed"
+      ) {
+        try {
+          const session = await opts.sessions.findById(sessionId);
+          if (session && session.status !== "complete" && session.status !== "failed") {
+            const payload = (parsed.payload ?? {}) as {
+              result?: unknown;
+              error?: string;
+            };
+            await opts.sessions.updateStatus(sessionId, {
+              status: parsed.type === "session.completed" ? "complete" : "failed",
+              completedAt: parsed.timestamp
+                ? new Date(parsed.timestamp)
+                : new Date(),
+              errorMessage: payload.error
+                ? String(payload.error)
+                : typeof payload.result === "string"
+                  ? null
+                  : null,
+            });
+          }
+        } catch (err) {
+          console.warn(
+            `[nats] status flip failed for session ${sessionId}: ${(err as Error).message}`,
+          );
+        }
       }
     }
   })().catch((err) => {
