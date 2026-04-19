@@ -55,3 +55,26 @@ export interface PublicInvitationView {
   revoked_at: string | null;
   workspace: { slug: string; name: string };
 }
+
+export type SessionStatus = "pending" | "running" | "complete" | "failed";
+export type SessionTriggerSource = "user" | "scheduler";
+
+export interface SessionDTO {
+  id: string;
+  agent_id: string;
+  triggered_by: SessionTriggerSource;
+  triggered_by_user_id: string | null;
+  triggered_at: string;
+  status: SessionStatus;
+  completed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface SessionListResponse {
+  sessions: SessionDTO[];
+}
+
+export interface SessionResponse {
+  session: SessionDTO;
+}

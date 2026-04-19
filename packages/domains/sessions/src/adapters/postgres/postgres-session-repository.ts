@@ -1,0 +1,129 @@
+import type postgres from "postgres";
+import { UserId } from "@x1agent/kernel";
+import { AgentId } from "@x1agent/domain-agents";
+import type {
+  CreateSessionInput,
+  SessionRepository,
+  UpdateSessionStatusInput,
+} from "../../ports/session-repository.js";
+import {
+  SessionDuplicateTickError,
+  SessionId,
+  SessionNotFoundError,
+  type Session,
+} from "../../domain/session.js";
+import { SessionStatus } from "../../domain/status.js";
+import { TriggerSource } from "../../domain/trigger.js";
+
+type Sql = postgres.Sql<Record<string, unknown>>;
+
+interface Row {
+  id: string;
+  agent_id: string;
+  triggered_by: string;
+  triggered_by_user_id: string | null;
+  triggered_at: Date | string;
+  status: string;
+  completed_at: Date | string | null;
+  error_message: string | null;
+  created_at: Date | string;
+}
+
+function toSession(r: Row): Session {
+  return {
+    id: SessionId(r.id),
+    agentId: AgentId(r.agent_id),
+    triggeredBy: TriggerSource(r.triggered_by),
+    triggeredByUserId: r.triggered_by_user_id
+      ? UserId(r.triggered_by_user_id)
+      : null,
+    triggeredAt: new Date(r.triggered_at),
+    status: SessionStatus(r.status),
+    completedAt: r.completed_at ? new Date(r.completed_at) : null,
+    errorMessage: r.error_message,
+    createdAt: new Date(r.created_at),
+  };
+}
+
+const SELECT = `
+  id, agent_id, triggered_by, triggered_by_user_id, triggered_at,
+  status, completed_at, error_message, created_at
+`;
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "23505"
+  );
+}
+
+export class PostgresSessionRepository implements SessionRepository {
+  constructor(private readonly sql: Sql) {}
+
+  async create(input: CreateSessionInput): Promise<Session> {
+    try {
+      const rows = await this.sql<Row[]>`
+        INSERT INTO sessions
+          (agent_id, triggered_by, triggered_by_user_id, triggered_at)
+        VALUES
+          (${input.agentId}, ${input.triggeredBy},
+           ${input.triggeredByUserId}, ${input.triggeredAt})
+        RETURNING ${this.sql.unsafe(SELECT)}
+      `;
+      return toSession(rows[0]!);
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new SessionDuplicateTickError(input.agentId, input.triggeredAt);
+      }
+      throw err;
+    }
+  }
+
+  async findById(id: SessionId): Promise<Session | null> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions WHERE id = ${id}
+    `;
+    return rows[0] ? toSession(rows[0]) : null;
+  }
+
+  async listByAgent(
+    agentId: AgentId,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE agent_id = ${agentId}
+      ORDER BY triggered_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(toSession);
+  }
+
+  async lastSchedulerRunFor(agentId: AgentId): Promise<Session | null> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE agent_id = ${agentId} AND triggered_by = 'scheduler'
+      ORDER BY triggered_at DESC
+      LIMIT 1
+    `;
+    return rows[0] ? toSession(rows[0]) : null;
+  }
+
+  async updateStatus(
+    id: SessionId,
+    patch: UpdateSessionStatusInput,
+  ): Promise<Session> {
+    const rows = await this.sql<Row[]>`
+      UPDATE sessions SET
+        status        = ${patch.status},
+        completed_at  = ${patch.completedAt === undefined ? this.sql`completed_at` : patch.completedAt},
+        error_message = ${patch.errorMessage === undefined ? this.sql`error_message` : patch.errorMessage}
+      WHERE id = ${id}
+      RETURNING ${this.sql.unsafe(SELECT)}
+    `;
+    if (!rows[0]) throw new SessionNotFoundError(id);
+    return toSession(rows[0]);
+  }
+}

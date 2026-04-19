@@ -1,0 +1,108 @@
+import { DomainError } from "@x1agent/kernel";
+import type { AgentId } from "@x1agent/domain-agents";
+import type {
+  CreateSessionInput,
+  SessionRepository,
+  UpdateSessionStatusInput,
+} from "../ports/session-repository.js";
+import type { AdminGuard } from "../ports/admin-guard.js";
+import {
+  SessionDuplicateTickError,
+  SessionId,
+  SessionNotFoundError,
+  type Session,
+} from "../domain/session.js";
+
+let counter = 0x40;
+function nextId(): string {
+  const n = (++counter).toString(16).padStart(12, "0");
+  return `00000000-0000-7000-8000-${n}`;
+}
+
+export class InMemorySessionRepository implements SessionRepository {
+  readonly rows: Session[] = [];
+
+  async create(input: CreateSessionInput): Promise<Session> {
+    const clash = this.rows.find(
+      (r) =>
+        r.agentId === input.agentId &&
+        r.triggeredAt.getTime() === input.triggeredAt.getTime(),
+    );
+    if (clash)
+      throw new SessionDuplicateTickError(input.agentId, input.triggeredAt);
+    const session: Session = {
+      id: SessionId(nextId()),
+      agentId: input.agentId,
+      triggeredBy: input.triggeredBy,
+      triggeredByUserId: input.triggeredByUserId,
+      triggeredAt: input.triggeredAt,
+      status: "pending",
+      completedAt: null,
+      errorMessage: null,
+      createdAt: new Date(),
+    };
+    this.rows.push(session);
+    return session;
+  }
+
+  async findById(id: SessionId): Promise<Session | null> {
+    return this.rows.find((r) => r.id === id) ?? null;
+  }
+
+  async listByAgent(
+    agentId: AgentId,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    return this.rows
+      .filter((r) => r.agentId === agentId)
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime())
+      .slice(0, limit);
+  }
+
+  async lastSchedulerRunFor(agentId: AgentId): Promise<Session | null> {
+    const scoped = this.rows
+      .filter((r) => r.agentId === agentId && r.triggeredBy === "scheduler")
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+    return scoped[0] ?? null;
+  }
+
+  async updateStatus(
+    id: SessionId,
+    patch: UpdateSessionStatusInput,
+  ): Promise<Session> {
+    const i = this.rows.findIndex((r) => r.id === id);
+    if (i === -1) throw new SessionNotFoundError(id);
+    const cur = this.rows[i]!;
+    const updated: Session = {
+      ...cur,
+      status: patch.status,
+      completedAt:
+        patch.completedAt === undefined ? cur.completedAt : patch.completedAt,
+      errorMessage:
+        patch.errorMessage === undefined
+          ? cur.errorMessage
+          : patch.errorMessage,
+    };
+    this.rows[i] = updated;
+    return updated;
+  }
+}
+
+class FakeAdminDeniedError extends DomainError {
+  readonly code = "admin_denied";
+  constructor() {
+    super("admin denied (fake)");
+  }
+}
+
+export class AllowAllAdmin implements AdminGuard {
+  async assertAdmin() {
+    return;
+  }
+}
+
+export class DenyAdmin implements AdminGuard {
+  async assertAdmin(): Promise<never> {
+    throw new FakeAdminDeniedError();
+  }
+}

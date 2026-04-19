@@ -35,6 +35,7 @@
         "@x1agent/domain-auth": "workspace:*",
         "@x1agent/domain-github": "workspace:*",
         "@x1agent/domain-invitations": "workspace:*",
+        "@x1agent/domain-sessions": "workspace:*",
         "@x1agent/domain-workspaces": "workspace:*",
         "@x1agent/kernel": "workspace:*",
         "@x1agent/shared": "workspace:*",
@@ -128,6 +129,21 @@
       "version": "0.0.0",
       "dependencies": {
         "@x1agent/kernel": "workspace:*",
+        "hono": "^4.6.0",
+        "postgres": "^3.4.4",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
+    "packages/domains/sessions": {
+      "name": "@x1agent/domain-sessions",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/domain-agents": "workspace:*",
+        "@x1agent/kernel": "workspace:*",
+        "cron-parser": "^4.9.0",
         "hono": "^4.6.0",
         "postgres": "^3.4.4",
       },
@@ -850,6 +866,8 @@
 
     "@x1agent/domain-invitations": ["@x1agent/domain-invitations@workspace:packages/domains/invitations"],
 
+    "@x1agent/domain-sessions": ["@x1agent/domain-sessions@workspace:packages/domains/sessions"],
+
     "@x1agent/domain-workspaces": ["@x1agent/domain-workspaces@workspace:packages/domains/workspaces"],
 
     "@x1agent/kernel": ["@x1agent/kernel@workspace:packages/kernel"],
@@ -1009,6 +1027,8 @@
     "cosmiconfig": ["cosmiconfig@9.0.1", "", { "dependencies": { "env-paths": "^2.2.1", "import-fresh": "^3.3.0", "js-yaml": "^4.1.0", "parse-json": "^5.2.0" }, "peerDependencies": { "typescript": ">=4.9.5" } }, "sha512-hr4ihw+DBqcvrsEDioRO31Z17x71pUYoNe/4h6Z0wB72p7MU7/9gH8Q3s12NFhHPfYBBOV3qyfUxmr/Yn3shnQ=="],
 
     "cosmiconfig-typescript-loader": ["cosmiconfig-typescript-loader@6.3.0", "", { "dependencies": { "jiti": "2.6.1" }, "peerDependencies": { "@types/node": "*", "cosmiconfig": ">=9", "typescript": ">=5" } }, "sha512-Akr82WH1Wfqatyiqpj8HDkO2o2KmJRu1FhKfSNJP3K4IdXwHfEyL7MOb62i1AGQVLtIQM+iCE9CGOtrfhR+mmA=="],
+
+    "cron-parser": ["cron-parser@4.9.0", "", { "dependencies": { "luxon": "^3.2.1" } }, "sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q=="],
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
@@ -1541,6 +1561,8 @@
     "lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "lucide-react": ["lucide-react@1.8.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-WuvlsjngSk7TnTBJ1hsCy3ql9V9VOdcPkd3PKcSmM34vJD8KG6molxz7m7zbYFgICwsanQWmJ13JlYs4Zp7Arw=="],
+
+    "luxon": ["luxon@3.7.2", "", {}, "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
