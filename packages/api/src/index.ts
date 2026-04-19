@@ -17,6 +17,7 @@ const {
   publicInvitationRoutes,
   agentRoutes,
   sessionRoutes,
+  internalRoutes,
   githubInstallRoutes,
   installationApiRoutes,
   agentRepoRoutes,
@@ -42,6 +43,7 @@ const {
   githubAppId: process.env.GITHUB_APP_ID || "",
   githubAppSlug: process.env.GITHUB_APP_SLUG || "",
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
+  internalToken: process.env.API_INTERNAL_TOKEN || "",
 });
 
 const app = new Hono();
@@ -74,6 +76,7 @@ app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/installations", installationApiRoutes);
+app.route("/api/internal", internalRoutes);
 
 await seedIfDev().catch((err) => {
   console.warn("[seed] skipped:", (err as Error).message);

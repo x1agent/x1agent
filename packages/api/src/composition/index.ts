@@ -27,6 +27,7 @@ import {
 } from "@x1agent/domain-agents";
 import {
   PostgresSessionRepository,
+  PostgresSessionEventRepository,
   createSessionRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
@@ -53,6 +54,7 @@ import {
   WorkspaceAdminGuard,
   WorkspaceReaderAdapter,
 } from "./invitation-adapters.js";
+import { createInternalRoutes } from "../internal/routes.js";
 
 export interface Composition {
   authRoutes: Hono;
@@ -60,6 +62,7 @@ export interface Composition {
   publicInvitationRoutes: Hono;
   agentRoutes: Hono;
   sessionRoutes: Hono;
+  internalRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
@@ -84,6 +87,8 @@ export interface CompositionEnv {
   githubAppId: string;
   githubAppSlug: string;
   githubAppPrivateKey: string;
+  /** Shared secret the sidecar sends on /api/internal/*. */
+  internalToken?: string;
   /** Optional: inject a fake GitHubAppClient for tests; overrides octokit. */
   githubAppClient?: GitHubAppClient;
 }
@@ -97,6 +102,7 @@ export function compose(env: CompositionEnv): Composition {
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
   const sessions = new PostgresSessionRepository(env.sql);
+  const sessionEvents = new PostgresSessionEventRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
   const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
@@ -188,6 +194,7 @@ export function compose(env: CompositionEnv): Composition {
   const sessionRoutes = createSessionRoutes({
     agents,
     sessions,
+    events: sessionEvents,
     adminGuard: new WorkspaceAdminGuard(memberships),
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
@@ -197,6 +204,12 @@ export function compose(env: CompositionEnv): Composition {
 
   const tickScheduler = () =>
     scheduleDueSessions({ agents, sessions, clock: systemClock });
+
+  const internalRoutes = createInternalRoutes({
+    events: sessionEvents,
+    githubClient,
+    internalToken: env.internalToken ?? "",
+  });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
   // boot doesn't fail. Frontend reads /auth/github/config to check.
@@ -235,6 +248,7 @@ export function compose(env: CompositionEnv): Composition {
     publicInvitationRoutes,
     agentRoutes,
     sessionRoutes,
+    internalRoutes,
     githubInstallRoutes,
     installationApiRoutes,
     agentRepoRoutes,

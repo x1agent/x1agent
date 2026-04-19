@@ -14,6 +14,7 @@ import {
   type AgentRepository,
 } from "@x1agent/domain-agents";
 import type { SessionRepository } from "../../ports/session-repository.js";
+import type { SessionEventRepository } from "../../ports/session-event-repository.js";
 import type { AdminGuard } from "../../ports/admin-guard.js";
 import {
   SessionAlreadyTerminalError,
@@ -22,13 +23,16 @@ import {
   SessionNotFoundError,
   type Session,
 } from "../../domain/session.js";
+import type { SessionEvent } from "../../domain/event.js";
 import { triggerSession } from "../../application/trigger-session.js";
 import { listSessions } from "../../application/list-sessions.js";
 import { cancelSession } from "../../application/cancel-session.js";
+import { listSessionEvents } from "../../application/list-session-events.js";
 
 export interface SessionRoutesConfig {
   agents: AgentRepository;
   sessions: SessionRepository;
+  events: SessionEventRepository;
   adminGuard: AdminGuard;
   /**
    * slug → workspace id, mirroring the agents + invitations routes. Used
@@ -53,6 +57,17 @@ function serialize(s: Session) {
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
     error_message: s.errorMessage,
     created_at: s.createdAt.toISOString(),
+  };
+}
+
+function serializeEvent(e: SessionEvent) {
+  return {
+    id: e.id,
+    session_id: e.sessionId,
+    seq: e.seq,
+    type: e.type,
+    payload: e.payload,
+    timestamp: e.timestamp.toISOString(),
   };
 }
 
@@ -141,6 +156,61 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
         { actor: actor.userId, agentId: agent.id },
       );
       return c.json({ session: serialize(s) }, 201);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+  });
+
+  app.get("/:sessionId", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const agent = await assertAgentInWorkspace(wsId, c.req.param("agentId")!);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    try {
+      await cfg.adminGuard.assertAdmin(actor.userId, agent.workspaceId);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+    const session = await cfg.sessions.findById(
+      SessionId(c.req.param("sessionId")!),
+    );
+    if (!session || session.agentId !== agent.id)
+      return c.json({ error: "session_not_found" }, 404);
+    return c.json({ session: serialize(session) });
+  });
+
+  app.get("/:sessionId/events", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const agent = await assertAgentInWorkspace(wsId, c.req.param("agentId")!);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    try {
+      const afterRaw = c.req.query("after_seq");
+      const limitRaw = c.req.query("limit");
+      const { session, events } = await listSessionEvents(
+        {
+          agents: cfg.agents,
+          sessions: cfg.sessions,
+          events: cfg.events,
+          adminGuard: cfg.adminGuard,
+        },
+        actor.userId,
+        SessionId(c.req.param("sessionId")!),
+        {
+          afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
+          limit: limitRaw !== undefined ? Number(limitRaw) : undefined,
+        },
+      );
+      if (session.agentId !== agent.id)
+        return c.json({ error: "session_not_found" }, 404);
+      return c.json({
+        session: serialize(session),
+        events: events.map(serializeEvent),
+      });
     } catch (err) {
       return c.json(errBody(err), errStatus(err) as 400);
     }

@@ -5,6 +5,10 @@ import type {
   SessionRepository,
   UpdateSessionStatusInput,
 } from "../ports/session-repository.js";
+import type {
+  AppendSessionEventInput,
+  SessionEventRepository,
+} from "../ports/session-event-repository.js";
 import type { AdminGuard } from "../ports/admin-guard.js";
 import {
   SessionDuplicateTickError,
@@ -12,6 +16,11 @@ import {
   SessionNotFoundError,
   type Session,
 } from "../domain/session.js";
+import {
+  SessionEventDuplicateError,
+  SessionEventId,
+  type SessionEvent,
+} from "../domain/event.js";
 
 let counter = 0x40;
 function nextId(): string {
@@ -104,5 +113,48 @@ export class AllowAllAdmin implements AdminGuard {
 export class DenyAdmin implements AdminGuard {
   async assertAdmin(): Promise<never> {
     throw new FakeAdminDeniedError();
+  }
+}
+
+let eventCounter = 0x80;
+function nextEventId(): string {
+  const n = (++eventCounter).toString(16).padStart(12, "0");
+  return `00000000-0000-7000-8000-${n}`;
+}
+
+export class InMemorySessionEventRepository
+  implements SessionEventRepository
+{
+  readonly rows: SessionEvent[] = [];
+
+  async append(input: AppendSessionEventInput): Promise<SessionEvent> {
+    const clash = this.rows.find(
+      (r) => r.sessionId === input.sessionId && r.seq === input.seq,
+    );
+    if (clash)
+      throw new SessionEventDuplicateError(input.sessionId, input.seq);
+    const ev: SessionEvent = {
+      id: SessionEventId(nextEventId()),
+      sessionId: input.sessionId,
+      seq: input.seq,
+      type: input.type,
+      payload: input.payload,
+      timestamp: input.timestamp,
+      createdAt: new Date(),
+    };
+    this.rows.push(ev);
+    return ev;
+  }
+
+  async listBySession(
+    sessionId: SessionId,
+    opts: { afterSeq?: number; limit?: number } = {},
+  ): Promise<readonly SessionEvent[]> {
+    const after = opts.afterSeq ?? -1;
+    const limit = Math.max(1, Math.min(5000, opts.limit ?? 1000));
+    return this.rows
+      .filter((r) => r.sessionId === sessionId && r.seq > after)
+      .sort((a, b) => a.seq - b.seq)
+      .slice(0, limit);
   }
 }
