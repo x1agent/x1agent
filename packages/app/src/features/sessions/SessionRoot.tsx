@@ -270,6 +270,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           events={events}
           verbose={verbose}
           onRespond={sendMessage}
+          workspaceSlug={workspaceSlug}
+          agentId={agent?.id}
+          sessionId={sessionId}
         />
 
         <MessageInput
