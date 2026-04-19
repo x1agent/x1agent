@@ -183,6 +183,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "post_message",
+      description:
+        "Send a message to a channel via the workspace's messaging provider (Slack, Teams, etc — set by platform config). Channel format depends on the provider — Slack accepts #channel, @user, or the raw Cxxxx id. Returns { ok, message_id, channel, posted_at } or { ok: false, error }. Common error codes: channel_not_found, messaging_unauthorized, messaging_provider_unreachable, provider_timeout.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          channel: {
+            type: "string",
+            description:
+              "Channel id or alias (#ops, @alice, Cxxxx for Slack)",
+          },
+          text: { type: "string" },
+          thread_id: {
+            type: "string",
+            description:
+              "Optional thread reference (Slack thread_ts, Teams replyToId)",
+          },
+          username: {
+            type: "string",
+            description:
+              "Optional display-name override where the provider supports it",
+          },
+        },
+        required: ["channel", "text"],
+      },
+    },
+    {
       name: "request_grant",
       description:
         "Ask the user to grant you a capability. One tool for every grant type — spawn, tool_scope, anything future. The user sees an inline Approve / Deny card in their session view; a message tells you the outcome.\n\nShape `details` to the grant_type:\n  - spawn: { child_agent_id: string }\n  - tool_scope: { scope: string }\n\nSet `scope` to:\n  - once: approve exactly one tool call\n  - session: approve for this session only\n  - persistent: standing approval (rare, admin-level)\n\nAfter calling this END YOUR TURN — the response arrives as a user message starting a fresh turn.",
@@ -389,6 +416,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `request_permission failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "post_message": {
+      try {
+        const res = await fetch(`${sidecarUrl}/messaging/post_message`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel: String(a?.channel ?? ""),
+            text: String(a?.text ?? ""),
+            thread_id: a?.thread_id,
+            username: a?.username,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `post_message failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
