@@ -99,6 +99,8 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
           </CardContent>
         </Card>
 
+        <VectorIndexCard collection={collection} />
+
         <Card>
           <CardHeader>
             <CardTitle>Record types</CardTitle>
@@ -136,5 +138,31 @@ function Row({
         {value}
       </div>
     </div>
+  );
+}
+
+function VectorIndexCard({
+  collection,
+}: {
+  collection: { settings: Record<string, unknown> };
+}) {
+  const v = (collection.settings as {
+    vector?: { dimension?: number; metric?: string };
+  }).vector;
+  if (!v?.dimension) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Vector index</CardTitle>
+        <CardDescription>
+          Dimension and metric set at create time. Every embedding written
+          here must match.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <Row label="Dimension" value={String(v.dimension)} mono />
+        <Row label="Metric" value={v.metric ?? "cosine"} mono />
+      </CardContent>
+    </Card>
   );
 }

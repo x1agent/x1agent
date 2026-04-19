@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import type { CreateCollectionRequest } from "@x1agent/shared";
+import type {
+  CreateCollectionRequest,
+  VectorMetric,
+} from "@x1agent/shared";
+import { EMBEDDING_PRESETS } from "@x1agent/shared";
 import { AppShell } from "../../shell/AppShell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -13,6 +17,13 @@ import {
 } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import {
   Table,
   TableBody,
@@ -201,6 +212,12 @@ function CreateCollectionCard({
   const [slug, setSlug] = useState("");
   const [slugDirty, setSlugDirty] = useState(false);
   const [description, setDescription] = useState("");
+  // Default picks the first preset (OpenAI text-embedding-3-small / 1536).
+  const [presetLabel, setPresetLabel] = useState<string>(
+    EMBEDDING_PRESETS[0]!.label,
+  );
+  const [customDim, setCustomDim] = useState<string>("");
+  const [metric, setMetric] = useState<VectorMetric>("cosine");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -209,15 +226,26 @@ function CreateCollectionCard({
     if (!slugDirty) setSlug(slugify(v));
   };
 
+  const isCustom = presetLabel === "__custom__";
+  const selectedPreset = EMBEDDING_PRESETS.find((p) => p.label === presetLabel);
+  const dimension = isCustom
+    ? Number(customDim) || 0
+    : (selectedPreset?.dimension ?? 0);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!Number.isInteger(dimension) || dimension <= 0) {
+      setError("Dimension must be a positive integer.");
+      return;
+    }
     setSubmitting(true);
     try {
       await create(workspaceSlug, {
         name: name.trim(),
         slug: slug.trim(),
         description: description.trim() || null,
+        settings: { vector: { dimension, metric } },
       });
       onCreated();
     } catch (err) {
@@ -275,6 +303,68 @@ function CreateCollectionCard({
               placeholder="What lives here?"
             />
           </div>
+
+          <div className="space-y-3 rounded-md border border-zinc-900 p-3">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">
+              Embedding model
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="coll-preset">Dimension</Label>
+              <Select value={presetLabel} onValueChange={setPresetLabel}>
+                <SelectTrigger id="coll-preset">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EMBEDDING_PRESETS.map((p) => (
+                    <SelectItem key={p.label} value={p.label}>
+                      {p.label} ({p.dimension})
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__custom__">Custom dimension…</SelectItem>
+                </SelectContent>
+              </Select>
+              {isCustom ? (
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={customDim}
+                  onChange={(e) => setCustomDim(e.target.value)}
+                  placeholder="e.g. 512"
+                  className="mt-1"
+                />
+              ) : selectedPreset ? (
+                <p className="text-xs text-zinc-500">
+                  {selectedPreset.description}
+                </p>
+              ) : null}
+              <p className="text-xs text-zinc-500">
+                All embeddings written to this collection must match this
+                dimension. Immutable after create.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="coll-metric">Distance metric</Label>
+              <Select
+                value={metric}
+                onValueChange={(v) => setMetric(v as VectorMetric)}
+              >
+                <SelectTrigger id="coll-metric">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cosine">
+                    cosine — the default for text embeddings
+                  </SelectItem>
+                  <SelectItem value="dot">
+                    dot — when vectors are already normalised
+                  </SelectItem>
+                  <SelectItem value="l2">l2 — Euclidean distance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           {error && <div className="text-sm text-red-400">{error}</div>}
           <div className="flex items-center gap-2">
             <Button type="submit" disabled={submitting || !name || !slug}>

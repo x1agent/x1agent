@@ -25,32 +25,53 @@ interface WireReply {
  * surfaces the error; the caller leaves the Postgres row in place so
  * the UI can show "provisioning failed" and the operator retries.
  */
+type VectorMetric = "cosine" | "l2" | "dot";
+
+interface VectorSettings {
+  dimension: number;
+  metric: VectorMetric;
+}
+
+const DEFAULT_VECTOR: VectorSettings = {
+  dimension: 1536, // OpenAI text-embedding-3-small
+  metric: "cosine",
+};
+
+function resolveVectorSettings(
+  settings: Record<string, unknown>,
+): VectorSettings {
+  const v = (settings.vector ?? {}) as Record<string, unknown>;
+  const rawDim = v["dimension"];
+  const rawMetric = v["metric"];
+  const dimension =
+    typeof rawDim === "number" && Number.isInteger(rawDim) && rawDim > 0
+      ? rawDim
+      : DEFAULT_VECTOR.dimension;
+  const metric: VectorMetric =
+    rawMetric === "cosine" || rawMetric === "l2" || rawMetric === "dot"
+      ? rawMetric
+      : DEFAULT_VECTOR.metric;
+  return { dimension, metric };
+}
+
 export class NatsProviderGateway implements ProviderGateway {
   constructor(
     private readonly nc: NatsConnection,
-    /**
-     * Vector defaults applied when a collection is created without
-     * explicit settings.vector. 1536 matches OpenAI text-embedding-3-small;
-     * bump or override per collection when the workload needs something
-     * different.
-     */
-    private readonly vectorDefaults: { dimension: number; metric: "cosine" | "l2" | "dot" } = {
-      dimension: 1536,
-      metric: "cosine",
-    },
     private readonly timeoutMs = 10_000,
   ) {}
 
   async provision(
     providerType: CollectionProviderType,
     handle: CollectionHandle,
+    settings: Record<string, unknown>,
   ): Promise<void> {
     void providerType;
+    const vector = resolveVectorSettings(settings);
     await this.request("x1.provider.graph.provision", { handle });
     await this.request("x1.provider.vector.provision", {
       namespace: handle,
-      dimension: this.vectorDefaults.dimension,
-      metric: this.vectorDefaults.metric,
+      dimension: vector.dimension,
+      metric: vector.metric,
     });
   }
 

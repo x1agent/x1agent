@@ -195,13 +195,15 @@ export class RecordingProviderGateway implements ProviderGateway {
     kind: "provision" | "deprovision";
     providerType: CollectionProviderType;
     handle: string;
+    settings?: Record<string, unknown>;
   }> = [];
 
   async provision(
     providerType: CollectionProviderType,
     handle: CollectionHandle,
+    settings: Record<string, unknown>,
   ): Promise<void> {
-    this.calls.push({ kind: "provision", providerType, handle });
+    this.calls.push({ kind: "provision", providerType, handle, settings });
   }
   async deprovision(
     providerType: CollectionProviderType,

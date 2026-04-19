@@ -188,12 +188,68 @@ export interface CollectionResponse {
   collection: CollectionDTO;
 }
 
+export type VectorMetric = "cosine" | "l2" | "dot";
+
+export interface CollectionVectorSettings {
+  /** Length of every embedding stored in this collection. Immutable. */
+  dimension: number;
+  /** Distance metric used at search time. Immutable. */
+  metric: VectorMetric;
+}
+
+export interface CollectionSettings {
+  vector?: CollectionVectorSettings;
+  /** Future: per-collection graph options, access overrides, etc. */
+  [k: string]: unknown;
+}
+
+/**
+ * Known embedding-model presets. Dimension is the only hard constraint
+ * (has to match the model); metric is usually cosine for text models.
+ */
+export const EMBEDDING_PRESETS: ReadonlyArray<{
+  label: string;
+  dimension: number;
+  description: string;
+}> = [
+  {
+    label: "OpenAI text-embedding-3-small",
+    dimension: 1536,
+    description: "Default — fast, cheap, broadly used.",
+  },
+  {
+    label: "OpenAI text-embedding-3-large",
+    dimension: 3072,
+    description: "Higher recall, 2× the storage.",
+  },
+  {
+    label: "Cohere embed-english-v3",
+    dimension: 1024,
+    description: "Good for English-only retrieval.",
+  },
+  {
+    label: "Voyage voyage-3",
+    dimension: 1024,
+    description: "Tuned for enterprise RAG.",
+  },
+  {
+    label: "sentence-transformers/all-MiniLM-L6-v2",
+    dimension: 384,
+    description: "Local CPU-friendly, low fidelity.",
+  },
+  {
+    label: "BGE base",
+    dimension: 768,
+    description: "Open-source baseline.",
+  },
+];
+
 export interface CreateCollectionRequest {
   name: string;
   slug: string;
   description?: string | null;
   provider_type?: CollectionProviderType;
-  settings?: Record<string, unknown>;
+  settings?: CollectionSettings;
 }
 
 export interface AgentCollectionAttachmentDTO extends CollectionDTO {

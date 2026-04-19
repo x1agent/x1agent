@@ -62,7 +62,7 @@ export async function createCollection(
     createdBy: cmd.actor,
   });
 
-  await deps.providers.provision(cmd.providerType, handle);
+  await deps.providers.provision(cmd.providerType, handle, cmd.settings);
 
   return collection;
 }
