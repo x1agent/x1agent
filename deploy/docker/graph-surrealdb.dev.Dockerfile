@@ -1,15 +1,12 @@
-# Dev image for @x1agent/provider-messaging-slack. Same pattern as the
-# api image: manifests first for caching, then source. devspace sync
-# overlays packages/ at runtime for hot reload.
+# Dev image for @x1agent/provider-graph-surrealdb. Same layering as the
+# api image: manifests first for cache, source copied in last, devspace
+# sync overlays at runtime for hot reload.
 FROM oven/bun:1-alpine
 
 RUN apk add --no-cache bash tini
 
 WORKDIR /app
 
-# Manifests for workspace resolution. The install runs against the full
-# workspace graph, so every package with a package.json has to be
-# present here — even ones the provider doesn't consume at runtime.
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
 COPY packages/shared/package.json ./packages/shared/
@@ -36,4 +33,4 @@ RUN bun install --frozen-lockfile --ignore-scripts
 COPY packages/ ./packages/
 
 ENTRYPOINT ["tini", "--"]
-CMD ["bun", "run", "--cwd", "packages/providers/messaging-slack", "src/index.ts"]
+CMD ["bun", "run", "--cwd", "packages/providers/graph-surrealdb", "src/index.ts"]

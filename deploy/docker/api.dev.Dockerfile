@@ -24,6 +24,9 @@ COPY packages/domains/github/package.json packages/domains/github/tsconfig.json 
 COPY packages/domains/sessions/package.json packages/domains/sessions/tsconfig.json ./packages/domains/sessions/
 COPY packages/domains/permissions/package.json packages/domains/permissions/tsconfig.json ./packages/domains/permissions/
 COPY packages/domains/messaging/package.json packages/domains/messaging/tsconfig.json ./packages/domains/messaging/
+COPY packages/domains/graph/package.json packages/domains/graph/tsconfig.json ./packages/domains/graph/
+COPY packages/domains/vector/package.json packages/domains/vector/tsconfig.json ./packages/domains/vector/
+COPY packages/domains/collections/package.json packages/domains/collections/tsconfig.json ./packages/domains/collections/
 # Agent is a workspace package too (even though the api doesn't require
 # it at runtime) — bun install fails --frozen-lockfile if any workspace
 # manifest is missing.
@@ -31,6 +34,7 @@ COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 # Every provider package manifest has to be present at install time
 # even though the api image doesn't run them.
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
+COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
 # docs is listed as a workspace in the root package.json; its manifest has
 # to be present at install time even though the api image doesn't run it.
 COPY docs/package.json ./docs/

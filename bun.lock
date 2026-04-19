@@ -259,6 +259,20 @@
         "typescript": "^5.6.0",
       },
     },
+    "packages/providers/graph-surrealdb": {
+      "name": "@x1agent/provider-graph-surrealdb",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/domain-graph": "workspace:*",
+        "@x1agent/domain-vector": "workspace:*",
+        "@x1agent/kernel": "workspace:*",
+        "nats": "^2.29.3",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/providers/messaging-slack": {
       "name": "@x1agent/provider-messaging-slack",
       "version": "0.0.0",
@@ -1025,6 +1039,8 @@
     "@x1agent/domain-workspaces": ["@x1agent/domain-workspaces@workspace:packages/domains/workspaces"],
 
     "@x1agent/kernel": ["@x1agent/kernel@workspace:packages/kernel"],
+
+    "@x1agent/provider-graph-surrealdb": ["@x1agent/provider-graph-surrealdb@workspace:packages/providers/graph-surrealdb"],
 
     "@x1agent/provider-messaging-slack": ["@x1agent/provider-messaging-slack@workspace:packages/providers/messaging-slack"],
 

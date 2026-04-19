@@ -1,0 +1,46 @@
+# DEV ONLY — graph + vector provider service. Prod path is the Helm
+# chart at deploy/helm/providers/graph-surrealdb.
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-surrealdb
+  labels:
+    app: graph-surrealdb
+spec:
+  clusterIP: None
+  selector:
+    app: graph-surrealdb
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-surrealdb
+  labels:
+    app: graph-surrealdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graph-surrealdb
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: graph-surrealdb
+    spec:
+      containers:
+        - name: provider
+          image: x1agent-provider-graph-surrealdb
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: SURREAL_URL
+              value: http://surrealdb:8000
+            - name: SURREAL_USER
+              value: root
+            - name: SURREAL_PASS
+              value: x1agent-surreal-root
+            - name: SURREAL_NAMESPACE
+              value: x1agent

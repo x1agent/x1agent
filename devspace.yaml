@@ -95,6 +95,13 @@ images:
     dockerfile: ./deploy/docker/messaging-slack.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  graph-surrealdb:
+    image: x1agent-provider-graph-surrealdb
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/graph-surrealdb.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
 
 deployments:
   postgres:
@@ -113,6 +120,14 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/messaging-slack.yaml
+  surrealdb:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/surrealdb.yaml
+  graph-surrealdb:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/graph-surrealdb.yaml
 
 dev:
   # Port-forward Postgres to the host so integration tests + migration
@@ -224,6 +239,36 @@ dev:
         value: nats://nats:4222
       - name: SLACK_BOT_TOKEN
         value: ${SLACK_BOT_TOKEN}
+
+  graph-surrealdb:
+    labelSelector:
+      app: graph-surrealdb
+    devImage: x1agent-provider-graph-surrealdb
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - "*.log"
+        startContainer: true
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app
+        exec bun --hot run packages/providers/graph-surrealdb/src/index.ts
+    env:
+      - name: NATS_URL
+        value: nats://nats:4222
+      - name: SURREAL_URL
+        value: http://surrealdb:8000
+      - name: SURREAL_USER
+        value: root
+      - name: SURREAL_PASS
+        value: x1agent-surreal-root
+      - name: SURREAL_NAMESPACE
+        value: x1agent
 
 pipelines:
   dev: |-

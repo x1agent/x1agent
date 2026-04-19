@@ -1,0 +1,64 @@
+# DEV ONLY — SurrealDB single-node for local graph + vector storage.
+# Prod chart will use a StatefulSet with persistent storage and real
+# credentials injected via External Secrets.
+apiVersion: v1
+kind: Service
+metadata:
+  name: surrealdb
+  labels:
+    app: surrealdb
+spec:
+  selector:
+    app: surrealdb
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: surrealdb
+  labels:
+    app: surrealdb
+spec:
+  serviceName: surrealdb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: surrealdb
+  template:
+    metadata:
+      labels:
+        app: surrealdb
+    spec:
+      containers:
+        - name: surrealdb
+          image: surrealdb/surrealdb:v2.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --log=info
+            - --user=root
+            - --pass=x1agent-surreal-root
+            - --bind=0.0.0.0:8000
+            - rocksdb:/data/db
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
