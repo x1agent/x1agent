@@ -21,6 +21,12 @@ SECRET_NAME="${SECRET_NAME:-nats-tls}"
 CERT_DIR="${CERT_DIR:-.local/nats-certs}"
 DAYS="${DAYS:-3650}"
 
+# Ensure the namespace exists. devspace creates it lazily on first apply,
+# but this script may run before that. apply-from-stdin is idempotent and
+# silent on "already exists".
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml \
+  | kubectl apply -f - >/dev/null
+
 if kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" >/dev/null 2>&1; then
   echo "[nats-tls] secret $SECRET_NAME already exists in $NAMESPACE — skipping."
   echo "[nats-tls] delete it to rotate: kubectl -n $NAMESPACE delete secret $SECRET_NAME"
