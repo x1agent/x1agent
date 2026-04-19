@@ -60,6 +60,20 @@ images:
     dockerfile: ./deploy/docker/api.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  agent:
+    image: x1agent-agent
+    tags:
+      - latest
+    dockerfile: ./packages/agent/Dockerfile
+    context: ./packages/agent
+    rebuildStrategy: ignoreContextChanges
+  sidecar:
+    image: x1agent-sidecar
+    tags:
+      - latest
+    dockerfile: ./packages/sidecar/Dockerfile
+    context: ./packages/sidecar
+    rebuildStrategy: ignoreContextChanges
 
 deployments:
   postgres:
@@ -151,6 +165,16 @@ dev:
         value: nats://nats:4222
       - name: API_INTERNAL_TOKEN
         value: ${API_INTERNAL_TOKEN}
+      - name: K8S_SKIP_TLS_VERIFY
+        value: "true"
+      # bun's TLS stack ignores skipTLSVerify from the k8s client config.
+      # Dev-only knob that makes it accept OrbStack's self-signed cert.
+      - name: NODE_TLS_REJECT_UNAUTHORIZED
+        value: "0"
+      - name: K8S_NAMESPACE
+        value: x1agent
+      - name: IMAGE_PULL_POLICY
+        value: IfNotPresent
 
 pipelines:
   dev: |-

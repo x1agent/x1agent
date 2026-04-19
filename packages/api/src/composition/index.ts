@@ -71,6 +71,11 @@ export interface Composition {
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
   sessionEvents: SessionEventRepository;
+  /** Exposed for the Job watcher — reads directly without reconnecting. */
+  sql: postgres.Sql<Record<string, unknown>>;
+  agents: PostgresAgentRepository;
+  sessions: PostgresSessionRepository;
+  agentRepoStore: PostgresAgentRepoStore;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
 }
@@ -258,6 +263,10 @@ export function compose(env: CompositionEnv): Composition {
     tokenizer,
     users,
     sessionEvents,
+    sql: env.sql,
+    agents,
+    sessions,
+    agentRepoStore: agentRepos,
     tickScheduler,
   };
 }

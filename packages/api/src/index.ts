@@ -3,6 +3,7 @@ import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
 import { seedIfDev } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
+import { startJobWatcher } from "./k8s/job-watcher.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
@@ -23,6 +24,10 @@ const {
   installationApiRoutes,
   agentRepoRoutes,
   sessionEvents,
+  sql: composedSql,
+  agents: composedAgents,
+  sessions: composedSessions,
+  agentRepoStore: composedAgentRepos,
   tickScheduler,
 } = compose({
   sql: getSql(),
@@ -129,6 +134,35 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[nats] subscriber failed to start: ${(err as Error).message} — events will not land in DB until NATS is reachable`,
+    );
+  }
+}
+
+if (process.env.JOB_WATCHER !== "disabled") {
+  try {
+    startJobWatcher({
+      sql: composedSql,
+      agents: composedAgents,
+      sessions: composedSessions,
+      agentRepos: composedAgentRepos,
+      namespace: process.env.K8S_NAMESPACE || "x1agent",
+      agentImage: process.env.AGENT_IMAGE || "x1agent-agent:latest",
+      sidecarImage: process.env.SIDECAR_IMAGE || "x1agent-sidecar:latest",
+      imagePullPolicy:
+        (process.env.IMAGE_PULL_POLICY as
+          | "IfNotPresent"
+          | "Always"
+          | "Never"
+          | undefined) ?? "IfNotPresent",
+      apiUrl: process.env.CLUSTER_API_URL || "http://api:30001",
+      apiInternalToken: process.env.API_INTERNAL_TOKEN || "",
+      natsUrl: process.env.NATS_URL || "nats://nats:4222",
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
+    });
+  } catch (err) {
+    console.warn(
+      `[jobs] watcher start failed: ${(err as Error).message} — sessions will stay pending`,
     );
   }
 }

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^1.4.0",
     "@x1agent/domain-agents": "workspace:*",
     "@x1agent/domain-auth": "workspace:*",
     "@x1agent/domain-github": "workspace:*",
