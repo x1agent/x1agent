@@ -8,6 +8,16 @@ export interface LinkedRepoForPod {
   installation_id: number;
 }
 
+export interface AttachedCollectionForPod {
+  id: string;
+  slug: string;
+  /** Provider-opaque backing-store id the adapter uses in NATS calls. */
+  backend_handle: string;
+  /** "surrealdb" | future providers. */
+  provider_type: string;
+  is_default: boolean;
+}
+
 export interface SessionPodSpec {
   sessionId: string;
   agentId: string;
@@ -21,6 +31,7 @@ export interface SessionPodSpec {
   idleTimeoutMs: number;
   maxTurns: number;
   repos: LinkedRepoForPod[];
+  collections: AttachedCollectionForPod[];
   /** Cluster-internal api URL. `http://api:30001` on dev. */
   apiUrl: string;
   /** Shared secret the sidecar sends as X-Internal-Token. */
@@ -90,6 +101,10 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "AGENT_ID", value: spec.agentId },
     { name: "SESSION_WORKSPACE_SLUG", value: spec.workspaceSlug },
     { name: "AGENT_REPOS_JSON", value: JSON.stringify(spec.repos) },
+    {
+      name: "AGENT_COLLECTIONS_JSON",
+      value: JSON.stringify(spec.collections),
+    },
   ];
 
   return {

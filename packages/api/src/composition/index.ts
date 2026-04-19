@@ -93,6 +93,7 @@ export interface Composition {
   agents: PostgresAgentRepository;
   sessions: PostgresSessionRepository;
   permissionGrants: PostgresPermissionGrantRepository;
+  collections: PostgresCollectionRepository;
   agentRepoStore: PostgresAgentRepoStore;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
@@ -355,6 +356,7 @@ export function compose(env: CompositionEnv): Composition {
     agents,
     sessions,
     permissionGrants,
+    collections: collectionsRepo,
     agentRepoStore: agentRepos,
     tickScheduler,
   };
