@@ -127,6 +127,33 @@ export function createCollectionRoutes(cfg: CollectionRoutesConfig): Hono {
     return c.json({ collection: serializeCollection(col) });
   });
 
+  // Live provider query for the collection's record-type registry.
+  // Membership-gated like the rest of the read surface.
+  app.get("/:id/record-types", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const col = await cfg.collections.findById(
+      CollectionId(c.req.param("id")!),
+    );
+    if (!col || col.workspaceId !== wsId)
+      return c.json({ error: "collection_not_found" }, 404);
+    try {
+      const types = await cfg.providers.discover(col.providerType, col.backendHandle);
+      return c.json({ record_types: types });
+    } catch (err) {
+      const e = err as Error & { code?: string };
+      return c.json(
+        {
+          error: e.code ?? "provider_error",
+          message: e.message ?? "discover failed",
+        },
+        502,
+      );
+    }
+  });
+
   app.post("/", async (c) => {
     const actor = cfg.getActor(c);
     if (!actor) return c.json({ error: "unauthenticated" }, 401);

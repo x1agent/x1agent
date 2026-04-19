@@ -149,14 +149,23 @@ export class SurrealGraphProvider implements GraphProvider {
       `DEFINE FIELD IF NOT EXISTS slug ON _record_types TYPE string;`,
       `DEFINE FIELD IF NOT EXISTS description ON _record_types TYPE string;`,
       `DEFINE FIELD IF NOT EXISTS icon ON _record_types TYPE option<string>;`,
-      `DEFINE FIELD IF NOT EXISTS fields ON _record_types TYPE array;`,
-      `DEFINE FIELD IF NOT EXISTS relationships ON _record_types TYPE array;`,
+      // SurrealDB v2 notes: `array` without element type drops inner
+      // contents; `array<object>` alone strips un-declared keys because
+      // the table is SCHEMAFULL. FLEXIBLE TYPE tells it to preserve
+      // the object's raw keys verbatim, matching our shape
+      // {name, type, required} / {name, targetType, edge}.
+      `DEFINE FIELD IF NOT EXISTS fields ON _record_types FLEXIBLE TYPE array<object>;`,
+      `DEFINE FIELD IF NOT EXISTS relationships ON _record_types FLEXIBLE TYPE array<object>;`,
       `DEFINE INDEX IF NOT EXISTS _record_types_slug_idx ON _record_types FIELDS slug UNIQUE;`,
     ];
     for (const seed of DEFAULT_RECORD_TYPES) {
       ddl.push(`DEFINE TABLE IF NOT EXISTS ${seed.slug} SCHEMALESS;`);
+      // Use record-id form (_record_types:slug). UPSERT...WHERE in
+      // SurrealDB v2 only applies its SET clause to existing rows —
+      // newly-created rows end up with just the WHERE fields. Targeting
+      // a known id sidesteps that and keeps provision idempotent.
       ddl.push(
-        `UPSERT _record_types SET name = ${quote(seed.name)}, slug = ${quote(seed.slug)}, description = ${quote(seed.description)}, icon = ${seed.icon ? quote(seed.icon) : "NONE"}, fields = ${jsonify(seed.fields)}, relationships = ${jsonify(seed.relationships)} WHERE slug = ${quote(seed.slug)};`,
+        `UPSERT _record_types:${seed.slug} CONTENT { name: ${quote(seed.name)}, slug: ${quote(seed.slug)}, description: ${quote(seed.description)}, icon: ${seed.icon ? quote(seed.icon) : "NONE"}, fields: ${jsonify(seed.fields)}, relationships: ${jsonify(seed.relationships)} };`,
       );
     }
     await this.client.sql(ddl.join("\n"), handle);
@@ -215,7 +224,7 @@ export class SurrealGraphProvider implements GraphProvider {
     const fields = Object.keys(input.data)
       .filter((k) => !k.startsWith("_"))
       .map((name) => ({ name, type: "string", required: false }));
-    const registerSql = `UPSERT _record_types SET name = ${quote(input.recordType)}, slug = ${quote(input.recordType)}, description = '', fields = ${jsonify(fields)}, relationships = [] WHERE slug = ${quote(input.recordType)};`;
+    const registerSql = `UPSERT _record_types:${input.recordType} CONTENT { name: ${quote(input.recordType)}, slug: ${quote(input.recordType)}, description: '', fields: ${jsonify(fields)}, relationships: [] };`;
     try {
       await this.client.sql(registerSql, input.collection);
     } catch {

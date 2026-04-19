@@ -2,6 +2,7 @@ import { connect, StringCodec, type NatsConnection } from "nats";
 import type {
   CollectionProviderType,
   ProviderGateway,
+  ProviderRecordType,
 } from "@x1agent/domain-collections";
 import type { CollectionHandle } from "@x1agent/domain-graph";
 
@@ -89,6 +90,46 @@ export class NatsProviderGateway implements ProviderGateway {
       namespace: handle,
     });
     await this.request("x1.provider.graph.deprovision", { handle });
+  }
+
+  async discover(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+  ): Promise<readonly ProviderRecordType[]> {
+    void providerType;
+    const result = (await this.request("x1.provider.graph.discover", {
+      handle,
+    })) as
+      | ReadonlyArray<{
+          name?: unknown;
+          slug?: unknown;
+          description?: unknown;
+          icon?: unknown;
+          fields?: unknown;
+          relationships?: unknown;
+        }>
+      | null;
+    if (!Array.isArray(result)) return [];
+    return result.map((r) => ({
+      name: typeof r.name === "string" ? r.name : "",
+      slug: typeof r.slug === "string" ? r.slug : "",
+      description: typeof r.description === "string" ? r.description : "",
+      icon: typeof r.icon === "string" ? r.icon : null,
+      fields: Array.isArray(r.fields)
+        ? (r.fields as ReadonlyArray<{
+            name: string;
+            type: string;
+            required: boolean;
+          }>)
+        : [],
+      relationships: Array.isArray(r.relationships)
+        ? (r.relationships as ReadonlyArray<{
+            name: string;
+            targetType: string;
+            edge: string;
+          }>)
+        : [],
+    }));
   }
 
   private async request(

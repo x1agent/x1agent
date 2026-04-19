@@ -264,3 +264,16 @@ export interface SyncAgentCollectionsRequest {
   collection_ids: string[];
   default_collection_id: string | null;
 }
+
+export interface RecordTypeDTO {
+  name: string;
+  slug: string;
+  description: string;
+  icon: string | null;
+  fields: Array<{ name: string; type: string; required: boolean }>;
+  relationships: Array<{ name: string; targetType: string; edge: string }>;
+}
+
+export interface RecordTypeListResponse {
+  record_types: RecordTypeDTO[];
+}

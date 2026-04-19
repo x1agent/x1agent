@@ -3,6 +3,7 @@ import type {
   AgentCollectionAttachmentDTO,
   CollectionDTO,
   CreateCollectionRequest,
+  RecordTypeDTO,
   SyncAgentCollectionsRequest,
 } from "@x1agent/shared";
 import { apiFetch } from "../lib/api";
@@ -14,6 +15,14 @@ interface CollectionsState {
 
   /** Attachments per agent, keyed by `${workspaceSlug}:${agentId}`. */
   attachmentsByAgentKey: Record<string, AgentCollectionAttachmentDTO[]>;
+
+  /**
+   * Record types per collection, keyed by `${workspaceSlug}:${collectionId}`.
+   * Populated lazily when the detail page mounts.
+   */
+  recordTypesByKey: Record<string, RecordTypeDTO[]>;
+  recordTypesErrorByKey: Record<string, string | null>;
+  recordTypesLoadingKey: string | null;
 
   load(workspaceSlug: string): Promise<void>;
   create(
@@ -28,6 +37,8 @@ interface CollectionsState {
     agentId: string,
     body: SyncAgentCollectionsRequest,
   ): Promise<void>;
+
+  loadRecordTypes(workspaceSlug: string, collectionId: string): Promise<void>;
 }
 
 export const useCollectionsStore = create<CollectionsState>((set, get) => ({
@@ -35,6 +46,9 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
   loadingSlug: null,
   errorBySlug: {},
   attachmentsByAgentKey: {},
+  recordTypesByKey: {},
+  recordTypesErrorByKey: {},
+  recordTypesLoadingKey: null,
 
   async load(workspaceSlug) {
     set((s) => ({
@@ -105,5 +119,34 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
       { method: "PUT", body: JSON.stringify(body) },
     );
     await get().loadAttachments(workspaceSlug, agentId);
+  },
+
+  async loadRecordTypes(workspaceSlug, collectionId) {
+    const key = `${workspaceSlug}:${collectionId}`;
+    set({ recordTypesLoadingKey: key });
+    try {
+      const res = await apiFetch<{ record_types: RecordTypeDTO[] }>(
+        `/api/workspaces/${workspaceSlug}/collections/${collectionId}/record-types`,
+      );
+      set((s) => ({
+        recordTypesByKey: {
+          ...s.recordTypesByKey,
+          [key]: res.record_types,
+        },
+        recordTypesErrorByKey: {
+          ...s.recordTypesErrorByKey,
+          [key]: null,
+        },
+        recordTypesLoadingKey: null,
+      }));
+    } catch (err) {
+      set((s) => ({
+        recordTypesErrorByKey: {
+          ...s.recordTypesErrorByKey,
+          [key]: (err as Error).message,
+        },
+        recordTypesLoadingKey: null,
+      }));
+    }
   },
 }));
