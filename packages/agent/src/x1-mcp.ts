@@ -182,6 +182,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["summary"],
       },
     },
+    {
+      name: "list_spawnable_agents",
+      description:
+        "List the child agents this session is allowed to spawn. Returns [{id, slug, name}]. Empty list means the agent has no spawn grants — ask the user to grant one on the agent edit screen.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "spawn_session",
+      description:
+        "Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child's progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_agent_id: {
+            type: "string",
+            description: "UUID of the child agent to spawn",
+          },
+        },
+        required: ["child_agent_id"],
+      },
+    },
   ],
 }));
 
@@ -292,6 +316,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `request_permission failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "list_spawnable_agents": {
+      try {
+        const res = await fetch(`${sidecarUrl}/spawnable`);
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `list_spawnable_agents failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "spawn_session": {
+      try {
+        const res = await fetch(`${sidecarUrl}/spawn`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_agent_id: String(a?.child_agent_id ?? ""),
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `spawn_session failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
