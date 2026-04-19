@@ -35,6 +35,10 @@ import {
   type SessionEventRepository,
 } from "@x1agent/domain-sessions";
 import {
+  PostgresPermissionGrantRepository,
+  createWorkspaceGrantRoutes,
+} from "@x1agent/domain-permissions";
+import {
   OctokitGitHubAppClient,
   PostgresInstallationRepository,
   PostgresAgentRepoStore,
@@ -69,6 +73,7 @@ export interface Composition {
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
+  workspaceGrantRoutes: Hono;
   tokenizer: SessionTokenizer;
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
@@ -113,6 +118,7 @@ export function compose(env: CompositionEnv): Composition {
   const agents = new PostgresAgentRepository(env.sql);
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
+  const permissionGrants = new PostgresPermissionGrantRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
   const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
@@ -255,6 +261,14 @@ export function compose(env: CompositionEnv): Composition {
     ? createAgentRepoRoutes(githubRoutesConfig)
     : unconfigured("/api/workspaces/:slug/agents/:agentId/repos");
 
+  const workspaceGrantRoutes = createWorkspaceGrantRoutes({
+    grants: permissionGrants,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    workspaces: new WorkspaceReaderAdapter(workspaces, env.sql),
+    requireAuth,
+    getActor,
+  });
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
@@ -266,6 +280,7 @@ export function compose(env: CompositionEnv): Composition {
     githubInstallRoutes,
     installationApiRoutes,
     agentRepoRoutes,
+    workspaceGrantRoutes,
     tokenizer,
     users,
     sessionEvents,

@@ -24,6 +24,7 @@ const {
   githubInstallRoutes,
   installationApiRoutes,
   agentRepoRoutes,
+  workspaceGrantRoutes,
   sessionEvents,
   sql: composedSql,
   agents: composedAgents,
@@ -84,6 +85,7 @@ app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
+app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
 

@@ -18,5 +18,13 @@ export * from "./application/consume-grant.js";
 export * from "./application/list-grants.js";
 export * from "./application/lookup-active.js";
 
+// Adapters
+export { PostgresPermissionGrantRepository } from "./adapters/postgres/postgres-permission-grant-repository.js";
+export {
+  createWorkspaceGrantRoutes,
+  type GrantRoutesConfig,
+  type WorkspaceReader,
+} from "./adapters/hono/routes.js";
+
 // Fakes
 export * from "./application/fakes.js";
