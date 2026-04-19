@@ -128,6 +128,14 @@ async fn main() {
         .route("/git/credential", routing::get(git::handle_git_credential))
         .route("/spawn", routing::post(orchestration::handle_spawn))
         .route("/spawnable", routing::get(orchestration::handle_spawnable))
+        .route(
+            "/child/:child_id/events",
+            routing::get(orchestration::handle_read_child),
+        )
+        .route(
+            "/child/:child_id/inject",
+            routing::post(orchestration::handle_inject_child),
+        )
         .route("/health", routing::get(|| async { "ok" }))
         .with_state(state);
 
