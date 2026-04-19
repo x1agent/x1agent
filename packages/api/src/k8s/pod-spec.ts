@@ -31,6 +31,15 @@ export interface SessionPodSpec {
   sidecarImage: string;
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
   anthropicApiKey?: string;
+  /**
+   * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
+   * (file). When set, both are hostPath-mounted into the agent container
+   * at /root so Claude Code picks up settings/agents/etc. Expected
+   * form: `/Users/alice`.
+   */
+  /**
+   * Dev-only: absolute host path to a file in Linux credentials format
+   */
   /** K8s namespace the Job lives in. */
   namespace: string;
 }
@@ -63,6 +72,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "WORKSPACE_SYSTEM_PROMPT", value: spec.systemPromptText },
     { name: "PLATFORM_NAME", value: "x1agent" },
     { name: "WORKSPACE_DIR", value: "/workspace" },
+    // Surface Claude Code stderr to the pod log so we can see auth /
+    // spawn failures. Dev-only.
+    { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },
     ...(spec.anthropicApiKey
       ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
       : []),
@@ -97,17 +109,63 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
         spec: {
           restartPolicy: "Never",
           securityContext: {
+            // fsGroup owns the /workspace emptyDir so both containers
+            // (agent as uid 1000, sidecar as root) can read/write.
+            fsGroup: 1000,
             seccompProfile: { type: "RuntimeDefault" },
           },
-          volumes: [{ name: "workspace", emptyDir: {} }],
+          volumes: [
+            { name: "workspace", emptyDir: {} },
+              ? [
+                  {
+                    hostPath: {
+                      type: "DirectoryOrCreate" as const,
+                    },
+                  },
+                  {
+                    hostPath: {
+                      type: "FileOrCreate" as const,
+                    },
+                  },
+                ]
+              : []),
+              ? [
+                  {
+                    hostPath: {
+                      type: "File" as const,
+                    },
+                  },
+                ]
+              : []),
+          ],
           containers: [
             {
               name: "agent",
               image: spec.agentImage,
               imagePullPolicy,
+              securityContext: {
+                // Claude Code refuses --dangerously-skip-permissions as
+                // root, so the agent runs as the Dockerfile's uid 1000.
+                runAsUser: 1000,
+                runAsGroup: 1000,
+              },
               env: agentEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                  ? [
+                      {
+                        mountPath: "/home/node/.claude",
+                      },
+                      {
+                        mountPath: "/home/node/.claude.json",
+                      },
+                    ]
+                  : []),
+                  ? [
+                      {
+                      },
+                    ]
+                  : []),
               ],
               resources: {
                 requests: { memory: "1Gi", cpu: "500m" },

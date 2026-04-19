@@ -32,6 +32,13 @@ run = "devspace purge --namespace x1agent"
 description = "Tail api pod logs"
 run = "kubectl logs -n x1agent -l app=api -f --tail=200"
 
+# file is also refreshed automatically by Claude Code inside the pod
+# because the hostPath mount is read/write).
+run = """
+mkdir -p "$(dirname "$dest")"
+chmod 600 "$dest"
+"""
+
 # ----------------------------------------------------------------------------
 # Host-side dev: Astro app. Assumes dev:cluster is already running so
 # localhost:30001 is port-forwarded.
