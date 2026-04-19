@@ -26,8 +26,8 @@ packages/
       src/contract-tests/          Shared suites every adapter must pass
     workspaces/                    Same shape
     invitations/                   Same shape
-    agents/                        (planned)
-    sessions/                      (planned)
+    agents/                        Same shape
+    sessions/                      Same shape (scheduler tick + pending-run state)
   infrastructure/                  Shared infra adapters (postgres, nats, k8s)
   api/                             Hono composition root. Wires adapters. No domain logic.
   app/                             Astro + React + zustand frontend
