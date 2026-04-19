@@ -113,3 +113,36 @@ export interface SessionEventListResponse {
   agent: { id: string; slug: string; name: string };
   events: SessionEventDTO[];
 }
+
+export type GrantScope = "once" | "session" | "persistent";
+export type GrantType = "spawn" | "tool_scope" | string;
+
+export interface GrantDTO {
+  id: string;
+  workspace_id: string;
+  user_subject_id: string | null;
+  agent_subject_id: string | null;
+  grant_type: GrantType;
+  details: Record<string, unknown>;
+  scope: GrantScope;
+  session_id: string | null;
+  consumed_at: string | null;
+  revoked_at: string | null;
+  granted_by_user_id: string;
+  granted_at: string;
+  reason: string | null;
+}
+
+export interface GrantListResponse {
+  grants: GrantDTO[];
+}
+
+export interface CreateGrantRequest {
+  user_subject_id?: string;
+  agent_subject_id?: string;
+  grant_type: GrantType;
+  details: Record<string, unknown>;
+  scope: GrantScope;
+  session_id?: string | null;
+  reason?: string | null;
+}
