@@ -1,0 +1,14 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { CollectionDetailRoot } from "../../../../features/collections/CollectionDetailRoot";
+
+const { slug, collectionSlug } = Astro.params;
+---
+
+<Layout title={`${collectionSlug} · ${slug} · x1agent`}>
+  <CollectionDetailRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+    collectionSlug={collectionSlug ?? ""}
+  />
+</Layout>

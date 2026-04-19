@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   Bot,
   ChevronsUpDown,
+  Database,
   LayoutDashboard,
   LogOut,
   MoreVertical,
@@ -76,6 +77,7 @@ export function AppSidebar() {
     ? [
         { title: "Agents", url: `${navBase}`, icon: Bot },
         { title: "Sessions", url: `${navBase}/sessions`, icon: Play },
+        { title: "Collections", url: `${navBase}/collections`, icon: Database },
         { title: "GitHub", url: `${navBase}/github`, icon: Github },
         { title: "Settings", url: `${navBase}/settings`, icon: Settings },
       ]
