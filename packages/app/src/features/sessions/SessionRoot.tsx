@@ -170,48 +170,36 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     session.status === "failed";
 
   return (
-    <AppShell>
-      <div className="flex h-[calc(100vh-56px)] flex-col">
-        <div className="flex items-center justify-between border-b border-zinc-900 px-4 py-2">
-          <div className="flex items-center gap-3 text-sm">
-            <a
-              href={`/workspaces/${workspaceSlug}`}
-              className="text-zinc-400 hover:text-zinc-200"
-            >
-              ← {workspaceSlug}
-            </a>
-            {agent && (
-              <>
-                <span className="text-zinc-600">/</span>
-                <a
-                  href={`/workspaces/${workspaceSlug}/agents/${agent.slug}`}
-                  className="text-zinc-200 hover:underline"
-                >
-                  {agent.name}
-                </a>
-              </>
-            )}
-            <span className="text-zinc-600">/</span>
-            <span className="font-mono text-xs text-zinc-500">
-              {sessionId.slice(0, 8)}
+    <AppShell
+      breadcrumbs={[
+        { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
+        ...(agent
+          ? [
+              {
+                label: agent.name,
+                href: `/workspaces/${workspaceSlug}/agents/${agent.slug}`,
+              },
+            ]
+          : []),
+        { label: sessionId.slice(0, 8) },
+      ]}
+    >
+      <div className="flex h-full min-h-[calc(100svh-56px)] flex-col">
+        <div className="flex items-center justify-end gap-3 border-b border-zinc-900 px-4 py-2 text-xs">
+          {session && (
+            <span className={STATUS_COLOR[session.status]}>
+              {session.status}
             </span>
-          </div>
-          <div className="flex items-center gap-3 text-xs">
-            {session && (
-              <span className={STATUS_COLOR[session.status]}>
-                {session.status}
-              </span>
-            )}
-            <span className="text-zinc-600">{events.length} events</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setVerbose((v) => !v)}
-              className="h-7 text-[11px] text-zinc-400"
-            >
-              {verbose ? "Compact" : "Verbose"}
-            </Button>
-          </div>
+          )}
+          <span className="text-zinc-600">{events.length} events</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setVerbose((v) => !v)}
+            className="h-7 text-[11px] text-zinc-400"
+          >
+            {verbose ? "Compact" : "Verbose"}
+          </Button>
         </div>
 
         {error && (
