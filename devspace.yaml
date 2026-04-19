@@ -133,6 +133,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/graph-surrealdb.yaml
+  networkpolicy:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/networkpolicy.yaml
 
 dev:
   # Port-forward Postgres to the host so integration tests + migration
