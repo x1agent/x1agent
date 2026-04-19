@@ -1,4 +1,4 @@
-import type { UserId } from "@x1agent/kernel";
+import type { UserId, WorkspaceId } from "@x1agent/kernel";
 import type { AgentId } from "@x1agent/domain-agents";
 import type { Session, SessionId } from "../domain/session.js";
 import type { SessionStatus } from "../domain/status.js";
@@ -28,6 +28,15 @@ export interface SessionRepository {
   findById(id: SessionId): Promise<Session | null>;
 
   listByAgent(agentId: AgentId, limit: number): Promise<readonly Session[]>;
+
+  /**
+   * Every session across every agent in a workspace, newest-first.
+   * Powers the workspace-level sessions list page.
+   */
+  listByWorkspace(
+    workspaceId: WorkspaceId,
+    limit: number,
+  ): Promise<readonly Session[]>;
 
   /**
    * The most recent scheduler-triggered session for an agent. Scheduler uses

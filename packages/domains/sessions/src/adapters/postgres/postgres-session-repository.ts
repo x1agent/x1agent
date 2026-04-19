@@ -1,5 +1,5 @@
 import type postgres from "postgres";
-import { UserId } from "@x1agent/kernel";
+import { UserId, type WorkspaceId } from "@x1agent/kernel";
 import { AgentId } from "@x1agent/domain-agents";
 import type {
   CreateSessionInput,
@@ -96,6 +96,26 @@ export class PostgresSessionRepository implements SessionRepository {
       SELECT ${this.sql.unsafe(SELECT)} FROM sessions
       WHERE agent_id = ${agentId}
       ORDER BY triggered_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(toSession);
+  }
+
+  async listByWorkspace(
+    workspaceId: WorkspaceId,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(
+        SELECT
+          .split(",")
+          .map((c) => `sessions.${c.trim()}`)
+          .join(", "),
+      )}
+      FROM sessions
+      JOIN agents ON agents.id = sessions.agent_id
+      WHERE agents.workspace_id = ${workspaceId}
+      ORDER BY sessions.triggered_at DESC
       LIMIT ${limit}
     `;
     return rows.map(toSession);

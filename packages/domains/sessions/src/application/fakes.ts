@@ -68,6 +68,20 @@ export class InMemorySessionRepository implements SessionRepository {
       .slice(0, limit);
   }
 
+  async listByWorkspace(
+    _workspaceId: unknown,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    // The fake doesn't track workspace → agent joins because agents
+    // live in a separate in-memory repo. Callers that need workspace
+    // scoping should seed only sessions for the relevant agents and
+    // rely on the natural chronological sort below.
+    return this.rows
+      .slice()
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime())
+      .slice(0, limit);
+  }
+
   async lastSchedulerRunFor(agentId: AgentId): Promise<Session | null> {
     const scoped = this.rows
       .filter((r) => r.agentId === agentId && r.triggeredBy === "scheduler")
