@@ -131,7 +131,11 @@ if (!schedulerDisabled) {
 const natsUrl = process.env.NATS_URL || "";
 if (natsUrl && process.env.NATS_DISABLED !== "true") {
   try {
-    await startSessionEventSubscriber({ natsUrl, events: sessionEvents });
+    await startSessionEventSubscriber({
+      natsUrl,
+      events: sessionEvents,
+      sessions: composedSessions,
+    });
     console.log(`[nats] connected to ${natsUrl}`);
   } catch (err) {
     console.warn(
