@@ -218,13 +218,16 @@ export class SurrealGraphProvider implements GraphProvider {
       Array.isArray(row) ? (row[0] as Record<string, unknown>) : row,
     );
 
-    // Auto-register the record type on first use — same upsert-by-slug
-    // that provision() uses so every write path converges on the same
-    // registry shape.
+    // Auto-register the record type on FIRST observation only. Using
+    // UPSERT here clobbered seed rows' name/description (seeded as
+    // "Person"/"...") with the write's slug ("person"/"") on every
+    // single write — breaking the UI's display name. INSERT...IGNORE
+    // inserts only when the id doesn't exist, leaving seeded rows
+    // alone.
     const fields = Object.keys(input.data)
       .filter((k) => !k.startsWith("_"))
       .map((name) => ({ name, type: "string", required: false }));
-    const registerSql = `UPSERT _record_types:${input.recordType} CONTENT { name: ${quote(input.recordType)}, slug: ${quote(input.recordType)}, description: '', fields: ${jsonify(fields)}, relationships: [] };`;
+    const registerSql = `INSERT IGNORE INTO _record_types { id: _record_types:${input.recordType}, name: ${quote(input.recordType)}, slug: ${quote(input.recordType)}, description: '', icon: NONE, fields: ${jsonify(fields)}, relationships: [] };`;
     try {
       await this.client.sql(registerSql, input.collection);
     } catch {

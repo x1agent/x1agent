@@ -277,3 +277,23 @@ export interface RecordTypeDTO {
 export interface RecordTypeListResponse {
   record_types: RecordTypeDTO[];
 }
+
+export interface RecordProvenanceDTO {
+  createdBy: string;
+  createdByUserId: string | null;
+  confidence: number;
+  source: string | null;
+  derivedFrom: string[];
+  createdAt: string;
+}
+
+export interface RecordDTO {
+  id: string;
+  recordType: string;
+  data: Record<string, unknown>;
+  provenance: RecordProvenanceDTO;
+}
+
+export interface RecordListResponse {
+  records: RecordDTO[];
+}

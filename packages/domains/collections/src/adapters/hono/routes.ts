@@ -127,6 +127,41 @@ export function createCollectionRoutes(cfg: CollectionRoutesConfig): Hono {
     return c.json({ collection: serializeCollection(col) });
   });
 
+  // List records of a specific type. Membership-gated.
+  app.get("/:id/record-types/:type/records", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const col = await cfg.collections.findById(
+      CollectionId(c.req.param("id")!),
+    );
+    if (!col || col.workspaceId !== wsId)
+      return c.json({ error: "collection_not_found" }, 404);
+    const limit = Math.max(
+      1,
+      Math.min(500, Number(c.req.query("limit") ?? 100)),
+    );
+    try {
+      const records = await cfg.providers.listRecords(
+        col.providerType,
+        col.backendHandle,
+        c.req.param("type")!,
+        limit,
+      );
+      return c.json({ records });
+    } catch (err) {
+      const e = err as Error & { code?: string };
+      return c.json(
+        {
+          error: e.code ?? "provider_error",
+          message: e.message ?? "listRecords failed",
+        },
+        502,
+      );
+    }
+  });
+
   // Live provider query for the collection's record-type registry.
   // Membership-gated like the rest of the read surface.
   app.get("/:id/record-types", async (c) => {

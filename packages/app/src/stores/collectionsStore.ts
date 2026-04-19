@@ -3,6 +3,7 @@ import type {
   AgentCollectionAttachmentDTO,
   CollectionDTO,
   CreateCollectionRequest,
+  RecordDTO,
   RecordTypeDTO,
   SyncAgentCollectionsRequest,
 } from "@x1agent/shared";
@@ -24,6 +25,14 @@ interface CollectionsState {
   recordTypesErrorByKey: Record<string, string | null>;
   recordTypesLoadingKey: string | null;
 
+  /**
+   * Records per type, keyed by `${workspaceSlug}:${collectionId}:${typeSlug}`.
+   * Populated lazily when the record-type detail page mounts.
+   */
+  recordsByKey: Record<string, RecordDTO[]>;
+  recordsErrorByKey: Record<string, string | null>;
+  recordsLoadingKey: string | null;
+
   load(workspaceSlug: string): Promise<void>;
   create(
     workspaceSlug: string,
@@ -39,6 +48,11 @@ interface CollectionsState {
   ): Promise<void>;
 
   loadRecordTypes(workspaceSlug: string, collectionId: string): Promise<void>;
+  loadRecords(
+    workspaceSlug: string,
+    collectionId: string,
+    typeSlug: string,
+  ): Promise<void>;
 }
 
 export const useCollectionsStore = create<CollectionsState>((set, get) => ({
@@ -49,6 +63,9 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
   recordTypesByKey: {},
   recordTypesErrorByKey: {},
   recordTypesLoadingKey: null,
+  recordsByKey: {},
+  recordsErrorByKey: {},
+  recordsLoadingKey: null,
 
   async load(workspaceSlug) {
     set((s) => ({
@@ -146,6 +163,29 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
           [key]: (err as Error).message,
         },
         recordTypesLoadingKey: null,
+      }));
+    }
+  },
+
+  async loadRecords(workspaceSlug, collectionId, typeSlug) {
+    const key = `${workspaceSlug}:${collectionId}:${typeSlug}`;
+    set({ recordsLoadingKey: key });
+    try {
+      const res = await apiFetch<{ records: RecordDTO[] }>(
+        `/api/workspaces/${workspaceSlug}/collections/${collectionId}/record-types/${typeSlug}/records`,
+      );
+      set((s) => ({
+        recordsByKey: { ...s.recordsByKey, [key]: res.records },
+        recordsErrorByKey: { ...s.recordsErrorByKey, [key]: null },
+        recordsLoadingKey: null,
+      }));
+    } catch (err) {
+      set((s) => ({
+        recordsErrorByKey: {
+          ...s.recordsErrorByKey,
+          [key]: (err as Error).message,
+        },
+        recordsLoadingKey: null,
       }));
     }
   },
