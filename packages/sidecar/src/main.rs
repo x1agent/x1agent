@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+mod audit;
 mod channel;
 mod git;
 mod collections;
@@ -173,6 +174,13 @@ async fn main() {
             routing::post(collections::handle_vector_delete),
         )
         .route("/health", routing::get(|| async { "ok" }))
+        // Audit middleware emits one NATS message per request (denylist
+        // for /health and /event). The api side persists those into
+        // audit_events.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            audit::audit_layer,
+        ))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:9090")

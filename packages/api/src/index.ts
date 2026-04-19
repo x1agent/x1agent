@@ -3,6 +3,7 @@ import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
 import { seedIfDev } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
+import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import { startJobWatcher } from "./k8s/job-watcher.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
@@ -203,6 +204,13 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[nats] subscriber failed to start: ${(err as Error).message} — events will not land in DB until NATS is reachable`,
+    );
+  }
+  try {
+    await startSessionAuditSubscriber({ natsUrl, sql: composedSql });
+  } catch (err) {
+    console.warn(
+      `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
     );
   }
 }
