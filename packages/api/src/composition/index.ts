@@ -39,6 +39,14 @@ import {
   createWorkspaceGrantRoutes,
 } from "@x1agent/domain-permissions";
 import {
+  PostgresCollectionRepository,
+  createCollectionRoutes,
+  createAgentCollectionRoutes,
+  type WorkspaceReader as CollectionsWorkspaceReader,
+} from "@x1agent/domain-collections";
+import { NatsProviderGateway } from "./nats-provider-gateway.js";
+import type { NatsConnection } from "nats";
+import {
   OctokitGitHubAppClient,
   PostgresInstallationRepository,
   PostgresAgentRepoStore,
@@ -74,6 +82,8 @@ export interface Composition {
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
   workspaceGrantRoutes: Hono;
+  collectionRoutes: Hono;
+  agentCollectionRoutes: Hono;
   tokenizer: SessionTokenizer;
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
@@ -107,6 +117,13 @@ export interface CompositionEnv {
   internalToken?: string;
   /** Optional: inject a fake GitHubAppClient for tests; overrides octokit. */
   githubAppClient?: GitHubAppClient;
+  /**
+   * NATS connection the api reuses for provider request/reply
+   * (collections provision/deprovision today; more tomorrow). Optional:
+   * when absent the collection create/delete endpoints return
+   * provider_unavailable.
+   */
+  natsConnection?: NatsConnection;
 }
 
 export function compose(env: CompositionEnv): Composition {
@@ -120,6 +137,7 @@ export function compose(env: CompositionEnv): Composition {
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
   const permissionGrants = new PostgresPermissionGrantRepository(env.sql);
+  const collectionsRepo = new PostgresCollectionRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
   const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
@@ -273,6 +291,49 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  const collectionsWorkspaceReader: CollectionsWorkspaceReader = {
+    async getIdBySlug(slug) {
+      const w = await workspaces.findBySlug(slug);
+      return w?.id ?? null;
+    },
+    async getSlugById(id) {
+      const w = await workspaces.findById(id);
+      return w ? (w.slug as WorkspaceSlug) : null;
+    },
+  };
+
+  const providerGateway = env.natsConnection
+    ? new NatsProviderGateway(env.natsConnection)
+    : null;
+  const providerGatewayUnavailable = {
+    async provision() {
+      throw Object.assign(new Error("NATS not connected; provider unavailable"), {
+        code: "provider_unavailable",
+      });
+    },
+    async deprovision() {
+      throw Object.assign(new Error("NATS not connected; provider unavailable"), {
+        code: "provider_unavailable",
+      });
+    },
+  };
+
+  const collectionRoutes = createCollectionRoutes({
+    collections: collectionsRepo,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    providers: providerGateway ?? providerGatewayUnavailable,
+    workspaces: collectionsWorkspaceReader,
+    requireAuth,
+    getActor,
+  });
+  const agentCollectionRoutes = createAgentCollectionRoutes({
+    collections: collectionsRepo,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    workspaces: collectionsWorkspaceReader,
+    requireAuth,
+    getActor,
+  });
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
@@ -285,6 +346,8 @@ export function compose(env: CompositionEnv): Composition {
     installationApiRoutes,
     agentRepoRoutes,
     workspaceGrantRoutes,
+    collectionRoutes,
+    agentCollectionRoutes,
     tokenizer,
     users,
     sessionEvents,

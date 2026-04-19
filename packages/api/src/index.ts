@@ -13,6 +13,24 @@ if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET env var is required");
 }
 
+// NATS connection for the provider gateway — separate from the one
+// startSessionEventSubscriber opens so the two paths don't block each
+// other on reconnect. Dev stack's NATS is reachable at nats://nats:4222;
+// when absent, compose falls back to a "provider_unavailable" stub.
+const providerNatsUrl = process.env.NATS_URL || "";
+let providerNats: import("nats").NatsConnection | undefined;
+if (providerNatsUrl && process.env.NATS_DISABLED !== "true") {
+  try {
+    providerNats = await (await import("./composition/nats-provider-gateway.js"))
+      .connectNats(providerNatsUrl);
+    console.log(`[providers] NATS for provider gateway: ${providerNatsUrl}`);
+  } catch (err) {
+    console.warn(
+      `[providers] NATS gateway connect failed: ${(err as Error).message}`,
+    );
+  }
+}
+
 const {
   authRoutes,
   workspaceInvitationRoutes,
@@ -25,6 +43,8 @@ const {
   installationApiRoutes,
   agentRepoRoutes,
   workspaceGrantRoutes,
+  collectionRoutes,
+  agentCollectionRoutes,
   permissionGrants,
   sessionEvents,
   sql: composedSql,
@@ -54,6 +74,7 @@ const {
   githubAppSlug: process.env.GITHUB_APP_SLUG || "",
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
   internalToken: process.env.API_INTERNAL_TOKEN || "",
+  natsConnection: providerNats,
 });
 
 const app = new Hono();
@@ -87,6 +108,11 @@ app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
+app.route("/api/workspaces/:slug/collections", collectionRoutes);
+app.route(
+  "/api/workspaces/:slug/agents/:agentId/collections",
+  agentCollectionRoutes,
+);
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
 

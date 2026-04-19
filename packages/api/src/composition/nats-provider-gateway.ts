@@ -1,0 +1,98 @@
+import { connect, StringCodec, type NatsConnection } from "nats";
+import type {
+  CollectionProviderType,
+  ProviderGateway,
+} from "@x1agent/domain-collections";
+import type { CollectionHandle } from "@x1agent/domain-graph";
+
+interface WireReply {
+  ok: boolean;
+  result?: unknown;
+  error?: { code: string; message: string };
+}
+
+/**
+ * ProviderGateway implementation that fans a provision/deprovision
+ * request out to BOTH the graph and vector subject trees for the
+ * chosen provider type. The graph-surrealdb provider implements both
+ * subjects from one deployment, so today the two requests hit the
+ * same pod. A split setup (graph=surrealdb, vector=turbopuffer) would
+ * fan to two providers with no change here.
+ *
+ * We fire the two requests sequentially — graph first, vector second
+ * — because vector.provision picks a dimension + metric from settings
+ * while graph.provision owns record-type seeding. Failure on either
+ * surfaces the error; the caller leaves the Postgres row in place so
+ * the UI can show "provisioning failed" and the operator retries.
+ */
+export class NatsProviderGateway implements ProviderGateway {
+  constructor(
+    private readonly nc: NatsConnection,
+    /**
+     * Vector defaults applied when a collection is created without
+     * explicit settings.vector. 1536 matches OpenAI text-embedding-3-small;
+     * bump or override per collection when the workload needs something
+     * different.
+     */
+    private readonly vectorDefaults: { dimension: number; metric: "cosine" | "l2" | "dot" } = {
+      dimension: 1536,
+      metric: "cosine",
+    },
+    private readonly timeoutMs = 10_000,
+  ) {}
+
+  async provision(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+  ): Promise<void> {
+    void providerType;
+    await this.request("x1.provider.graph.provision", { handle });
+    await this.request("x1.provider.vector.provision", {
+      namespace: handle,
+      dimension: this.vectorDefaults.dimension,
+      metric: this.vectorDefaults.metric,
+    });
+  }
+
+  async deprovision(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+  ): Promise<void> {
+    void providerType;
+    // Deprovision in reverse order so the graph DB is the last thing
+    // to go — REMOVE DATABASE on the same db cleans up the vector
+    // tables too, but calling vector.deprovision first keeps the
+    // symmetry and makes a future split-provider setup (two different
+    // DBs) Just Work.
+    await this.request("x1.provider.vector.deprovision", {
+      namespace: handle,
+    });
+    await this.request("x1.provider.graph.deprovision", { handle });
+  }
+
+  private async request(
+    subject: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    const sc = StringCodec();
+    const reply = await this.nc.request(
+      subject,
+      sc.encode(JSON.stringify(body)),
+      { timeout: this.timeoutMs },
+    );
+    const parsed = JSON.parse(sc.decode(reply.data)) as WireReply;
+    if (!parsed.ok) {
+      const err = new Error(
+        parsed.error?.message ?? `${subject} returned error`,
+      );
+      (err as Error & { code?: string }).code =
+        parsed.error?.code ?? "provider_error";
+      throw err;
+    }
+    return parsed.result;
+  }
+}
+
+export async function connectNats(url: string): Promise<NatsConnection> {
+  return connect({ servers: url });
+}
