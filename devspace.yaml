@@ -208,6 +208,12 @@ dev:
         value: ${ANTHROPIC_API_KEY}
       - name: NATS_URL
         value: nats://nats:4222
+      - name: NATS_CA_FILE
+        value: /etc/nats-tls/ca.crt
+      - name: NATS_CLIENT_CERT
+        value: /etc/nats-tls/client.crt
+      - name: NATS_CLIENT_KEY
+        value: /etc/nats-tls/client.key
       - name: API_INTERNAL_TOKEN
         value: ${API_INTERNAL_TOKEN}
       - name: K8S_SKIP_TLS_VERIFY
@@ -246,6 +252,12 @@ dev:
     env:
       - name: NATS_URL
         value: nats://nats:4222
+      - name: NATS_CA_FILE
+        value: /etc/nats-tls/ca.crt
+      - name: NATS_CLIENT_CERT
+        value: /etc/nats-tls/client.crt
+      - name: NATS_CLIENT_KEY
+        value: /etc/nats-tls/client.key
       - name: SLACK_BOT_TOKEN
         value: ${SLACK_BOT_TOKEN}
 
@@ -270,6 +282,12 @@ dev:
     env:
       - name: NATS_URL
         value: nats://nats:4222
+      - name: NATS_CA_FILE
+        value: /etc/nats-tls/ca.crt
+      - name: NATS_CLIENT_CERT
+        value: /etc/nats-tls/client.crt
+      - name: NATS_CLIENT_KEY
+        value: /etc/nats-tls/client.key
       - name: SURREAL_URL
         value: http://surrealdb:8000
       - name: SURREAL_USER

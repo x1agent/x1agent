@@ -36,6 +36,12 @@ spec:
           env:
             - name: NATS_URL
               value: nats://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
             - name: SURREAL_URL
               value: http://surrealdb:8000
             - name: SURREAL_USER
@@ -44,3 +50,11 @@ spec:
               value: x1agent-surreal-root
             - name: SURREAL_NAMESPACE
               value: x1agent
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-tls

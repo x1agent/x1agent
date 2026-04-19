@@ -6,3 +6,4 @@ node_modules/
 dist/
 .devspace/
 MEMORY.md
+.local/

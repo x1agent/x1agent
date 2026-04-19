@@ -99,6 +99,14 @@ spec:
               value: x1agent
             - name: NODE_ENV
               value: development
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
           # Secrets come in via devspace env-var injection at dev time so
           # values never land in committed manifests.
           readinessProbe:
@@ -107,3 +115,14 @@ spec:
               port: 30001
             initialDelaySeconds: 10
             periodSeconds: 5
+          # mTLS to NATS — every pod that talks to NATS mounts the
+          # same `nats-tls` Secret today (one shared client cert).
+          # Per-cert subject ACLs come in a follow-up slice.
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-tls
