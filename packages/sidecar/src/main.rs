@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod channel;
 mod git;
+mod messaging;
 mod nats_bridge;
 mod orchestration;
 mod stream;
@@ -135,6 +136,10 @@ async fn main() {
         .route(
             "/child/:child_id/inject",
             routing::post(orchestration::handle_inject_child),
+        )
+        .route(
+            "/messaging/post_message",
+            routing::post(messaging::handle_post_message),
         )
         .route("/health", routing::get(|| async { "ok" }))
         .with_state(state);
