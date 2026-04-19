@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
 import { seedIfDev } from "./seed.js";
+import { startSessionEventSubscriber } from "./nats/subscriber.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
@@ -21,6 +22,7 @@ const {
   githubInstallRoutes,
   installationApiRoutes,
   agentRepoRoutes,
+  sessionEvents,
   tickScheduler,
 } = compose({
   sql: getSql(),
@@ -117,6 +119,18 @@ if (!schedulerDisabled) {
   console.log(
     `[scheduler] started (interval=${SCHEDULER_INTERVAL_MS}ms)`,
   );
+}
+
+const natsUrl = process.env.NATS_URL || "";
+if (natsUrl && process.env.NATS_DISABLED !== "true") {
+  try {
+    await startSessionEventSubscriber({ natsUrl, events: sessionEvents });
+    console.log(`[nats] connected to ${natsUrl}`);
+  } catch (err) {
+    console.warn(
+      `[nats] subscriber failed to start: ${(err as Error).message} — events will not land in DB until NATS is reachable`,
+    );
+  }
 }
 
 console.log(`[api] listening on :${PORT}`);

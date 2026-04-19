@@ -31,6 +31,7 @@ import {
   createSessionRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
+  type SessionEventRepository,
 } from "@x1agent/domain-sessions";
 import {
   OctokitGitHubAppClient,
@@ -68,6 +69,8 @@ export interface Composition {
   agentRepoRoutes: Hono;
   tokenizer: SessionTokenizer;
   users: UserRepository;
+  /** For the NATS subscriber to persist events as they fly by. */
+  sessionEvents: SessionEventRepository;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
 }
@@ -254,6 +257,7 @@ export function compose(env: CompositionEnv): Composition {
     agentRepoRoutes,
     tokenizer,
     users,
+    sessionEvents,
     tickScheduler,
   };
 }

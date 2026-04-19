@@ -22,6 +22,10 @@ COPY packages/domains/invitations/package.json packages/domains/invitations/tsco
 COPY packages/domains/agents/package.json packages/domains/agents/tsconfig.json ./packages/domains/agents/
 COPY packages/domains/github/package.json packages/domains/github/tsconfig.json ./packages/domains/github/
 COPY packages/domains/sessions/package.json packages/domains/sessions/tsconfig.json ./packages/domains/sessions/
+# Agent is a workspace package too (even though the api doesn't require
+# it at runtime) — bun install fails --frozen-lockfile if any workspace
+# manifest is missing.
+COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 # docs is listed as a workspace in the root package.json; its manifest has
 # to be present at install time even though the api image doesn't run it.
 COPY docs/package.json ./docs/

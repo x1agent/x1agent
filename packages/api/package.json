@@ -20,6 +20,7 @@
     "@x1agent/kernel": "workspace:*",
     "@x1agent/shared": "workspace:*",
     "hono": "^4.6.0",
+    "nats": "^2.29.3",
     "postgres": "^3.4.4"
   },
   "devDependencies": {

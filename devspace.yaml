@@ -50,6 +50,9 @@ vars:
   ANTHROPIC_API_KEY:
     source: env
     default: ""
+  API_INTERNAL_TOKEN:
+    source: env
+    default: "dev-internal-token-change-me"
 
 images:
   api:
@@ -63,6 +66,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/postgres.yaml
+  nats:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/nats.yaml
   api:
     kubectl:
       manifests:
@@ -76,6 +83,15 @@ dev:
       app: postgres
     ports:
       - port: "5432"
+
+  # NATS: :4222 for clients (api, tooling), :8080 for the browser
+  # WebSocket used by the session viewer.
+  nats:
+    labelSelector:
+      app: nats
+    ports:
+      - port: "4222"
+      - port: "8080"
 
   api:
     labelSelector:
@@ -131,6 +147,10 @@ dev:
         value: ${GITHUB_APP_WEBHOOK_SECRET}
       - name: ANTHROPIC_API_KEY
         value: ${ANTHROPIC_API_KEY}
+      - name: NATS_URL
+        value: nats://nats:4222
+      - name: API_INTERNAL_TOKEN
+        value: ${API_INTERNAL_TOKEN}
 
 pipelines:
   dev: |-
