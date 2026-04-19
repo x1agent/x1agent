@@ -163,3 +163,48 @@ export interface CreateGrantRequest {
   session_id?: string | null;
   reason?: string | null;
 }
+
+export type CollectionProviderType = "surrealdb";
+
+export interface CollectionDTO {
+  id: string;
+  workspace_id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  provider_type: CollectionProviderType;
+  backend_handle: string;
+  settings: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionListResponse {
+  collections: CollectionDTO[];
+}
+
+export interface CollectionResponse {
+  collection: CollectionDTO;
+}
+
+export interface CreateCollectionRequest {
+  name: string;
+  slug: string;
+  description?: string | null;
+  provider_type?: CollectionProviderType;
+  settings?: Record<string, unknown>;
+}
+
+export interface AgentCollectionAttachmentDTO extends CollectionDTO {
+  is_default: boolean;
+}
+
+export interface AgentCollectionListResponse {
+  attachments: AgentCollectionAttachmentDTO[];
+}
+
+export interface SyncAgentCollectionsRequest {
+  collection_ids: string[];
+  default_collection_id: string | null;
+}

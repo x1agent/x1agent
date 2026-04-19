@@ -20,6 +20,13 @@ export * from "./application/sync-agent-attachments.js";
 
 // Adapters
 export { PostgresCollectionRepository } from "./adapters/postgres/postgres-collection-repository.js";
+export {
+  createCollectionRoutes,
+  createAgentCollectionRoutes,
+  type CollectionRoutesConfig,
+  type AgentCollectionRoutesConfig,
+  type WorkspaceReader,
+} from "./adapters/hono/routes.js";
 
 // Fakes
 export * from "./application/fakes.js";
