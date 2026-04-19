@@ -13,6 +13,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { RecentRunsSection } from "../sessions/RecentRunsSection";
+import { CanSpawnCard } from "./CanSpawnCard";
 
 interface Props {
   workspaceSlug: string;
@@ -137,6 +138,13 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
         )}
 
         <AgentReposSection workspaceSlug={workspaceSlug} agentId={agent.id} />
+
+        <CanSpawnCard
+          workspaceSlug={workspaceSlug}
+          parentAgentId={agent.id}
+          parentAgentName={agent.name}
+          canManage={!!canManage}
+        />
 
         <RecentRunsSection workspaceSlug={workspaceSlug} agentId={agent.id} />
       </div>
