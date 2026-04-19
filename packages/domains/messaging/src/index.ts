@@ -13,5 +13,11 @@ export {
   type MessagingProviderContractFixture,
 } from "./contract-tests/messaging-provider.contract.js";
 
+// Adapters
+export {
+  SlackMessagingProvider,
+  type SlackMessagingProviderConfig,
+} from "./adapters/slack/slack-messaging-provider.js";
+
 // Fakes
 export * from "./application/fakes.js";

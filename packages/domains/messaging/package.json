@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@slack/web-api": "^7.9.1",
     "@x1agent/kernel": "workspace:*"
   },
   "devDependencies": {
