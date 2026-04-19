@@ -61,4 +61,13 @@ export interface PermissionGrantRepository {
    * does not exist.
    */
   revoke(id: GrantId): Promise<Grant | null>;
+
+  /**
+   * Revoke every session-scoped grant whose bound session has reached a
+   * terminal state. Called periodically by the api. Returns the count
+   * of rows updated so the caller can log progress. `listActive`
+   * already filters on session status; this reaper is defence-in-depth
+   * for reporting and archival.
+   */
+  reapDanglingSessionGrants(): Promise<number>;
 }

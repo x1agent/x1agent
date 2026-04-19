@@ -128,17 +128,49 @@ export class PostgresPermissionGrantRepository
     const agentSubjectId =
       q.subject.kind === "agent" ? q.subject.agentId : null;
 
+    // Session-scoped grants are valid only while their bound session is
+    // still running. Without the join we'd return grants whose session
+    // already completed. The reaper (reapDanglingSessionGrants) is
+    // belt-and-suspenders for that case; this join is the belt.
     const rows = await this.sql<Row[]>`
-      SELECT ${this.sql.unsafe(SELECT)} FROM permission_grants
-      WHERE workspace_id = ${q.workspaceId}
-        AND grant_type = ${q.grantType}
-        AND consumed_at IS NULL
-        AND revoked_at IS NULL
+      SELECT ${this.sql.unsafe(
+        SELECT
+          .split(",")
+          .map((c) => `g.${c.trim()}`)
+          .join(", "),
+      )} FROM permission_grants g
+      LEFT JOIN sessions s ON s.id = g.session_id
+      WHERE g.workspace_id = ${q.workspaceId}
+        AND g.grant_type = ${q.grantType}
+        AND g.consumed_at IS NULL
+        AND g.revoked_at IS NULL
+        AND (g.scope <> 'session' OR s.status IN ('pending', 'running'))
         ${q.subject.kind === "user"
-          ? this.sql`AND user_subject_id = ${userSubjectId}`
-          : this.sql`AND agent_subject_id = ${agentSubjectId}`}
+          ? this.sql`AND g.user_subject_id = ${userSubjectId}`
+          : this.sql`AND g.agent_subject_id = ${agentSubjectId}`}
     `;
     return rows.map(toGrant);
+  }
+
+  /**
+   * Revoke session-scoped grants whose bound session has reached a
+   * terminal state. Idempotent — grants already revoked or consumed
+   * are left alone. Returns the number of rows the reaper updated
+   * so the caller can log it.
+   */
+  async reapDanglingSessionGrants(): Promise<number> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE permission_grants g
+      SET revoked_at = now()
+      FROM sessions s
+      WHERE g.scope = 'session'
+        AND g.session_id = s.id
+        AND g.consumed_at IS NULL
+        AND g.revoked_at IS NULL
+        AND s.status IN ('complete', 'failed')
+      RETURNING g.id
+    `;
+    return rows.length;
   }
 
   async consumeIfActive(id: GrantId): Promise<Grant | null> {

@@ -300,6 +300,67 @@ describe("listGrants", () => {
   });
 });
 
+describe("reapDanglingSessionGrants", () => {
+  it("revokes session-scoped grants whose session is terminal", async () => {
+    const terminalSessionId = "019da258-70a0-7efa-98a1-47cdc5f9e501";
+    const runningSessionId = "019da258-70a0-7efa-98a1-47cdc5f9e502";
+
+    // Seed one session-scoped grant bound to a terminal session and one
+    // bound to a still-running session. Only the first should reap.
+    await grants.create({
+      workspaceId: ws,
+      subject: userSubject(actor),
+      grantType: GrantType(TOOL_SCOPE_GRANT_TYPE),
+      details: { scope: "git.write" },
+      scope: "session",
+      sessionId: terminalSessionId as never,
+      grantedByUserId: actor,
+      reason: null,
+    });
+    await grants.create({
+      workspaceId: ws,
+      subject: userSubject(actor),
+      grantType: GrantType(TOOL_SCOPE_GRANT_TYPE),
+      details: { scope: "gmail.read" },
+      scope: "session",
+      sessionId: runningSessionId as never,
+      grantedByUserId: actor,
+      reason: null,
+    });
+
+    grants.sessionTerminal = (id) => id === terminalSessionId;
+
+    const count = await grants.reapDanglingSessionGrants();
+    expect(count).toBe(1);
+
+    // The terminal-session grant is now revoked; the running one stays active.
+    const live = grants.rows.filter((g) => g.revokedAt === null);
+    expect(live).toHaveLength(1);
+    expect(live[0]!.details).toEqual({ scope: "gmail.read" });
+  });
+
+  it("is a no-op when nothing is dangling", async () => {
+    grants.sessionTerminal = () => false;
+    await expect(grants.reapDanglingSessionGrants()).resolves.toBe(0);
+  });
+
+  it("leaves persistent + once grants alone", async () => {
+    await createGrant(deps(), {
+      actor,
+      workspaceId: ws,
+      subject: agentSubject(agent),
+      grantType: GrantType(SPAWN_GRANT_TYPE),
+      details: { child_agent_id: child },
+      scope: "persistent",
+      sessionId: null,
+      reason: null,
+    });
+    grants.sessionTerminal = () => true; // doesn't matter, no session scope
+    const count = await grants.reapDanglingSessionGrants();
+    expect(count).toBe(0);
+  });
+});
+
 describe("findActiveGrant", () => {
   it("returns null when no match", async () => {
     const out = await findActiveGrant(

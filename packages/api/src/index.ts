@@ -25,6 +25,7 @@ const {
   installationApiRoutes,
   agentRepoRoutes,
   workspaceGrantRoutes,
+  permissionGrants,
   sessionEvents,
   sql: composedSql,
   agents: composedAgents,
@@ -128,6 +129,39 @@ if (!schedulerDisabled) {
   console.log(
     `[scheduler] started (interval=${SCHEDULER_INTERVAL_MS}ms)`,
   );
+}
+
+// Dangling-grant reaper. session-scoped grants become invalid when their
+// bound session reaches a terminal state; the active-lookup already
+// filters on session status, but this belt-and-suspenders pass
+// permanently marks those grants revoked so the audit log and the UI
+// agree on the set of "live" grants.
+const REAPER_INTERVAL_MS = Number(
+  process.env.GRANT_REAPER_INTERVAL_MS || 60_000,
+);
+const reaperDisabled = process.env.GRANT_REAPER_DISABLED === "true";
+if (!reaperDisabled) {
+  let reaping = false;
+  const reap = async () => {
+    if (reaping) return;
+    reaping = true;
+    try {
+      const n = await permissionGrants.reapDanglingSessionGrants();
+      if (n > 0) console.log(`[grants] reaped ${n} dangling session grants`);
+    } catch (err) {
+      console.warn("[grants] reaper crashed:", (err as Error).message);
+    } finally {
+      reaping = false;
+    }
+  };
+  const handle = setInterval(() => {
+    void reap();
+  }, REAPER_INTERVAL_MS);
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  void reap();
+  console.log(`[grants] reaper started (interval=${REAPER_INTERVAL_MS}ms)`);
 }
 
 const natsUrl = process.env.NATS_URL || "";

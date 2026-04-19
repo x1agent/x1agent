@@ -1,5 +1,6 @@
 import { DomainError, type UserId, type WorkspaceId } from "@x1agent/kernel";
 import type { AgentId } from "@x1agent/domain-agents";
+import type { SessionId } from "@x1agent/domain-sessions";
 import {
   GrantId,
   type Grant,
@@ -92,6 +93,32 @@ export class InMemoryPermissionGrantRepository
     const updated: Grant = { ...r, revokedAt: new Date() };
     this.rows[i] = updated;
     return updated;
+  }
+
+  /**
+   * Callers supply a predicate that returns true when the session
+   * bound to a grant is terminal — the fake doesn't know about
+   * sessions, so it can't answer that on its own. Tests pass in a
+   * closure over an InMemorySessionRepository or a hand-rolled set.
+   */
+  sessionTerminal: (sessionId: SessionId) => boolean = () => false;
+
+  async reapDanglingSessionGrants(): Promise<number> {
+    let count = 0;
+    for (let i = 0; i < this.rows.length; i++) {
+      const r = this.rows[i]!;
+      if (
+        r.scope === "session" &&
+        r.sessionId !== null &&
+        r.consumedAt === null &&
+        r.revokedAt === null &&
+        this.sessionTerminal(r.sessionId)
+      ) {
+        this.rows[i] = { ...r, revokedAt: new Date() };
+        count += 1;
+      }
+    }
+    return count;
   }
 }
 
