@@ -211,4 +211,18 @@ export class RecordingProviderGateway implements ProviderGateway {
   ): Promise<void> {
     this.calls.push({ kind: "deprovision", providerType, handle });
   }
+
+  /** Tests seed this to control what discover returns. */
+  recordTypes: Array<{
+    name: string;
+    slug: string;
+    description: string;
+    icon: string | null;
+    fields: Array<{ name: string; type: string; required: boolean }>;
+    relationships: Array<{ name: string; targetType: string; edge: string }>;
+  }> = [];
+
+  async discover() {
+    return this.recordTypes;
+  }
 }

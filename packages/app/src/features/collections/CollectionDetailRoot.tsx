@@ -8,8 +8,17 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../components/ui/table";
 import { useAuthStore } from "../../stores/authStore";
 import { useCollectionsStore } from "../../stores/collectionsStore";
+import type { CollectionDTO, RecordTypeDTO } from "@x1agent/shared";
 
 interface Props {
   workspaceSlug: string;
@@ -36,6 +45,21 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
 
   const rows = bySlug[workspaceSlug] ?? [];
   const collection = rows.find((c) => c.slug === collectionSlug);
+  const {
+    loadRecordTypes,
+    recordTypesByKey,
+    recordTypesErrorByKey,
+    recordTypesLoadingKey,
+  } = useCollectionsStore();
+
+  useEffect(() => {
+    if (collection) loadRecordTypes(workspaceSlug, collection.id);
+  }, [workspaceSlug, collection?.id, loadRecordTypes]);
+
+  const rtKey = collection ? `${workspaceSlug}:${collection.id}` : "";
+  const recordTypes = recordTypesByKey[rtKey] ?? [];
+  const rtLoading = recordTypesLoadingKey === rtKey;
+  const rtError = recordTypesErrorByKey[rtKey] ?? null;
 
   const breadcrumbs = [
     { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
@@ -101,20 +125,11 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
 
         <VectorIndexCard collection={collection} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Record types</CardTitle>
-            <CardDescription>
-              Seed types registered on provision. Agents can introduce new
-              types at write time.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-zinc-400">
-            Person, Organization, Project, Document, Meeting Note, Decision,
-            Action Item. Live discovery via the graph provider lands in a
-            later slice.
-          </CardContent>
-        </Card>
+        <RecordTypesCard
+          loading={rtLoading}
+          error={rtError}
+          types={recordTypes}
+        />
       </div>
     </AppShell>
   );
@@ -138,6 +153,97 @@ function Row({
         {value}
       </div>
     </div>
+  );
+}
+
+function RecordTypesCard({
+  loading,
+  error,
+  types,
+}: {
+  loading: boolean;
+  error: string | null;
+  types: RecordTypeDTO[];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Record types</CardTitle>
+        <CardDescription>
+          Live from the graph provider. Seed types come from the platform
+          default registry; agents extend this at write time by introducing
+          a new type.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {error && (
+          <div className="px-4 py-3 text-sm text-red-400">{error}</div>
+        )}
+        {loading && types.length === 0 && (
+          <div className="px-4 py-3 text-sm text-zinc-500">Loading…</div>
+        )}
+        {!loading && !error && types.length === 0 && (
+          <div className="px-4 py-3 text-sm text-zinc-500">
+            No record types registered.
+          </div>
+        )}
+        {types.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Type</TableHead>
+                <TableHead>Fields</TableHead>
+                <TableHead>Relationships</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {types.map((t) => (
+                <TableRow key={t.slug} className="hover:bg-transparent">
+                  <TableCell>
+                    <div className="text-zinc-200">{t.name}</div>
+                    <div className="font-mono text-[11px] text-zinc-600">
+                      {t.slug}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {t.fields.length === 0 && (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
+                      {t.fields.map((f) => (
+                        <Badge
+                          key={f.name}
+                          variant={f.required ? "info" : "secondary"}
+                          title={`${f.type}${f.required ? " · required" : ""}`}
+                        >
+                          {f.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {t.relationships.length === 0 && (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
+                      {t.relationships.map((r) => (
+                        <Badge
+                          key={r.name}
+                          variant="outline"
+                          title={`→ ${r.targetType}`}
+                        >
+                          {r.edge}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

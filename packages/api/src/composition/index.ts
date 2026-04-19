@@ -306,16 +306,21 @@ export function compose(env: CompositionEnv): Composition {
   const providerGateway = env.natsConnection
     ? new NatsProviderGateway(env.natsConnection)
     : null;
+  const providerUnavailable = () => {
+    throw Object.assign(new Error("NATS not connected; provider unavailable"), {
+      code: "provider_unavailable",
+    });
+  };
   const providerGatewayUnavailable = {
     async provision() {
-      throw Object.assign(new Error("NATS not connected; provider unavailable"), {
-        code: "provider_unavailable",
-      });
+      providerUnavailable();
     },
     async deprovision() {
-      throw Object.assign(new Error("NATS not connected; provider unavailable"), {
-        code: "provider_unavailable",
-      });
+      providerUnavailable();
+    },
+    async discover() {
+      providerUnavailable();
+      return [];
     },
   };
 

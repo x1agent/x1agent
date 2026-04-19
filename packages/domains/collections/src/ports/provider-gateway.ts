@@ -30,4 +30,32 @@ export interface ProviderGateway {
     providerType: CollectionProviderType,
     handle: CollectionHandle,
   ): Promise<void>;
+
+  /**
+   * Return the record-type registry for a provisioned collection.
+   * Powers the "Record types" card on the collection detail page and
+   * any tool that wants to pick a record_type before writing.
+   */
+  discover(
+    providerType: CollectionProviderType,
+    handle: CollectionHandle,
+  ): Promise<readonly ProviderRecordType[]>;
+}
+
+/**
+ * Mirror of @x1agent/domain-graph's RecordType, redeclared locally so
+ * domain-collections doesn't force every caller to pull in the graph
+ * package just for a response shape.
+ */
+export interface ProviderRecordType {
+  name: string;
+  slug: string;
+  description: string;
+  icon: string | null;
+  fields: ReadonlyArray<{ name: string; type: string; required: boolean }>;
+  relationships: ReadonlyArray<{
+    name: string;
+    targetType: string;
+    edge: string;
+  }>;
 }
