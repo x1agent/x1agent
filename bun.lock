@@ -221,6 +221,19 @@
         "typescript": "^5.6.0",
       },
     },
+    "packages/providers/messaging-slack": {
+      "name": "@x1agent/provider-messaging-slack",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/domain-messaging": "workspace:*",
+        "@x1agent/kernel": "workspace:*",
+        "nats": "^2.29.3",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/shared": {
       "name": "@x1agent/shared",
       "version": "0.0.0",
@@ -968,6 +981,8 @@
     "@x1agent/domain-workspaces": ["@x1agent/domain-workspaces@workspace:packages/domains/workspaces"],
 
     "@x1agent/kernel": ["@x1agent/kernel@workspace:packages/kernel"],
+
+    "@x1agent/provider-messaging-slack": ["@x1agent/provider-messaging-slack@workspace:packages/providers/messaging-slack"],
 
     "@x1agent/shared": ["@x1agent/shared@workspace:packages/shared"],
 
