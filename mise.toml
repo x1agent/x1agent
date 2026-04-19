@@ -17,11 +17,22 @@ KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 PUBLIC_API_URL = "http://localhost:30001"
 
 # ----------------------------------------------------------------------------
+# One-time-per-cluster setup: ensure the namespace + NATS mTLS Secret exist.
+# Runs before any deployment touches the cluster. Idempotent — safe to call
+# every dev start. Without this, the NATS pod cannot mount nats-tls and the
+# whole stack stalls.
+# ----------------------------------------------------------------------------
+[tasks."dev:setup"]
+description = "Bootstrap namespace + NATS mTLS material (idempotent)"
+run = "deploy/scripts/bootstrap-nats-tls.sh"
+
+# ----------------------------------------------------------------------------
 # Cluster-side dev: Postgres + api Deployment + file-sync + port-forward.
 # Blocks until you Ctrl-C; keep it running in its own terminal.
 # ----------------------------------------------------------------------------
 [tasks."dev:cluster"]
 description = "Start api + postgres in OrbStack with hot file-sync (blocks)"
+depends = ["dev:setup"]
 run = "devspace dev --namespace x1agent"
 
 [tasks."dev:cluster:stop"]
@@ -61,6 +72,7 @@ run = "cd packages/app && bun run dev"
 # run dev:cluster:stop to tear down the cluster-side stack.
 [tasks.dev]
 description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
+depends = ["dev:setup"]
 run = [
   "devspace dev --namespace x1agent &",
   "sleep 6 && cd packages/app && bun run dev",
