@@ -20,6 +20,7 @@ import {
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { AgentReposSection } from "../github/AgentReposSection";
+import { RecentRunsSection } from "../sessions/RecentRunsSection";
 
 interface Props {
   workspaceSlug: string;
@@ -253,6 +254,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         )}
 
         <AgentReposSection
+          workspaceSlug={workspaceSlug}
+          agentId={existing?.id ?? null}
+        />
+
+        <RecentRunsSection
           workspaceSlug={workspaceSlug}
           agentId={existing?.id ?? null}
         />
