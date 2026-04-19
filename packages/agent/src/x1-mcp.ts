@@ -183,6 +183,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "request_grant",
+      description:
+        "Ask the user to grant you a capability. One tool for every grant type — spawn, tool_scope, anything future. The user sees an inline Approve / Deny card in their session view; a message tells you the outcome.\n\nShape `details` to the grant_type:\n  - spawn: { child_agent_id: string }\n  - tool_scope: { scope: string }\n\nSet `scope` to:\n  - once: approve exactly one tool call\n  - session: approve for this session only\n  - persistent: standing approval (rare, admin-level)\n\nAfter calling this END YOUR TURN — the response arrives as a user message starting a fresh turn.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          request_id: {
+            type: "string",
+            description: "Unique ID used to match the response",
+          },
+          grant_type: {
+            type: "string",
+            enum: ["spawn", "tool_scope"],
+          },
+          details: {
+            type: "object",
+            description: "Type-specific payload (see tool description)",
+          },
+          scope: {
+            type: "string",
+            enum: ["once", "session", "persistent"],
+          },
+          justification: {
+            type: "string",
+            description:
+              "One-sentence explanation of why you need this, from the user's perspective.",
+          },
+        },
+        required: [
+          "request_id",
+          "grant_type",
+          "details",
+          "scope",
+          "justification",
+        ],
+      },
+    },
+    {
       name: "list_spawnable_agents",
       description:
         "List the child agents this session is allowed to spawn. Returns [{id, slug, name}]. Empty list means the agent has no spawn grants — ask the user to grant one on the agent edit screen.",
@@ -322,6 +360,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
     }
+
+    case "request_grant":
+      await postToSidecar("agent.permission_request", a);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Grant request sent. User will Approve or Deny; the outcome arrives as a user message with request_id: ${String(a?.request_id ?? "")}`,
+          },
+        ],
+      };
 
     case "list_spawnable_agents": {
       try {

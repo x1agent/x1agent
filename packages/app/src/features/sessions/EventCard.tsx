@@ -4,11 +4,17 @@ import remarkGfm from "remark-gfm";
 import { ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { apiFetch } from "../../lib/api";
 
 interface Props {
   event: SessionEventDTO;
   verbose?: boolean;
   onRespond?: (text: string, requestId: string) => void;
+  workspaceSlug: string;
+  agentId?: string;
+  sessionId: string;
 }
 
 type Payload = Record<string, unknown>;
@@ -155,6 +161,127 @@ function InputRequestCard({
   );
 }
 
+function PermissionRequestCard({
+  event,
+  onRespond,
+  workspaceSlug,
+  agentId,
+  sessionId,
+}: {
+  event: SessionEventDTO;
+  onRespond?: (text: string, requestId: string) => void;
+  workspaceSlug: string;
+  agentId?: string;
+  sessionId: string;
+}) {
+  const payload = p(event);
+  const requestId = String(payload["request_id"] ?? "");
+  const grantType = String(payload["grant_type"] ?? "");
+  const scope = String(payload["scope"] ?? "once");
+  const justification = String(payload["justification"] ?? "");
+  const details = (payload["details"] ?? {}) as Record<string, unknown>;
+
+  const [state, setState] = useState<
+    "pending" | "approving" | "approved" | "denied" | "error"
+  >("pending");
+  const [error, setError] = useState<string | null>(null);
+
+  const summarize = (): string => {
+    if (grantType === "tool_scope") {
+      return String(details["scope"] ?? grantType);
+    }
+    if (grantType === "spawn") {
+      return `spawn ${String(details["child_agent_id"] ?? "")}`;
+    }
+    return grantType;
+  };
+
+  const approve = async () => {
+    if (!agentId) {
+      setState("error");
+      setError("agent id unknown — cannot create grant");
+      return;
+    }
+    setState("approving");
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {
+        agent_subject_id: agentId,
+        grant_type: grantType,
+        details,
+        scope,
+        reason: `agent requested: ${justification.slice(0, 200)}`,
+      };
+      if (scope === "session") body["session_id"] = sessionId;
+      const res = await apiFetch<{ grant: { id: string } }>(
+        `/api/workspaces/${workspaceSlug}/grants`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      setState("approved");
+      onRespond?.(
+        `Permission approved: ${summarize()} (${scope}). Grant id: ${res.grant.id}.`,
+        requestId,
+      );
+    } catch (err) {
+      setState("error");
+      setError((err as Error).message);
+    }
+  };
+
+  const deny = () => {
+    setState("denied");
+    onRespond?.(
+      `Permission denied: ${summarize()}. Do not try again for this scope without a new user instruction.`,
+      requestId,
+    );
+  };
+
+  return (
+    <div className="px-4 py-3">
+      <div className="rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-amber-300">
+            Permission request
+          </span>
+          <Badge variant="warning">{grantType}</Badge>
+          <Badge variant="secondary">{scope}</Badge>
+        </div>
+        <p className="mb-2 text-sm text-amber-100">
+          The agent is asking for{" "}
+          <span className="font-medium">{summarize()}</span>.
+        </p>
+        {justification && (
+          <p className="mb-3 whitespace-pre-wrap text-sm text-zinc-200">
+            {justification}
+          </p>
+        )}
+        {state === "error" && error && (
+          <p className="mb-2 text-xs text-red-400">{error}</p>
+        )}
+        {state === "pending" || state === "approving" || state === "error" ? (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              onClick={approve}
+              disabled={state === "approving" || !agentId}
+            >
+              {state === "approving" ? "Approving…" : "Approve"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={deny}>
+              Deny
+            </Button>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">
+            {state === "approved" ? "Approved." : "Denied."}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ErrorCard({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   return (
@@ -245,7 +372,14 @@ function ToolResultCard({ event }: { event: SessionEventDTO }) {
   );
 }
 
-export function EventCard({ event, verbose, onRespond }: Props) {
+export function EventCard({
+  event,
+  verbose,
+  onRespond,
+  workspaceSlug,
+  agentId,
+  sessionId,
+}: Props) {
   switch (event.type) {
     case "session.started":
     case "session.completed":
@@ -262,6 +396,16 @@ export function EventCard({ event, verbose, onRespond }: Props) {
       return <ArtifactCard event={event} />;
     case "agent.input_request":
       return <InputRequestCard event={event} onRespond={onRespond} />;
+    case "agent.permission_request":
+      return (
+        <PermissionRequestCard
+          event={event}
+          onRespond={onRespond}
+          workspaceSlug={workspaceSlug}
+          agentId={agentId}
+          sessionId={sessionId}
+        />
+      );
     case "agent.error":
       return <ErrorCard event={event} />;
     case "agent.thinking":

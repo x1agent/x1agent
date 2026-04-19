@@ -6,9 +6,21 @@ interface Props {
   events: SessionEventDTO[];
   verbose?: boolean;
   onRespond?: (text: string, requestId: string) => void;
+  workspaceSlug: string;
+  /** The agent running this session — used as the subject of request_grant approvals. */
+  agentId?: string;
+  /** The session id — used as the session_id when an approved grant has scope='session'. */
+  sessionId: string;
 }
 
-export function EventStream({ events, verbose, onRespond }: Props) {
+export function EventStream({
+  events,
+  verbose,
+  onRespond,
+  workspaceSlug,
+  agentId,
+  sessionId,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,6 +43,9 @@ export function EventStream({ events, verbose, onRespond }: Props) {
             event={e}
             verbose={verbose}
             onRespond={onRespond}
+            workspaceSlug={workspaceSlug}
+            agentId={agentId}
+            sessionId={sessionId}
           />
         ))}
       </div>
