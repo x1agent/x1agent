@@ -1,10 +1,21 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { DomainError, systemClock } from "@x1agent/kernel";
 import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
+import { AgentId, type AgentRepository } from "@x1agent/domain-agents";
 import type {
   SessionEventRepository,
-  SessionId,
+  SessionRepository,
 } from "@x1agent/domain-sessions";
-import { appendSessionEvent } from "@x1agent/domain-sessions";
+import {
+  SessionId,
+  appendSessionEvent,
+  spawnChildSession,
+} from "@x1agent/domain-sessions";
+import {
+  SPAWN_GRANT_TYPE,
+  findActiveGrant,
+  type PermissionGrantRepository,
+} from "@x1agent/domain-permissions";
 
 /**
  * Endpoints only the sidecar calls (same-cluster). Gated on a shared
@@ -14,6 +25,9 @@ import { appendSessionEvent } from "@x1agent/domain-sessions";
  */
 export interface InternalRoutesConfig {
   events: SessionEventRepository;
+  sessions: SessionRepository;
+  agents: AgentRepository;
+  grants: PermissionGrantRepository;
   githubClient: GitHubAppClient | null;
   internalToken: string;
 }
@@ -60,6 +74,87 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       },
     );
     return c.json({ ok: true, duplicate: row === null });
+  });
+
+  // Spawn a child session on behalf of an orchestrator. The sidecar
+  // passes the orchestrator's own session_id (known to it from pod env)
+  // and the requested child agent id. The api enforces the spawn grant
+  // and sets parent_session_id / parent_agent_id on the child row.
+  app.post("/sessions/spawn", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      child_agent_id?: string;
+    };
+    if (!body.parent_session_id || !body.child_agent_id) {
+      return c.json(
+        { error: "missing_fields", need: ["parent_session_id", "child_agent_id"] },
+        400,
+      );
+    }
+
+    const permission = {
+      canSpawn: async (parentAgentId: ReturnType<typeof AgentId>, childAgentId: ReturnType<typeof AgentId>) => {
+        // The parent agent's workspace owns the grants — we need to look
+        // it up once before checking. Cheap: agents are cached by the
+        // repo.
+        const parentAgent = await cfg.agents.findById(parentAgentId);
+        if (!parentAgent) return false;
+        const grant = await findActiveGrant(
+          { grants: cfg.grants },
+          {
+            workspaceId: parentAgent.workspaceId,
+            subject: { kind: "agent", agentId: parentAgentId },
+            grantType: SPAWN_GRANT_TYPE as never,
+            matches: (d) => d["child_agent_id"] === childAgentId,
+          },
+        );
+        return grant !== null;
+      },
+    };
+
+    try {
+      const child = await spawnChildSession(
+        {
+          agents: cfg.agents,
+          sessions: cfg.sessions,
+          permission,
+          clock: systemClock,
+        },
+        {
+          parentSessionId: body.parent_session_id as never,
+          childAgentId: AgentId(body.child_agent_id),
+        },
+      );
+      return c.json(
+        {
+          session: {
+            id: child.id,
+            agent_id: child.agentId,
+            parent_session_id: child.parentSessionId,
+            parent_agent_id: child.parentAgentId,
+            triggered_by: child.triggeredBy,
+            status: child.status,
+            triggered_at: child.triggeredAt.toISOString(),
+          },
+        },
+        201,
+      );
+    } catch (err) {
+      if (err instanceof DomainError) {
+        const status =
+          err.code === "session_not_found" ||
+          err.code === "agent_not_found"
+            ? 404
+            : err.code === "permission_required"
+              ? 403
+              : 400;
+        return c.json(
+          { error: err.code, message: err.message },
+          status as 400,
+        );
+      }
+      return c.json({ error: "internal_error" }, 500);
+    }
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.

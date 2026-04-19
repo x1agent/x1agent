@@ -24,6 +24,7 @@ export * from "./application/schedule-due-sessions.js";
 export * from "./application/next-due.js";
 export * from "./application/append-session-event.js";
 export * from "./application/list-session-events.js";
+export * from "./application/spawn-child-session.js";
 
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";

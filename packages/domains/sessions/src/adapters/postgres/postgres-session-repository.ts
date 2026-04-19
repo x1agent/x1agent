@@ -22,6 +22,8 @@ interface Row {
   agent_id: string;
   triggered_by: string;
   triggered_by_user_id: string | null;
+  parent_session_id: string | null;
+  parent_agent_id: string | null;
   triggered_at: Date | string;
   status: string;
   completed_at: Date | string | null;
@@ -37,6 +39,10 @@ function toSession(r: Row): Session {
     triggeredByUserId: r.triggered_by_user_id
       ? UserId(r.triggered_by_user_id)
       : null,
+    parentSessionId: r.parent_session_id
+      ? SessionId(r.parent_session_id)
+      : null,
+    parentAgentId: r.parent_agent_id ? AgentId(r.parent_agent_id) : null,
     triggeredAt: new Date(r.triggered_at),
     status: SessionStatus(r.status),
     completedAt: r.completed_at ? new Date(r.completed_at) : null,
@@ -46,8 +52,9 @@ function toSession(r: Row): Session {
 }
 
 const SELECT = `
-  id, agent_id, triggered_by, triggered_by_user_id, triggered_at,
-  status, completed_at, error_message, created_at
+  id, agent_id, triggered_by, triggered_by_user_id,
+  parent_session_id, parent_agent_id,
+  triggered_at, status, completed_at, error_message, created_at
 `;
 
 function isUniqueViolation(err: unknown): boolean {
@@ -66,10 +73,13 @@ export class PostgresSessionRepository implements SessionRepository {
     try {
       const rows = await this.sql<Row[]>`
         INSERT INTO sessions
-          (agent_id, triggered_by, triggered_by_user_id, triggered_at)
+          (agent_id, triggered_by, triggered_by_user_id,
+           parent_session_id, parent_agent_id, triggered_at)
         VALUES
           (${input.agentId}, ${input.triggeredBy},
-           ${input.triggeredByUserId}, ${input.triggeredAt})
+           ${input.triggeredByUserId},
+           ${input.parentSessionId}, ${input.parentAgentId},
+           ${input.triggeredAt})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;
       return toSession(rows[0]!);
