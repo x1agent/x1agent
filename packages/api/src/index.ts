@@ -16,9 +16,11 @@ const {
   workspaceInvitationRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  sessionRoutes,
   githubInstallRoutes,
   installationApiRoutes,
   agentRepoRoutes,
+  tickScheduler,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -69,12 +71,50 @@ app.route("/auth/github", githubInstallRoutes);
 app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/installations", installationApiRoutes);
 
 await seedIfDev().catch((err) => {
   console.warn("[seed] skipped:", (err as Error).message);
 });
+
+const SCHEDULER_INTERVAL_MS = Number(
+  process.env.SCHEDULER_INTERVAL_MS || 30_000,
+);
+const schedulerDisabled = process.env.SCHEDULER_DISABLED === "true";
+
+if (!schedulerDisabled) {
+  let ticking = false;
+  const tick = async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      const r = await tickScheduler();
+      if (r.created > 0 || r.errors > 0) {
+        console.log(
+          `[scheduler] considered=${r.considered} created=${r.created} skipped=${r.skippedDuplicate} errors=${r.errors}`,
+        );
+      }
+    } catch (err) {
+      console.warn("[scheduler] tick crashed:", (err as Error).message);
+    } finally {
+      ticking = false;
+    }
+  };
+
+  const handle = setInterval(() => {
+    void tick();
+  }, SCHEDULER_INTERVAL_MS);
+  // Don't keep the event loop alive on its own.
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  void tick();
+  console.log(
+    `[scheduler] started (interval=${SCHEDULER_INTERVAL_MS}ms)`,
+  );
+}
 
 console.log(`[api] listening on :${PORT}`);
 

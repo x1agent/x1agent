@@ -56,7 +56,7 @@ run = [
 [tasks.test]
 description = "Run all unit + integration tests across packages"
 run = """
-for pkg in kernel domains/auth domains/workspaces domains/invitations domains/agents api; do
+for pkg in kernel domains/auth domains/workspaces domains/invitations domains/agents domains/github domains/sessions api; do
   echo "=== $pkg ==="
   (cd packages/$pkg && bun test) || exit 1
 done

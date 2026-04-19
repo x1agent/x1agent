@@ -26,6 +26,12 @@ import {
   createAgentRoutes,
 } from "@x1agent/domain-agents";
 import {
+  PostgresSessionRepository,
+  createSessionRoutes,
+  scheduleDueSessions,
+  type ScheduleDueSessionsResult,
+} from "@x1agent/domain-sessions";
+import {
   OctokitGitHubAppClient,
   PostgresInstallationRepository,
   PostgresAgentRepoStore,
@@ -53,11 +59,14 @@ export interface Composition {
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
   agentRoutes: Hono;
+  sessionRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
   tokenizer: SessionTokenizer;
   users: UserRepository;
+  /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
+  tickScheduler: () => Promise<ScheduleDueSessionsResult>;
 }
 
 export interface CompositionEnv {
@@ -87,6 +96,7 @@ export function compose(env: CompositionEnv): Composition {
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
+  const sessions = new PostgresSessionRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
   const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
@@ -162,16 +172,31 @@ export function compose(env: CompositionEnv): Composition {
   const publicInvitationRoutes =
     createPublicInvitationRoutes(invitationConfig);
 
+  const resolveWorkspace = async (slug: ReturnType<typeof WorkspaceSlug>) => {
+    const w = await workspaces.findBySlug(slug);
+    return w?.id ?? null;
+  };
+
   const agentRoutes = createAgentRoutes({
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
-    resolveWorkspace: async (slug) => {
-      const w = await workspaces.findBySlug(WorkspaceSlug(slug));
-      return w?.id ?? null;
-    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
   });
+
+  const sessionRoutes = createSessionRoutes({
+    agents,
+    sessions,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+    clock: systemClock,
+  });
+
+  const tickScheduler = () =>
+    scheduleDueSessions({ agents, sessions, clock: systemClock });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
   // boot doesn't fail. Frontend reads /auth/github/config to check.
@@ -209,10 +234,12 @@ export function compose(env: CompositionEnv): Composition {
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     agentRoutes,
+    sessionRoutes,
     githubInstallRoutes,
     installationApiRoutes,
     agentRepoRoutes,
     tokenizer,
     users,
+    tickScheduler,
   };
 }

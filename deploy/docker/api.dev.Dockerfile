@@ -21,6 +21,7 @@ COPY packages/domains/workspaces/package.json packages/domains/workspaces/tsconf
 COPY packages/domains/invitations/package.json packages/domains/invitations/tsconfig.json ./packages/domains/invitations/
 COPY packages/domains/agents/package.json packages/domains/agents/tsconfig.json ./packages/domains/agents/
 COPY packages/domains/github/package.json packages/domains/github/tsconfig.json ./packages/domains/github/
+COPY packages/domains/sessions/package.json packages/domains/sessions/tsconfig.json ./packages/domains/sessions/
 # docs is listed as a workspace in the root package.json; its manifest has
 # to be present at install time even though the api image doesn't run it.
 COPY docs/package.json ./docs/
