@@ -157,6 +157,45 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
   });
 
+  // Read durable events from a child session. Authorization: the
+  // caller passes parent_session_id in the query; the api verifies the
+  // child was actually spawned by that parent before returning any
+  // events. A sibling or ancestor session cannot read another's output.
+  app.get("/sessions/:childId/child-events", async (c) => {
+    const childId = c.req.param("childId")! as SessionId;
+    const parentSessionId = c.req.query("parent_session_id");
+    if (!parentSessionId)
+      return c.json({ error: "missing_parent_session_id" }, 400);
+
+    const child = await cfg.sessions.findById(childId);
+    if (!child) return c.json({ error: "session_not_found" }, 404);
+    if (child.parentSessionId !== parentSessionId)
+      return c.json({ error: "not_your_child" }, 403);
+
+    const afterRaw = c.req.query("after_seq");
+    const limitRaw = c.req.query("limit");
+    const limit = Math.max(
+      1,
+      Math.min(5000, limitRaw !== undefined ? Number(limitRaw) : 500),
+    );
+    const events = await cfg.events.listBySession(childId, {
+      afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
+      limit,
+    });
+    return c.json({
+      child: {
+        id: child.id,
+        status: child.status,
+      },
+      events: events.map((e) => ({
+        seq: e.seq,
+        type: e.type,
+        payload: e.payload,
+        timestamp: e.timestamp.toISOString(),
+      })),
+    });
+  });
+
   // List the child agents a given session is allowed to spawn. Derived
   // from permission_grants by looking up active spawn grants held by
   // the session's agent; returned enriched with agent name + slug so the

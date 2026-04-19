@@ -6,18 +6,30 @@
 //! adding the API internal token — the agent container never sees the
 //! token itself.
 
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::Json;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use crate::AppState;
+use crate::{AppState, SessionMessage};
 
 #[derive(Deserialize)]
 pub struct SpawnRequest {
     pub child_agent_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct InjectRequest {
+    pub text: String,
+}
+
+#[derive(Deserialize)]
+pub struct ReadChildQuery {
+    pub after_seq: Option<i64>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +58,106 @@ pub async fn handle_spawn(
         .send()
         .await;
     relay_json(res).await
+}
+
+pub async fn handle_read_child(
+    State(state): State<Arc<AppState>>,
+    Path(child_id): Path<String>,
+    Query(q): Query<ReadChildQuery>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let mut url = format!(
+        "{}/api/internal/sessions/{}/child-events?parent_session_id={}",
+        state.api_url.trim_end_matches('/'),
+        child_id,
+        state.session_id
+    );
+    if let Some(s) = q.after_seq {
+        url.push_str(&format!("&after_seq={}", s));
+    }
+    if let Some(l) = q.limit {
+        url.push_str(&format!("&limit={}", l));
+    }
+    let res = client
+        .get(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .send()
+        .await;
+    relay_json(res).await
+}
+
+pub async fn handle_inject_child(
+    State(state): State<Arc<AppState>>,
+    Path(child_id): Path<String>,
+    Json(req): Json<InjectRequest>,
+) -> axum::response::Response {
+    // Authorization: verify the child's parent_session_id equals our
+    // session_id before we publish anything. The api has the truth;
+    // we ask it to confirm by calling the same child-events endpoint
+    // (it returns 403 not_your_child when the link is wrong).
+    let client = reqwest::Client::new();
+    let check_url = format!(
+        "{}/api/internal/sessions/{}/child-events?parent_session_id={}&limit=1",
+        state.api_url.trim_end_matches('/'),
+        child_id,
+        state.session_id
+    );
+    match client
+        .get(&check_url)
+        .header("x-internal-token", &state.api_internal_token)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => {
+            let status = r.status();
+            let body = r.bytes().await.unwrap_or_default();
+            return axum::http::Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap_or_else(|_| {
+                    error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "upstream_build_failed",
+                        "",
+                    )
+                });
+        }
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_failed",
+                &e.to_string(),
+            )
+        }
+    }
+
+    // Publish a user.message envelope to the child's input subject.
+    let seq = state.sequence.fetch_add(1, Ordering::SeqCst);
+    let msg = SessionMessage {
+        session_id: child_id.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        sequence: seq,
+        r#type: "user.message".into(),
+        payload: serde_json::json!({
+            "text": req.text,
+            "from_session_id": state.session_id,
+        }),
+    };
+    let subject = format!("x1.session.{}.input", child_id);
+    match state.nc.publish(subject, serde_json::to_vec(&msg).unwrap().into()).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "ok": true, "sequence": seq })),
+        )
+            .into_response(),
+        Err(e) => error_response(
+            StatusCode::BAD_GATEWAY,
+            "publish_failed",
+            &e.to_string(),
+        ),
+    }
 }
 
 pub async fn handle_spawnable(

@@ -230,6 +230,41 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "read_child_output",
+      description:
+        "Read durable events from a session you spawned. Pass child_session_id (returned by spawn_session) and optionally after_seq to page — typical loop: call with after_seq=0 first, then pass back the last seq you saw. Returns { child: {id, status}, events: [{seq, type, payload, timestamp}] }. A 403 means the session isn't yours to read.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: { type: "string" },
+          after_seq: {
+            type: "number",
+            description:
+              "Return only events whose seq is greater than this. Default 0 (all).",
+          },
+          limit: {
+            type: "number",
+            description:
+              "Max number of events (default 500, cap 5000).",
+          },
+        },
+        required: ["child_session_id"],
+      },
+    },
+    {
+      name: "inject_message",
+      description:
+        "Send a user-message into a session you spawned. Use to drive a child agent — e.g. ask it a follow-up question after reading its output. The child receives it as a new user turn with from_session_id set to your id. Returns { ok, sequence }. A 403 means the session isn't yours to drive.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: { type: "string" },
+          text: { type: "string" },
+        },
+        required: ["child_session_id", "text"],
+      },
+    },
+    {
       name: "spawn_session",
       description:
         "Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child's progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.",
@@ -387,6 +422,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `list_spawnable_agents failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "read_child_output": {
+      const childId = String(a?.child_session_id ?? "");
+      const qs = new URLSearchParams();
+      if (a?.after_seq !== undefined)
+        qs.set("after_seq", String(a["after_seq"]));
+      if (a?.limit !== undefined) qs.set("limit", String(a["limit"]));
+      try {
+        const res = await fetch(
+          `${sidecarUrl}/child/${encodeURIComponent(childId)}/events${
+            qs.toString() ? `?${qs.toString()}` : ""
+          }`,
+        );
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `read_child_output failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "inject_message": {
+      const childId = String(a?.child_session_id ?? "");
+      try {
+        const res = await fetch(
+          `${sidecarUrl}/child/${encodeURIComponent(childId)}/inject`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: String(a?.text ?? "") }),
+          },
+        );
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `inject_message failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
