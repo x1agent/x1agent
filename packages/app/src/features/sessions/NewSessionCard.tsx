@@ -116,8 +116,8 @@ export function NewSessionCard({ workspaceSlug }: Props) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={onPromptKeyDown}
-            placeholder="Optional: message to start the session with. Leave blank to start silent."
-            rows={3}
+            placeholder="User prompt"
+            rows={2}
             className="resize-y"
           />
           <div className="flex items-center justify-between gap-3">
