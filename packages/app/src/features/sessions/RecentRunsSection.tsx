@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { SessionDTO, SessionStatus } from "@x1agent/shared";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { Textarea } from "../../components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -10,6 +11,8 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { useSessionsStore } from "../../stores/sessionsStore";
+
+export const PENDING_PROMPT_KEY_PREFIX = "x1agent:pending-prompt:";
 
 interface Props {
   workspaceSlug: string;
@@ -69,6 +72,7 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
   const { byAgent, load, trigger } = useSessionsStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
 
   useEffect(() => {
     if (agentId) load(workspaceSlug, agentId);
@@ -78,11 +82,24 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
 
   const rows = byAgent[agentId] ?? [];
 
-  const onRun = async () => {
+  const onRun = async (e?: FormEvent) => {
+    e?.preventDefault();
     setError(null);
     setBusy(true);
     try {
       const session = await trigger(workspaceSlug, agentId);
+      // Persist the prompt so the session page can auto-send it once
+      // the agent pod is up. sessionStorage is scoped to this tab, so
+      // opening the session in a new tab won't replay it.
+      const v = prompt.trim();
+      if (v) {
+        try {
+          sessionStorage.setItem(`${PENDING_PROMPT_KEY_PREFIX}${session.id}`, v);
+        } catch {
+          // sessionStorage can be disabled; the run still proceeds
+          // without an initial prompt.
+        }
+      }
       window.location.href = `/workspaces/${workspaceSlug}/sessions/${session.id}`;
     } catch (err) {
       setError((err as Error).message);
@@ -90,28 +107,50 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
     }
   };
 
+  const onPromptKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void onRun();
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <CardTitle>Recent runs</CardTitle>
-            <CardDescription>
-              Last 50 sessions, newest first. Scheduler ticks every 30s.
-            </CardDescription>
-          </div>
-          <Button type="button" onClick={onRun} disabled={busy}>
-            {busy ? "Starting…" : "Run now"}
-          </Button>
-        </div>
+        <CardTitle>Recent runs</CardTitle>
+        <CardDescription>
+          Last 50 sessions, newest first. Scheduler ticks every 30s.
+        </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
+        <form
+          onSubmit={onRun}
+          className="flex flex-col gap-2 border-b border-zinc-900 p-4"
+        >
+          <Textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={onPromptKeyDown}
+            placeholder="Optional: message to start the session with. Leave blank to start silent."
+            rows={3}
+            className="resize-y"
+          />
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-zinc-600">
+              ⌘/Ctrl+Enter to run
+            </span>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Starting…" : prompt.trim() ? "Run with prompt" : "Run"}
+            </Button>
+          </div>
+        </form>
+
         {error && (
           <div className="px-4 pt-3 text-sm text-red-400">{error}</div>
         )}
         {rows.length === 0 ? (
           <div className="p-4 text-sm text-zinc-500">
-            No runs yet. Click "Run now" to trigger one.
+            No runs yet. Write a prompt above and click "Run" to trigger one.
           </div>
         ) : (
           <div>
