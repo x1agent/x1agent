@@ -9,8 +9,15 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../components/ui/tabs";
 import { InvitationsPanel } from "../invitations/InvitationsPanel";
 import { SharedAgentResourcesPanel } from "./SharedAgentResourcesPanel";
+import { ContainerRegistryPanel } from "./ContainerRegistryPanel";
 
 interface Props {
   workspaceSlug: string;
@@ -40,7 +47,7 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
       ]}
     >
       <div className="space-y-6 p-6">
-        <div className="max-w-3xl space-y-6">
+        <div className="max-w-4xl space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Workspace</CardTitle>
@@ -58,20 +65,43 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
             </CardContent>
           </Card>
 
-          <SharedAgentResourcesPanel
-            slug={workspaceSlug}
-            canManage={!!canManage}
-          />
+          <Tabs defaultValue="resources">
+            <TabsList>
+              <TabsTrigger value="resources">Shared resources</TabsTrigger>
+              <TabsTrigger value="registry">Container registry</TabsTrigger>
+              <TabsTrigger value="invitations">Invitations</TabsTrigger>
+            </TabsList>
 
-          <InvitationsPanel slug={workspaceSlug} canManage={!!canManage} />
+            <TabsContent value="resources">
+              <SharedAgentResourcesPanel
+                slug={workspaceSlug}
+                canManage={!!canManage}
+              />
+              {!canManage && (
+                <Card className="mt-4">
+                  <CardContent className="py-4 text-sm text-zinc-500">
+                    Only workspace admins and owners can install or remove
+                    shared agent resources.
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
 
-          {!canManage && (
-            <Card>
-              <CardContent className="py-4 text-sm text-zinc-500">
-                Only workspace admins and owners can manage invitations.
-              </CardContent>
-            </Card>
-          )}
+            <TabsContent value="registry">
+              <ContainerRegistryPanel slug={workspaceSlug} />
+            </TabsContent>
+
+            <TabsContent value="invitations">
+              <InvitationsPanel slug={workspaceSlug} canManage={!!canManage} />
+              {!canManage && (
+                <Card className="mt-4">
+                  <CardContent className="py-4 text-sm text-zinc-500">
+                    Only workspace admins and owners can manage invitations.
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </AppShell>

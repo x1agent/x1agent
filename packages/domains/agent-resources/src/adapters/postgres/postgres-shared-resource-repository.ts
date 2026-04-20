@@ -99,6 +99,17 @@ export class PostgresSharedResourceRepository
     return rows.map(toResource);
   }
 
+  async listByStatus(
+    status: SharedResourceStatus,
+  ): Promise<readonly SharedResource[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM workspace_shared_resources
+      WHERE status = ${status}
+      ORDER BY created_at ASC
+    `;
+    return rows.map(toResource);
+  }
+
   async updateStatus(
     id: SharedResourceId,
     status: SharedResourceStatus,
