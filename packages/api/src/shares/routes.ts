@@ -172,8 +172,31 @@ export function createWorkspaceShareRoutes(
       idx >= 0 ? c.req.path.slice(idx + prefix.length) : "";
     if (!filePath) filePath = "index.html";
 
+    // CORS headers need to land on the raw Response we build below.
+    // Hono's global CORS middleware only sets headers via c.header(),
+    // which is bypassed when a handler returns `new Response(...)`
+    // directly. So we pull the origin from the request and echo it —
+    // cookies ride when Allow-Credentials + an exact Allow-Origin are
+    // both set. Mirrors the app-wide middleware in
+    // packages/api/src/index.ts.
+    const corsOrigin =
+      c.req.header("Origin") ?? process.env.PUBLIC_URL ?? "";
+    const corsHeaders: Record<string, string> = corsOrigin
+      ? {
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Access-Control-Allow-Credentials": "true",
+          Vary: "Origin",
+        }
+      : {};
+
     if (cfg.gcsArtifactsBucket) {
-      return serveFromGcs(cfg.gcsArtifactsBucket, sessionId, shareId, filePath);
+      return serveFromGcs(
+        cfg.gcsArtifactsBucket,
+        sessionId,
+        shareId,
+        filePath,
+        corsHeaders,
+      );
     }
 
     const bytes = readShareFile(sessionId, shareId, filePath);
@@ -182,6 +205,7 @@ export function createWorkspaceShareRoutes(
       headers: {
         "Content-Type": getMimeType(filePath),
         "Cache-Control": "public, max-age=86400",
+        ...corsHeaders,
       },
     });
   });
@@ -285,6 +309,7 @@ async function serveFromGcs(
   sessionId: string,
   shareId: string,
   filePath: string,
+  corsHeaders: Record<string, string>,
 ): Promise<Response> {
   try {
     const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
@@ -297,10 +322,10 @@ async function serveFromGcs(
     const tokenBody = (await tokenRes.json()) as { access_token?: string };
     const token = tokenBody.access_token;
     if (!token) {
-      return new Response(
-        JSON.stringify({ error: "gcs_auth_failed" }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
     const res = await fetch(gcsUrl, {
       headers: { Authorization: `Bearer ${token}` },
@@ -308,19 +333,20 @@ async function serveFromGcs(
     if (!res.ok) {
       return new Response(JSON.stringify({ error: "not_found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
     return new Response(res.body, {
       headers: {
         "Content-Type": getMimeType(filePath),
         "Cache-Control": "public, max-age=86400",
+        ...corsHeaders,
       },
     });
   } catch {
     return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
       status: 502,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   }
 }

@@ -67,20 +67,14 @@ function shareUrl(
   shareId: string,
   path = "",
 ): string {
-  const base = `${API_BASE}/api/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${shareId}/${path}`;
-  // Iframes and <img> tags can't set Authorization headers, and the
-  // session cookie doesn't ride along cross-port in dev, so we look up
-  // the user's JWT from the cookie and append it as ?token=. The share
-  // routes accept it and promote it to the Authorization header before
-  // the normal auth check runs.
-  const token = readSessionCookie();
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
-}
-
-function readSessionCookie(): string | null {
-  if (typeof document === "undefined") return null;
-  const match = document.cookie.match(/(?:^|;\s*)x1_session=([^;]+)/);
-  return match?.[1] ?? null;
+  // Cookies ride: localhost:4322 and localhost:30001 share the same
+  // registrable domain so a SameSite=Lax session cookie is sent on
+  // top-level navigations (iframe src, <a download> clicks) without
+  // any extra work. fetch() calls in this file use
+  // credentials: "include" so they're covered too; <img> tags get
+  // crossOrigin="use-credentials" below. The api's CORS block already
+  // allows credentials from the app origin.
+  return `${API_BASE}/api/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${shareId}/${path}`;
 }
 
 function formatSize(bytes: number): string {
@@ -220,6 +214,7 @@ function ImageShare({ payload, workspaceSlug, sessionId }: SubProps) {
     <img
       src={src}
       alt={payload.title}
+      crossOrigin="use-credentials"
       className="max-w-full rounded-md border border-zinc-800"
       style={{ maxHeight: "500px", objectFit: "contain" }}
     />
@@ -247,7 +242,7 @@ function SvgShare({ payload, workspaceSlug, sessionId }: SubProps) {
   );
 
   useEffect(() => {
-    fetch(src)
+    fetch(src, { credentials: "include" })
       .then((r) => r.text())
       .then(setSvg)
       .catch(() => setSvg(""));
@@ -334,7 +329,7 @@ function CsvShare({
   );
 
   useEffect(() => {
-    fetch(src)
+    fetch(src, { credentials: "include" })
       .then((r) => r.text())
       .then((text) => {
         const parsed = text
@@ -405,7 +400,7 @@ function JsonShare({
   const isJsonl = (payload.files[0]?.path || "").endsWith(".jsonl");
 
   useEffect(() => {
-    fetch(src)
+    fetch(src, { credentials: "include" })
       .then((r) => r.text())
       .then((text) => {
         if (isJsonl) {
@@ -452,7 +447,7 @@ function CodeShare({ payload, workspaceSlug, sessionId }: SubProps) {
   );
 
   useEffect(() => {
-    fetch(src)
+    fetch(src, { credentials: "include" })
       .then((r) => r.text())
       .then(setContent)
       .catch(() => setContent(""));
@@ -479,7 +474,7 @@ function DocumentShare({ payload, workspaceSlug, sessionId }: SubProps) {
   );
 
   useEffect(() => {
-    fetch(src)
+    fetch(src, { credentials: "include" })
       .then((r) => r.text())
       .then(setContent)
       .catch(() => setContent(""));
