@@ -32,6 +32,7 @@ import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
+import { ScheduleField } from "./ScheduleField";
 
 interface Props {
   workspaceSlug: string;
@@ -296,17 +297,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 <CardHeader>
                   <CardTitle>Schedule</CardTitle>
                   <CardDescription>
-                    Cron expression or macro like <code>@hourly</code> or{" "}
-                    <code>@every 15m</code>. Leave blank for manual runs only.
+                    Pick a cadence or drop to a raw cron under Custom.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Input
-                    id="agent-schedule"
-                    value={schedule}
-                    onChange={(e) => setSchedule(e.target.value)}
-                    placeholder="@hourly, @every 15m, or 0 9 * * mon-fri"
-                  />
+                  <ScheduleField value={schedule} onChange={setSchedule} />
                 </CardContent>
               </Card>
 
