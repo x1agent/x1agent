@@ -1,38 +1,45 @@
 # x1agent preset: Rust stable
 #
-# Rust doesn't define LTS — `stable` is the supported channel and every
-# six weeks a new minor replaces it. This preset installs rustup with
-# the minimal profile and the stable toolchain; admins who need a
-# specific version can override with `rustup default <version>` inside
-# the agent's workspace or fork this Dockerfile.
-#
-# build-essential + pkg-config + libssl-dev cover the common crate
-# dependencies (tokio, reqwest, etc.) that link against openssl.
+# Starts from Rust's canonical image (bookworm; rustup-managed
+# toolchain, cargo, rustc preconfigured) and layers the x1 agent
+# overlay on top. Rust has no LTS; the image tracks the current stable
+# minor and rebuilds pull the latest.
 
-ARG BASE_IMAGE=x1agent/runtime-core:v1
-FROM ${BASE_IMAGE}
+ARG AGENT_OVERLAY=x1agent/runtime-core:v1
+FROM ${AGENT_OVERLAY} AS x1
 
-USER root
+FROM rust:1-bookworm
 
+# --- x1 agent overlay ---
+COPY --from=x1 /x1 /x1
+
+# --- language-agnostic dev tooling + common native-link deps ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
       pkg-config \
       libssl-dev \
       ripgrep \
       jq \
   && rm -rf /var/lib/apt/lists/*
 
-USER node
+# --- rustup components the agent is likely to reach for ---
+RUN rustup component add clippy rustfmt
 
-ENV CARGO_HOME=/home/node/.cargo
-ENV RUSTUP_HOME=/home/node/.rustup
-ENV PATH="/home/node/.cargo/bin:${PATH}"
+# --- user + workspace + entrypoint wiring ---
+# rust:1-bookworm runs as root. Create uid 1000 and rewire CARGO_HOME
+# to the agent's home so `cargo install` writes to a path the agent
+# owns.
+RUN id -u 1000 >/dev/null 2>&1 \
+    || ( groupadd --system --gid 1000 agent \
+      && useradd --system --uid 1000 --gid 1000 --home /home/agent \
+           --create-home --shell /bin/bash agent ) \
+  && ln -sf /x1/etc/gitconfig /etc/gitconfig \
+  && mkdir -p /workspace /home/agent/.cargo \
+  && chown -R 1000:1000 /x1 /workspace /home/agent
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-      sh -s -- -y \
-        --default-toolchain stable \
-        --profile minimal \
-        --no-modify-path \
-  && rustc --version \
-  && cargo --version \
-  && rustup component add clippy rustfmt
+USER 1000
+ENV HOME=/home/agent
+ENV CARGO_HOME=/home/agent/.cargo
+ENV PATH="/x1/bin:${CARGO_HOME}/bin:${PATH}"
+WORKDIR /workspace
+
+ENTRYPOINT ["/x1/bin/entrypoint"]
