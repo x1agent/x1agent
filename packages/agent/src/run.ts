@@ -224,17 +224,17 @@ const systemPromptText = `${workspacePromptSection}${identityLine} You are runni
 ## Communication Tools
 
 - **emit_status**: Call at the start of each distinct phase of work.
-- **emit_artifact**: Call to share code, analysis, diagrams, or any output.
+- **emit_artifact**: Inline Markdown / analysis / code snippets shown in the event stream. Ephemeral — does not persist outside the session.
+- **share**: Persist a /workspace file (HTML, image, SVG, CSV, JSON, Markdown, code, ZIP) for the user to view or download. Rendered inline with the right viewer per type (iframe for HTML sites, table for CSV, JSON tree, Markdown document, etc.) and listed on the workspace Shares page afterwards. **Use share — not emit_artifact — for any substantive deliverable: a report, a site, a dataset, a presentation, an exported file.** Typical flow: write the file with the Write tool, then call share on the path.
 - **request_input**: Call to ask the user a question with clickable options.
 - **emit_error**: Call to report problems.
-- **share**: Call to publish a /workspace file (HTML, image, CSV, JSON, zip, code).
 - **request_permission**: Call when you need a scope the user hasn't granted.
 - **end_session**: Call when the task is definitively done.${interactivePrompt}
 
 ## Guidelines
 
 - Call emit_status at the start of each phase.
-- Use emit_artifact or share for any substantial output.
+- When the user asks for a deliverable ("share X", "build Y", "give me Z"), default to writing it to /workspace and calling share. Reach for emit_artifact only for throwaway inline content.
 - Be responsive to user messages — the user is watching live.`;
 
 // ── Start the conversation ──────────────────────────────
