@@ -132,9 +132,23 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
 
   appendEvent(sessionId, ev) {
     set((s) => {
+      // Local echoes (user-typed messages the browser puts in the
+      // store immediately, before any server round-trip) use sentinel
+      // sequences in the 1B+ range. They must NOT update curMax —
+      // otherwise every real server event afterward (seq 3, 4, ...)
+      // falls below curMax and appendEvent silently drops it,
+      // which looks to the user like "my messages go through but
+      // the agent never responds".
+      const isLocal =
+        typeof ev.id === "string" && ev.id.startsWith("local-");
+
       const curMax = s.maxSeqBySession[sessionId] ?? -1;
-      if (ev.seq <= curMax) return s;
+      if (!isLocal && ev.seq <= curMax) return s;
+
       const cur = s.eventsBySession[sessionId] ?? [];
+      // Dedup double-fires of the same local echo by id.
+      if (isLocal && cur.some((e) => e.id === ev.id)) return s;
+
       let sessions = s.sessionsById;
       if (
         (ev.type === "session.completed" || ev.type === "session.failed") &&
@@ -154,7 +168,9 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ...s.eventsBySession,
           [sessionId]: [...cur, ev],
         },
-        maxSeqBySession: { ...s.maxSeqBySession, [sessionId]: ev.seq },
+        maxSeqBySession: isLocal
+          ? s.maxSeqBySession
+          : { ...s.maxSeqBySession, [sessionId]: ev.seq },
         sessionsById: sessions,
       };
     });
