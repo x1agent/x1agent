@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { NewSessionCard } from "./NewSessionCard";
 
 interface Props {
   workspaceSlug: string;
@@ -106,6 +107,8 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
       ]}
     >
       <div className="space-y-4 p-6">
+        <NewSessionCard workspaceSlug={workspaceSlug} />
+
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1 rounded-md border border-zinc-900 bg-zinc-950 p-1">
             {STATUS_FILTERS.map((f) => (
