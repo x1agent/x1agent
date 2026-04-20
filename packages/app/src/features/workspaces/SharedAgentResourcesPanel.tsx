@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiFetch as apiFetchShared } from "../../lib/api";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -56,20 +57,29 @@ const STATUS_VARIANT: Record<InstalledResource["status"], BadgeVariant> = {
   failed: "warning",
 };
 
-async function apiFetch<T>(
-  url: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const res = await fetch(url, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
-    ...init,
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    throw new Error(body.message ?? body.error ?? `HTTP ${res.status}`);
+// Thin wrapper around the shared apiFetch so the error body's
+// structured `error` / `message` come through when the API returns
+// 4xx with a DomainError payload.
+async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    return await apiFetchShared<T>(path, init);
+  } catch (err) {
+    const msg = (err as Error).message;
+    // apiFetchShared throws `API <status>: <body>`; unwrap the body.
+    const m = /^API \d+: (.+)$/.exec(msg);
+    if (m) {
+      try {
+        const parsed = JSON.parse(m[1]!) as {
+          message?: string;
+          error?: string;
+        };
+        throw new Error(parsed.message ?? parsed.error ?? msg);
+      } catch {
+        // fall through — body wasn't JSON
+      }
+    }
+    throw err;
   }
-  return (await res.json()) as T;
 }
 
 export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
