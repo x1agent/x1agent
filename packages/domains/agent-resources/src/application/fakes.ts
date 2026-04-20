@@ -60,6 +60,12 @@ export class InMemorySharedResourceRepository
     );
   }
 
+  async listByStatus(
+    status: SharedResourceStatus,
+  ): Promise<readonly SharedResource[]> {
+    return Array.from(this.byId.values()).filter((r) => r.status === status);
+  }
+
   async updateStatus(
     id: SharedResourceId,
     status: SharedResourceStatus,

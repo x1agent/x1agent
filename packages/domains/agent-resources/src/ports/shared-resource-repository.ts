@@ -30,6 +30,11 @@ export interface SharedResourceRepository {
     workspaceId: WorkspaceId,
   ): Promise<readonly SharedResource[]>;
 
+  /** Every resource currently at the given status, across all workspaces. */
+  listByStatus(
+    status: SharedResourceStatus,
+  ): Promise<readonly SharedResource[]>;
+
   updateStatus(
     id: SharedResourceId,
     status: SharedResourceStatus,

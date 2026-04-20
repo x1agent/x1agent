@@ -7,6 +7,7 @@ import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
+import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
@@ -65,8 +66,10 @@ const {
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
+  postgresProvisioner: composedPostgresProvisioner,
   redisBranches: composedRedisBranches,
   redisMinter: composedRedisMinter,
+  redisProvisioner: composedRedisProvisioner,
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
@@ -293,6 +296,53 @@ if (process.env.BRANCH_REAPER_DISABLED !== "true") {
   void reap();
   console.log(
     `[branch-reaper] started (interval=${BRANCH_REAPER_INTERVAL_MS}ms stale_after=${BRANCH_REAPER_STALE_AFTER_MS}ms)`,
+  );
+}
+
+// Status reconciler for shared agent resources. On a fast cadence
+// (15s) we ask each engine's provisioner whether the StatefulSet it
+// just stood up has become ready; on the first positive answer we
+// flip the workspace_shared_resources row from 'provisioning' to
+// 'running'. Without this the UI sits at "provisioning" indefinitely
+// even though K8s marked the pod 1/1 Ready seconds after install.
+const RESOURCE_RECONCILE_INTERVAL_MS = Number(
+  process.env.RESOURCE_RECONCILE_INTERVAL_MS || 15_000,
+);
+if (process.env.RESOURCE_RECONCILE_DISABLED !== "true") {
+  let reconciling = false;
+  const reconcile = async () => {
+    if (reconciling) return;
+    reconciling = true;
+    try {
+      const r = await reconcileSharedResourceStatuses({
+        sharedResources: composedSharedResources,
+        postgresProvisioner: composedPostgresProvisioner ?? null,
+        redisProvisioner: composedRedisProvisioner ?? null,
+        namespace: process.env.K8S_NAMESPACE || "x1agent",
+      });
+      if (r.flipped > 0) {
+        console.log(
+          `[resources] reconciled ${r.flipped}/${r.checked} to running`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[resources] reconcile tick crashed:",
+        (err as Error).message,
+      );
+    } finally {
+      reconciling = false;
+    }
+  };
+  const handle = setInterval(() => {
+    void reconcile();
+  }, RESOURCE_RECONCILE_INTERVAL_MS);
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  void reconcile();
+  console.log(
+    `[resources] status reconciler started (interval=${RESOURCE_RECONCILE_INTERVAL_MS}ms)`,
   );
 }
 
