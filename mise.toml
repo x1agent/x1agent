@@ -109,6 +109,68 @@ run = "cd docs && npm run build"
 description = "Preview the built docs site"
 run = "cd docs && npm run preview"
 
+# ----------------------------------------------------------------------------
+# Image catalog: build and push platform presets to the in-cluster
+# registry. Run this after `dev:cluster` is up and the registry Service
+# is reachable. Idempotent — re-running rebuilds + re-tags only what
+# changed in the layer cache.
+#
+# Port-forwards the registry to localhost:5000, builds:
+#   x1agent/runtime-core:v1        (packages/agent/Dockerfile)
+#   x1agent/preset-python-django:v1 (deploy/images/python-django/Dockerfile,
+#                                     FROMs runtime-core:v1)
+# then pushes to the forwarded port. Uses docker buildx for linux/amd64
+# so images run unchanged on both arm64 and amd64 nodes.
+# ----------------------------------------------------------------------------
+[tasks."images:publish"]
+description = "Build + push runtime-core and preset-python-django to the in-cluster registry"
+run = """
+set -euo pipefail
+REGISTRY_LOCAL="${IMAGES_REGISTRY:-localhost:5000}"
+PLATFORM="${IMAGES_PLATFORM:-linux/arm64}"
+PF_PID=""
+if ! curl -sf --max-time 2 "http://${REGISTRY_LOCAL}/v2/" > /dev/null; then
+  echo "[images] port-forwarding x1-registry Service to ${REGISTRY_LOCAL}"
+  kubectl -n x1agent port-forward svc/x1-registry "${REGISTRY_LOCAL##*:}":5000 > /tmp/x1-registry-pf.log 2>&1 &
+  PF_PID=$!
+  trap 'if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi' EXIT
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    if curl -sf --max-time 2 "http://${REGISTRY_LOCAL}/v2/" > /dev/null; then break; fi
+  done
+fi
+
+echo "[images] building runtime-core:v1"
+# Build locally first so the `FROM` in preset-python-django resolves,
+# then push. --load puts it in the local daemon.
+docker buildx build \\
+  --platform "${PLATFORM}" \\
+  -t x1agent/runtime-core:v1 \\
+  -t "${REGISTRY_LOCAL}/x1agent/runtime-core:v1" \\
+  -t "${REGISTRY_LOCAL}/x1agent/runtime-core:latest" \\
+  -f packages/agent/Dockerfile \\
+  --load \\
+  packages/agent
+
+docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:v1"
+docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:latest"
+
+echo "[images] building preset-python-django:v1"
+docker buildx build \\
+  --platform "${PLATFORM}" \\
+  -t "${REGISTRY_LOCAL}/x1agent/preset-python-django:v1" \\
+  -t "${REGISTRY_LOCAL}/x1agent/preset-python-django:latest" \\
+  --build-arg BASE_IMAGE=x1agent/runtime-core:v1 \\
+  -f deploy/images/python-django/Dockerfile \\
+  --load \\
+  deploy/images/python-django
+
+docker push "${REGISTRY_LOCAL}/x1agent/preset-python-django:v1"
+docker push "${REGISTRY_LOCAL}/x1agent/preset-python-django:latest"
+
+echo "[images] done — presets available at ${REGISTRY_LOCAL}/x1agent/*"
+"""
+
 [tasks.review]
 description = "Run Claude code review on staged changes"
 run = "claude --print .claude/commands/review.md"

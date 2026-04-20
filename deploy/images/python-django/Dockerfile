@@ -13,8 +13,14 @@
 # arc. At agent-run time the platform selects this image via the agent's
 # image_id column and composes it into a session pod alongside the sidecar
 # and any declared siblings.
+#
+# BASE_IMAGE defaults to the local tag `x1agent/runtime-core:v1`. The
+# `mise run images:publish` task builds and loads runtime-core before
+# building this image, so the local tag resolves. Kaniko in Phase 2
+# overrides BASE_IMAGE with the in-cluster registry path.
 
-FROM x1agent/runtime-core:v1
+ARG BASE_IMAGE=x1agent/runtime-core:v1
+FROM ${BASE_IMAGE}
 
 USER root
 
