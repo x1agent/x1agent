@@ -47,6 +47,26 @@ export function createWorkspaceShareRoutes(
   cfg: WorkspaceShareRoutesConfig,
 ): Hono {
   const app = new Hono();
+
+  // Iframes and <img> tags can't set an Authorization header, and
+  // cross-port cookies don't ride along in dev. To make a site-share
+  // iframe work, we accept the JWT as a `?token=` query param and
+  // promote it onto the Authorization header before requireAuth runs.
+  // Safe because requireAuth still verifies it with the tokenizer — a
+  // forged or expired token fails the same way whether it arrived as
+  // a header or query param.
+  app.use("*", async (c, next) => {
+    const existing =
+      c.req.header("Authorization") ||
+      c.req.header("Cookie")?.includes("x1_session=");
+    if (!existing) {
+      const qs = c.req.query("token");
+      if (qs) {
+        c.req.raw.headers.set("Authorization", `Bearer ${qs}`);
+      }
+    }
+    await next();
+  });
   app.use("*", cfg.requireAuth);
 
   const loadScoped = async (
