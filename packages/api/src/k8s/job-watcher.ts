@@ -23,6 +23,11 @@ import {
   type PostgresBranchRepository,
 } from "@x1agent/agent-resources-postgres";
 import {
+  mintRedisBranchCredential,
+  type RedisBranchMinter,
+  type RedisBranchRepository,
+} from "@x1agent/agent-resources-redis";
+import {
   buildSessionJob,
   type AttachedCollectionForPod,
   type LinkedRepoForPod,
@@ -68,6 +73,8 @@ export interface JobWatcherConfig {
   sharedResources?: SharedResourceRepository | null;
   postgresMinter?: PostgresBranchMinter | null;
   postgresBranches?: PostgresBranchRepository | null;
+  redisMinter?: RedisBranchMinter | null;
+  redisBranches?: RedisBranchRepository | null;
 }
 
 export interface JobWatcherHandle {
@@ -468,7 +475,26 @@ async function mintSessionCredentials(
         );
       }
     }
-    // Redis / future engines slot in here the same way.
+    if (resource.kind === "redis" && cfg.redisMinter && cfg.redisBranches) {
+      try {
+        const cred = await mintRedisBranchCredential(
+          cfg.redisMinter,
+          cfg.redisBranches,
+          {
+            resource,
+            namespace: cfg.namespace,
+            repoFullName: primary.repo_full_name,
+            branchName: primary.branch,
+          },
+        );
+        credsEnv.REDIS_URL = cred.url;
+        haveKinds.push("redis");
+      } catch (err) {
+        console.warn(
+          `[jobs] redis mint failed for session ${sessionId}: ${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   if (Object.keys(credsEnv).length === 0) {
