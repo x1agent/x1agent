@@ -121,6 +121,9 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/api.yaml
+    # Mirror deploy/images into the running api pod so seed.ts can read
+    # the Dockerfile text for each preset without rebuilding the image.
+    # Matches the `deploy/migrations` sync pattern below.
   messaging-slack:
     kubectl:
       manifests:
@@ -173,6 +176,7 @@ dev:
           - "*.log"
         startContainer: true
       - path: ./deploy/migrations:/app/deploy/migrations
+      - path: ./deploy/images:/app/deploy/images
     ports:
       - port: "30001"
     # The image already has node_modules installed; file sync overlays

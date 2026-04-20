@@ -20,6 +20,10 @@ interface Row {
   description: string | null;
   built_ref: string;
   is_preset: boolean;
+  dockerfile_source: string;
+  build_status: string;
+  build_log: string;
+  last_built_at: Date | string | null;
   created_at: Date | string;
 }
 
@@ -32,11 +36,18 @@ function serialize(r: Row) {
     description: r.description,
     built_ref: r.built_ref,
     is_preset: r.is_preset,
-    created_at:
-      typeof r.created_at === "string"
-        ? r.created_at
-        : r.created_at.toISOString(),
+    dockerfile_source: r.dockerfile_source,
+    build_status: r.build_status,
+    build_log: r.build_log,
+    last_built_at: toIso(r.last_built_at),
+    created_at: toIso(r.created_at) ?? "",
   };
+}
+
+function toIso(v: Date | string | null): string | null {
+  if (v === null) return null;
+  if (typeof v === "string") return v;
+  return v.toISOString();
 }
 
 /**
@@ -58,7 +69,8 @@ export function createWorkspaceImageCatalogRoutes(
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     const rows = await cfg.sql<Row[]>`
       SELECT id, workspace_id, name, display_name, description, built_ref,
-             is_preset, created_at
+             is_preset, dockerfile_source, build_status, build_log,
+             last_built_at, created_at
       FROM agent_images
       WHERE workspace_id IS NULL OR workspace_id = ${wsId}
       ORDER BY is_preset DESC, name ASC

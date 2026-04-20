@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { apiFetch } from "../lib/api";
 
+export type BuildStatus =
+  | "pending"
+  | "building"
+  | "succeeded"
+  | "failed"
+  | "ready";
+
 export interface AgentImage {
   id: string;
   workspace_id: string | null;
@@ -9,6 +16,10 @@ export interface AgentImage {
   description: string | null;
   built_ref: string;
   is_preset: boolean;
+  dockerfile_source: string;
+  build_status: BuildStatus;
+  build_log: string;
+  last_built_at: string | null;
   created_at: string;
 }
 

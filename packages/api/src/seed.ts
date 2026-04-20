@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { sql } from "./db/client.js";
 
 const TEST_USER = process.env.TEST_USER;
@@ -22,6 +24,7 @@ const PLATFORM_PRESETS = [
     description:
       "Base image every preset FROMs. Ships Node 22, tsx, the agent SDK, gh CLI, git, and the non-root user at uid 1000. No other language toolchains.",
     built_ref: `${REGISTRY}/x1agent/runtime-core:v1`,
+    dockerfile_path: "runtime-core/Dockerfile",
   },
   {
     name: "preset-python",
@@ -29,6 +32,7 @@ const PLATFORM_PRESETS = [
     description:
       "runtime-core + Python 3.13 (via uv standalone distribution), build-essential, ripgrep, jq. Generic Python target — add your own dependencies with uv or pip.",
     built_ref: `${REGISTRY}/x1agent/preset-python:v1`,
+    dockerfile_path: "python/Dockerfile",
   },
   {
     name: "preset-node",
@@ -36,6 +40,7 @@ const PLATFORM_PRESETS = [
     description:
       "runtime-core + TypeScript CLI + pnpm. Node 22 is the current Active LTS (Jod).",
     built_ref: `${REGISTRY}/x1agent/preset-node:v1`,
+    dockerfile_path: "node/Dockerfile",
   },
   {
     name: "preset-go",
@@ -43,6 +48,7 @@ const PLATFORM_PRESETS = [
     description:
       "runtime-core + the Go 1.24 toolchain from the official go.dev tarball. GOPATH at /home/node/go; `go install` targets land on PATH.",
     built_ref: `${REGISTRY}/x1agent/preset-go:v1`,
+    dockerfile_path: "go/Dockerfile",
   },
   {
     name: "preset-rust",
@@ -50,8 +56,24 @@ const PLATFORM_PRESETS = [
     description:
       "runtime-core + rustup stable toolchain (minimal profile) + clippy + rustfmt. Common native-link deps (build-essential, pkg-config, libssl-dev) pre-installed.",
     built_ref: `${REGISTRY}/x1agent/preset-rust:v1`,
+    dockerfile_path: "rust/Dockerfile",
   },
 ] as const;
+
+function readDockerfile(relativePath: string): string {
+  // api runs from /app/packages/api; Dockerfiles live at
+  // /app/deploy/images/<name>/Dockerfile (baked into the dev image).
+  // Fall back to empty if the file isn't there — detail view will
+  // render a placeholder note.
+  try {
+    return readFileSync(
+      join(process.cwd(), "..", "..", "deploy", "images", relativePath),
+      "utf8",
+    );
+  } catch {
+    return "";
+  }
+}
 
 export async function seedIfDev() {
   if (process.env.NODE_ENV === "production") return;
@@ -83,15 +105,22 @@ export async function seedIfDev() {
   }
 
   for (const preset of PLATFORM_PRESETS) {
+    const dockerfileSource = readDockerfile(preset.dockerfile_path);
     await sql`
-      INSERT INTO agent_images (workspace_id, name, display_name, description, built_ref, is_preset)
-      VALUES (NULL, ${preset.name}, ${preset.display_name}, ${preset.description},
-              ${preset.built_ref}, true)
+      INSERT INTO agent_images
+        (workspace_id, name, display_name, description, built_ref,
+         is_preset, dockerfile_source, build_status)
+      VALUES
+        (NULL, ${preset.name}, ${preset.display_name},
+         ${preset.description}, ${preset.built_ref}, true,
+         ${dockerfileSource}, 'ready')
       ON CONFLICT (name) WHERE workspace_id IS NULL
       DO UPDATE SET
         display_name = EXCLUDED.display_name,
         description = EXCLUDED.description,
         built_ref = EXCLUDED.built_ref,
+        dockerfile_source = EXCLUDED.dockerfile_source,
+        build_status = 'ready',
         updated_at = now()
     `;
   }
@@ -108,3 +137,4 @@ export async function seedIfDev() {
   `;
   console.log(`[seed] platform presets ready: ${PLATFORM_PRESETS.length}`);
 }
+
