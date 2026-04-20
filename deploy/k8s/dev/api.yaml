@@ -16,9 +16,10 @@ metadata:
   labels:
     app: x1agent-api
 ---
-# Least-privilege role for the api pod. Two buckets today:
+# Least-privilege role for the api pod. Three buckets:
 #  1. Read own namespace (debugging/self-awareness)
 #  2. Create/list/get/delete session Jobs (for the sessions milestone)
+#  3. Manage shared-agent-resources StatefulSets, Services, Secrets, and PVCs
 # Kept in one role rather than split — it's always one SA's permissions.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -33,7 +34,16 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
-    verbs: ["get", "list"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["create", "get", "list", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

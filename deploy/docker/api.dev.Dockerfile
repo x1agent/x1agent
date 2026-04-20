@@ -27,6 +27,8 @@ COPY packages/domains/messaging/package.json packages/domains/messaging/tsconfig
 COPY packages/domains/graph/package.json packages/domains/graph/tsconfig.json ./packages/domains/graph/
 COPY packages/domains/vector/package.json packages/domains/vector/tsconfig.json ./packages/domains/vector/
 COPY packages/domains/collections/package.json packages/domains/collections/tsconfig.json ./packages/domains/collections/
+COPY packages/domains/agent-resources/package.json packages/domains/agent-resources/tsconfig.json ./packages/domains/agent-resources/
+COPY packages/domains/agent-resources-postgres/package.json packages/domains/agent-resources-postgres/tsconfig.json ./packages/domains/agent-resources-postgres/
 # Agent is a workspace package too (even though the api doesn't require
 # it at runtime) — bun install fails --frozen-lockfile if any workspace
 # manifest is missing.
