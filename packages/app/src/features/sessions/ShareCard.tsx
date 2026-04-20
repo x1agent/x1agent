@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownComponents } from "./markdown-components";
 import {
   Braces,
   Download,
@@ -487,8 +488,10 @@ function DocumentShare({ payload, workspaceSlug, sessionId }: SubProps) {
   if (content === null)
     return <div className="text-xs text-zinc-500">Loading…</div>;
   return (
-    <div className="prose prose-sm prose-invert max-h-96 max-w-none overflow-auto [&_pre]:overflow-x-auto">
-      <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+    <div className="max-h-96 overflow-auto text-sm text-zinc-100">
+      <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {content}
+      </Markdown>
     </div>
   );
 }

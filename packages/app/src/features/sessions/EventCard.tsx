@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
 import ShareCard from "./ShareCard";
+import { markdownComponents } from "./markdown-components";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { apiFetch } from "../../lib/api";
@@ -52,10 +53,10 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
 function AgentText({ event }: { event: SessionEventDTO }) {
   const text = String(p(event)["text"] ?? "");
   return (
-    <div className="px-4 py-3 text-sm">
-      <div className="prose prose-sm prose-invert max-w-none [&_pre]:overflow-x-auto">
-        <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
-      </div>
+    <div className="px-4 py-3 text-sm text-zinc-100">
+      <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {text}
+      </Markdown>
     </div>
   );
 }
@@ -131,8 +132,13 @@ function ArtifactCard({ event }: { event: SessionEventDTO }) {
             {content}
           </pre>
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none">
-            <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+          <div className="text-sm text-zinc-100">
+            <Markdown
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
+              {content}
+            </Markdown>
           </div>
         )}
       </div>

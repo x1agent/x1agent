@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import type postgres from "postgres";
 import {
   DomainError,
   WorkspaceSlug,
@@ -183,6 +184,91 @@ export function createWorkspaceShareRoutes(
         "Cache-Control": "public, max-age=86400",
       },
     });
+  });
+
+  return app;
+}
+
+/**
+ * Workspace-level shares index. Lists every `agent.share` event in the
+ * workspace, joined with the originating session + agent so the page
+ * can link back. Sorted newest-first; capped at 500 rows because the
+ * UI paginates client-side.
+ *
+ * Mount point: `/api/workspaces/:slug/shares`.
+ */
+export interface WorkspaceSharesIndexConfig {
+  sql: postgres.Sql<Record<string, unknown>>;
+  adminGuard: AdminGuard;
+  resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
+  requireAuth: MiddlewareHandler;
+  getActor: (c: Context) => { userId: UserId; email: Email } | null;
+}
+
+interface SharesIndexRow {
+  session_id: string;
+  agent_id: string;
+  agent_slug: string;
+  agent_name: string;
+  session_triggered_at: Date | string;
+  payload: unknown;
+  created_at: Date | string;
+}
+
+export function createWorkspaceSharesIndexRoutes(
+  cfg: WorkspaceSharesIndexConfig,
+): Hono {
+  const app = new Hono();
+  app.use("*", cfg.requireAuth);
+
+  app.get("/", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    let wsId: WorkspaceId | null = null;
+    try {
+      wsId = await cfg.resolveWorkspace(WorkspaceSlug(c.req.param("slug")!));
+    } catch {
+      return c.json({ error: "workspace_not_found" }, 404);
+    }
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    try {
+      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
+    } catch (err) {
+      if (err instanceof DomainError)
+        return c.json({ error: err.code, message: err.message }, 403);
+      return c.json({ error: "forbidden" }, 403);
+    }
+    const rows = await cfg.sql<SharesIndexRow[]>`
+      SELECT
+        se.session_id,
+        s.agent_id,
+        a.slug AS agent_slug,
+        a.name AS agent_name,
+        s.triggered_at AS session_triggered_at,
+        se.payload,
+        se.created_at
+      FROM session_events se
+      JOIN sessions s ON s.id = se.session_id
+      JOIN agents a ON a.id = s.agent_id
+      WHERE a.workspace_id = ${wsId}
+        AND se.type = 'agent.share'
+      ORDER BY se.created_at DESC
+      LIMIT 500
+    `;
+    const shares = rows.map((r) => {
+      const payload =
+        typeof r.payload === "string"
+          ? (JSON.parse(r.payload) as Record<string, unknown>)
+          : (r.payload as Record<string, unknown>);
+      return {
+        ...payload,
+        session_id: r.session_id,
+        session_triggered_at: new Date(r.session_triggered_at).toISOString(),
+        agent: { id: r.agent_id, slug: r.agent_slug, name: r.agent_name },
+        created_at: new Date(r.created_at).toISOString(),
+      };
+    });
+    return c.json({ shares });
   });
 
   return app;
