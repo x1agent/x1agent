@@ -156,14 +156,35 @@ function ImageDetail({
         )}
 
         <section>
+          <SectionLabel>Dockerfile</SectionLabel>
+          {image.dockerfile_source ? (
+            <pre className="max-h-[28rem] overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs text-zinc-200 whitespace-pre-wrap break-all border border-zinc-900">
+              {image.dockerfile_source}
+            </pre>
+          ) : (
+            <div className="rounded-md border border-zinc-900 p-3 text-xs text-zinc-500">
+              Dockerfile source isn't stored on this row. For seeded
+              presets this should populate automatically on the next
+              api restart; check the <code>[seed] platform presets
+              ready</code> log line.
+            </div>
+          )}
+          {image.is_preset && (
+            <p className="mt-1 text-xs text-zinc-500">
+              Presets are code-maintained in{" "}
+              <code>deploy/images/{image.name.replace(/^preset-/, "")}/Dockerfile</code>
+              . Edits happen in the repo and ship with{" "}
+              <code>mise run images:publish</code>. Forking a preset
+              into a workspace-scoped, editable image is the next arc.
+            </p>
+          )}
+        </section>
+
+        <section>
           <SectionLabel>Registry reference</SectionLabel>
           <div className="rounded-md bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200 break-all">
             {image.built_ref}
           </div>
-          <p className="mt-1 text-xs text-zinc-500">
-            Session pods pull this reference when an agent has this image
-            pinned. Rebuild with <code>mise run images:publish</code>.
-          </p>
         </section>
 
         <section className="grid grid-cols-2 gap-4">
@@ -176,16 +197,42 @@ function ImageDetail({
             }
           />
           <Field
+            label="Build status"
+            value={
+              <Badge
+                variant={
+                  image.build_status === "ready" ||
+                  image.build_status === "succeeded"
+                    ? "success"
+                    : image.build_status === "failed"
+                      ? "warning"
+                      : "info"
+                }
+              >
+                {image.build_status}
+              </Badge>
+            }
+          />
+          <Field
             label="Created"
             value={new Date(image.created_at).toLocaleString()}
           />
+          <Field
+            label="Last built"
+            value={
+              image.last_built_at
+                ? new Date(image.last_built_at).toLocaleString()
+                : "—"
+            }
+          />
         </section>
 
-        {image.is_preset && (
-          <section className="rounded-md border border-zinc-900 p-3 text-xs text-zinc-500">
-            Presets are read-only. Phase 2 of the image catalog will let
-            admins fork a preset into a workspace-scoped image with
-            their own Dockerfile.
+        {image.build_status === "failed" && image.build_log && (
+          <section>
+            <SectionLabel>Build log</SectionLabel>
+            <pre className="max-h-[20rem] overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs text-red-300 whitespace-pre-wrap border border-zinc-900">
+              {image.build_log}
+            </pre>
           </section>
         )}
       </CardContent>
