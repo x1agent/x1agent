@@ -26,6 +26,9 @@ COPY packages/domains/messaging/package.json packages/domains/messaging/tsconfig
 COPY packages/domains/graph/package.json packages/domains/graph/tsconfig.json ./packages/domains/graph/
 COPY packages/domains/vector/package.json packages/domains/vector/tsconfig.json ./packages/domains/vector/
 COPY packages/domains/collections/package.json packages/domains/collections/tsconfig.json ./packages/domains/collections/
+COPY packages/domains/agent-resources/package.json packages/domains/agent-resources/tsconfig.json ./packages/domains/agent-resources/
+COPY packages/domains/agent-resources-postgres/package.json packages/domains/agent-resources-postgres/tsconfig.json ./packages/domains/agent-resources-postgres/
+COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-resources-redis/tsconfig.json ./packages/domains/agent-resources-redis/
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
