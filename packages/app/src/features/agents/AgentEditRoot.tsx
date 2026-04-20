@@ -32,7 +32,7 @@ import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
-import { ScheduleField } from "./ScheduleField";
+import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
 
 interface Props {
   workspaceSlug: string;
@@ -301,7 +301,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ScheduleField value={schedule} onChange={setSchedule} />
+                  <ScheduleBuilder value={schedule} onChange={setSchedule} />
                 </CardContent>
               </Card>
 
