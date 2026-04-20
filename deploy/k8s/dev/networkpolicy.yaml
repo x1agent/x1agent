@@ -147,6 +147,29 @@ spec:
               - { key: app, operator: In, values: ["api", "api-devspace"] }
       ports: [{ port: 5432, protocol: TCP }]
 ---
+# ── x1-registry (in-cluster image registry) ingress ────────────
+# Kubelet pulls images from the node network, so session-pod ingress
+# is not needed here. What IS needed: the api pushes platform presets
+# (runtime-core, python-django) via the mise publish task, and Kaniko
+# build jobs (Phase 2) push workspace-authored images. Both run as
+# pods labeled with their component.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: x1-registry-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: x1-registry } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: ["api", "api-devspace"] }
+        - podSelector: { matchLabels: { x1-component: image-build } }
+      ports: [{ port: 5000, protocol: TCP }]
+---
 # ── x1-redis (shared agent resources): session pods + api ──────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
