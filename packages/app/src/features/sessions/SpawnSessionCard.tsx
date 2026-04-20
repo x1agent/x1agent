@@ -3,7 +3,6 @@ import { Button } from "../../components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
@@ -59,10 +58,6 @@ export function SpawnSessionCard({ workspaceSlug, agentId }: Props) {
     <Card>
       <CardHeader>
         <CardTitle>Run</CardTitle>
-        <CardDescription>
-          Start a session for this agent. Optionally kick it off with a
-          prompt.
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onRun} className="flex flex-col gap-2">
