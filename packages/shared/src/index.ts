@@ -78,6 +78,13 @@ export interface SessionDTO {
   triggered_by_user_id: string | null;
   parent_session_id: string | null;
   parent_agent_id: string | null;
+  /**
+   * When this session was created by resuming a terminal session,
+   * points at the prior session's id. UI uses this to fetch the
+   * prior event log and prepend it to the current session's events
+   * with a "Session resumed" divider.
+   */
+  resumed_from: string | null;
   triggered_at: string;
   status: SessionStatus;
   completed_at: string | null;
