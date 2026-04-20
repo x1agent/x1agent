@@ -60,6 +60,9 @@ const {
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
+  sharedResources: composedSharedResources,
+  postgresBranches: composedPostgresBranches,
+  postgresMinter: composedPostgresMinter,
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
@@ -260,6 +263,9 @@ if (process.env.JOB_WATCHER !== "disabled") {
       hostClaudeCredentialsFile:
         process.env.HOST_CLAUDE_CREDENTIALS_FILE || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
+      sharedResources: composedSharedResources,
+      postgresMinter: composedPostgresMinter,
+      postgresBranches: composedPostgresBranches,
     });
   } catch (err) {
     console.warn(
