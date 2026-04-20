@@ -330,10 +330,28 @@ function VerboseThinking({ event }: { event: SessionEventDTO }) {
   );
 }
 
+// Internal MCP tools whose `agent.tool_call` events we suppress from the
+// raw JSON card because the SAME call also produces a nicely-rendered
+// companion event (agent.status, agent.artifact, agent.error, etc.).
+// Showing both is pure noise — the companion card has the same content
+// in a user-friendly shape. Keep this list in sync with the set of MCP
+// tools that emit structured events back into the session stream.
+const SUPPRESSED_RAW_TOOL_CALLS = new Set<string>([
+  "mcp__x1agent__emit_status",
+  "mcp__x1agent__emit_artifact",
+  "mcp__x1agent__emit_error",
+  "mcp__x1agent__request_input",
+  "mcp__x1agent__request_permission",
+  "mcp__x1agent__request_grant",
+  "mcp__x1agent__share",
+  "mcp__x1agent__end_session",
+]);
+
 function ToolCallCard({ event }: { event: SessionEventDTO }) {
   const [open, setOpen] = useState(false);
   const payload = p(event);
   const name = String(payload["tool_name"] ?? "tool");
+  if (SUPPRESSED_RAW_TOOL_CALLS.has(name)) return null;
   const input = payload["input"] ?? {};
   return (
     <div className="px-4 py-1.5">
