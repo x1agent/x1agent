@@ -185,7 +185,6 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="claude_code">claude_code</SelectItem>
-                  <SelectItem value="mastra">mastra</SelectItem>
                 </SelectContent>
               </Select>
             </div>
