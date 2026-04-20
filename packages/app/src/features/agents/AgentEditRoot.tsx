@@ -40,6 +40,16 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [heartbeatMd, setHeartbeatMd] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [imageId, setImageId] = useState<string>("");
+  const [images, setImages] = useState<
+    Array<{
+      id: string;
+      name: string;
+      display_name: string;
+      description: string | null;
+      is_preset: boolean;
+    }>
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,6 +60,15 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   useEffect(() => {
     load(workspaceSlug);
   }, [workspaceSlug, load]);
+
+  useEffect(() => {
+    fetch(`/api/workspaces/${workspaceSlug}/agent-images`, {
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? r.json() : { images: [] }))
+      .then((body: { images: typeof images }) => setImages(body.images ?? []))
+      .catch(() => setImages([]));
+  }, [workspaceSlug]);
 
   const existing =
     !isCreate && agentSlug
@@ -65,6 +84,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setSystemPrompt(existing.system_prompt);
       setHeartbeatMd(existing.heartbeat_md);
       setIsActive(existing.is_active);
+      setImageId((existing as { image_id?: string | null }).image_id ?? "");
     }
   }, [existing]);
 
@@ -128,7 +148,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
           is_active: isActive,
-        });
+          image_id: imageId === "" ? null : imageId,
+        } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
     } catch (err) {
@@ -187,6 +208,35 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   <SelectItem value="claude_code">claude_code</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-image">Container image</Label>
+              <Select
+                value={imageId === "" ? "__default__" : imageId}
+                onValueChange={(v) =>
+                  setImageId(v === "__default__" ? "" : v)
+                }
+              >
+                <SelectTrigger id="agent-image">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">
+                    Platform default
+                  </SelectItem>
+                  {images.map((img) => (
+                    <SelectItem key={img.id} value={img.id}>
+                      {img.display_name}
+                      {img.is_preset ? " (preset)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-zinc-500">
+                Pick a preset or a workspace image. "Platform default"
+                uses the deployment-wide AGENT_IMAGE and is appropriate
+                for the generic node-based agent.
+              </p>
             </div>
           </CardContent>
         </Card>

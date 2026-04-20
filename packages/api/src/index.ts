@@ -61,6 +61,7 @@ const {
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
+  workspaceImageCatalogRoutes,
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
@@ -140,6 +141,10 @@ app.route(
 app.route(
   "/api/workspaces/:slug/shared-agent-resources",
   sharedAgentResourcesRoutes,
+);
+app.route(
+  "/api/workspaces/:slug/agent-images",
+  workspaceImageCatalogRoutes,
 );
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
