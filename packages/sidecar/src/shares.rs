@@ -405,14 +405,18 @@ async fn upload_to_gcs(
 /// Upload every file to the api service as base64-encoded JSON. This
 /// is the local-dev path (no GCS bucket set); the api writes the files
 /// to its share directory and serves them back on GET requests.
+///
+/// Routed under `/api/internal/` rather than the workspace-scoped
+/// mount because the sidecar authenticates with the internal shared
+/// secret, not a user JWT.
 async fn upload_to_api(
     state: &Arc<AppState>,
     share_id: &str,
     files: &[(String, Vec<u8>, ShareFileEntry)],
 ) -> bool {
     let url = format!(
-        "{}/api/workspaces/{}/sessions/{}/shares",
-        state.api_url, state.workspace_slug, state.session_id
+        "{}/api/internal/sessions/{}/shares",
+        state.api_url, state.session_id
     );
 
     let files_payload: Vec<serde_json::Value> = files
