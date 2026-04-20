@@ -489,31 +489,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path, title }),
         });
-        const result = (await res.json()) as {
+        // Read as text first so we can surface a useful message even
+        // when the sidecar returns an empty body — that happens when
+        // the binary predates the /share route and axum's default
+        // 404 handler responds with a bare status line.
+        const bodyText = await res.text();
+        let result: {
           ok?: boolean;
           title?: string;
           share_type?: string;
           files?: unknown[];
           error?: string;
-        };
-        if (result.ok) {
+        } = {};
+        if (bodyText) {
+          try {
+            result = JSON.parse(bodyText);
+          } catch {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Share failed: sidecar returned non-JSON (${res.status}): ${bodyText.slice(0, 200)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+        if (!res.ok || !result.ok) {
+          const hint =
+            res.status === 404
+              ? " — sidecar is missing the /share route (image likely predates the share subsystem; rebuild required)"
+              : "";
           return {
             content: [
               {
                 type: "text" as const,
-                text: `Shared "${result.title ?? path}" (${result.share_type ?? "file"}) with user. ${result.files?.length ?? 1} file(s).`,
+                text: `Share failed (${res.status}): ${result.error ?? bodyText.slice(0, 200) ?? "unknown error"}${hint}`,
               },
             ],
+            isError: true,
           };
         }
         return {
           content: [
             {
               type: "text" as const,
-              text: `Share failed: ${result.error ?? "unknown error"}`,
+              text: `Shared "${result.title ?? path}" (${result.share_type ?? "file"}) with user. ${result.files?.length ?? 1} file(s).`,
             },
           ],
-          isError: true,
         };
       } catch (err) {
         return {
