@@ -19,9 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
-import { apiFetch } from "../../lib/api";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
+import { useImagesStore } from "../../stores/imagesStore";
 
 interface Props {
   workspaceSlug: string;
@@ -42,15 +42,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [heartbeatMd, setHeartbeatMd] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
-  const [images, setImages] = useState<
-    Array<{
-      id: string;
-      name: string;
-      display_name: string;
-      description: string | null;
-      is_preset: boolean;
-    }>
-  >([]);
+  const {
+    bySlug: imagesBySlug,
+    load: loadImages,
+  } = useImagesStore();
+  const images = imagesBySlug[workspaceSlug] ?? [];
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,12 +59,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   }, [workspaceSlug, load]);
 
   useEffect(() => {
-    apiFetch<{ images: typeof images }>(
-      `/api/workspaces/${workspaceSlug}/agent-images`,
-    )
-      .then((body) => setImages(body.images ?? []))
-      .catch(() => setImages([]));
-  }, [workspaceSlug]);
+    loadImages(workspaceSlug);
+  }, [workspaceSlug, loadImages]);
 
   const existing =
     !isCreate && agentSlug
