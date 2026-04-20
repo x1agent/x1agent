@@ -115,6 +115,20 @@
         "typescript": "^5.6.0",
       },
     },
+    "packages/domains/agent-resources-postgres": {
+      "name": "@x1agent/agent-resources-postgres",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kubernetes/client-node": "^1.4.0",
+        "@x1agent/agent-resources": "workspace:*",
+        "@x1agent/kernel": "workspace:*",
+        "postgres": "^3.4.4",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/domains/agents": {
       "name": "@x1agent/domain-agents",
       "version": "0.0.0",
@@ -1025,6 +1039,8 @@
     "@x1agent/agent": ["@x1agent/agent@workspace:packages/agent"],
 
     "@x1agent/agent-resources": ["@x1agent/agent-resources@workspace:packages/domains/agent-resources"],
+
+    "@x1agent/agent-resources-postgres": ["@x1agent/agent-resources-postgres@workspace:packages/domains/agent-resources-postgres"],
 
     "@x1agent/api": ["@x1agent/api@workspace:packages/api"],
 
