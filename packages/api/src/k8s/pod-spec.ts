@@ -53,6 +53,14 @@ export interface SessionPodSpec {
    */
   /** K8s namespace the Job lives in. */
   namespace: string;
+  /**
+   * Name of a K8s Secret (in the same namespace) holding per-session
+   * credentials for shared-agent-resources — DATABASE_URL, REDIS_URL,
+   * etc. Injected into the agent container via `envFrom.secretRef` so
+   * the agent sees standard env vars without the values ever landing in
+   * the pod spec.
+   */
+  sessionCredentialsSecretName?: string;
 }
 
 /**
@@ -168,6 +176,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               name: "agent",
               image: spec.agentImage,
               imagePullPolicy,
+              envFrom: spec.sessionCredentialsSecretName
+                ? [{ secretRef: { name: spec.sessionCredentialsSecretName } }]
+                : undefined,
               securityContext: {
                 // Claude Code refuses --dangerously-skip-permissions as
                 // root, so the agent runs as the Dockerfile's uid 1000.

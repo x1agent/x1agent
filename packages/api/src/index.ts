@@ -60,6 +60,9 @@ const {
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
+  sharedResources: composedSharedResources,
+  postgresBranches: composedPostgresBranches,
+  postgresMinter: composedPostgresMinter,
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
@@ -257,6 +260,9 @@ if (process.env.JOB_WATCHER !== "disabled") {
       natsUrl: process.env.NATS_URL || "nats://nats:4222",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
+      sharedResources: composedSharedResources,
+      postgresMinter: composedPostgresMinter,
+      postgresBranches: composedPostgresBranches,
     });
   } catch (err) {
     console.warn(

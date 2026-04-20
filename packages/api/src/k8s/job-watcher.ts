@@ -13,6 +13,15 @@ import type {
   InstallationId,
 } from "@x1agent/domain-github";
 import type { CollectionRepository } from "@x1agent/domain-collections";
+import type {
+  SharedResource,
+  SharedResourceRepository,
+} from "@x1agent/agent-resources";
+import {
+  mintPostgresBranchCredential,
+  type PostgresBranchMinter,
+  type PostgresBranchRepository,
+} from "@x1agent/agent-resources-postgres";
 import {
   buildSessionJob,
   type AttachedCollectionForPod,
@@ -45,6 +54,15 @@ export interface JobWatcherConfig {
   intervalMs?: number;
   /** Called on fatal per-tick errors. Defaults to console.warn. */
   onError?: (err: unknown) => void;
+  /**
+   * Shared-agent-resources plumbing. When `sharedResources` is present
+   * the watcher enumerates installed resources per session, mints
+   * per-branch credentials, and injects them as env via a per-session
+   * K8s Secret. When null, session pods boot without DATABASE_URL etc.
+   */
+  sharedResources?: SharedResourceRepository | null;
+  postgresMinter?: PostgresBranchMinter | null;
+  postgresBranches?: PostgresBranchRepository | null;
 }
 
 export interface JobWatcherHandle {
@@ -98,7 +116,7 @@ export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
         LIMIT 20
       `;
       for (const row of pending) {
-        await launchSession(cfg, batchApi, row.id as SessionId).catch((err) =>
+        await launchSession(cfg, batchApi, kc, row.id as SessionId).catch((err) =>
           console.warn(
             `[jobs] launch session ${row.id} failed: ${(err as Error).message}`,
           ),
@@ -132,6 +150,7 @@ export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
 async function launchSession(
   cfg: JobWatcherConfig,
   batchApi: k8s.BatchV1Api,
+  kc: k8s.KubeConfig,
   sessionId: SessionId,
 ): Promise<void> {
   const session = await cfg.sessions.findById(sessionId);
@@ -190,6 +209,22 @@ async function launchSession(
   const isScheduled = session.triggeredBy === "scheduler";
   const initialPrompt = isScheduled ? agent.heartbeatMd : "";
 
+  // Shared agent resources: mint per-branch credentials for every
+  // installed resource, stuff them into a per-session Secret, and let
+  // pod-spec reference it via envFrom. Augment the system prompt with
+  // a usage block so the agent knows what the env vars mean.
+  const { credentialsSecretName, promptAppend } = await mintSessionCredentials(
+    cfg,
+    kc,
+    session.id,
+    agent.workspaceId,
+    repos,
+  );
+
+  const composedSystemPrompt = promptAppend
+    ? `${agent.systemPrompt}\n\n${promptAppend}`
+    : agent.systemPrompt;
+
   const job = buildSessionJob({
     sessionId: session.id,
     agentId: agent.id,
@@ -197,7 +232,7 @@ async function launchSession(
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     agentPrompt: initialPrompt,
-    systemPromptText: agent.systemPrompt,
+    systemPromptText: composedSystemPrompt,
     heartbeatMd: agent.heartbeatMd,
     sessionMode: "interactive",
     idleTimeoutMs: 900_000,
@@ -212,6 +247,7 @@ async function launchSession(
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
     namespace: cfg.namespace,
+    sessionCredentialsSecretName: credentialsSecretName,
   });
 
   try {
@@ -360,3 +396,131 @@ async function markTerminal(
 
 // Export used by unit tests to avoid hitting a real cluster.
 export const _testing = { launchSession };
+
+/**
+ * For each installed shared-agent-resource in the session's workspace,
+ * mint a per-branch credential against the session's primary repo and
+ * branch, then write a per-session K8s Secret keyed as env vars
+ * (DATABASE_URL, ...). Returns the Secret name and a system-prompt
+ * append describing what the agent now has access to.
+ *
+ * When no shared resources are installed, or no minter is wired, this
+ * returns an empty result — the session pod boots exactly as it did
+ * before the feature.
+ */
+async function mintSessionCredentials(
+  cfg: JobWatcherConfig,
+  kc: k8s.KubeConfig,
+  sessionId: string,
+  workspaceId: string,
+  repos: LinkedRepoForPod[],
+): Promise<{
+  credentialsSecretName: string | undefined;
+  promptAppend: string;
+}> {
+  if (!cfg.sharedResources) {
+    return { credentialsSecretName: undefined, promptAppend: "" };
+  }
+  const primary = repos[0];
+  if (!primary) {
+    // No repo linked = nothing to scope a branch database to. Skip the
+    // mint entirely; the agent boots without DATABASE_URL.
+    return { credentialsSecretName: undefined, promptAppend: "" };
+  }
+  const resources = await cfg.sharedResources.listByWorkspace(
+    workspaceId as never,
+  );
+  const running = resources.filter(
+    (r: SharedResource) => r.status === "running",
+  );
+  if (running.length === 0) {
+    return { credentialsSecretName: undefined, promptAppend: "" };
+  }
+
+  const credsEnv: Record<string, string> = {};
+  const haveKinds: string[] = [];
+
+  for (const resource of running) {
+    if (resource.kind === "postgres" && cfg.postgresMinter && cfg.postgresBranches) {
+      try {
+        const cred = await mintPostgresBranchCredential(
+          cfg.postgresMinter,
+          cfg.postgresBranches,
+          {
+            resource,
+            namespace: cfg.namespace,
+            repoFullName: primary.repo_full_name,
+            branchName: primary.branch,
+          },
+        );
+        credsEnv.DATABASE_URL = cred.dsn;
+        haveKinds.push("postgres");
+      } catch (err) {
+        console.warn(
+          `[jobs] postgres mint failed for session ${sessionId}: ${(err as Error).message}`,
+        );
+      }
+    }
+    // Redis / future engines slot in here the same way.
+  }
+
+  if (Object.keys(credsEnv).length === 0) {
+    return { credentialsSecretName: undefined, promptAppend: "" };
+  }
+
+  const secretName = `x1-session-creds-${shortId(sessionId)}`;
+  const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+  const body: k8s.V1Secret = {
+    metadata: {
+      name: secretName,
+      namespace: cfg.namespace,
+      labels: {
+        app: "x1agent",
+        component: "session-credentials",
+        "session-id": sessionId,
+      },
+    },
+    type: "Opaque",
+    stringData: credsEnv,
+  };
+  try {
+    await coreApi.createNamespacedSecret({ namespace: cfg.namespace, body });
+  } catch (err) {
+    if ((err as { code?: number }).code === 409) {
+      await coreApi.replaceNamespacedSecret({
+        name: secretName,
+        namespace: cfg.namespace,
+        body,
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  return {
+    credentialsSecretName: secretName,
+    promptAppend: buildPromptAppend(haveKinds, primary.branch),
+  };
+}
+
+function buildPromptAppend(kinds: string[], branchName: string): string {
+  const lines: string[] = [];
+  lines.push("## Shared agent resources");
+  lines.push("");
+  if (kinds.includes("postgres")) {
+    lines.push(
+      `You have a Postgres database at \`$DATABASE_URL\`. It is scoped to branch \`${branchName}\`. Migrations, schemas, fixtures, and any other state you create persist across sessions on this branch. On branch deletion the database is dropped.`,
+    );
+  }
+  if (kinds.includes("redis")) {
+    lines.push("");
+    lines.push(
+      `You have a Redis cache at \`$REDIS_URL\`. All keys are prefixed automatically by your branch scope; you read and write unprefixed keys and the server enforces isolation.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function shortId(id: string): string {
+  return id.replace(/-/g, "").slice(0, 12);
+}
