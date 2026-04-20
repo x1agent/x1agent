@@ -19,14 +19,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../components/ui/tabs";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { useImagesStore } from "../../stores/imagesStore";
+import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
+import { AgentReposSection } from "../github/AgentReposSection";
+import { CollectionsAttachCard } from "./CollectionsAttachCard";
+import { CanSpawnCard } from "./CanSpawnCard";
 
 interface Props {
   workspaceSlug: string;
   /** undefined for create mode. */
   agentSlug?: string;
+}
+
+/**
+ * Agent edit screen. Divided into tabs so the detail page can stay
+ * compact: General (identity + schedule + active), Prompts (system +
+ * heartbeat), Repositories, Collections, Permissions. The tab is
+ * URL-synced so summary-row links on the detail page can deep-link
+ * straight into the right section.
+ *
+ * Create mode only shows General + Prompts — the others require an
+ * agent id that doesn't exist yet. After create, the user lands on
+ * the detail page and can attach repos/collections/grants from there.
+ */
+
+type TabKey = "general" | "prompts" | "repos" | "collections" | "permissions";
+
+const DEFAULT_TAB: TabKey = "general";
+
+function isTabKey(value: string): value is TabKey {
+  return (
+    value === "general" ||
+    value === "prompts" ||
+    value === "repos" ||
+    value === "collections" ||
+    value === "permissions"
+  );
 }
 
 export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
@@ -49,6 +85,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const images = imagesBySlug[workspaceSlug] ?? [];
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [tabRaw, setTab] = useUrlSearchParam("tab", DEFAULT_TAB);
+  const tab: TabKey = isTabKey(tabRaw) ? tabRaw : DEFAULT_TAB;
 
   useEffect(() => {
     if (status === "idle") fetchMe();
@@ -158,180 +197,248 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     window.location.href = `/workspaces/${workspaceSlug}`;
   };
 
+  // Save bar is shown under the General + Prompts tabs — those tabs
+  // edit the agent row itself. Repos / Collections / Permissions each
+  // save independently via their own cards and don't go through this
+  // form submit.
+  const showSaveBar = tab === "general" || tab === "prompts";
+
   return (
     <AppShell breadcrumbs={breadcrumbs}>
-      <form onSubmit={onSubmit} className="space-y-6 p-6 max-w-3xl">
-        <Card>
-          <CardHeader>
-            <CardTitle>Identity</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-name">Name</Label>
-              <Input
-                id="agent-name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Heartbeat"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-slug">Slug</Label>
-              <Input
-                id="agent-slug"
-                required
-                disabled={!isCreate}
-                value={slugInput}
-                onChange={(e) => setSlugInput(e.target.value)}
-                placeholder="heartbeat"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-runtime">Runtime</Label>
-              <Select
-                value={runtimeType}
-                onValueChange={(v) => setRuntimeType(v as RuntimeType)}
-              >
-                <SelectTrigger id="agent-runtime">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="claude_code">claude_code</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-image">Container image</Label>
-              <Select
-                value={imageId === "" ? "__default__" : imageId}
-                onValueChange={(v) =>
-                  setImageId(v === "__default__" ? "" : v)
-                }
-              >
-                <SelectTrigger id="agent-image">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__default__">
-                    Platform default
-                  </SelectItem>
-                  {images.map((img) => (
-                    <SelectItem key={img.id} value={img.id}>
-                      {img.display_name}
-                      {img.is_preset ? " (preset)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-zinc-500">
-                Pick a preset or a workspace image. "Platform default"
-                uses the deployment-wide AGENT_IMAGE and is appropriate
-                for the generic node-based agent.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="max-w-3xl p-6">
+        <Tabs value={tab} onValueChange={(v) => setTab(v)}>
+          <TabsList className="mb-4">
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            {!isCreate && (
+              <>
+                <TabsTrigger value="repos">Repositories</TabsTrigger>
+                <TabsTrigger value="collections">Collections</TabsTrigger>
+                <TabsTrigger value="permissions">Permissions</TabsTrigger>
+              </>
+            )}
+          </TabsList>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Schedule</CardTitle>
-            <CardDescription>
-              Cron expression or macro like <code>@hourly</code> or{" "}
-              <code>@every 15m</code>. Leave blank for manual runs only.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Input
-              id="agent-schedule"
-              value={schedule}
-              onChange={(e) => setSchedule(e.target.value)}
-              placeholder="@hourly, @every 15m, or 0 9 * * mon-fri"
-            />
-          </CardContent>
-        </Card>
+          <form onSubmit={onSubmit} className="space-y-6">
+            <TabsContent value="general" className="mt-0 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Identity</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-name">Name</Label>
+                    <Input
+                      id="agent-name"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Heartbeat"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-slug">Slug</Label>
+                    <Input
+                      id="agent-slug"
+                      required
+                      disabled={!isCreate}
+                      value={slugInput}
+                      onChange={(e) => setSlugInput(e.target.value)}
+                      placeholder="heartbeat"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-runtime">Runtime</Label>
+                    <Select
+                      value={runtimeType}
+                      onValueChange={(v) => setRuntimeType(v as RuntimeType)}
+                    >
+                      <SelectTrigger id="agent-runtime">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="claude_code">claude_code</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="agent-image">Container image</Label>
+                    <Select
+                      value={imageId === "" ? "__default__" : imageId}
+                      onValueChange={(v) =>
+                        setImageId(v === "__default__" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger id="agent-image">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">
+                          Platform default
+                        </SelectItem>
+                        {images.map((img) => (
+                          <SelectItem key={img.id} value={img.id}>
+                            {img.display_name}
+                            {img.is_preset ? " (preset)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-zinc-500">
+                      Pick a preset or a workspace image. "Platform default"
+                      uses the deployment-wide AGENT_IMAGE.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>System prompt</CardTitle>
-            <CardDescription>
-              Applied on every session regardless of trigger. Runtime
-              instructions that change per task live in the repo's own
-              CLAUDE.md, cloned into /workspace at session start.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              id="agent-system"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={6}
-            />
-          </CardContent>
-        </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Schedule</CardTitle>
+                  <CardDescription>
+                    Cron expression or macro like <code>@hourly</code> or{" "}
+                    <code>@every 15m</code>. Leave blank for manual runs only.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Input
+                    id="agent-schedule"
+                    value={schedule}
+                    onChange={(e) => setSchedule(e.target.value)}
+                    placeholder="@hourly, @every 15m, or 0 9 * * mon-fri"
+                  />
+                </CardContent>
+              </Card>
 
-        {schedule.trim() && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Heartbeat instructions</CardTitle>
-              <CardDescription>
-                Sent as the first user message on every scheduler tick.
-                Only relevant because a cadence is set — manual-only
-                agents wait for you to type in the session.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                id="agent-heartbeat"
-                value={heartbeatMd}
-                onChange={(e) => setHeartbeatMd(e.target.value)}
-                rows={8}
-                placeholder="Every tick: read the latest dashboard, summarize changes, post to #ops."
-                className="font-mono text-xs"
-              />
-            </CardContent>
-          </Card>
-        )}
+              {!isCreate && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Status</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={isActive}
+                        onChange={(e) => setIsActive(e.target.checked)}
+                      />
+                      Active (runs on schedule)
+                    </label>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
 
-        {!isCreate && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                />
-                Active (runs on schedule)
-              </label>
-            </CardContent>
-          </Card>
-        )}
+            <TabsContent value="prompts" className="mt-0 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>System prompt</CardTitle>
+                  <CardDescription>
+                    Applied on every session regardless of trigger. Runtime
+                    instructions that change per task live in the repo's own
+                    CLAUDE.md, cloned into /workspace at session start.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Textarea
+                    id="agent-system"
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    rows={10}
+                  />
+                </CardContent>
+              </Card>
 
-        {error && <div className="text-sm text-red-400">{error}</div>}
+              {schedule.trim() ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Heartbeat instructions</CardTitle>
+                    <CardDescription>
+                      Sent as the first user message on every scheduler tick.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Textarea
+                      id="agent-heartbeat"
+                      value={heartbeatMd}
+                      onChange={(e) => setHeartbeatMd(e.target.value)}
+                      rows={8}
+                      placeholder="Every tick: read the latest dashboard, summarize changes, post to #ops."
+                      className="font-mono text-xs"
+                    />
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Heartbeat instructions</CardTitle>
+                    <CardDescription>
+                      Available once a schedule is set. Set one on the General
+                      tab to enable heartbeat prompts.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              )}
+            </TabsContent>
 
-        <div className="flex items-center gap-2">
-          <Button type="submit" disabled={submitting}>
-            {submitting ? "Saving…" : isCreate ? "Create agent" : "Save"}
-          </Button>
-          <Button type="button" variant="outline" asChild>
-            <a href={cancelHref}>Cancel</a>
-          </Button>
-          {!isCreate && (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={onDelete}
-              className="ml-auto"
-            >
-              Delete
-            </Button>
-          )}
-        </div>
-      </form>
+            {!isCreate && existing && (
+              <>
+                <TabsContent value="repos" className="mt-0">
+                  <AgentReposSection
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                  />
+                </TabsContent>
+
+                <TabsContent value="collections" className="mt-0">
+                  <CollectionsAttachCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    agentName={existing.name}
+                    canManage={!!canManage}
+                  />
+                </TabsContent>
+
+                <TabsContent value="permissions" className="mt-0">
+                  <CanSpawnCard
+                    workspaceSlug={workspaceSlug}
+                    parentAgentId={existing.id}
+                    parentAgentName={existing.name}
+                    canManage={!!canManage}
+                  />
+                </TabsContent>
+              </>
+            )}
+
+            {error && <div className="text-sm text-red-400">{error}</div>}
+
+            {showSaveBar && (
+              <div className="flex items-center gap-2">
+                <Button type="submit" disabled={submitting}>
+                  {submitting
+                    ? "Saving…"
+                    : isCreate
+                      ? "Create agent"
+                      : "Save"}
+                </Button>
+                <Button type="button" variant="outline" asChild>
+                  <a href={cancelHref}>Cancel</a>
+                </Button>
+                {!isCreate && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={onDelete}
+                    className="ml-auto"
+                  >
+                    Delete
+                  </Button>
+                )}
+              </div>
+            )}
+          </form>
+        </Tabs>
+      </div>
     </AppShell>
   );
 }
