@@ -279,6 +279,17 @@ const injectServer = http.createServer(async (req, res) => {
         return;
       }
       inputChannel.push(parsed.text, parsed.request_id || undefined);
+      // Emit the user message to the stream so the sidecar publishes
+      // it on `.events` and the api persists it to session_events. The
+      // browser applies a local echo immediately on send, but without
+      // this emission the event never reaches durable storage and
+      // disappears on refresh.
+      emitToStream({
+        type: parsed.request_id ? "user.input_response" : "user.message",
+        payload: parsed.request_id
+          ? { text: parsed.text, request_id: parsed.request_id }
+          : { text: parsed.text },
+      });
       resetIdleTimer();
       console.log(`[agent] queued user message: ${parsed.text.slice(0, 100)}`);
       res.writeHead(200);

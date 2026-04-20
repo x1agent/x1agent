@@ -190,11 +190,13 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
-    // Per-component sequence counter. Local echoes share the same
-    // seq space as the publish envelopes. The store dedups by
-    // (seq, type) — since the server never emits `user.message` as
-    // its own event type, local echoes can never collide with real
-    // server events, regardless of what seq they use.
+    // The agent now emits a user.message (or user.input_response) to
+    // its SSE stream on inject, which the sidecar publishes to NATS
+    // and the api persists to session_events. The browser picks up
+    // that same event via its NATS subscription — so we do NOT add a
+    // local echo here. The round trip is one hop through the pod and
+    // costs ~50–200ms; in exchange the event is durable and survives
+    // page refresh.
     const seq = seqRef.current++;
     const envelope = {
       session_id: sessionId,
@@ -207,16 +209,6 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       `x1.session.${sessionId}.input`,
       sc.encode(JSON.stringify(envelope)),
     );
-    // Local echo. Always type `user.message` so the UI renders a user
-    // bubble even when the envelope was a `user.input_response`.
-    appendEvent(sessionId, {
-      id: `local-${seq}`,
-      session_id: sessionId,
-      seq,
-      type: "user.message",
-      payload: basePayload,
-      timestamp: envelope.timestamp,
-    });
   };
 
   const disabled =
