@@ -1,0 +1,146 @@
+# DEV — in-cluster container registry for platform presets and (later)
+# workspace-authored images built by Kaniko. See
+# docs/deployment/in-cluster-registry.md for the binding architecture.
+#
+# This is the plain-k8s variant wired into devspace. A prod Helm chart
+# (with backing object storage and a larger PVC) lives alongside the
+# x1agent chart under deploy/helm/registry/ when the first non-dev
+# deployment lands.
+#
+# Registry addressing from inside the cluster:
+#   x1-registry.x1agent.svc.cluster.local:5000
+#
+# Paths:
+#   x1agent/<name>:<version>            — platform images (runtime-core, presets)
+#   ws/<workspace-id>/<name>:<version>   — workspace-authored images (Phase 2)
+#   mirror/<upstream>/<path>:<tag>       — pull-through cache (Phase 2)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: x1-registry
+  labels:
+    app: x1-registry
+    x1-component: registry
+spec:
+  selector:
+    app: x1-registry
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: 5000
+      protocol: TCP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: x1-registry-data
+  labels:
+    app: x1-registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: x1-registry-config
+  labels:
+    app: x1-registry
+data:
+  # Minimal registry:2 config. No auth in dev — NetworkPolicy restricts
+  # reachability to in-cluster pods only. Storage is the PVC mounted
+  # at /var/lib/registry. Filesystem driver, no external object store
+  # needed for OrbStack.
+  config.yml: |
+    version: 0.1
+    log:
+      level: info
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+      delete:
+        enabled: true
+    http:
+      addr: :5000
+    health:
+      storagedriver:
+        enabled: true
+        interval: 10s
+        threshold: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: x1-registry
+  labels:
+    app: x1-registry
+    x1-component: registry
+spec:
+  replicas: 1
+  strategy:
+    # registry:2 single-replica with filesystem backing can't roll; the
+    # PVC is RWO so we need the old pod gone before the new one starts.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: x1-registry
+  template:
+    metadata:
+      labels:
+        app: x1-registry
+        x1-component: registry
+    spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: registry:2.8.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: registry
+              containerPort: 5000
+          env:
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+            - name: config
+              mountPath: /etc/docker/registry
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: x1-registry-data
+        - name: config
+          configMap:
+            name: x1-registry-config
