@@ -76,7 +76,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "emit_artifact",
       description:
-        "Show inline content in the session UI. For file-backed content (HTML, images, CSV, zip) use `share` instead.\n\nHow each type renders:\n- code: monospace block on dark background. Use only for actual source code.\n- analysis / summary / document / diff / other: rendered Markdown with headings, tables, lists, bold, italic, and inline code. Mermaid fences render as diagrams.\n\nIf the content has Markdown or a Mermaid diagram, use `document` or `analysis` — not `code`.",
+        "Show inline content to the user in the session UI. For file-backed content (HTML, images, CSV, etc.), use the `share` tool instead.\n\nHow each type renders:\n- **code**: raw monospace text on dark background. Use ONLY for actual source code snippets.\n- **analysis**: rendered Markdown with headings, lists, tables, bold/italic.\n- **summary**: rendered Markdown. Use for executive summaries or conclusions.\n- **document**: rendered Markdown. Use for reports, Mermaid diagrams, or any formatted text.\n- **diff**: rendered Markdown. Use for showing changes.\n- **other**: rendered Markdown.\n\nIMPORTANT: If the content contains Markdown formatting (headings, tables, lists, Mermaid diagrams), use 'document' or 'analysis' — NOT 'code'. Only use 'code' for actual programming language source code.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -138,16 +138,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "share",
       description:
-        "Publish a file or folder from /workspace to persistent storage so the user can view or download it. Renders inline by type: HTML → iframe, image → preview, CSV → table, JSON → tree, Markdown → document, code → syntax-highlighted, zip → download link. The file must already exist at /workspace/{path}.",
+        "Share a file or folder from /workspace with the user. The content is uploaded to persistent storage and displayed inline in the session UI. Use this for any output the user should see or download.\n\nSupported types and how they render:\n- HTML (.html or folder with index.html) → interactive iframe. Relative CSS/JS/image refs work.\n- Images (.png, .jpg, .svg, .gif, .webp) → inline image preview\n- CSV (.csv) → interactive data table\n- JSON/JSONL (.json, .jsonl) → expandable JSON tree viewer\n- Markdown (.md) → rendered document\n- Code (.ts, .py, .rs, etc.) → syntax-highlighted code block\n- ZIP (.zip) → download link\n\nThe file must already exist at /workspace/{path} before calling share. Typical flow: write the file with the Write tool, then call share. Shares are persistent — they survive past the session and show up on the workspace Shares page.",
       inputSchema: {
         type: "object" as const,
         properties: {
           path: {
             type: "string",
             description:
-              "Path relative to /workspace (e.g. 'report.html', 'charts/revenue.png', 'data.csv')",
+              "Path relative to /workspace (e.g. 'output/report.html', 'charts/revenue.png', 'data.csv')",
           },
-          title: { type: "string", description: "Display title" },
+          title: {
+            type: "string",
+            description: "Short display title for the share card.",
+          },
         },
         required: ["path"],
       },
