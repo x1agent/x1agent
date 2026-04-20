@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { InvitationsPanel } from "../invitations/InvitationsPanel";
+import { SharedAgentResourcesPanel } from "./SharedAgentResourcesPanel";
 
 interface Props {
   workspaceSlug: string;
@@ -56,6 +57,11 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
               />
             </CardContent>
           </Card>
+
+          <SharedAgentResourcesPanel
+            slug={workspaceSlug}
+            canManage={!!canManage}
+          />
 
           <InvitationsPanel slug={workspaceSlug} canManage={!!canManage} />
 
