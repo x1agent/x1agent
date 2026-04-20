@@ -67,6 +67,14 @@ export interface SessionPodSpec {
    * the pod spec.
    */
   sessionCredentialsSecretName?: string;
+  /**
+   * Name of a K8s ConfigMap carrying the rendered session-history
+   * markdown for a resumed session. When set, pod-spec mounts the
+   * `session_history.md` key at `/workspace/session_history.md` so
+   * the agent can read prior context before handling the next user
+   * message. See SESSION_RESUME_PROMPT in @x1agent/domain-sessions.
+   */
+  sessionHistoryConfigMapName?: string;
 }
 
 /**
@@ -155,6 +163,16 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
             // up, so any direct NATS connect from the agent container
             // fails the TLS handshake.
             { name: "nats-tls", secret: { secretName: "nats-tls" } },
+            ...(spec.sessionHistoryConfigMapName
+              ? [
+                  {
+                    name: "session-history",
+                    configMap: {
+                      name: spec.sessionHistoryConfigMapName,
+                    },
+                  },
+                ]
+              : []),
             ...(spec.hostHomeDir
               ? [
                   {
@@ -215,6 +233,16 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               env: agentEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                ...(spec.sessionHistoryConfigMapName
+                  ? [
+                      {
+                        name: "session-history",
+                        mountPath: "/workspace/session_history.md",
+                        subPath: "session_history.md",
+                        readOnly: true,
+                      },
+                    ]
+                  : []),
                 ...(spec.hostHomeDir
                   ? [
                       {

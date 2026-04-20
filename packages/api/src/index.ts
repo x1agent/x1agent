@@ -372,6 +372,7 @@ if (process.env.JOB_WATCHER !== "disabled") {
         process.env.HOST_CLAUDE_CREDENTIALS_FILE || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
+      sessionEvents,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,
