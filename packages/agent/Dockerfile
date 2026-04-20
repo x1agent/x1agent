@@ -1,13 +1,36 @@
-# x1agent session runtime — the "runtime-core" base image. Ships the
-# agent SDK, gh CLI, git, the git-credential-x1 shim, and a non-root
-# user at uid 1000. No language toolchains (python, go, rust, ...) —
-# those are layered on in admin-authored preset images via
-# `FROM x1agent/runtime-core:<version>`.
+# x1agent session runtime — "runtime-core".
 #
-# See docs/architecture/runtime-images.md for the FROM-pattern
-# contract and the reject-list (USER 0, privileged ports, baked
-# secrets). No secrets live in this image; every credential-bearing
-# request is minted on demand by the sidecar.
+# This image plays two roles:
+#
+# 1. A buildable, runnable reference. You can `FROM x1agent/runtime-core`
+#    and add a language toolchain. Simple, but it forces every preset
+#    to start from node-slim rather than the language's canonical image
+#    (golang:1.24, python:3.13-slim, rust:1.95-slim, ...). That pattern
+#    works but is not idiomatic Docker.
+#
+# 2. A SOURCE OF FILES to `COPY --from=`. The real pattern — and the
+#    one all shipped presets use — is:
+#
+#        FROM python:3.13-slim-bookworm
+#        COPY --from=x1agent/runtime-core:v1 /x1 /x1
+#        ENV PATH="/x1/bin:${PATH}"
+#        ENTRYPOINT ["/x1/bin/entrypoint"]
+#
+#    Everything the agent runtime needs is bundled under `/x1/`:
+#      /x1/bin/entrypoint         launcher script
+#      /x1/bin/gh                 gh CLI (on PATH via `ENV PATH`)
+#      /x1/bin/git-credential-x1  sidecar credential shim
+#      /x1/app/                   agent SDK (src + node_modules)
+#      /x1/runtime/               bundled Node 22 (bin + lib/node_modules)
+#      /x1/etc/gitconfig          git config to link to /etc/gitconfig
+#
+#    The preset adds a uid 1000 user (most language images don't have
+#    one), links gitconfig, and delegates to the entrypoint. See
+#    docs/architecture/runtime-images.md for the full rationale.
+#
+# Constraint: the bundled Node links against glibc. Presets must use
+# glibc-based bases (debian bookworm) for v1. An alpine/musl variant
+# is future work when someone asks.
 
 FROM node:22-slim AS builder
 
@@ -33,7 +56,6 @@ COPY src/ ./src/
 COPY tsconfig.json ./
 
 # ── Runtime stage ─────────────────────────────────────────
-
 FROM node:22-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -56,22 +78,37 @@ COPY gitconfig /etc/gitconfig
 
 RUN mkdir -p /workspace && chmod 777 /workspace
 
+# ── Build the /x1 overlay tree ─────────────────────────────
+# Language presets COPY this entire directory as their only hard
+# dependency on runtime-core. Everything in /x1 is self-contained and
+# PATH-independent — the entrypoint uses absolute paths into /x1.
+RUN set -e \
+  && mkdir -p /x1/bin /x1/app /x1/runtime/bin /x1/runtime/lib /x1/etc \
+  && cp -L /usr/local/bin/node /x1/runtime/bin/node \
+  && cp -rL /usr/local/lib/node_modules /x1/runtime/lib/node_modules \
+  && cp -r /app/. /x1/app/ \
+  && cp /usr/bin/gh /x1/bin/gh \
+  && cp /usr/local/bin/git-credential-x1 /x1/bin/git-credential-x1 \
+  && cp /etc/gitconfig /x1/etc/gitconfig
+
+# Entrypoint script: run the Agent SDK launcher under the bundled
+# Node + tsx. Works regardless of whether the base image ships its
+# own Node — we ignore $PATH and use absolute paths.
+COPY x1-entrypoint.sh /x1/bin/entrypoint
+RUN chmod +x /x1/bin/entrypoint
+
 # Claude Code refuses --dangerously-skip-permissions as root. The
-# node:22-slim base image already ships a `node` user at uid 1000; we
-# reuse it and give them a home dir so Claude Code writes settings and
-# debug logs somewhere writable. Preset images that FROM runtime-core
-# inherit this user; they must END with `USER node`, which the
-# runtime-images.md save-time validator enforces.
+# node:22-slim base image ships a `node` user at uid 1000; we reuse
+# it. When used via COPY --from overlay, the preset ensures its own
+# uid 1000 exists.
 RUN mkdir -p /home/node/.claude \
-  && chown -R node:node /app /workspace /home/node
+  && chown -R node:node /app /workspace /home/node /x1
 USER node
 ENV HOME=/home/node
 
-# Platform-tagged labels so the image is identifiable in any registry
-# that holds it. Preset images override these with their own name.
 LABEL org.x1agent.image="runtime-core" \
-      org.x1agent.image.role="base"
+      org.x1agent.image.role="base-and-overlay-source"
 
 WORKDIR /workspace
 
-ENTRYPOINT ["tsx", "/app/src/run.ts"]
+ENTRYPOINT ["/x1/bin/entrypoint"]

@@ -1,40 +1,42 @@
 # x1agent preset: Go 1.24
 #
-# Go doesn't define LTS — the last two minors get security fixes. 1.24
-# is the current stable release at image build time. Downloaded as the
-# official static tarball from go.dev, which resolves GOARCH from the
-# host platform so the image builds clean on arm64 and amd64.
-#
-# GOPATH is /home/node/go, consistent with the runtime-core user. The
-# agent can install tools with `go install .../cmd/foo@latest` and
-# they land in $GOPATH/bin which is on PATH.
+# Starts from Google's canonical Go image (bookworm) — GOPATH, GOROOT,
+# and the optimized go toolchain are set up the way the Go team ships
+# them — and layers the x1 agent overlay on top. Go has no formal LTS;
+# this pins 1.24 and tracks patches via rebuilds.
 
-ARG BASE_IMAGE=x1agent/runtime-core:v1
-FROM ${BASE_IMAGE}
+ARG AGENT_OVERLAY=x1agent/runtime-core:v1
+FROM ${AGENT_OVERLAY} AS x1
 
-USER root
+FROM golang:1.24-bookworm
 
-ARG GO_VERSION=1.24.0
+# --- x1 agent overlay ---
+COPY --from=x1 /x1 /x1
 
+# --- language-agnostic dev tooling ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ripgrep \
       jq \
   && rm -rf /var/lib/apt/lists/*
 
-RUN ARCH="$(dpkg --print-architecture)" \
-  && case "$ARCH" in \
-       amd64) GOARCH=amd64 ;; \
-       arm64) GOARCH=arm64 ;; \
-       *) echo "unsupported arch: $ARCH" && exit 1 ;; \
-     esac \
-  && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" -o /tmp/go.tgz \
-  && tar -C /usr/local -xzf /tmp/go.tgz \
-  && rm /tmp/go.tgz \
-  && /usr/local/go/bin/go version
+# --- user + workspace + entrypoint wiring ---
+# golang:1.24-bookworm runs as root. Create the uid 1000 user and hand
+# GOPATH over. The Go image already puts go and GOROOT in sensible
+# places; we don't touch those.
+RUN id -u 1000 >/dev/null 2>&1 \
+    || ( groupadd --system --gid 1000 agent \
+      && useradd --system --uid 1000 --gid 1000 --home /home/agent \
+           --create-home --shell /bin/bash agent ) \
+  && ln -sf /x1/etc/gitconfig /etc/gitconfig \
+  && mkdir -p /workspace /home/agent/go \
+  && chown -R 1000:1000 /x1 /workspace /home/agent/go
 
-ENV PATH="/usr/local/go/bin:/home/node/go/bin:${PATH}"
-ENV GOPATH="/home/node/go"
+USER 1000
+ENV HOME=/home/agent
+# GOPATH under the agent's home so `go install` lands in a writable
+# path. /x1/bin in front for gh + git-credential-x1.
+ENV GOPATH=/home/agent/go
+ENV PATH="/x1/bin:${GOPATH}/bin:${PATH}"
+WORKDIR /workspace
 
-RUN mkdir -p /home/node/go && chown -R node:node /home/node/go
-
-USER node
+ENTRYPOINT ["/x1/bin/entrypoint"]

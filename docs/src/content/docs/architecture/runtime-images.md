@@ -49,44 +49,125 @@ All containers share the pod's network namespace, so every sibling is reachable 
 
 Pod teardown is governed by the session lifecycle documented in [Sessions](/architecture/sessions). When the session completes or times out, the Job terminates the pod and every sibling with it. emptyDir volumes disappear; secrets unmount; persistent data, if any, lives on a PersistentVolumeClaim (see [Siblings — persistence](/architecture/siblings#persistence)).
 
-## The runtime-core base image
+## runtime-core and the overlay pattern
 
-`x1agent/runtime-core` is the single base image the platform maintains. Every admin-authored agent image is built `FROM x1agent/runtime-core:<version>`. Its contents:
+`x1agent/runtime-core` is the single agent-runtime image the platform maintains. It's a node:22-slim image with everything the agent session loop needs:
 
 | Layer | What it contains | Why |
 |-------|------------------|-----|
-| Base OS | `node:22-slim` (Debian bookworm, glibc) | Compatible with most upstream language images; smallest viable surface. |
-| System packages | `git`, `curl`, `ca-certificates` | Required by runtime components and nearly every admin-authored image. |
+| Base OS | `node:22-slim` (Debian bookworm, glibc) | Smallest viable surface that carries a working Node. |
+| System packages | `git`, `curl`, `ca-certificates` | Required by runtime components. |
 | Node + tsx | Prebuilt in `node:22-slim` | Runs the agent entrypoint script. |
 | `gh` CLI | Installed from GitHub's apt source | GitHub operations in-session via the credential proxy. |
 | Git credential helper | `git-credential-x1` shim | Routes git credentials through the sidecar; see [GitHub credential proxy](/security/credential-proxy). |
-| Agent entrypoint | `/app/src/run.ts` (or the Pi equivalent once runtime swap lands) | Starts the LLM runtime, wires the event stream to the sidecar, accepts user inject on `:8788`. |
-| User | `agent` at uid 1000, home at `/home/agent` | Non-root; Claude Code refuses `--dangerously-skip-permissions` as root. |
+| Agent entrypoint | `/x1/bin/entrypoint` | Launches the LLM runtime, wires events to the sidecar, accepts user inject on `:8788`. |
+| User | `node` at uid 1000, home at `/home/node` | Non-root; Claude Code refuses `--dangerously-skip-permissions` as root. |
 | Workspace dir | `/workspace` with agent-owned permissions | Where the cloned repo and agent scratch files live. |
+| `/x1/` tree | Self-contained agent overlay | Exists so language presets can `COPY --from=runtime-core /x1 /x1` rather than inheriting the whole image as a base. See below. |
 
-When the platform bumps Pi, the agent entrypoint script, or an x1 extension, it publishes a new `runtime-core:<version>`. Admin images need to be rebuilt against the new base to pick up the change. The admin UI surfaces this as a "rebuild against latest runtime" action per image.
+### Why not `FROM runtime-core`?
 
-**What runtime-core deliberately does not contain:** language toolchains. Python, Go, Rust, Java, Ruby — none of them are in runtime-core. Those belong in admin-authored images. Keeping the base image lean makes version bumps cheap and isolates toolchain churn from runtime churn.
+The naive pattern — a Python preset that does `FROM x1agent/runtime-core` and `apt install python3.13` on top — works, and early drafts of this doc described it. It has two real problems:
 
-## Admin-authored images
+1. **It throws away the language's canonical image.** `python:3.13-slim-bookworm`, `golang:1.24-bookworm`, `rust:1-bookworm` are maintained by each language's team. They ship multi-arch, they set GOPATH / PYTHONPATH / CARGO_HOME the way the ecosystem expects, they include the right native deps, and they get security updates on the upstream cadence. A preset that bolts a language into a Node image loses every one of those benefits. Admins who already know how to author a `FROM python:3.13-slim` Dockerfile have to learn a parallel ladder of apt names, env vars, and user ids.
+2. **It couples x1 runtime bumps to language Dockerfile churn.** Every time the agent runtime changes (SDK version, entrypoint tweak, gh CLI bump), every admin-authored image inherits it through the base. That's good for security rollups but bad when a preset needs to stay on a specific language minor: the only way to get a new runtime is to also get whatever upstream python:* did on the same day.
 
-An agent image is an admin-authored Dockerfile that starts with `FROM x1agent/runtime-core:<version>` and adds whatever the agent needs. The admin writes and saves the Dockerfile in the workspace's image catalog; the platform builds it with Kaniko and pushes the result to the in-cluster registry.
+### Why not split agent and language into separate containers?
 
-Minimal Python/Django example:
+This was considered and rejected. The agent's shell runs `bash -c 'go build ./...'`; `bash` must reach `go` through the normal file-system PATH with no RPC hop, because the [native-shell principle](#design-principles) is non-negotiable. Two containers breaks that — the agent would have to proxy every shell invocation into the language container. That's the shape modern IDEs use for remote development and it's fine there; it's wrong for an agent whose entire tool surface is `Bash`.
+
+Nested containers (DIND, sidecar runtime classes) would technically let each role live in its own layer but are rejected upstream for PSA / CIS compliance — see the *No DIND* principle.
+
+### The solution: `COPY --from=runtime-core /x1`
+
+Runtime-core packages its entire contribution under a single `/x1/` directory and publishes itself as a **source of files**, not a base to extend. Language presets start from whichever canonical language image the author prefers and copy the overlay in:
 
 ```dockerfile
-FROM x1agent/runtime-core:v1
+ARG AGENT_OVERLAY=x1agent/runtime-core:v1
+FROM ${AGENT_OVERLAY} AS x1
 
-USER root
+FROM python:3.13-slim-bookworm
+
+# --- x1 agent overlay ---
+COPY --from=x1 /x1 /x1
+
+# --- language-agnostic dev tooling ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.12 python3.12-dev python3.12-venv \
-      build-essential libpq-dev postgresql-client \
+      git curl ca-certificates ripgrep jq build-essential \
   && rm -rf /var/lib/apt/lists/*
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
-USER agent
+
+# Plus: uv, or pip, or whatever this preset needs.
+RUN curl -LsSf https://astral.sh/uv/install.sh | \
+      env UV_INSTALL_DIR=/usr/local/bin sh
+
+# --- user + workspace + entrypoint wiring ---
+# Create uid 1000 (python:3.13-slim runs as root by default), link
+# gitconfig, hand /workspace to the agent.
+RUN id -u 1000 >/dev/null 2>&1 \
+    || ( groupadd --system --gid 1000 agent \
+      && useradd --system --uid 1000 --gid 1000 --home /home/agent \
+           --create-home --shell /bin/bash agent ) \
+  && ln -sf /x1/etc/gitconfig /etc/gitconfig \
+  && mkdir -p /workspace \
+  && chown -R 1000:1000 /x1 /workspace
+
+USER 1000
+ENV HOME=/home/agent
+ENV PATH="/x1/bin:${PATH}"
+WORKDIR /workspace
+
+ENTRYPOINT ["/x1/bin/entrypoint"]
 ```
 
-The image catalog record stores this Dockerfile alongside a `siblings.yaml` (the companion manifest declaring Postgres or any other pod-level services this image expects; see [Siblings](/architecture/siblings)).
+### Contents of `/x1/`
+
+```
+/x1/
+  bin/
+    entrypoint         launcher: exec node + tsx + /x1/app/src/run.ts
+    gh                 gh CLI
+    git-credential-x1  sidecar credential shim
+  app/                 agent SDK (src/ + package.json + node_modules)
+  runtime/
+    bin/node           bundled Node 22 binary
+    lib/node_modules/  tsx + its deps
+  etc/
+    gitconfig          git config linked into /etc/gitconfig by the preset
+```
+
+Everything is self-contained. The overlay uses absolute paths (`/x1/runtime/bin/node …`), ignores `$PATH`, and expects nothing from the base image except a POSIX `/bin/sh`.
+
+### Preset contract
+
+A valid preset Dockerfile following the overlay pattern:
+
+1. Declares an `ARG AGENT_OVERLAY` defaulting to the current runtime-core tag.
+2. Adds `FROM ${AGENT_OVERLAY} AS x1` as the first named stage.
+3. Starts from a bookworm-based language image (see *libc compatibility* below).
+4. `COPY --from=x1 /x1 /x1` brings in the overlay.
+5. Creates a uid 1000 user if the base image doesn't already have one.
+6. `ln -sf /x1/etc/gitconfig /etc/gitconfig`.
+7. `chown -R 1000:1000 /x1 /workspace`.
+8. Sets `ENV PATH="/x1/bin:${PATH}"`.
+9. `USER 1000` (or the named user with that uid).
+10. `ENTRYPOINT ["/x1/bin/entrypoint"]`.
+
+The save-time validator rejects images that end `USER 0`, omit the `/x1/bin/entrypoint` entrypoint, or `RUN rm` against `/x1/`.
+
+### libc compatibility
+
+The bundled Node + tsx links against glibc. Presets **must** use a glibc base image. In practice this means the `*-bookworm` or `*-bookworm-slim` flavor of each language image. `alpine` / musl-based bases won't work until runtime-core publishes an `alpine` variant. The shipped presets are all bookworm-based for this reason.
+
+This is the one real tradeoff. Revisiting later: the agent runtime is a candidate for `bun build --compile` into a static binary, which would dissolve the libc constraint and let presets use any base.
+
+### When to still use `FROM runtime-core`
+
+Direct-use is kept for two narrow cases:
+
+- Smoke-testing the agent runtime itself in isolation — spin up runtime-core with no language layer and verify the entrypoint works.
+- A non-language agent whose only job is to drive the SDK (a summarization bot, a PR review agent, a Slack responder). These agents don't need Go or Python; runtime-core is already everything they want.
+
+For any language-using agent, the overlay pattern is the shipped path.
 
 ### The registry path
 
