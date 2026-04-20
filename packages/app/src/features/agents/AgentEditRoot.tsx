@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { apiFetch } from "../../lib/api";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 
@@ -62,11 +63,10 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   }, [workspaceSlug, load]);
 
   useEffect(() => {
-    fetch(`/api/workspaces/${workspaceSlug}/agent-images`, {
-      credentials: "include",
-    })
-      .then((r) => (r.ok ? r.json() : { images: [] }))
-      .then((body: { images: typeof images }) => setImages(body.images ?? []))
+    apiFetch<{ images: typeof images }>(
+      `/api/workspaces/${workspaceSlug}/agent-images`,
+    )
+      .then((body) => setImages(body.images ?? []))
       .catch(() => setImages([]));
   }, [workspaceSlug]);
 
