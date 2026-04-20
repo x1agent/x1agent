@@ -16,6 +16,7 @@ import { useCollectionsStore } from "../../stores/collectionsStore";
 import { useGitHubStore } from "../../stores/githubStore";
 import { useGrantsStore } from "../../stores/grantsStore";
 import { RecentRunsSection } from "../sessions/RecentRunsSection";
+import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
 interface Props {
   workspaceSlug: string;
@@ -120,6 +121,8 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
             </Badge>
           </div>
         </div>
+
+        <SpawnSessionCard workspaceSlug={workspaceSlug} agentId={agent.id} />
 
         <Card>
           <CardHeader>
