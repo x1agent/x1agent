@@ -4,6 +4,7 @@ import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
 import { useSessionDetailStore } from "../../stores/sessionDetailStore";
+import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
 import { MessageInput } from "./MessageInput";
@@ -49,8 +50,21 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   } = useSessionDetailStore();
 
   const [verbose, setVerbose] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const ncRef = useRef<NatsConnection | null>(null);
   const seqRef = useRef(0);
+  const resumeAction = useSessionsStore((s) => s.resume);
+
+  const onResume = async () => {
+    setResuming(true);
+    try {
+      const created = await resumeAction(workspaceSlug, sessionId);
+      window.location.href = `/workspaces/${workspaceSlug}/sessions/${created.id}`;
+    } catch (err) {
+      setError(sessionId, (err as Error).message);
+      setResuming(false);
+    }
+  };
 
   const session = sessionsById[sessionId];
   const agent = agentsBySession[sessionId];
@@ -208,6 +222,18 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               <span>{parent.agent.name}</span>
             </a>
           )}
+          {session?.resumed_from && (
+            <a
+              href={`/workspaces/${workspaceSlug}/sessions/${session.resumed_from}`}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+              title={`continues session ${session.resumed_from.slice(0, 8)}`}
+            >
+              <span className="text-zinc-500">resumed from</span>
+              <span className="font-mono">
+                {session.resumed_from.slice(0, 8)}
+              </span>
+            </a>
+          )}
           {children.length > 0 && (
             <span className="text-zinc-500">
               {children.length}{" "}
@@ -221,6 +247,19 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               </span>
             )}
             <span className="text-zinc-600">{events.length} events</span>
+            {session &&
+              (session.status === "complete" ||
+                session.status === "failed") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onResume}
+                  disabled={resuming}
+                  className="h-7 text-[11px]"
+                >
+                  {resuming ? "Resuming…" : "Resume"}
+                </Button>
+              )}
             <Button
               variant="ghost"
               size="sm"

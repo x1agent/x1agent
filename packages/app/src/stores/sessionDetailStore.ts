@@ -61,6 +61,46 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
       const res = await apiFetch<SessionEventListResponse>(
         `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/events`,
       );
+
+      // When this session resumes a prior one, fetch the prior
+      // session's events and prepend them with a synthetic
+      // `session.resumed` divider. The divider sequence is negative so
+      // it sorts before every real event; the prior events get
+      // negative sequences in the 1000s range for the same reason.
+      let merged = res.events;
+      const resumedFrom = res.session.resumed_from;
+      if (resumedFrom) {
+        try {
+          const prior = await apiFetch<SessionEventListResponse>(
+            `/api/workspaces/${workspaceSlug}/sessions/${resumedFrom}/events`,
+          );
+          const priorEvents = prior.events.map((e, idx) => ({
+            ...e,
+            id: `prior-${e.id}`,
+            session_id: resumedFrom,
+            seq: -10000 - (prior.events.length - idx),
+          }));
+          const divider: SessionEventDTO = {
+            id: `resume-divider-${sessionId}`,
+            session_id: sessionId,
+            seq: -1,
+            type: "session.resumed",
+            payload: {
+              message: "Session resumed",
+              previous_session_id: resumedFrom,
+            },
+            timestamp:
+              res.session.triggered_at ??
+              res.events[0]?.timestamp ??
+              new Date().toISOString(),
+          };
+          merged = [...priorEvents, divider, ...res.events];
+        } catch {
+          // Prior session may have been deleted or access was denied.
+          // Fall back to just the current session's events.
+        }
+      }
+
       const maxSeq = res.events.reduce((m, e) => Math.max(m, e.seq), -1);
       set((s) => ({
         sessionsById: { ...s.sessionsById, [sessionId]: res.session },
@@ -73,7 +113,7 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ...s.childrenBySession,
           [sessionId]: res.children ?? [],
         },
-        eventsBySession: { ...s.eventsBySession, [sessionId]: res.events },
+        eventsBySession: { ...s.eventsBySession, [sessionId]: merged },
         maxSeqBySession: {
           ...s.maxSeqBySession,
           [sessionId]: maxSeq,

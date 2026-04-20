@@ -59,6 +59,18 @@ function AgentText({ event }: { event: SessionEventDTO }) {
   );
 }
 
+function ResumedDivider() {
+  return (
+    <div className="my-2 flex items-center gap-3 px-4 py-3">
+      <div className="flex-1 border-t border-dashed border-zinc-800" />
+      <span className="px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+        Session resumed
+      </span>
+      <div className="flex-1 border-t border-dashed border-zinc-800" />
+    </div>
+  );
+}
+
 function SessionBanner({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   const type = event.type;
@@ -385,6 +397,8 @@ export function EventCard({
     case "session.completed":
     case "session.failed":
       return <SessionBanner event={event} />;
+    case "session.resumed":
+      return <ResumedDivider />;
     case "user.message":
     case "user.input_response":
       return <UserBubble event={event} />;

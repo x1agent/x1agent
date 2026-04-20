@@ -22,6 +22,16 @@ interface SessionsState {
     agentId: string,
     sessionId: string,
   ): Promise<SessionDTO>;
+  /**
+   * Resume a terminal session. Creates a new pending session linked
+   * to the original via resumed_from; the job-watcher assembles the
+   * session-history ConfigMap at spawn time. Returns the new session
+   * (workspace-scoped — no agent id prefix needed).
+   */
+  resume(
+    workspaceSlug: string,
+    sessionId: string,
+  ): Promise<SessionDTO>;
 }
 
 const listUrl = (ws: string, agentId: string) =>
@@ -81,6 +91,23 @@ export const useSessionsStore = create<SessionsState>((set) => ({
         ),
       },
     }));
+    return res.session;
+  },
+
+  async resume(workspaceSlug, sessionId) {
+    const res = await apiFetch<SessionResponse>(
+      `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/resume`,
+      { method: "POST" },
+    );
+    set((s) => {
+      const agentId = res.session.agent_id;
+      return {
+        byAgent: {
+          ...s.byAgent,
+          [agentId]: [res.session, ...(s.byAgent[agentId] ?? [])],
+        },
+      };
+    });
     return res.session;
   },
 }));
