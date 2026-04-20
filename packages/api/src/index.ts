@@ -6,6 +6,7 @@ import { seedIfDev } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import { startJobWatcher } from "./k8s/job-watcher.js";
+import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
@@ -238,6 +239,56 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
     );
   }
+}
+
+const BRANCH_REAPER_INTERVAL_MS = Number(
+  process.env.BRANCH_REAPER_INTERVAL_MS || 24 * 60 * 60 * 1000,
+);
+const BRANCH_REAPER_STALE_AFTER_MS = Number(
+  process.env.BRANCH_REAPER_STALE_AFTER_MS || 30 * 24 * 60 * 60 * 1000,
+);
+if (process.env.BRANCH_REAPER_DISABLED !== "true") {
+  let reaping = false;
+  const reap = async () => {
+    if (reaping) return;
+    reaping = true;
+    try {
+      const r = await reapStaleBranches({
+        sql: composedSql,
+        sharedResources: composedSharedResources,
+        postgresBranches: composedPostgresBranches ?? null,
+        postgresMinter: composedPostgresMinter ?? null,
+        redisBranches: composedRedisBranches ?? null,
+        redisMinter: composedRedisMinter ?? null,
+        namespace: process.env.K8S_NAMESPACE || "x1agent",
+        staleAfterMs: BRANCH_REAPER_STALE_AFTER_MS,
+      });
+      if (r.postgresReaped + r.redisReaped + r.errors > 0) {
+        console.log(
+          `[branch-reaper] pg=${r.postgresReaped} redis=${r.redisReaped} errors=${r.errors}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[branch-reaper] tick crashed:",
+        (err as Error).message,
+      );
+    } finally {
+      reaping = false;
+    }
+  };
+  const handle = setInterval(() => {
+    void reap();
+  }, BRANCH_REAPER_INTERVAL_MS);
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  // Initial kick is fire-and-forget — reaping on boot is cheap; the
+  // API doesn't block startup on it.
+  void reap();
+  console.log(
+    `[branch-reaper] started (interval=${BRANCH_REAPER_INTERVAL_MS}ms stale_after=${BRANCH_REAPER_STALE_AFTER_MS}ms)`,
+  );
 }
 
 if (process.env.JOB_WATCHER !== "disabled") {
