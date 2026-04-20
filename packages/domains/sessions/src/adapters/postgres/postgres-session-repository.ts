@@ -24,6 +24,7 @@ interface Row {
   triggered_by_user_id: string | null;
   parent_session_id: string | null;
   parent_agent_id: string | null;
+  resumed_from: string | null;
   triggered_at: Date | string;
   status: string;
   completed_at: Date | string | null;
@@ -43,6 +44,7 @@ function toSession(r: Row): Session {
       ? SessionId(r.parent_session_id)
       : null,
     parentAgentId: r.parent_agent_id ? AgentId(r.parent_agent_id) : null,
+    resumedFromSessionId: r.resumed_from ? SessionId(r.resumed_from) : null,
     triggeredAt: new Date(r.triggered_at),
     status: SessionStatus(r.status),
     completedAt: r.completed_at ? new Date(r.completed_at) : null,
@@ -53,7 +55,7 @@ function toSession(r: Row): Session {
 
 const SELECT = `
   id, agent_id, triggered_by, triggered_by_user_id,
-  parent_session_id, parent_agent_id,
+  parent_session_id, parent_agent_id, resumed_from,
   triggered_at, status, completed_at, error_message, created_at
 `;
 
@@ -74,11 +76,13 @@ export class PostgresSessionRepository implements SessionRepository {
       const rows = await this.sql<Row[]>`
         INSERT INTO sessions
           (agent_id, triggered_by, triggered_by_user_id,
-           parent_session_id, parent_agent_id, triggered_at)
+           parent_session_id, parent_agent_id, resumed_from,
+           triggered_at)
         VALUES
           (${input.agentId}, ${input.triggeredBy},
            ${input.triggeredByUserId},
            ${input.parentSessionId}, ${input.parentAgentId},
+           ${input.resumedFromSessionId},
            ${input.triggeredAt})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;

@@ -3,6 +3,7 @@ export * from "./domain/session.js";
 export * from "./domain/status.js";
 export * from "./domain/trigger.js";
 export * from "./domain/event.js";
+export * from "./domain/session-history.js";
 
 // Ports
 export type {
@@ -25,6 +26,7 @@ export * from "./application/next-due.js";
 export * from "./application/append-session-event.js";
 export * from "./application/list-session-events.js";
 export * from "./application/spawn-child-session.js";
+export * from "./application/resume-session.js";
 
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";
