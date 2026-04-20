@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Button } from "../../components/ui/button";
+import { Label } from "../../components/ui/label";
 import {
   Card,
   CardContent,
@@ -89,7 +90,7 @@ export function NewSessionCard({ workspaceSlug }: Props) {
       <CardContent>
         <form onSubmit={onRun} className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-zinc-500">Agent</label>
+            <Label>Agent</Label>
             <Select
               value={agentId}
               onValueChange={setAgentId}
