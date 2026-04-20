@@ -24,6 +24,14 @@ export interface Session {
   parentSessionId: SessionId | null;
   /** Set only when triggeredBy === "agent" — the orchestrator's agent. */
   parentAgentId: AgentId | null;
+  /**
+   * Previous session this one is a continuation of. Set when an admin
+   * clicks Resume on a terminal session; the job-watcher walks the
+   * chain at spawn time to build `/workspace/session_history.md`.
+   * Null for fresh sessions (including scheduler ticks and orchestrator
+   * spawns).
+   */
+  resumedFromSessionId: SessionId | null;
   triggeredAt: Date;
   status: SessionStatus;
   completedAt: Date | null;

@@ -58,6 +58,7 @@ export async function scheduleDueSessions(
           triggeredByUserId: null,
           parentSessionId: null,
           parentAgentId: null,
+          resumedFromSessionId: null,
           triggeredAt: due,
         });
         result.created += 1;

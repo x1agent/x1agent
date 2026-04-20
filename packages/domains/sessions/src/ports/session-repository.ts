@@ -12,6 +12,12 @@ export interface CreateSessionInput {
   parentSessionId: SessionId | null;
   /** Required when triggeredBy === "agent". Null otherwise. */
   parentAgentId: AgentId | null;
+  /**
+   * Set when this session is a resume of a terminal session. The
+   * job-watcher walks the chain at spawn time to build the session
+   * history markdown.
+   */
+  resumedFromSessionId: SessionId | null;
   triggeredAt: Date;
 }
 

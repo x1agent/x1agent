@@ -80,6 +80,7 @@ describe("spawnChildSession", () => {
       triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
       parentSessionId: null,
       parentAgentId: null,
+      resumedFromSessionId: null,
       triggeredAt: new Date("2026-04-19T11:00:00Z"),
     });
 
@@ -112,6 +113,7 @@ describe("spawnChildSession", () => {
       triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
       parentSessionId: null,
       parentAgentId: null,
+      resumedFromSessionId: null,
       triggeredAt: new Date("2026-04-19T11:00:00Z"),
     });
     await sessions.updateStatus(parentSession.id, {
@@ -142,6 +144,7 @@ describe("spawnChildSession", () => {
       triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
       parentSessionId: null,
       parentAgentId: null,
+      resumedFromSessionId: null,
       triggeredAt: new Date("2026-04-19T11:00:00Z"),
     });
 
@@ -171,6 +174,7 @@ describe("spawnChildSession", () => {
       triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
       parentSessionId: null,
       parentAgentId: null,
+      resumedFromSessionId: null,
       triggeredAt: new Date("2026-04-19T11:00:00Z"),
     });
 
@@ -217,6 +221,7 @@ describe("spawnChildSession", () => {
       triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
       parentSessionId: null,
       parentAgentId: null,
+      resumedFromSessionId: null,
       triggeredAt: new Date("2026-04-19T11:00:00Z"),
     });
 

@@ -28,6 +28,10 @@ import { triggerSession } from "../../application/trigger-session.js";
 import { listSessions } from "../../application/list-sessions.js";
 import { cancelSession } from "../../application/cancel-session.js";
 import { listSessionEvents } from "../../application/list-session-events.js";
+import {
+  resumeSession,
+  SessionNotTerminalError,
+} from "../../application/resume-session.js";
 
 export interface SessionRoutesConfig {
   agents: AgentRepository;
@@ -54,6 +58,7 @@ function serialize(s: Session) {
     triggered_by_user_id: s.triggeredByUserId,
     parent_session_id: s.parentSessionId,
     parent_agent_id: s.parentAgentId,
+    resumed_from: s.resumedFromSessionId,
     triggered_at: s.triggeredAt.toISOString(),
     status: s.status,
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
@@ -77,6 +82,7 @@ function errStatus(err: unknown): number {
   if (err instanceof SessionNotFoundError) return 404;
   if (err instanceof AgentNotFoundError) return 404;
   if (err instanceof SessionAlreadyTerminalError) return 409;
+  if (err instanceof SessionNotTerminalError) return 409;
   if (err instanceof SessionDuplicateTickError) return 409;
   if (err instanceof DomainError) {
     if (
@@ -257,6 +263,7 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
 export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
   const app = new Hono();
   app.use("*", cfg.requireAuth);
+  const clock = cfg.clock ?? systemClock;
 
   const resolveWs = async (slug: string) => {
     try {
@@ -416,6 +423,45 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       parent,
       children,
     });
+  });
+
+  // Resume a terminal session. Creates a new pending session in the
+  // same workspace that points at the original via `resumed_from`; the
+  // job-watcher assembles `/workspace/session_history.md` at spawn
+  // time.
+  app.post("/:sessionId/resume", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      if (scope.error === "forbidden")
+        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
+      return c.json({ error: scope.error }, 404);
+    }
+    try {
+      const session = await resumeSession(
+        {
+          agents: cfg.agents,
+          sessions: cfg.sessions,
+          adminGuard: cfg.adminGuard,
+          clock,
+        },
+        { actor: actor.userId, originalSessionId: scope.session.id },
+      );
+      return c.json(
+        {
+          session: serialize(session),
+          resumed_from: scope.session.id,
+        },
+        201,
+      );
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
   });
 
   return app;

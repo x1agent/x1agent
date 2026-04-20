@@ -97,6 +97,7 @@ export async function spawnChildSession(
     triggeredByUserId: null,
     parentSessionId: parent.id,
     parentAgentId: parent.agentId,
+    resumedFromSessionId: null,
     triggeredAt: deps.clock.now(),
   });
 }
