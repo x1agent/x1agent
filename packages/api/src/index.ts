@@ -369,6 +369,7 @@ if (process.env.JOB_WATCHER !== "disabled") {
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
+      sessionEvents,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,

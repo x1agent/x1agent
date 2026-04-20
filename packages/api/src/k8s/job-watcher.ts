@@ -12,7 +12,15 @@ import type {
   AgentRepoStore,
   InstallationId,
 } from "@x1agent/domain-github";
+import type { SessionEventRepository } from "@x1agent/domain-sessions";
 import type { CollectionRepository } from "@x1agent/domain-collections";
+import {
+  buildSessionHistory,
+  SESSION_RESUME_PROMPT,
+  walkResumeChain,
+  type Session as SessionEntity,
+  type SessionEvent as SessionEventEntity,
+} from "@x1agent/domain-sessions";
 import type {
   SharedResource,
   SharedResourceRepository,
@@ -65,6 +73,12 @@ export interface JobWatcherConfig {
    * per-branch credentials, and injects them as env via a per-session
    * K8s Secret. When null, session pods boot without DATABASE_URL etc.
    */
+  /**
+   * Session events repository — used at spawn time to assemble
+   * /workspace/session_history.md when `session.resumedFromSessionId`
+   * is set.
+   */
+  sessionEvents?: SessionEventRepository | null;
   sharedResources?: SharedResourceRepository | null;
   postgresMinter?: PostgresBranchMinter | null;
   postgresBranches?: PostgresBranchRepository | null;
@@ -225,8 +239,28 @@ async function launchSession(
   // Scheduler-triggered sessions get heartbeat_md as the first user
   // message. User-triggered sessions start empty and wait for inject —
   // the detail page's MessageInput drives the conversation.
+  // Resumed sessions get a canned prompt that points the agent at the
+  // session-history markdown mounted into /workspace.
   const isScheduled = session.triggeredBy === "scheduler";
-  const initialPrompt = isScheduled ? agent.heartbeatMd : "";
+  const isResume = session.resumedFromSessionId !== null;
+  const initialPrompt = isResume
+    ? SESSION_RESUME_PROMPT
+    : isScheduled
+      ? agent.heartbeatMd
+      : "";
+
+  // Resume: walk the chain of prior sessions, fetch their events, and
+  // stash the rendered markdown into a ConfigMap mounted at
+  // /workspace/session_history.md in the agent container. The
+  // ConfigMap is session-scoped and GC'd on Job TTL. If the events
+  // repo isn't wired (dev without the session domain composed),
+  // fall back to an empty history — the agent still boots, just
+  // without prior context.
+  const resumeHistoryConfigMapName = await maybeBuildResumeHistoryConfigMap(
+    cfg,
+    kc,
+    session,
+  );
 
   // Shared agent resources: mint per-branch credentials for every
   // installed resource, stuff them into a per-session Secret, and let
@@ -267,6 +301,7 @@ async function launchSession(
     anthropicApiKey: cfg.anthropicApiKey,
     namespace: cfg.namespace,
     sessionCredentialsSecretName: credentialsSecretName,
+    sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,
   });
 
   try {
@@ -561,4 +596,83 @@ function buildPromptAppend(kinds: string[], branchName: string): string {
 
 function shortId(id: string): string {
   return id.replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * When the pending session has `resumedFromSessionId` set, walk the
+ * chain and render a markdown history file into a session-scoped
+ * ConfigMap. Returns the ConfigMap name (or null if nothing to do /
+ * the events repo isn't wired).
+ *
+ * The ConfigMap has a single key `session_history.md`; pod-spec
+ * mounts it at `/workspace/session_history.md` via subPath.
+ */
+async function maybeBuildResumeHistoryConfigMap(
+  cfg: JobWatcherConfig,
+  kc: k8s.KubeConfig,
+  session: SessionEntity,
+): Promise<string | null> {
+  if (!session.resumedFromSessionId) return null;
+  if (!cfg.sessionEvents) return null;
+
+  // Walk the chain root-first using the sessions repo.
+  const loader = async (id: SessionEntity["id"]) => {
+    return (await cfg.sessions.findById(id)) ?? null;
+  };
+  const chain = await walkResumeChain(
+    await (async () => {
+      const original = await cfg.sessions.findById(
+        session.resumedFromSessionId!,
+      );
+      return original;
+    })() as SessionEntity,
+    loader,
+  );
+  if (chain.length === 0) return null;
+
+  // Fetch events for every session in the chain.
+  const eventsBySessionId = new Map<
+    SessionEntity["id"],
+    readonly SessionEventEntity[]
+  >();
+  for (const s of chain) {
+    const evs = await cfg.sessionEvents.listBySession(s.id, { limit: 5000 });
+    eventsBySessionId.set(s.id, evs);
+  }
+
+  const markdown = buildSessionHistory(chain, eventsBySessionId);
+  const name = `x1-session-history-${shortId(session.id)}`;
+
+  const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+  const body: k8s.V1ConfigMap = {
+    metadata: {
+      name,
+      namespace: cfg.namespace,
+      labels: {
+        app: "x1agent",
+        component: "session-history",
+        "session-id": session.id,
+      },
+    },
+    data: {
+      "session_history.md": markdown,
+    },
+  };
+  try {
+    await coreApi.createNamespacedConfigMap({
+      namespace: cfg.namespace,
+      body,
+    });
+  } catch (err) {
+    if ((err as { code?: number }).code === 409) {
+      await coreApi.replaceNamespacedConfigMap({
+        name,
+        namespace: cfg.namespace,
+        body,
+      });
+    } else {
+      throw err;
+    }
+  }
+  return name;
 }
