@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
+import ShareCard from "./ShareCard";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { apiFetch } from "../../lib/api";
@@ -426,6 +427,14 @@ export function EventCard({
       return <StatusCard event={event} />;
     case "agent.artifact":
       return <ArtifactCard event={event} />;
+    case "agent.share":
+      return (
+        <ShareCard
+          event={event}
+          workspaceSlug={workspaceSlug}
+          sessionId={sessionId}
+        />
+      );
     case "agent.input_request":
       return <InputRequestCard event={event} onRespond={onRespond} />;
     case "agent.permission_request":
