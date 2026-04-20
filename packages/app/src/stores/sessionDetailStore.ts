@@ -23,11 +23,24 @@ interface SessionDetailState {
   parentBySession: Record<string, ParentRef | null>;
   childrenBySession: Record<string, ChildRef[]>;
   eventsBySession: Record<string, SessionEventDTO[]>;
-  maxSeqBySession: Record<string, number>;
   statusBySession: Record<string, ConnStatus>;
   errorBySession: Record<string, string | null>;
 
   loadInitial(workspaceSlug: string, sessionId: string): Promise<void>;
+  /**
+   * Append one event to the session's stream. Dedup is by the
+   * `(seq, type)` tuple — any event with a combination we already
+   * have is dropped. This matches the reference pattern and handles
+   * every case we care about: REST-fetched historical events replayed
+   * while the WS is also live, local echoes vs eventual server events,
+   * and accidental double-subscribes.
+   *
+   * No watermark is used, so out-of-order arrivals are fine as long as
+   * the (seq, type) combinations are unique within their domain.
+   * Local echoes — type "user.message" with sequences the server never
+   * emits — cannot collide with server events since the server never
+   * emits that type.
+   */
   appendEvent(sessionId: string, ev: SessionEventDTO): void;
   setStatus(sessionId: string, status: ConnStatus): void;
   setError(sessionId: string, msg: string | null): void;
@@ -45,7 +58,6 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   parentBySession: {},
   childrenBySession: {},
   eventsBySession: {},
-  maxSeqBySession: {},
   statusBySession: {},
   errorBySession: {},
 
@@ -101,7 +113,6 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
         }
       }
 
-      const maxSeq = res.events.reduce((m, e) => Math.max(m, e.seq), -1);
       set((s) => ({
         sessionsById: { ...s.sessionsById, [sessionId]: res.session },
         agentsBySession: { ...s.agentsBySession, [sessionId]: res.agent },
@@ -114,10 +125,6 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           [sessionId]: res.children ?? [],
         },
         eventsBySession: { ...s.eventsBySession, [sessionId]: merged },
-        maxSeqBySession: {
-          ...s.maxSeqBySession,
-          [sessionId]: maxSeq,
-        },
       }));
     } catch (err) {
       set((s) => ({
@@ -132,22 +139,16 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
 
   appendEvent(sessionId, ev) {
     set((s) => {
-      // Local echoes (user-typed messages the browser puts in the
-      // store immediately, before any server round-trip) use sentinel
-      // sequences in the 1B+ range. They must NOT update curMax —
-      // otherwise every real server event afterward (seq 3, 4, ...)
-      // falls below curMax and appendEvent silently drops it,
-      // which looks to the user like "my messages go through but
-      // the agent never responds".
-      const isLocal =
-        typeof ev.id === "string" && ev.id.startsWith("local-");
-
-      const curMax = s.maxSeqBySession[sessionId] ?? -1;
-      if (!isLocal && ev.seq <= curMax) return s;
-
       const cur = s.eventsBySession[sessionId] ?? [];
-      // Dedup double-fires of the same local echo by id.
-      if (isLocal && cur.some((e) => e.id === ev.id)) return s;
+      // Dedup by (seq, type). An event with the same tuple has already
+      // been delivered — whether from REST on initial load, from a
+      // prior NATS delivery, or from an accidental double-subscribe.
+      // Local echoes are safe against server events because the server
+      // never emits `user.message` as its own event type.
+      const exists = cur.some(
+        (e) => e.seq === ev.seq && e.type === ev.type,
+      );
+      if (exists) return s;
 
       let sessions = s.sessionsById;
       if (
@@ -168,9 +169,6 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ...s.eventsBySession,
           [sessionId]: [...cur, ev],
         },
-        maxSeqBySession: isLocal
-          ? s.maxSeqBySession
-          : { ...s.maxSeqBySession, [sessionId]: ev.seq },
         sessionsById: sessions,
       };
     });
