@@ -26,6 +26,13 @@ export interface Agent {
   heartbeatMd: string;
   schedule: CronSchedule | null;
   isActive: boolean;
+  /**
+   * References an agent_images row. NULL means "use the platform
+   * default (AGENT_IMAGE env)". Pod-spec resolves this to built_ref
+   * at launch; the UI renders a picker sourced from the workspace's
+   * available images + platform presets.
+   */
+  imageId: string | null;
   createdBy: UserId | null;
   createdAt: Date;
   updatedAt: Date;

@@ -44,6 +44,7 @@ function serialize(a: Agent) {
     heartbeat_md: a.heartbeatMd,
     schedule: a.schedule,
     is_active: a.isActive,
+    image_id: a.imageId,
     created_by: a.createdBy,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
@@ -166,6 +167,12 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         }),
         ...(body.is_active !== undefined && {
           isActive: Boolean(body.is_active),
+        }),
+        ...(body.image_id !== undefined && {
+          imageId:
+            body.image_id === null || body.image_id === ""
+              ? null
+              : String(body.image_id),
         }),
       };
       const a = await updateAgent(

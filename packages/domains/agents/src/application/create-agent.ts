@@ -24,6 +24,7 @@ export interface CreateAgentInput {
   systemPrompt?: string;
   heartbeatMd?: string;
   schedule?: CronSchedule | null;
+  imageId?: string | null;
 }
 
 export async function createAgent(
@@ -46,6 +47,7 @@ export async function createAgent(
     systemPrompt: input.systemPrompt ?? "",
     heartbeatMd: input.heartbeatMd ?? "",
     schedule: input.schedule ?? null,
+    imageId: input.imageId ?? null,
     createdBy: input.actor,
   });
 }

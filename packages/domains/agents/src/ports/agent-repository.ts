@@ -15,6 +15,7 @@ export interface CreateAgentInput {
   systemPrompt: string;
   heartbeatMd: string;
   schedule: CronSchedule | null;
+  imageId?: string | null;
   createdBy: UserId | null;
 }
 
@@ -25,6 +26,7 @@ export interface UpdateAgentInput {
   heartbeatMd?: string;
   schedule?: CronSchedule | null;
   isActive?: boolean;
+  imageId?: string | null;
 }
 
 export interface AgentRepository {

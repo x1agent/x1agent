@@ -25,6 +25,7 @@ interface Row {
   heartbeat_md: string;
   schedule: string | null;
   is_active: boolean;
+  image_id: string | null;
   created_by: string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -41,6 +42,7 @@ function toAgent(r: Row): Agent {
     heartbeatMd: r.heartbeat_md,
     schedule: r.schedule ? CronSchedule(r.schedule) : null,
     isActive: r.is_active,
+    imageId: r.image_id,
     createdBy: r.created_by ? UserId(r.created_by) : null,
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
@@ -49,7 +51,8 @@ function toAgent(r: Row): Agent {
 
 const SELECT = `
   id, workspace_id, slug, name, runtime_type, system_prompt,
-  heartbeat_md, schedule, is_active, created_by, created_at, updated_at
+  heartbeat_md, schedule, is_active, image_id, created_by,
+  created_at, updated_at
 `;
 
 export class PostgresAgentRepository implements AgentRepository {
@@ -59,11 +62,12 @@ export class PostgresAgentRepository implements AgentRepository {
     const rows = await this.sql<Row[]>`
       INSERT INTO agents
         (workspace_id, slug, name, runtime_type, system_prompt,
-         heartbeat_md, schedule, created_by)
+         heartbeat_md, schedule, image_id, created_by)
       VALUES
         (${input.workspaceId}, ${input.slug}, ${input.name},
          ${input.runtimeType}, ${input.systemPrompt},
-         ${input.heartbeatMd}, ${input.schedule}, ${input.createdBy})
+         ${input.heartbeatMd}, ${input.schedule},
+         ${input.imageId ?? null}, ${input.createdBy})
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
     return toAgent(rows[0]!);
@@ -107,6 +111,7 @@ export class PostgresAgentRepository implements AgentRepository {
         heartbeat_md  = COALESCE(${patch.heartbeatMd ?? null}, heartbeat_md),
         schedule      = ${patch.schedule === undefined ? this.sql`schedule` : patch.schedule},
         is_active     = COALESCE(${patch.isActive ?? null}, is_active),
+        image_id      = ${patch.imageId === undefined ? this.sql`image_id` : patch.imageId},
         updated_at    = now()
       WHERE id = ${id}
       RETURNING ${this.sql.unsafe(SELECT)}

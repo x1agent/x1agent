@@ -42,6 +42,7 @@ export class InMemoryAgentRepository implements AgentRepository {
       heartbeatMd: input.heartbeatMd,
       schedule: input.schedule,
       isActive: true,
+      imageId: input.imageId ?? null,
       createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
@@ -75,6 +76,7 @@ export class InMemoryAgentRepository implements AgentRepository {
       ...(patch.heartbeatMd !== undefined && { heartbeatMd: patch.heartbeatMd }),
       ...(patch.schedule !== undefined && { schedule: patch.schedule }),
       ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+      ...(patch.imageId !== undefined && { imageId: patch.imageId }),
       updatedAt: new Date(),
     };
     this.rows.set(id, updated);

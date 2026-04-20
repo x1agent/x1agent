@@ -98,6 +98,7 @@ import {
   WorkspaceReaderAdapter,
 } from "./invitation-adapters.js";
 import { createInternalRoutes } from "../internal/routes.js";
+import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
 
 export interface Composition {
   authRoutes: Hono;
@@ -114,6 +115,7 @@ export interface Composition {
   collectionRoutes: Hono;
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
+  workspaceImageCatalogRoutes: Hono;
   sharedResources: SharedResourceRepository;
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
@@ -478,6 +480,13 @@ export function compose(env: CompositionEnv): Composition {
     }
   }
 
+  const workspaceImageCatalogRoutes = createWorkspaceImageCatalogRoutes({
+    sql: env.sql,
+    resolveWorkspace: async (slug) => resolveWorkspace(slug),
+    requireAuth,
+    getActor,
+  });
+
   const sharedAgentResourcesRoutes = createSharedAgentResourcesRoutes({
     resources: sharedResources,
     installers,
@@ -540,6 +549,7 @@ export function compose(env: CompositionEnv): Composition {
     collectionRoutes,
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,
+    workspaceImageCatalogRoutes,
     sharedResources,
     postgresBranches,
     postgresProvisioner,
