@@ -33,6 +33,7 @@ import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
 import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
+import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
 interface Props {
   workspaceSlug: string;
@@ -222,6 +223,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
           <form onSubmit={onSubmit} className="space-y-6">
             <TabsContent value="general" className="mt-0 space-y-6">
+              {!isCreate && existing && (
+                <SpawnSessionCard
+                  workspaceSlug={workspaceSlug}
+                  agentId={existing.id}
+                />
+              )}
+
               <Card>
                 <CardHeader>
                   <CardTitle>Identity</CardTitle>
