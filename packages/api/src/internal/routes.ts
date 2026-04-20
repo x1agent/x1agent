@@ -16,6 +16,7 @@ import {
   findActiveGrant,
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
+import { writeShareFiles } from "../shares/storage.js";
 
 /**
  * Endpoints only the sidecar calls (same-cluster). Gated on a shared
@@ -225,6 +226,28 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       .map((a) => ({ id: a.id, slug: a.slug, name: a.name }));
 
     return c.json({ spawnable });
+  });
+
+  // Receive share files from the sidecar. Local-dev-only — in
+  // production the sidecar uploads straight to GCS and skips this
+  // path. The session must exist; files are written under
+  // X1_SHARES_DIR/sessions/{id}/shares/{share_id}/.
+  app.post("/sessions/:sessionId/shares", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const session = await cfg.sessions.findById(sessionId);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      share_id?: string;
+      files?: { path: string; content: string }[];
+    };
+    if (!body.share_id || !Array.isArray(body.files)) {
+      return c.json(
+        { error: "missing_fields", need: ["share_id", "files"] },
+        400,
+      );
+    }
+    const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
+    return c.json({ ok: true, total_size: totalSize });
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.
