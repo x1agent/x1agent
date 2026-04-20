@@ -176,6 +176,18 @@ async function launchSession(
   const ws = await cfg.sql<{ slug: string; name: string }[]>`
     SELECT slug, name FROM workspaces WHERE id = ${agent.workspaceId}
   `;
+  // Resolve the agent's configured image if one is set. Falls back to
+  // the deployment-wide default (AGENT_IMAGE env) when the agent has
+  // no image_id pinned — preserves behavior for seeded agents and
+  // agents created before the catalog landed.
+  const imageRow = await cfg.sql<{ built_ref: string }[]>`
+    SELECT i.built_ref
+    FROM agents a
+    JOIN agent_images i ON i.id = a.image_id
+    WHERE a.id = ${agent.id}
+  `;
+  const resolvedAgentImage =
+    imageRow[0]?.built_ref ?? cfg.agentImage;
   if (ws.length === 0) {
     await cfg.sessions.updateStatus(sessionId, {
       status: "failed",
@@ -249,7 +261,7 @@ async function launchSession(
     apiUrl: cfg.apiUrl,
     apiInternalToken: cfg.apiInternalToken,
     natsUrl: cfg.natsUrl,
-    agentImage: cfg.agentImage,
+    agentImage: resolvedAgentImage,
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,

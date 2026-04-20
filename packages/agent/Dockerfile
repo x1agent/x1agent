@@ -1,6 +1,13 @@
-# x1agent session runtime — Claude Agent SDK + gh CLI + git, with a
-# credential helper that shells to the sidecar. No secrets live in this
-# image; every request is minted on demand by the sidecar.
+# x1agent session runtime — the "runtime-core" base image. Ships the
+# agent SDK, gh CLI, git, the git-credential-x1 shim, and a non-root
+# user at uid 1000. No language toolchains (python, go, rust, ...) —
+# those are layered on in admin-authored preset images via
+# `FROM x1agent/runtime-core:<version>`.
+#
+# See docs/architecture/runtime-images.md for the FROM-pattern
+# contract and the reject-list (USER 0, privileged ports, baked
+# secrets). No secrets live in this image; every credential-bearing
+# request is minted on demand by the sidecar.
 
 FROM node:22-slim AS builder
 
@@ -52,11 +59,18 @@ RUN mkdir -p /workspace && chmod 777 /workspace
 # Claude Code refuses --dangerously-skip-permissions as root. The
 # node:22-slim base image already ships a `node` user at uid 1000; we
 # reuse it and give them a home dir so Claude Code writes settings and
-# debug logs somewhere writable.
+# debug logs somewhere writable. Preset images that FROM runtime-core
+# inherit this user; they must END with `USER node`, which the
+# runtime-images.md save-time validator enforces.
 RUN mkdir -p /home/node/.claude \
   && chown -R node:node /app /workspace /home/node
 USER node
 ENV HOME=/home/node
+
+# Platform-tagged labels so the image is identifiable in any registry
+# that holds it. Preset images override these with their own name.
+LABEL org.x1agent.image="runtime-core" \
+      org.x1agent.image.role="base"
 
 WORKDIR /workspace
 
