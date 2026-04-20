@@ -13,6 +13,7 @@ export * from "./application/list-resources.js";
 
 // Adapters
 export { PostgresSharedResourceRepository } from "./adapters/postgres/postgres-shared-resource-repository.js";
+export * from "./adapters/hono/routes.js";
 
 // Fakes
 export * from "./application/fakes.js";

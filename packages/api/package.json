@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.4.0",
+    "@x1agent/agent-resources": "workspace:*",
+    "@x1agent/agent-resources-postgres": "workspace:*",
     "@x1agent/domain-agents": "workspace:*",
     "@x1agent/domain-auth": "workspace:*",
     "@x1agent/domain-collections": "workspace:*",

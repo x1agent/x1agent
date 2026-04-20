@@ -44,6 +44,25 @@ import {
   createAgentCollectionRoutes,
   type WorkspaceReader as CollectionsWorkspaceReader,
 } from "@x1agent/domain-collections";
+import {
+  PostgresSharedResourceRepository,
+  SharedResourceKind,
+  createSharedAgentResourcesRoutes,
+  type KindInstaller,
+  type KindUninstaller,
+  type SharedResource,
+  type SharedResourceRepository,
+} from "@x1agent/agent-resources";
+import {
+  PostgresPostgresBranchRepository,
+  StatefulSetPostgresAdminProvisioner,
+  StatefulSetPostgresBranchMinter,
+  installPostgres,
+  type PostgresAdminProvisioner,
+  type PostgresBranchMinter,
+  type PostgresBranchRepository,
+} from "@x1agent/agent-resources-postgres";
+import type * as k8s from "@kubernetes/client-node";
 import { NatsProviderGateway } from "./nats-provider-gateway.js";
 import type { NatsConnection } from "nats";
 import {
@@ -84,6 +103,11 @@ export interface Composition {
   workspaceGrantRoutes: Hono;
   collectionRoutes: Hono;
   agentCollectionRoutes: Hono;
+  sharedAgentResourcesRoutes: Hono;
+  sharedResources: SharedResourceRepository;
+  postgresBranches: PostgresBranchRepository;
+  postgresProvisioner: PostgresAdminProvisioner | null;
+  postgresMinter: PostgresBranchMinter | null;
   tokenizer: SessionTokenizer;
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
@@ -125,6 +149,18 @@ export interface CompositionEnv {
    * provider_unavailable.
    */
   natsConnection?: NatsConnection;
+  /**
+   * Kubernetes config for shared-agent-resources install / minter calls.
+   * When absent, the Install route returns 501 for kinds that need K8s.
+   * Kept optional so local dev without a cluster keeps booting.
+   */
+  kubeConfig?: k8s.KubeConfig;
+  /**
+   * Namespace where shared-agent-resource StatefulSets and their Secrets
+   * go. v1 reuses the platform's main namespace; per-workspace namespaces
+   * are a future enhancement.
+   */
+  sharedResourcesNamespace?: string;
 }
 
 export function compose(env: CompositionEnv): Composition {
@@ -328,6 +364,61 @@ export function compose(env: CompositionEnv): Composition {
     },
   };
 
+  const sharedResources = new PostgresSharedResourceRepository(env.sql);
+  const postgresBranches = new PostgresPostgresBranchRepository(env.sql);
+  const postgresProvisioner: PostgresAdminProvisioner | null = env.kubeConfig
+    ? new StatefulSetPostgresAdminProvisioner(env.kubeConfig)
+    : null;
+  const postgresMinter: PostgresBranchMinter | null = env.kubeConfig
+    ? new StatefulSetPostgresBranchMinter(env.kubeConfig)
+    : null;
+
+  const installers: Partial<Record<SharedResourceKind, KindInstaller>> = {};
+  const uninstallers: Partial<Record<SharedResourceKind, KindUninstaller>> = {};
+
+  if (postgresProvisioner) {
+    installers.postgres = async (req): Promise<SharedResource> =>
+      installPostgres(sharedResources, postgresProvisioner, {
+        workspaceId: req.workspaceId,
+        namespace: req.namespace,
+        version: req.version,
+        storageSize: (req.config.storage_size as string) ?? "20Gi",
+        installedBy: req.installedBy,
+      });
+    uninstallers.postgres = async (resource) => {
+      // Reap every branch DB first, then tear down the StatefulSet.
+      const branches =
+        await postgresBranches.listActiveByResource(resource.id);
+      if (postgresMinter) {
+        for (const b of branches) {
+          await postgresMinter
+            .revokeBranch({
+              resource,
+              namespace: env.sharedResourcesNamespace ?? "x1agent",
+              branchId: b.branchId,
+            })
+            .catch(() => undefined);
+          await postgresBranches.markReaped(b.id).catch(() => undefined);
+        }
+      }
+      await postgresProvisioner.uninstall(
+        resource,
+        env.sharedResourcesNamespace ?? "x1agent",
+      );
+    };
+  }
+
+  const sharedAgentResourcesRoutes = createSharedAgentResourcesRoutes({
+    resources: sharedResources,
+    installers,
+    uninstallers,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(slug),
+    workspaceNamespace: env.sharedResourcesNamespace ?? "x1agent",
+    requireAuth,
+    getActor,
+  });
+
   const collectionRoutes = createCollectionRoutes({
     collections: collectionsRepo,
     adminGuard: new WorkspaceAdminGuard(memberships),
@@ -358,6 +449,11 @@ export function compose(env: CompositionEnv): Composition {
     workspaceGrantRoutes,
     collectionRoutes,
     agentCollectionRoutes,
+    sharedAgentResourcesRoutes,
+    sharedResources,
+    postgresBranches,
+    postgresProvisioner,
+    postgresMinter,
     tokenizer,
     users,
     sessionEvents,

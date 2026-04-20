@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import * as k8s from "@kubernetes/client-node";
 import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
 import { seedIfDev } from "./seed.js";
@@ -32,6 +33,18 @@ if (providerNatsUrl && process.env.NATS_DISABLED !== "true") {
   }
 }
 
+// Kubernetes config is optional — when the process is not running in a
+// cluster, composition falls back to "Postgres installer not available"
+// (install returns 501; listing still works).
+let sharedKubeConfig: k8s.KubeConfig | undefined;
+try {
+  const kc = new k8s.KubeConfig();
+  kc.loadFromCluster();
+  sharedKubeConfig = kc;
+} catch {
+  // Not in a cluster; leave undefined. Dev without devspace still boots.
+}
+
 const {
   authRoutes,
   workspaceInvitationRoutes,
@@ -46,6 +59,7 @@ const {
   workspaceGrantRoutes,
   collectionRoutes,
   agentCollectionRoutes,
+  sharedAgentResourcesRoutes,
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
@@ -77,6 +91,8 @@ const {
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
   internalToken: process.env.API_INTERNAL_TOKEN || "",
   natsConnection: providerNats,
+  kubeConfig: sharedKubeConfig,
+  sharedResourcesNamespace: process.env.K8S_NAMESPACE || "x1agent",
 });
 
 const app = new Hono();
@@ -114,6 +130,10 @@ app.route("/api/workspaces/:slug/collections", collectionRoutes);
 app.route(
   "/api/workspaces/:slug/agents/:agentId/collections",
   agentCollectionRoutes,
+);
+app.route(
+  "/api/workspaces/:slug/shared-agent-resources",
+  sharedAgentResourcesRoutes,
 );
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
