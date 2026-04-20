@@ -125,8 +125,19 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           }
         })().catch(() => {});
 
-        // Presence heartbeat every 20s so the agent's idle timer stays
-        // warm while someone is watching.
+        // Presence / stay-alive: the agent's idle timer starts counting
+        // down as soon as the conversation is quiet. To keep a session
+        // warm while someone is watching but not actively typing, the
+        // browser publishes to `x1.session.{id}.presence`; the sidecar
+        // forwards each ping to the agent's /keepalive endpoint, which
+        // resets the idle timer.
+        //
+        // Cadence:
+        //   - Immediate kickoff ping on subscribe
+        //   - Every 20s thereafter
+        //   - Extra ping on tab refocus (setInterval can stall or skip
+        //     in backgrounded tabs, so re-ping the moment the user
+        //     comes back — matches the upstream pattern)
         const heartbeat = () => {
           try {
             nc.publish(
@@ -139,8 +150,18 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         };
         heartbeat();
         const hbInterval = setInterval(heartbeat, 20_000);
+        const onVisibilityChange = () => {
+          if (document.visibilityState === "visible") heartbeat();
+        };
+        document.addEventListener("visibilitychange", onVisibilityChange);
         (nc as NatsConnection & { __hbCleanup?: () => void }).__hbCleanup =
-          () => clearInterval(hbInterval);
+          () => {
+            clearInterval(hbInterval);
+            document.removeEventListener(
+              "visibilitychange",
+              onVisibilityChange,
+            );
+          };
       } catch (err) {
         setError(sessionId, `NATS connect failed: ${(err as Error).message}`);
       }
