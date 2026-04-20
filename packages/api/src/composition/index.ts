@@ -48,6 +48,7 @@ import {
   PostgresSharedResourceRepository,
   SharedResourceKind,
   createSharedAgentResourcesRoutes,
+  type BranchResetter,
   type KindInstaller,
   type KindUninstaller,
   type SharedResource,
@@ -394,6 +395,7 @@ export function compose(env: CompositionEnv): Composition {
 
   const installers: Partial<Record<SharedResourceKind, KindInstaller>> = {};
   const uninstallers: Partial<Record<SharedResourceKind, KindUninstaller>> = {};
+  const branchResetters: Partial<Record<SharedResourceKind, BranchResetter>> = {};
 
   if (postgresProvisioner) {
     installers.postgres = async (req): Promise<SharedResource> =>
@@ -424,6 +426,17 @@ export function compose(env: CompositionEnv): Composition {
         env.sharedResourcesNamespace ?? "x1agent",
       );
     };
+    if (postgresMinter) {
+      branchResetters.postgres = async ({ resource, branchId }) => {
+        // Drop then remint. The mint path ensures CREATE DATABASE
+        // from the main template again.
+        await postgresMinter.revokeBranch({
+          resource,
+          namespace: env.sharedResourcesNamespace ?? "x1agent",
+          branchId,
+        });
+      };
+    }
   }
 
   if (redisProvisioner) {
@@ -454,12 +467,41 @@ export function compose(env: CompositionEnv): Composition {
         env.sharedResourcesNamespace ?? "x1agent",
       );
     };
+    if (redisMinter) {
+      branchResetters.redis = async ({ resource, branchId }) => {
+        await redisMinter.revokeBranch({
+          resource,
+          namespace: env.sharedResourcesNamespace ?? "x1agent",
+          branchId,
+        });
+      };
+    }
   }
 
   const sharedAgentResourcesRoutes = createSharedAgentResourcesRoutes({
     resources: sharedResources,
     installers,
     uninstallers,
+    branchResetters,
+    findBranchId: async ({ kind, resourceId, repoFullName, branchName }) => {
+      if (kind === "postgres") {
+        const row = await postgresBranches.find({
+          resourceId: resourceId as never,
+          repoFullName,
+          branchName,
+        });
+        return row?.branchId ?? null;
+      }
+      if (kind === "redis") {
+        const row = await redisBranches.find({
+          resourceId: resourceId as never,
+          repoFullName,
+          branchName,
+        });
+        return row?.branchId ?? null;
+      }
+      return null;
+    },
     adminGuard: new WorkspaceAdminGuard(memberships),
     resolveWorkspace: async (slug) => resolveWorkspace(slug),
     workspaceNamespace: env.sharedResourcesNamespace ?? "x1agent",
