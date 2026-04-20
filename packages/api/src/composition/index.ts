@@ -62,6 +62,15 @@ import {
   type PostgresBranchMinter,
   type PostgresBranchRepository,
 } from "@x1agent/agent-resources-postgres";
+import {
+  PostgresRedisBranchRepository,
+  StatefulSetRedisAdminProvisioner,
+  StatefulSetRedisBranchMinter,
+  installRedis,
+  type RedisAdminProvisioner,
+  type RedisBranchMinter,
+  type RedisBranchRepository,
+} from "@x1agent/agent-resources-redis";
 import type * as k8s from "@kubernetes/client-node";
 import { NatsProviderGateway } from "./nats-provider-gateway.js";
 import type { NatsConnection } from "nats";
@@ -108,6 +117,9 @@ export interface Composition {
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
   postgresMinter: PostgresBranchMinter | null;
+  redisBranches: RedisBranchRepository;
+  redisProvisioner: RedisAdminProvisioner | null;
+  redisMinter: RedisBranchMinter | null;
   tokenizer: SessionTokenizer;
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
@@ -366,11 +378,18 @@ export function compose(env: CompositionEnv): Composition {
 
   const sharedResources = new PostgresSharedResourceRepository(env.sql);
   const postgresBranches = new PostgresPostgresBranchRepository(env.sql);
+  const redisBranches = new PostgresRedisBranchRepository(env.sql);
   const postgresProvisioner: PostgresAdminProvisioner | null = env.kubeConfig
     ? new StatefulSetPostgresAdminProvisioner(env.kubeConfig)
     : null;
   const postgresMinter: PostgresBranchMinter | null = env.kubeConfig
     ? new StatefulSetPostgresBranchMinter(env.kubeConfig)
+    : null;
+  const redisProvisioner: RedisAdminProvisioner | null = env.kubeConfig
+    ? new StatefulSetRedisAdminProvisioner(env.kubeConfig)
+    : null;
+  const redisMinter: RedisBranchMinter | null = env.kubeConfig
+    ? new StatefulSetRedisBranchMinter(env.kubeConfig)
     : null;
 
   const installers: Partial<Record<SharedResourceKind, KindInstaller>> = {};
@@ -386,7 +405,6 @@ export function compose(env: CompositionEnv): Composition {
         installedBy: req.installedBy,
       });
     uninstallers.postgres = async (resource) => {
-      // Reap every branch DB first, then tear down the StatefulSet.
       const branches =
         await postgresBranches.listActiveByResource(resource.id);
       if (postgresMinter) {
@@ -402,6 +420,36 @@ export function compose(env: CompositionEnv): Composition {
         }
       }
       await postgresProvisioner.uninstall(
+        resource,
+        env.sharedResourcesNamespace ?? "x1agent",
+      );
+    };
+  }
+
+  if (redisProvisioner) {
+    installers.redis = async (req): Promise<SharedResource> =>
+      installRedis(sharedResources, redisProvisioner, {
+        workspaceId: req.workspaceId,
+        namespace: req.namespace,
+        version: req.version,
+        storageSize: (req.config.storage_size as string) ?? "5Gi",
+        installedBy: req.installedBy,
+      });
+    uninstallers.redis = async (resource) => {
+      const branches = await redisBranches.listActiveByResource(resource.id);
+      if (redisMinter) {
+        for (const b of branches) {
+          await redisMinter
+            .revokeBranch({
+              resource,
+              namespace: env.sharedResourcesNamespace ?? "x1agent",
+              branchId: b.branchId,
+            })
+            .catch(() => undefined);
+          await redisBranches.markReaped(b.id).catch(() => undefined);
+        }
+      }
+      await redisProvisioner.uninstall(
         resource,
         env.sharedResourcesNamespace ?? "x1agent",
       );
@@ -454,6 +502,9 @@ export function compose(env: CompositionEnv): Composition {
     postgresBranches,
     postgresProvisioner,
     postgresMinter,
+    redisBranches,
+    redisProvisioner,
+    redisMinter,
     tokenizer,
     users,
     sessionEvents,

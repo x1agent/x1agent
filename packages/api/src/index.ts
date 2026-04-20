@@ -63,6 +63,8 @@ const {
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
+  redisBranches: composedRedisBranches,
+  redisMinter: composedRedisMinter,
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
@@ -263,6 +265,8 @@ if (process.env.JOB_WATCHER !== "disabled") {
       sharedResources: composedSharedResources,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
+      redisMinter: composedRedisMinter,
+      redisBranches: composedRedisBranches,
     });
   } catch (err) {
     console.warn(
