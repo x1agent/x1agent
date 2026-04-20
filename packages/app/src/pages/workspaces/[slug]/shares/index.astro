@@ -1,0 +1,13 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { WorkspaceSharesRoot } from "../../../../features/shares/WorkspaceSharesRoot";
+
+const { slug } = Astro.params;
+---
+
+<Layout title={`shares · ${slug} · x1agent`}>
+  <WorkspaceSharesRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+  />
+</Layout>

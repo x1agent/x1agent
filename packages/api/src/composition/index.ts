@@ -99,7 +99,10 @@ import {
 } from "./invitation-adapters.js";
 import { createInternalRoutes } from "../internal/routes.js";
 import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
-import { createWorkspaceShareRoutes } from "../shares/routes.js";
+import {
+  createWorkspaceShareRoutes,
+  createWorkspaceSharesIndexRoutes,
+} from "../shares/routes.js";
 
 export interface Composition {
   authRoutes: Hono;
@@ -109,6 +112,7 @@ export interface Composition {
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
   workspaceShareRoutes: Hono;
+  workspaceSharesIndexRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
@@ -303,6 +307,14 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
     getActor,
     gcsArtifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
+  });
+
+  const workspaceSharesIndexRoutes = createWorkspaceSharesIndexRoutes({
+    sql: env.sql,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
   });
 
   const tickScheduler = () =>
@@ -555,6 +567,7 @@ export function compose(env: CompositionEnv): Composition {
     sessionRoutes,
     workspaceSessionRoutes,
     workspaceShareRoutes,
+    workspaceSharesIndexRoutes,
     internalRoutes,
     githubInstallRoutes,
     installationApiRoutes,
