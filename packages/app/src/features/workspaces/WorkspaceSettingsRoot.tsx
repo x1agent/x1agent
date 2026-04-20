@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AppShell } from "../../shell/AppShell";
 import { useAuthStore } from "../../stores/authStore";
+import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { Badge } from "../../components/ui/badge";
 import {
   Card,
@@ -39,6 +40,10 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
   const ws = memberships.find((m) => m.slug === workspaceSlug);
   const canManage = ws?.role === "admin" || ws?.role === "owner";
 
+  // URL-synced active tab. Default "resources" stays clean in the URL;
+  // selecting another tab writes `?tab=registry` / `?tab=invitations`.
+  const [tab, setTab] = useUrlSearchParam("tab", "resources");
+
   return (
     <AppShell
       breadcrumbs={[
@@ -65,7 +70,7 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
             </CardContent>
           </Card>
 
-          <Tabs defaultValue="resources">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="resources">Shared resources</TabsTrigger>
               <TabsTrigger value="registry">Container registry</TabsTrigger>

@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch as apiFetchShared } from "../../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  useSharedResourcesStore,
+  type InstalledResource,
+} from "../../stores/sharedResourcesStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -32,89 +35,38 @@ interface Props {
   canManage: boolean;
 }
 
-interface CatalogEntry {
-  kind: string;
-  display_name: string;
-  versions: string[];
-  default_version: string;
-  default_storage_size: string;
-  available: boolean;
-}
-
-interface InstalledResource {
-  id: string;
-  kind: string;
-  version: string;
-  provider: string;
-  status: "provisioning" | "running" | "failed";
-  status_reason: string | null;
-  created_at: string;
-}
-
 const STATUS_VARIANT: Record<InstalledResource["status"], BadgeVariant> = {
   provisioning: "info",
   running: "success",
   failed: "warning",
 };
 
-// Thin wrapper around the shared apiFetch so the error body's
-// structured `error` / `message` come through when the API returns
-// 4xx with a DomainError payload.
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  try {
-    return await apiFetchShared<T>(path, init);
-  } catch (err) {
-    const msg = (err as Error).message;
-    // apiFetchShared throws `API <status>: <body>`; unwrap the body.
-    const m = /^API \d+: (.+)$/.exec(msg);
-    if (m) {
-      try {
-        const parsed = JSON.parse(m[1]!) as {
-          message?: string;
-          error?: string;
-        };
-        throw new Error(parsed.message ?? parsed.error ?? msg);
-      } catch {
-        // fall through — body wasn't JSON
-      }
-    }
-    throw err;
-  }
-}
-
 export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [installed, setInstalled] = useState<InstalledResource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    catalogBySlug,
+    installedBySlug,
+    loadingSlug,
+    errorBySlug,
+    load,
+    install,
+    uninstall,
+  } = useSharedResourcesStore();
+  const catalog = catalogBySlug[slug] ?? [];
+  const installed = installedBySlug[slug] ?? [];
+  const loading = loadingSlug === slug && catalog.length === 0;
+  const error = errorBySlug[slug] ?? null;
 
+  // Local form state — short-lived and per-panel; does not belong in
+  // the zustand store.
   const [kind, setKind] = useState<string>("postgres");
   const [version, setVersion] = useState<string>("");
   const [storageSize, setStorageSize] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const base = `/api/workspaces/${slug}/shared-agent-resources`;
-
-  const reload = useCallback(async () => {
-    setError(null);
-    try {
-      const [c, l] = await Promise.all([
-        apiFetch<{ entries: CatalogEntry[] }>(`${base}/catalog`),
-        apiFetch<{ resources: InstalledResource[] }>(base),
-      ]);
-      setCatalog(c.entries);
-      setInstalled(l.resources);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [base]);
-
   useEffect(() => {
-    reload();
-  }, [reload]);
+    load(slug);
+  }, [slug, load]);
 
   const selectedEntry = useMemo(
     () => catalog.find((e) => e.kind === kind),
@@ -138,16 +90,12 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await apiFetch(base, {
-        method: "POST",
-        body: JSON.stringify({
-          kind,
-          version,
-          config: { storage_size: storageSize },
-        }),
+      await install(slug, {
+        kind,
+        version,
+        storage_size: storageSize,
       });
       setStorageSize("");
-      await reload();
     } catch (err) {
       setSubmitError((err as Error).message);
     } finally {
@@ -161,10 +109,11 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
     );
     if (!ok) return;
     try {
-      await apiFetch(`${base}/${resource.id}`, { method: "DELETE" });
-      await reload();
+      await uninstall(slug, resource.id);
     } catch (err) {
-      setError((err as Error).message);
+      // Surface via submit error slot since it's the closest visible
+      // error region; a dedicated toast would be next-level polish.
+      setSubmitError((err as Error).message);
     }
   };
 
