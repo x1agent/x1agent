@@ -99,7 +99,15 @@ spec:
   ingress:
     - {}
 ---
-# ── postgres: only api may connect ──────────────────────────────
+# ── postgres (control plane): ONLY api may connect ──────────────
+# This is the x1agent control-plane database — workspaces, agents,
+# sessions, permission_grants, audit_events. Session pods MUST NOT
+# reach it. The selector excludes `component: agent-session`; combined
+# with default-deny-all, agent pods have no path to control-plane pg.
+#
+# Workspace-scoped Postgres instances (installed via
+# /api/workspaces/:slug/shared-agent-resources) have
+# `app: x1-postgres` and a separate ingress policy below.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -115,6 +123,47 @@ spec:
             matchExpressions:
               - { key: app, operator: In, values: ["api", "api-devspace"] }
       ports: [{ port: 5432, protocol: TCP }]
+---
+# ── x1-postgres (shared agent resources): session pods + api ───
+# Workspace-installed Postgres instances. Session pods read/write
+# their per-branch databases via DATABASE_URL; the api reaches the
+# same instance to run admin SQL (CREATE DATABASE, ALTER ROLE) at
+# session start. Control-plane postgres is deliberately not in this
+# policy — it is a separate pod with `app: postgres`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: x1-postgres-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: x1-postgres } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { component: agent-session } }
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: ["api", "api-devspace"] }
+      ports: [{ port: 5432, protocol: TCP }]
+---
+# ── x1-redis (shared agent resources): session pods + api ──────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: x1-redis-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { app: x1-redis } }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { component: agent-session } }
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: ["api", "api-devspace"] }
+      ports: [{ port: 6379, protocol: TCP }]
 ---
 # ── nats: api, all session sidecars, and providers may connect ──
 apiVersion: networking.k8s.io/v1
@@ -202,6 +251,12 @@ spec:
 # The agent container shares this namespace with the sidecar; per-
 # container isolation needs Cilium or a proxy. Today both containers
 # get the same pod-level egress allowlist.
+#
+# CONTROL-PLANE POSTGRES IS DELIBERATELY NOT IN THIS LIST. Session
+# pods hold no control-plane credential and must not be able to
+# reach `app: postgres` on 5432. Their DATABASE_URL (when shared
+# agent resources are installed) points at `app: x1-postgres`, a
+# different pod, allowed here on a separate rule.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -220,6 +275,12 @@ spec:
             matchExpressions:
               - { key: app, operator: In, values: ["api", "api-devspace"] }
       ports: [{ port: 30001, protocol: TCP }]
+    - to:
+        - podSelector: { matchLabels: { app: x1-postgres } }
+      ports: [{ port: 5432, protocol: TCP }]
+    - to:
+        - podSelector: { matchLabels: { app: x1-redis } }
+      ports: [{ port: 6379, protocol: TCP }]
     # External: github (gh, git), npm/jsr (package installs), Anthropic
     # / OpenAI (LLM calls if not via provider), generic web.
     - to:
