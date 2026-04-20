@@ -24,6 +24,7 @@ mod collections;
 mod messaging;
 mod nats_bridge;
 mod orchestration;
+mod shares;
 mod stream;
 
 #[derive(Clone)]
@@ -143,6 +144,7 @@ async fn main() {
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
         )
+        .route("/share", routing::post(shares::handle_share))
         .route(
             "/collections",
             routing::get(collections::handle_list_collections),
