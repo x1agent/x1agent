@@ -11,6 +11,7 @@ import {
 } from "../../domain/shared-resource.js";
 import type { SharedResourceRepository } from "../../ports/shared-resource-repository.js";
 import { listWorkspaceResources } from "../../application/list-resources.js";
+import { loadStaticCatalog, type CatalogEntry } from "../../catalog.js";
 
 /**
  * Narrow port: "is this user an admin of this workspace?" — same shape
@@ -38,10 +39,32 @@ export type KindInstaller = (
 
 export type KindUninstaller = (resource: SharedResource) => Promise<void>;
 
+/**
+ * Per-engine "reset a single branch" hook. Drops + re-templates a
+ * Postgres database, or DELs + recreates a Redis ACL user. The
+ * agent's next session re-provisions on the mint path.
+ */
+export type BranchResetter = (input: {
+  resource: SharedResource;
+  branchId: string;
+}) => Promise<void>;
+
 export interface SharedAgentResourcesRoutesConfig {
   resources: SharedResourceRepository;
   installers: Partial<Record<SharedResourceKind, KindInstaller>>;
   uninstallers: Partial<Record<SharedResourceKind, KindUninstaller>>;
+  branchResetters: Partial<Record<SharedResourceKind, BranchResetter>>;
+  /**
+   * Lookup branch_id by (resource, repo_full_name, branch_name) — we
+   * hash-sanitize the branch name in the domain layer; the routes need
+   * to be able to find existing rows without recomputing the id.
+   */
+  findBranchId: (input: {
+    kind: SharedResourceKind;
+    resourceId: string;
+    repoFullName: string;
+    branchName: string;
+  }) => Promise<string | null>;
   adminGuard: WorkspaceAdminGuard;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   /** Namespace where workspace-scoped K8s resources live. */
@@ -102,29 +125,15 @@ export function createSharedAgentResourcesRoutes(
     }
   };
 
-  // Catalog — what the workspace can install. Hard-coded v1; a future
-  // release moves this to a platform config and supports dynamic entries.
+  // Catalog — what the platform can install. Source is the code-embedded
+  // loadStaticCatalog(); `available` is decorated per deployment based
+  // on which installers the composition root wired in.
   app.get("/catalog", (c) => {
-    return c.json({
-      entries: [
-        {
-          kind: "postgres",
-          display_name: "PostgreSQL",
-          versions: ["16", "15"],
-          default_version: "16",
-          default_storage_size: "20Gi",
-          available: Boolean(cfg.installers.postgres),
-        },
-        {
-          kind: "redis",
-          display_name: "Redis",
-          versions: ["7"],
-          default_version: "7",
-          default_storage_size: "5Gi",
-          available: Boolean(cfg.installers.redis),
-        },
-      ],
-    });
+    const entries: CatalogEntry[] = loadStaticCatalog().map((entry) => ({
+      ...entry,
+      available: Boolean(cfg.installers[entry.kind]),
+    }));
+    return c.json({ entries });
   });
 
   // List installed.
@@ -173,6 +182,55 @@ export function createSharedAgentResourcesRoutes(
         installedBy: actor.userId,
       });
       return c.json({ resource: serialize(resource) }, 201);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+  });
+
+  // Reset a single branch's DB / ACL user. Drops the backing data and
+  // the next session on that (repo, branch) re-provisions from the main
+  // template. Destructive at the branch scope; other branches are
+  // untouched.
+  app.post("/:id/branches/:branch/reset", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const id = c.req.param("id")!;
+    const branchName = decodeURIComponent(c.req.param("branch")!);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      repo_full_name?: string;
+    };
+    if (!body.repo_full_name) {
+      return c.json({ error: "missing_fields", message: "repo_full_name is required" }, 400);
+    }
+    try {
+      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
+      const resource = await cfg.resources.findById(id as never);
+      if (!resource || resource.workspaceId !== wsId) {
+        return c.json({ error: "resource_not_found" }, 404);
+      }
+      const resetter = cfg.branchResetters[resource.kind];
+      if (!resetter) {
+        return c.json(
+          {
+            error: "kind_not_available",
+            message: `reset is not available for ${resource.kind}`,
+          },
+          501,
+        );
+      }
+      const branchId = await cfg.findBranchId({
+        kind: resource.kind,
+        resourceId: resource.id,
+        repoFullName: body.repo_full_name,
+        branchName,
+      });
+      if (!branchId) {
+        return c.json({ error: "branch_not_provisioned" }, 404);
+      }
+      await resetter({ resource, branchId });
+      return c.json({ ok: true, branch_id: branchId });
     } catch (err) {
       return c.json(errBody(err), errStatus(err) as 400);
     }

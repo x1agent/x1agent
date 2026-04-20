@@ -2,6 +2,9 @@
 export * from "./domain/shared-resource.js";
 export * from "./domain/branch-id.js";
 
+// Catalog
+export * from "./catalog.js";
+
 // Ports
 export type {
   CreateSharedResourceInput,
