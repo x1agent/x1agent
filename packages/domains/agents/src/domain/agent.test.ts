@@ -33,9 +33,8 @@ describe("CronSchedule", () => {
 });
 
 describe("RuntimeType", () => {
-  it("accepts claude_code + mastra", () => {
+  it("accepts claude_code", () => {
     expect(RuntimeType("claude_code")).toBe("claude_code");
-    expect(RuntimeType("mastra")).toBe("mastra");
   });
 
   it("rejects unknown runtimes", () => {

@@ -1,6 +1,6 @@
 import { ValidationError } from "@x1agent/kernel";
 
-export const RUNTIME_TYPES = ["claude_code", "mastra"] as const;
+export const RUNTIME_TYPES = ["claude_code"] as const;
 export type RuntimeType = (typeof RUNTIME_TYPES)[number];
 
 export function RuntimeType(raw: string): RuntimeType {

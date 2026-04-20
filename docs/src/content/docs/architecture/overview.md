@@ -24,7 +24,7 @@ graph TB
     sidecar -.- vol
 ```
 
-**Agent container** -- Runs the LLM runtime (Claude Agent SDK, Mastra, or custom). Exposes an SSE stream on `:3100` for event output and an inject endpoint on `:8788` for user message input. Receives zero secrets. Talks only to the sidecar on localhost.
+**Agent container** -- Runs the LLM runtime (Claude Agent SDK or a custom runtime). Exposes an SSE stream on `:3100` for event output and an inject endpoint on `:8788` for user message input. Receives zero secrets. Talks only to the sidecar on localhost.
 
 **Sidecar container** -- Rust (Axum + async-nats). Bridges the agent to NATS, enforces permissions, manages the workspace volume, proxies credential-bearing API calls, and logs all operations. This is the trust boundary.
 
@@ -102,6 +102,5 @@ The platform treats agent runtimes as pluggable. A runtime must expose two HTTP 
 Built-in runtimes:
 
 - **claude_code** -- Claude Agent SDK (TypeScript). Multi-turn via `streamInput()`. MCP servers for tools and proactive emission.
-- **mastra** -- Generic runner that clones any Mastra agent repo at startup. Postgres-backed memory for thread persistence.
 
 Custom runtimes can be added by implementing these two endpoints in any language.

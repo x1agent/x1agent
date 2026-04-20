@@ -1,6 +1,6 @@
 -- 004_agents
 -- Agent configurations live inside a workspace. An agent describes what
--- kind of runtime to spin up (claude_code, mastra), the system prompt,
+-- kind of runtime to spin up (claude_code), the system prompt,
 -- its cron schedule, and which GitHub repos are mounted at session start.
 
 CREATE TABLE IF NOT EXISTS agents (

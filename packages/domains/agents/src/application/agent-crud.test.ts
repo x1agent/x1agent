@@ -184,7 +184,7 @@ describe("listAgents", () => {
         workspaceId: otherWs,
         slug: WorkspaceSlug("beta"),
         name: "B",
-        runtimeType: RuntimeType("mastra"),
+        runtimeType: RuntimeType("claude_code"),
       },
     );
     const rows = await listAgents(agents, ACTOR, WS);
