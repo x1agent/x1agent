@@ -163,15 +163,22 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     const nc = ncRef.current;
     if (!nc) return;
     const sc = StringCodec();
-    const payload: Record<string, unknown> = { text };
+    const basePayload: Record<string, unknown> = { text };
+    const payload: Record<string, unknown> = { ...basePayload };
     if (requestId) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
+    // Per-component sequence counter. Local echoes share the same
+    // seq space as the publish envelopes. The store dedups by
+    // (seq, type) — since the server never emits `user.message` as
+    // its own event type, local echoes can never collide with real
+    // server events, regardless of what seq they use.
+    const seq = seqRef.current++;
     const envelope = {
       session_id: sessionId,
       timestamp: new Date().toISOString(),
-      sequence: seqRef.current++,
+      sequence: seq,
       type: requestId ? "user.input_response" : "user.message",
       payload,
     };
@@ -179,13 +186,14 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       `x1.session.${sessionId}.input`,
       sc.encode(JSON.stringify(envelope)),
     );
-    // Local echo so the user sees their message immediately.
+    // Local echo. Always type `user.message` so the UI renders a user
+    // bubble even when the envelope was a `user.input_response`.
     appendEvent(sessionId, {
-      id: `local-${envelope.sequence}`,
+      id: `local-${seq}`,
       session_id: sessionId,
-      seq: 1_000_000_000 + envelope.sequence,
+      seq,
       type: "user.message",
-      payload: { text },
+      payload: basePayload,
       timestamp: envelope.timestamp,
     });
   };
