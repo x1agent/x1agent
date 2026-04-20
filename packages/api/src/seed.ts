@@ -8,21 +8,48 @@ const DEFAULT_WORKSPACE_NAME = "Default";
 // `built_ref` points at the in-cluster registry path that `mise run
 // images:publish` pushes to. Pod-spec resolves agents.image_id to this
 // row's built_ref at session launch.
+//
+// Version choices at seed time:
+//   - Python 3.13 — latest stable CPython minor (5-year security support)
+//   - Node.js 22 — Active LTS ("Jod")
+//   - Go 1.24 — latest stable
+//   - Rust stable — rolling channel; rustup resolves at build time
+const REGISTRY = "x1-registry.x1agent.svc.cluster.local:5000";
 const PLATFORM_PRESETS = [
   {
     name: "runtime-core",
     display_name: "x1 runtime core",
     description:
-      "Base image every preset FROMs. Ships the agent SDK, gh CLI, git, and the non-root user at uid 1000. No language toolchains.",
-    built_ref: "x1-registry.x1agent.svc.cluster.local:5000/x1agent/runtime-core:v1",
+      "Base image every preset FROMs. Ships Node 22, tsx, the agent SDK, gh CLI, git, and the non-root user at uid 1000. No other language toolchains.",
+    built_ref: `${REGISTRY}/x1agent/runtime-core:v1`,
   },
   {
-    name: "preset-python-django",
-    display_name: "Python / Django",
+    name: "preset-python",
+    display_name: "Python 3.13",
     description:
-      "runtime-core + Python 3.12, libpq-dev, postgresql-client, ripgrep, jq, uv. Suitable for Django and FastAPI projects.",
-    built_ref:
-      "x1-registry.x1agent.svc.cluster.local:5000/x1agent/preset-python-django:v1",
+      "runtime-core + Python 3.13 (via uv standalone distribution), build-essential, ripgrep, jq. Generic Python target — add your own dependencies with uv or pip.",
+    built_ref: `${REGISTRY}/x1agent/preset-python:v1`,
+  },
+  {
+    name: "preset-node",
+    display_name: "Node.js 22 LTS",
+    description:
+      "runtime-core + TypeScript CLI + pnpm. Node 22 is the current Active LTS (Jod).",
+    built_ref: `${REGISTRY}/x1agent/preset-node:v1`,
+  },
+  {
+    name: "preset-go",
+    display_name: "Go 1.24",
+    description:
+      "runtime-core + the Go 1.24 toolchain from the official go.dev tarball. GOPATH at /home/node/go; `go install` targets land on PATH.",
+    built_ref: `${REGISTRY}/x1agent/preset-go:v1`,
+  },
+  {
+    name: "preset-rust",
+    display_name: "Rust stable",
+    description:
+      "runtime-core + rustup stable toolchain (minimal profile) + clippy + rustfmt. Common native-link deps (build-essential, pkg-config, libssl-dev) pre-installed.",
+    built_ref: `${REGISTRY}/x1agent/preset-rust:v1`,
   },
 ] as const;
 
@@ -68,5 +95,16 @@ export async function seedIfDev() {
         updated_at = now()
     `;
   }
+  // Drop preset rows that were removed from this list. Any agent
+  // referencing a dropped preset gets image_id → NULL via the
+  // ON DELETE SET NULL on agents.image_id; pod-spec falls back to
+  // the deployment-wide AGENT_IMAGE.
+  const liveNames = PLATFORM_PRESETS.map((p) => p.name);
+  await sql`
+    DELETE FROM agent_images
+    WHERE workspace_id IS NULL
+      AND is_preset = true
+      AND name <> ALL(${liveNames as unknown as string[]})
+  `;
   console.log(`[seed] platform presets ready: ${PLATFORM_PRESETS.length}`);
 }

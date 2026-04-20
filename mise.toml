@@ -110,24 +110,29 @@ description = "Preview the built docs site"
 run = "cd docs && npm run preview"
 
 # ----------------------------------------------------------------------------
-# Image catalog: build and push platform presets to the in-cluster
-# registry. Run this after `dev:cluster` is up and the registry Service
-# is reachable. Idempotent — re-running rebuilds + re-tags only what
-# changed in the layer cache.
+# Image catalog: build + push runtime-core and every language preset to
+# the in-cluster registry. Run after `dev:cluster` is up. Idempotent —
+# re-runs rebuild only what changed in the buildx layer cache.
 #
-# Port-forwards the registry to localhost:5000, builds:
-#   x1agent/runtime-core:v1        (packages/agent/Dockerfile)
-#   x1agent/preset-python-django:v1 (deploy/images/python-django/Dockerfile,
-#                                     FROMs runtime-core:v1)
-# then pushes to the forwarded port. Uses docker buildx for linux/amd64
-# so images run unchanged on both arm64 and amd64 nodes.
+# What gets built (each tagged :v1 and :latest):
+#   x1agent/runtime-core       — base image every preset FROMs
+#   x1agent/preset-python      — Python 3.13 via uv
+#   x1agent/preset-node        — Node.js 22 LTS + TypeScript + pnpm
+#   x1agent/preset-go          — Go 1.24 toolchain
+#   x1agent/preset-rust        — Rust stable via rustup
+#
+# Adding a new preset: drop a Dockerfile under deploy/images/<name>/ and
+# add <name> to the PRESETS variable below. The seed in
+# packages/api/src/seed.ts also needs an entry so the agent_images row
+# is populated on next api boot.
 # ----------------------------------------------------------------------------
 [tasks."images:publish"]
-description = "Build + push runtime-core and preset-python-django to the in-cluster registry"
+description = "Build + push runtime-core and every language preset to the in-cluster registry"
 run = """
 set -euo pipefail
 REGISTRY_LOCAL="${IMAGES_REGISTRY:-localhost:5000}"
 PLATFORM="${IMAGES_PLATFORM:-linux/arm64}"
+PRESETS="${IMAGES_PRESETS:-python node go rust}"
 PF_PID=""
 if ! curl -sf --max-time 2 "http://${REGISTRY_LOCAL}/v2/" > /dev/null; then
   echo "[images] port-forwarding x1-registry Service to ${REGISTRY_LOCAL}"
@@ -141,8 +146,8 @@ if ! curl -sf --max-time 2 "http://${REGISTRY_LOCAL}/v2/" > /dev/null; then
 fi
 
 echo "[images] building runtime-core:v1"
-# Build locally first so the `FROM` in preset-python-django resolves,
-# then push. --load puts it in the local daemon.
+# --load puts runtime-core in the local daemon so the preset Dockerfiles'
+# `FROM x1agent/runtime-core:v1` resolves without needing to pull.
 docker buildx build \\
   --platform "${PLATFORM}" \\
   -t x1agent/runtime-core:v1 \\
@@ -151,24 +156,28 @@ docker buildx build \\
   -f packages/agent/Dockerfile \\
   --load \\
   packages/agent
-
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:v1"
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:latest"
 
-echo "[images] building preset-python-django:v1"
-docker buildx build \\
-  --platform "${PLATFORM}" \\
-  -t "${REGISTRY_LOCAL}/x1agent/preset-python-django:v1" \\
-  -t "${REGISTRY_LOCAL}/x1agent/preset-python-django:latest" \\
-  --build-arg BASE_IMAGE=x1agent/runtime-core:v1 \\
-  -f deploy/images/python-django/Dockerfile \\
-  --load \\
-  deploy/images/python-django
+for P in $PRESETS; do
+  if [ ! -f "deploy/images/$P/Dockerfile" ]; then
+    echo "[images] no Dockerfile at deploy/images/$P/Dockerfile — skipping"
+    continue
+  fi
+  echo "[images] building preset-$P:v1"
+  docker buildx build \\
+    --platform "${PLATFORM}" \\
+    -t "${REGISTRY_LOCAL}/x1agent/preset-$P:v1" \\
+    -t "${REGISTRY_LOCAL}/x1agent/preset-$P:latest" \\
+    --build-arg BASE_IMAGE=x1agent/runtime-core:v1 \\
+    -f "deploy/images/$P/Dockerfile" \\
+    --load \\
+    "deploy/images/$P"
+  docker push "${REGISTRY_LOCAL}/x1agent/preset-$P:v1"
+  docker push "${REGISTRY_LOCAL}/x1agent/preset-$P:latest"
+done
 
-docker push "${REGISTRY_LOCAL}/x1agent/preset-python-django:v1"
-docker push "${REGISTRY_LOCAL}/x1agent/preset-python-django:latest"
-
-echo "[images] done — presets available at ${REGISTRY_LOCAL}/x1agent/*"
+echo "[images] done — images available at ${REGISTRY_LOCAL}/x1agent/*"
 """
 
 [tasks.review]
