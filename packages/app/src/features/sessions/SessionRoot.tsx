@@ -8,7 +8,7 @@ import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
 import { MessageInput } from "./MessageInput";
-import { PENDING_PROMPT_KEY_PREFIX } from "./RecentRunsSection";
+import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 
 interface Props {
@@ -54,16 +54,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const [resuming, setResuming] = useState(false);
   const ncRef = useRef<NatsConnection | null>(null);
   const seqRef = useRef(0);
-  // If the user entered a prompt on the "Run" card before navigating,
-  // RecentRunsSection stashed it in sessionStorage. Read it once so a
-  // later clear (from the auto-send effect) doesn't race us.
-  const pendingPromptRef = useRef<string | null>(
-    typeof window !== "undefined"
-      ? window.sessionStorage.getItem(
-          `${PENDING_PROMPT_KEY_PREFIX}${sessionId}`,
-        )
-      : null,
-  );
+  const takePendingPrompt = usePendingPromptStore((s) => s.take);
   const pendingPromptSentRef = useRef(false);
   const resumeAction = useSessionsStore((s) => s.resume);
 
@@ -230,22 +221,18 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // process are both live, which also means the sidecar has
   // subscribed to `.input` and won't drop our publish. NATS core is
   // at-most-once, so publishing earlier would be a silent loss.
+  //
+  // `take` reads + clears atomically, so a re-render can't refire the
+  // send; we still guard with a ref for the same-render case.
   useEffect(() => {
-    const pending = pendingPromptRef.current;
-    if (!pending || pendingPromptSentRef.current) return;
+    if (pendingPromptSentRef.current) return;
     if (!ncRef.current) return;
-    const hasStarted = events.some((e) => e.type === "session.started");
-    if (!hasStarted) return;
+    if (!events.some((e) => e.type === "session.started")) return;
+    const pending = takePendingPrompt(sessionId);
+    if (!pending) return;
     pendingPromptSentRef.current = true;
     sendMessage(pending);
-    try {
-      window.sessionStorage.removeItem(
-        `${PENDING_PROMPT_KEY_PREFIX}${sessionId}`,
-      );
-    } catch {
-      // storage may be disabled; nothing else to clean up.
-    }
-  }, [events, sessionId]);
+  }, [events, sessionId, takePendingPrompt]);
 
   const disabled =
     !session ||

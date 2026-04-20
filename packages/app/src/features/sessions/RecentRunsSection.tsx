@@ -11,8 +11,7 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { useSessionsStore } from "../../stores/sessionsStore";
-
-export const PENDING_PROMPT_KEY_PREFIX = "x1agent:pending-prompt:";
+import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 
 interface Props {
   workspaceSlug: string;
@@ -70,6 +69,7 @@ function RunRow({
  */
 export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
   const { byAgent, load, trigger } = useSessionsStore();
+  const queuePendingPrompt = usePendingPromptStore((s) => s.set);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -88,18 +88,11 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
     setBusy(true);
     try {
       const session = await trigger(workspaceSlug, agentId);
-      // Persist the prompt so the session page can auto-send it once
-      // the agent pod is up. sessionStorage is scoped to this tab, so
-      // opening the session in a new tab won't replay it.
-      const v = prompt.trim();
-      if (v) {
-        try {
-          sessionStorage.setItem(`${PENDING_PROMPT_KEY_PREFIX}${session.id}`, v);
-        } catch {
-          // sessionStorage can be disabled; the run still proceeds
-          // without an initial prompt.
-        }
-      }
+      // Queue the prompt so the session page can auto-send it once
+      // the agent pod is up. The store persists to sessionStorage
+      // (tab-scoped), so opening the session in a new tab won't
+      // replay it.
+      queuePendingPrompt(session.id, prompt);
       window.location.href = `/workspaces/${workspaceSlug}/sessions/${session.id}`;
     } catch (err) {
       setError((err as Error).message);
