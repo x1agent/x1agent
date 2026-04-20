@@ -248,48 +248,52 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       placeholder="heartbeat"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="agent-runtime">Runtime</Label>
-                    <Select
-                      value={runtimeType}
-                      onValueChange={(v) => setRuntimeType(v as RuntimeType)}
-                    >
-                      <SelectTrigger id="agent-runtime">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="claude_code">claude_code</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="agent-image">Container image</Label>
-                    <Select
-                      value={imageId === "" ? "__default__" : imageId}
-                      onValueChange={(v) =>
-                        setImageId(v === "__default__" ? "" : v)
-                      }
-                    >
-                      <SelectTrigger id="agent-image">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__default__">
-                          Platform default
-                        </SelectItem>
-                        {images.map((img) => (
-                          <SelectItem key={img.id} value={img.id}>
-                            {img.display_name}
-                            {img.is_preset ? " (preset)" : ""}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="agent-runtime">Runtime</Label>
+                      <Select
+                        value={runtimeType}
+                        onValueChange={(v) => setRuntimeType(v as RuntimeType)}
+                      >
+                        <SelectTrigger id="agent-runtime">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="claude_code">
+                            claude_code
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-zinc-500">
-                      Pick a preset or a workspace image. "Platform default"
-                      uses the deployment-wide AGENT_IMAGE.
-                    </p>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="agent-image">Container image</Label>
+                      <Select
+                        value={imageId === "" ? "__default__" : imageId}
+                        onValueChange={(v) =>
+                          setImageId(v === "__default__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger id="agent-image">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">
+                            Platform default
+                          </SelectItem>
+                          {images.map((img) => (
+                            <SelectItem key={img.id} value={img.id}>
+                              {img.display_name}
+                              {img.is_preset ? " (preset)" : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
+                  <p className="text-xs text-zinc-500">
+                    "Platform default" uses the deployment-wide AGENT_IMAGE;
+                    pick a preset or a workspace image to override per agent.
+                  </p>
                 </CardContent>
               </Card>
 

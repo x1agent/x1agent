@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import cronstrue from "cronstrue";
 import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import {
   Select,
   SelectContent,
@@ -267,7 +268,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-zinc-400">Frequency</label>
+        <Label>Frequency</Label>
         <Select
           value={state.kind}
           onValueChange={(v) => setKind(v as StructuredSchedule["kind"])}
@@ -339,9 +340,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
       {state.kind === "monthly" && (
         <>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-400">
-              Day of month
-            </label>
+            <Label>Day of month</Label>
             <Input
               type="number"
               min={1}
@@ -364,9 +363,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
 
       {state.kind === "custom" && (
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-zinc-400">
-            Cron expression
-          </label>
+          <Label>Cron expression</Label>
           <Input
             value={state.raw}
             onChange={(e) => patch({ kind: "custom", raw: e.target.value })}
@@ -461,7 +458,7 @@ function DayPicker({
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-zinc-400">On</label>
+      <Label>On</Label>
       <div className="flex gap-1">
         {DOW_LABELS.map((label, day) => {
           const active = days.has(day);
