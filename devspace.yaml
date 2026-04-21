@@ -53,13 +53,6 @@ vars:
   API_INTERNAL_TOKEN:
     source: env
     default: "dev-internal-token-change-me"
-  # Dev-only: host home dir. On macOS this is /Users/<you>. The Job
-  # watcher passes this into agent containers as a hostPath mount of
-  # ~/.claude + ~/.claude.json so Claude Code picks up settings.
-    source: env
-    default: ""
-    source: env
-    default: ""
   # Phase 1 messaging provider credential. Phase 2 replaces this with
   # per-workspace OAuth + credential proxy.
   SLACK_BOT_TOKEN:
