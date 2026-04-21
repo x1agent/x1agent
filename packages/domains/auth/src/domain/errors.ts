@@ -63,3 +63,30 @@ export class LinkAttemptExpiredError extends DomainError {
     super("account-link attempt has expired; restart the Add Account flow");
   }
 }
+
+/**
+ * Either the email has no account at all or the stored hash didn't
+ * match. We collapse both into one error code on purpose — the route
+ * maps it to a generic "invalid credentials" so a bad actor can't use
+ * timing / wording to enumerate which emails exist.
+ */
+export class PasswordSignInFailedError extends DomainError {
+  readonly code = "invalid_credentials";
+  constructor() {
+    super("invalid email or password");
+  }
+}
+
+/**
+ * The user exists but has never set (or has explicitly cleared) a
+ * password — they need to sign in via SSO or have an admin reseed the
+ * password. Internal use; routes collapse this to
+ * PasswordSignInFailedError so external responses don't leak the
+ * distinction.
+ */
+export class NoPasswordSetError extends DomainError {
+  readonly code = "no_password_set";
+  constructor(public readonly email: string) {
+    super(`${email} has no password configured`);
+  }
+}
