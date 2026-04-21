@@ -38,6 +38,8 @@ These are architectural invariants. Features that violate them are redesigned, n
 
 No API keys, OAuth tokens, or database credentials in the agent container or provider containers. The sidecar fetches user tokens per-request, uses them, and drops them. The agent receives only a `SESSION_ID` and a localhost URL for the sidecar.
 
+Secrets the agent container *does* need (model API keys, per-MCP credentials) are delivered as explicit environment variables sourced from Kubernetes Secrets via `secretKeyRef`. Each pod sees only the variables we chose to inject — no wildcard mounts, no access to any other secret in its namespace. See [Secrets management](/security/secrets) for the complete model, including per-MCP environment filtering.
+
 ### 2. The sidecar is the trust boundary
 
 The sidecar is compiled Rust with no LLM, no dynamic code loading, and a small attack surface. All external API calls route through it. All permission checks happen in it. All operations are logged by it.
@@ -53,3 +55,9 @@ Every tool call is attributed to the active user's verified identity. The sideca
 ### 5. Signing keys stay in trusted components
 
 `JWT_SECRET` lives only in the API server and sidecar. The agent cannot forge permission approvals. Consent tokens are single-use with a 5-minute TTL.
+
+### 6. Secrets live in the cluster's chosen backend, not in x1agent storage
+
+x1agent does not own any secret value. It writes references. Storage, encryption-at-rest, rotation, and read audit are delegated to Kubernetes (via native `Secret` objects encrypted by the cluster's `EncryptionConfiguration`) or to an external backend — HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, 1Password, and others — bridged by the [External Secrets Operator](https://external-secrets.io/).
+
+This principle is what lets x1agent serve both solo operators on OrbStack and regulated enterprises on a hardened cluster without forking: both tiers write the same `ExternalSecret` CRD; only the backend behind it changes. See [Secrets management](/security/secrets) for the write path, scoping model, capture vs bind modes, and the specific invariants that make "compromised api ≠ compromised backend" true.
