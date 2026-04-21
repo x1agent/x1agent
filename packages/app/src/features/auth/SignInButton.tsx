@@ -2,20 +2,26 @@ import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
 import { API_BASE } from "../../lib/api";
+import { PasswordSignInForm } from "./PasswordSignInForm";
+
+interface AuthConfig {
+  auth_bypass?: boolean;
+  password_auth?: boolean;
+}
 
 export function SignInButton() {
   const signIn = useAuthStore((s) => s.signIn);
-  const [bypassEnabled, setBypassEnabled] = useState(false);
+  const [config, setConfig] = useState<AuthConfig>({});
 
   useEffect(() => {
     fetch(`${API_BASE}/auth/config`)
       .then((r) => r.json())
-      .then((c) => setBypassEnabled(!!c.auth_bypass))
-      .catch(() => setBypassEnabled(false));
+      .then((c) => setConfig(c as AuthConfig))
+      .catch(() => setConfig({}));
   }, []);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <Button onClick={signIn} className="w-full">
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
           <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" />
@@ -25,7 +31,17 @@ export function SignInButton() {
         </svg>
         Sign in with Google
       </Button>
-      {bypassEnabled && (
+      {config.password_auth && (
+        <>
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-zinc-600">
+            <span className="h-px flex-1 bg-zinc-800" />
+            <span>or</span>
+            <span className="h-px flex-1 bg-zinc-800" />
+          </div>
+          <PasswordSignInForm />
+        </>
+      )}
+      {config.auth_bypass && (
         <Button variant="outline" asChild className="w-full">
           <a href={`${API_BASE}/auth/bypass`}>Dev: sign in as test user</a>
         </Button>

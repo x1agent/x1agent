@@ -13,9 +13,11 @@ export type { UserRepository } from "./ports/user-repository.js";
 export type { SessionTokenizer } from "./ports/session-tokenizer.js";
 export type { PersonRepository } from "./ports/person-repository.js";
 export type { LinkAttemptStore } from "./ports/link-attempt-store.js";
+export type { PasswordCredentialStore } from "./ports/password-credential-store.js";
 
 // Application
 export * from "./application/sign-in.js";
+export * from "./application/sign-in-with-password.js";
 export * from "./application/verify-session.js";
 export * from "./application/begin-link.js";
 export * from "./application/complete-link.js";
@@ -27,5 +29,6 @@ export { JwtSessionTokenizer } from "./adapters/jwt/jwt-session-tokenizer.js";
 export { PostgresUserRepository } from "./adapters/postgres/postgres-user-repository.js";
 export { PostgresPersonRepository } from "./adapters/postgres/postgres-person-repository.js";
 export { PostgresLinkAttemptStore } from "./adapters/postgres/postgres-link-attempt-store.js";
+export { PostgresPasswordCredentialStore } from "./adapters/postgres/postgres-password-credential-store.js";
 export { createAuthRoutes } from "./adapters/hono/routes.js";
 export { createRequireAuth } from "./adapters/hono/require-auth.js";

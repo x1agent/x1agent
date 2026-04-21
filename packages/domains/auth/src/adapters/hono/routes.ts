@@ -4,18 +4,21 @@ import type { UserRepository } from "../../ports/user-repository.js";
 import type { SessionTokenizer } from "../../ports/session-tokenizer.js";
 import type { PersonRepository } from "../../ports/person-repository.js";
 import type { LinkAttemptStore } from "../../ports/link-attempt-store.js";
+import type { PasswordCredentialStore } from "../../ports/password-credential-store.js";
 import { signInWithCode, completeSignIn } from "../../application/sign-in.js";
+import { signInWithPassword } from "../../application/sign-in-with-password.js";
 import { verifySessionToken } from "../../application/verify-session.js";
 import { beginLink } from "../../application/begin-link.js";
 import { completeLink } from "../../application/complete-link.js";
 import { DomainError, systemClock, type Clock } from "@x1agent/kernel";
 import {
   NoWorkspaceMembershipError,
+  PasswordSignInFailedError,
   SessionVerificationError,
 } from "../../domain/errors.js";
 import type { AuthProfile } from "../../domain/auth-profile.js";
 import { LinkState } from "../../domain/link-attempt.js";
-import { UserId } from "@x1agent/kernel";
+import { Email, UserId } from "@x1agent/kernel";
 
 export interface AuthRoutesConfig {
   authProvider: AuthProvider;
@@ -51,6 +54,15 @@ export interface AuthRoutesConfig {
   persons?: PersonRepository;
   linkAttempts?: LinkAttemptStore;
   clock?: Clock;
+
+  /**
+   * When set, exposes `POST /auth/password` for email+password login
+   * and advertises the capability on `GET /auth/config`. Password
+   * credentials coexist with SSO — a user can have either, both, or
+   * neither. Seeded via the quickstart CLI; there is no reset flow in
+   * this deployment (no SMTP).
+   */
+  passwords?: PasswordCredentialStore;
 }
 
 function cookieHeader(
@@ -99,6 +111,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
     c.json({
       provider: cfg.authProvider.id,
       auth_bypass: !!cfg.bypassProvider,
+      password_auth: !!cfg.passwords,
     }),
   );
 
@@ -161,6 +174,52 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
       } catch (err) {
         if (err instanceof NoWorkspaceMembershipError)
           return c.redirect(`${cfg.appUrl}/no-access`);
+        return c.json(domainErrorBody(err), domainErrorStatus(err) as 400);
+      }
+    });
+  }
+
+  if (cfg.passwords) {
+    const passwords = cfg.passwords;
+    app.post("/password", async (c) => {
+      const body = await c.req
+        .json<{ email?: string; password?: string }>()
+        .catch(() => ({}));
+      const email = body.email?.trim();
+      const password = body.password;
+      if (!email || !password) {
+        return c.json({ error: "missing_fields" }, 400);
+      }
+      try {
+        const { session, token } = await signInWithPassword(
+          {
+            passwords,
+            users: cfg.users,
+            tokenizer: cfg.tokenizer,
+            persons: cfg.persons,
+            platformAdmins: cfg.platformAdmins ?? [],
+          },
+          Email(email),
+          password,
+        );
+        c.header(
+          "Set-Cookie",
+          cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
+        );
+        return c.json({
+          ok: true,
+          workspace_slug: session.memberships[0]!.slug,
+        });
+      } catch (err) {
+        if (
+          err instanceof PasswordSignInFailedError ||
+          err instanceof NoWorkspaceMembershipError
+        ) {
+          // Collapse both "bad credentials" and "no workspace" to a
+          // single 401 — exposing the distinction would leak which
+          // emails have accounts.
+          return c.json({ error: "invalid_credentials" }, 401);
+        }
         return c.json(domainErrorBody(err), domainErrorStatus(err) as 400);
       }
     });

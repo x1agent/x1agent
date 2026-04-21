@@ -5,6 +5,7 @@ import {
   PostgresUserRepository,
   PostgresPersonRepository,
   PostgresLinkAttemptStore,
+  PostgresPasswordCredentialStore,
   createAuthRoutes,
   createRequireAuth,
   type AuthProvider,
@@ -188,6 +189,7 @@ export function compose(env: CompositionEnv): Composition {
   const users = new PostgresUserRepository(env.sql);
   const persons = new PostgresPersonRepository(env.sql);
   const linkAttempts = new PostgresLinkAttemptStore(env.sql);
+  const passwords = new PostgresPasswordCredentialStore(env.sql);
   const workspaces = new PostgresWorkspaceRepository(env.sql);
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
@@ -242,6 +244,7 @@ export function compose(env: CompositionEnv): Composition {
     bypassProvider: bypass,
     persons,
     linkAttempts,
+    passwords,
     clock: systemClock,
   });
 
