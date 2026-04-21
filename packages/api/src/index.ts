@@ -9,6 +9,53 @@ import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
 
+/**
+ * Hot-reload cleanup registry. `bun --hot` re-evaluates this module
+ * on every file change but does NOT tear down side effects from the
+ * previous evaluation — timers keep ticking, NATS subscriptions keep
+ * draining, the job watcher keeps polling. Over a dev session that
+ * stacks: 5 ticks registered becomes 10 then 20, each one grabbing a
+ * connection and eventually exhausting Postgres max_connections.
+ *
+ * We pin the registry on globalThis (survives the module re-eval)
+ * and, on each module load, first drain every cleanup recorded by
+ * the previous generation. Subsequent `registerCleanup` calls record
+ * the new generation's handles. A proper SIGTERM also walks the
+ * registry on shutdown.
+ */
+type Cleanup = () => void | Promise<void>;
+const g = globalThis as { __x1agentCleanups?: Cleanup[] };
+if (g.__x1agentCleanups) {
+  for (const fn of g.__x1agentCleanups) {
+    try {
+      await fn();
+    } catch (err) {
+      console.warn(
+        "[hot-reload] cleanup failed:",
+        (err as Error).message,
+      );
+    }
+  }
+}
+g.__x1agentCleanups = [];
+const registerCleanup = (fn: Cleanup) => {
+  g.__x1agentCleanups!.push(fn);
+};
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.once(sig, () => {
+    void (async () => {
+      for (const fn of g.__x1agentCleanups ?? []) {
+        try {
+          await fn();
+        } catch {
+          // best-effort on shutdown
+        }
+      }
+      process.exit(0);
+    })();
+  });
+}
+
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
 const PORT = Number(process.env.API_PORT || 30001);
@@ -190,10 +237,10 @@ if (!schedulerDisabled) {
   const handle = setInterval(() => {
     void tick();
   }, SCHEDULER_INTERVAL_MS);
-  // Don't keep the event loop alive on its own.
   if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
     (handle as unknown as { unref: () => void }).unref();
   }
+  registerCleanup(() => clearInterval(handle));
   void tick();
   console.log(
     `[scheduler] started (interval=${SCHEDULER_INTERVAL_MS}ms)`,
@@ -229,6 +276,7 @@ if (!reaperDisabled) {
   if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
     (handle as unknown as { unref: () => void }).unref();
   }
+  registerCleanup(() => clearInterval(handle));
   void reap();
   console.log(`[grants] reaper started (interval=${REAPER_INTERVAL_MS}ms)`);
 }
@@ -236,11 +284,12 @@ if (!reaperDisabled) {
 const natsUrl = process.env.NATS_URL || "";
 if (natsUrl && process.env.NATS_DISABLED !== "true") {
   try {
-    await startSessionEventSubscriber({
+    const sub = await startSessionEventSubscriber({
       natsUrl,
       events: sessionEvents,
       sessions: composedSessions,
     });
+    registerCleanup(() => sub.stop());
     console.log(`[nats] connected to ${natsUrl}`);
   } catch (err) {
     console.warn(
@@ -248,7 +297,11 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
     );
   }
   try {
-    await startSessionAuditSubscriber({ natsUrl, sql: composedSql });
+    const sub = await startSessionAuditSubscriber({
+      natsUrl,
+      sql: composedSql,
+    });
+    registerCleanup(() => sub.stop());
   } catch (err) {
     console.warn(
       `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
@@ -298,6 +351,7 @@ if (process.env.BRANCH_REAPER_DISABLED !== "true") {
   if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
     (handle as unknown as { unref: () => void }).unref();
   }
+  registerCleanup(() => clearInterval(handle));
   // Initial kick is fire-and-forget — reaping on boot is cheap; the
   // API doesn't block startup on it.
   void reap();
@@ -347,6 +401,7 @@ if (process.env.RESOURCE_RECONCILE_DISABLED !== "true") {
   if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
     (handle as unknown as { unref: () => void }).unref();
   }
+  registerCleanup(() => clearInterval(handle));
   void reconcile();
   console.log(
     `[resources] status reconciler started (interval=${RESOURCE_RECONCILE_INTERVAL_MS}ms)`,
@@ -355,7 +410,7 @@ if (process.env.RESOURCE_RECONCILE_DISABLED !== "true") {
 
 if (process.env.JOB_WATCHER !== "disabled") {
   try {
-    startJobWatcher({
+    const watcher = startJobWatcher({
       sql: composedSql,
       agents: composedAgents,
       sessions: composedSessions,
@@ -382,6 +437,7 @@ if (process.env.JOB_WATCHER !== "disabled") {
       redisMinter: composedRedisMinter,
       redisBranches: composedRedisBranches,
     });
+    registerCleanup(() => watcher.stop());
   } catch (err) {
     console.warn(
       `[jobs] watcher start failed: ${(err as Error).message} — sessions will stay pending`,
