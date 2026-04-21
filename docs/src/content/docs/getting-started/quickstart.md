@@ -23,7 +23,7 @@ No Google Cloud account, no AWS credentials, no Vault, no SMTP server. The local
 You'll be asked for a few things during setup. Have them ready:
 
 - **An email address and a password** for the admin account x1agent seeds. Any valid email works — it's never sent anywhere.
-- **An Anthropic API key** (`sk-ant-...`) — required. Agents run Claude via the Anthropic SDK; without the key they won't respond.
+- **An Anthropic API key** (`sk-ant-...`) — required. Agents drive sessions through the Claude Agent SDK, which Anthropic's [Feb 2026 OAuth policy](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-max-plan) restricts to API-key authentication. Your Claude Code Pro/Max subscription's OAuth tokens cannot be used. Get a key at [console.anthropic.com](https://console.anthropic.com).
 - An **OpenAI API key** (optional) — only needed if you want to use collections with vector embeddings.
 - A **GitHub personal access token** (optional) — only needed if you want agents to clone private repos. For public repos, skip it.
 
@@ -43,7 +43,7 @@ mise run quickstart
 
 **2. Admin account.** Email + password (masked). The wizard hashes the password with argon2id before it ever touches the database. You'll use these credentials to sign in to the web UI.
 
-**3. Required secrets.** You're prompted for your Anthropic API key. Paste it once; the wizard writes it as a Kubernetes Secret in the dedicated `x1agent-secrets` namespace and creates an `ExternalSecret` reference so agent pods can mount it on demand. The plaintext never lands anywhere else — not in the wizard's config file, not in the repo, not in any log.
+**3. Anthropic API key.** You're prompted for your key (starts with `sk-ant-`). Paste it once; the wizard writes it as a Kubernetes Secret in the dedicated `x1agent-secrets` namespace and creates an `ExternalSecret` reference so agent pods can mount it on demand. The plaintext never lands anywhere else — not in the wizard's config file, not in the repo, not in any log.
 
 **4. Optional secrets.** OpenAI and GitHub PAT are offered next. You can skip either and add them later through the web UI. The wizard flags which features won't work without each: "Vector collections will be inactive without OpenAI", "Agents can only clone public repos without GitHub".
 
