@@ -32,25 +32,47 @@ export interface GitHubRoutesConfig {
 }
 
 export interface InstallStateStore {
-  put(state: string, actor: UserId, expiresAt: Date): Promise<void>;
-  consume(state: string): Promise<{ actor: UserId } | null>;
+  put(
+    state: string,
+    actor: UserId,
+    expiresAt: Date,
+    returnTo?: string | null,
+  ): Promise<void>;
+  consume(
+    state: string,
+  ): Promise<{ actor: UserId; returnTo: string | null } | null>;
 }
 
 export class InMemoryInstallStateStore implements InstallStateStore {
   private readonly rows = new Map<
     string,
-    { actor: UserId; expiresAt: Date }
+    { actor: UserId; expiresAt: Date; returnTo: string | null }
   >();
-  async put(state: string, actor: UserId, expiresAt: Date) {
-    this.rows.set(state, { actor, expiresAt });
+  async put(state: string, actor: UserId, expiresAt: Date, returnTo = null) {
+    this.rows.set(state, { actor, expiresAt, returnTo });
   }
   async consume(state: string) {
     const row = this.rows.get(state);
     if (!row) return null;
     this.rows.delete(state);
     if (row.expiresAt.getTime() < Date.now()) return null;
-    return { actor: row.actor };
+    return { actor: row.actor, returnTo: row.returnTo };
   }
+}
+
+/**
+ * Only accept same-origin, absolute paths as return targets. This
+ * prevents an open-redirect: an attacker-crafted `?return_to=https://evil.com`
+ * would otherwise land the user on an attacker-controlled site after
+ * a legitimate GitHub install. We require `/` leading + no `//` prefix
+ * (which browsers treat as protocol-relative) + no `\` (Windows URL
+ * parsing quirk).
+ */
+function safeReturnTo(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//") || raw.startsWith("/\\")) return null;
+  return raw;
 }
 
 function errStatus(err: unknown): number {
@@ -90,7 +112,13 @@ export function createGitHubInstallRoutes(cfg: GitHubRoutesConfig): Hono {
     const actor = cfg.getActor(c);
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const state = randomBytes(32).toString("hex");
-    await store.put(state, actor.userId, new Date(Date.now() + 10 * 60 * 1000));
+    const returnTo = safeReturnTo(c.req.query("return_to"));
+    await store.put(
+      state,
+      actor.userId,
+      new Date(Date.now() + 10 * 60 * 1000),
+      returnTo,
+    );
     const url = new URL(
       `https://github.com/apps/${cfg.client.appSlug}/installations/new`,
     );
@@ -101,11 +129,19 @@ export function createGitHubInstallRoutes(cfg: GitHubRoutesConfig): Hono {
   app.get("/callback", async (c) => {
     const state = c.req.query("state");
     const installationIdStr = c.req.query("installation_id");
+    // Default landing when no return_to was set on install. Same
+    // fallback applies to every error branch below so the user always
+    // ends up somewhere actionable rather than on a blank screen.
+    const fallback = `${cfg.appUrl}/account`;
     if (!state || !installationIdStr)
-      return c.redirect(`${cfg.appUrl}/account?github_error=missing_params`);
+      return c.redirect(`${fallback}?github_error=missing_params`);
     const consumed = await store.consume(state);
     if (!consumed)
-      return c.redirect(`${cfg.appUrl}/account?github_error=bad_state`);
+      return c.redirect(`${fallback}?github_error=bad_state`);
+    const target = consumed.returnTo
+      ? `${cfg.appUrl}${consumed.returnTo}`
+      : fallback;
+    const separator = target.includes("?") ? "&" : "?";
     try {
       await recordInstallation(
         { client: cfg.client, installations: cfg.installations },
@@ -114,10 +150,10 @@ export function createGitHubInstallRoutes(cfg: GitHubRoutesConfig): Hono {
           actor: consumed.actor,
         },
       );
-      return c.redirect(`${cfg.appUrl}/account?github_installed=1`);
+      return c.redirect(`${target}${separator}github_installed=1`);
     } catch (err) {
       return c.redirect(
-        `${cfg.appUrl}/account?github_error=${
+        `${target}${separator}github_error=${
           err instanceof DomainError ? err.code : "install_failed"
         }`,
       );

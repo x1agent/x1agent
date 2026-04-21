@@ -69,7 +69,7 @@ export function GitHubInstallationsCard() {
             link repos from the installations listed here.
           </CardDescription>
         </div>
-        <Button size="sm" onClick={startInstall}>
+        <Button size="sm" onClick={() => startInstall()}>
           {installations.length === 0
             ? "Connect GitHub"
             : "Add installation"}

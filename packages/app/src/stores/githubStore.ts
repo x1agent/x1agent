@@ -24,7 +24,7 @@ interface GitHubState {
   loadConfig(): Promise<void>;
   loadInstallations(): Promise<void>;
   loadReposForInstallation(id: number): Promise<void>;
-  startInstall(): void;
+  startInstall(returnTo?: string): void;
 
   loadAgentRepos(workspaceSlug: string, agentId: string): Promise<void>;
   attachRepo(
@@ -92,8 +92,18 @@ export const useGitHubStore = create<GitHubState>((set, get) => ({
     }
   },
 
-  startInstall() {
-    window.location.href = `${API_BASE}/auth/github/install`;
+  startInstall(returnTo) {
+    // Default: remember the page the user is on so the callback drops
+    // them back where they started. Callers can override (e.g. from
+    // the Account screen where the default would loop back on itself).
+    const path =
+      returnTo ??
+      (typeof window !== "undefined"
+        ? window.location.pathname + window.location.search
+        : undefined);
+    const url = new URL(`${API_BASE}/auth/github/install`);
+    if (path) url.searchParams.set("return_to", path);
+    window.location.href = url.toString();
   },
 
   async loadAgentRepos(workspaceSlug, agentId) {
