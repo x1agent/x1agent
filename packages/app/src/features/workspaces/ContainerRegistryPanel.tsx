@@ -68,7 +68,6 @@ export function ContainerRegistryPanel({ slug }: Props) {
                   <TableHead>Name</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Kind</TableHead>
-                  <TableHead className="w-0" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -91,9 +90,6 @@ export function ContainerRegistryPanel({ slug }: Props) {
                       <Badge variant={img.is_preset ? "info" : "secondary"}>
                         {img.is_preset ? "preset" : "workspace"}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-zinc-500">
-                      View →
                     </TableCell>
                   </TableRow>
                 ))}
