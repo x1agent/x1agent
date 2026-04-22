@@ -20,6 +20,7 @@ Providers are the pluggable parts of x1agent. Each provider implements a defined
 | `ai` | LLM API routing and proxying | Anthropic (direct) |
 | `storage` | Object storage for session artifacts | GCS |
 | `vector` | Vector search backend | Turbopuffer |
+| `preview` | Ephemeral deploy targets for E2E testing of agent-authored code | Local Kubernetes |
 
 Each domain has a defined NATS request/reply contract. A provider implements one or more domains.
 
