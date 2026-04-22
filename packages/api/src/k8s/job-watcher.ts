@@ -57,6 +57,17 @@ export interface JobWatcherConfig {
   apiInternalToken: string;
   natsUrl: string;
   anthropicApiKey?: string;
+  /**
+   * Dev-only: host home directory to mount `.claude` + `.claude.json`
+   * from, for Max users. Empty string / undefined disables the mount.
+   */
+  hostHomeDir?: string;
+  /**
+   * Dev-only: host path to the exported Max OAuth credentials file.
+   * Mounted to `/home/node/.claude/.credentials.json` so Claude Code
+   * authenticates without an API key.
+   */
+  hostClaudeCredentialsFile?: string;
   /** Poll interval in ms. */
   intervalMs?: number;
   /** Called on fatal per-tick errors. Defaults to console.warn. */
@@ -293,6 +304,8 @@ async function launchSession(
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
+    hostHomeDir: cfg.hostHomeDir,
+    hostClaudeCredentialsFile: cfg.hostClaudeCredentialsFile,
     namespace: cfg.namespace,
     sessionCredentialsSecretName: credentialsSecretName,
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,

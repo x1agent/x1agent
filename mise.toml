@@ -16,6 +16,15 @@ KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 # devspace port-forwards 30001 from the api pod to localhost.
 PUBLIC_API_URL = "http://localhost:30001"
 
+# Dev-only: Claude Code Max credentials mount for agent pods. Local
+# dev only — the in-repo default assumes the operator is running
+# x1agent for their own solo use on their own machine with their own
+# Claude subscription. Not appropriate for shared or multi-user
+# deployments; for anything beyond solo local dev, use
+# ANTHROPIC_API_KEY via the workspace-secrets path.
+HOST_HOME_DIR = "{{env.HOME}}"
+HOST_CLAUDE_CREDENTIALS_FILE = "{{env.HOME}}/.x1agent-dev/claude-credentials.json"
+
 # ----------------------------------------------------------------------------
 # One-time-per-cluster setup: ensure the namespace + NATS mTLS Secret exist.
 # Runs before any deployment touches the cluster. Idempotent — safe to call
@@ -39,6 +48,24 @@ run = "devspace dev --namespace x1agent"
 description = "Run the x1agent setup wizard (interactive TUI)"
 run = "cd packages/cli && bun run src/index.ts setup"
 
+# macOS-only: export the Claude Code Max OAuth credentials from the
+# Keychain to a file so the Job watcher can mount it into agent pods
+# as /home/node/.claude/.credentials.json. Re-run when tokens refresh
+# (the file is also refreshed automatically by Claude Code inside the
+# pod because the hostPath mount is read/write).
+#
+# `mise run dev` depends on this task so the file is always populated
+# before devspace picks up HOST_CLAUDE_CREDENTIALS_FILE.
+[tasks."dev:claude-creds"]
+description = "Export ~/.claude Max credentials from Keychain for agent pods"
+run = """
+dest="${HOST_CLAUDE_CREDENTIALS_FILE:-$HOME/.x1agent-dev/claude-credentials.json}"
+mkdir -p "$(dirname "$dest")"
+security find-generic-password -s "Claude Code-credentials" -a "$USER" -w > "$dest"
+chmod 600 "$dest"
+echo "Wrote Max credentials to $dest"
+"""
+
 [tasks."dev:cluster:stop"]
 description = "Tear down the devspace-managed cluster dev stack"
 run = "devspace purge --namespace x1agent"
@@ -60,7 +87,7 @@ run = "cd packages/app && bun run dev"
 # run dev:cluster:stop to tear down the cluster-side stack.
 [tasks.dev]
 description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
-depends = ["dev:setup"]
+depends = ["dev:setup", "dev:claude-creds"]
 run = [
   "devspace dev --namespace x1agent &",
   "sleep 6 && cd packages/app && bun run dev",

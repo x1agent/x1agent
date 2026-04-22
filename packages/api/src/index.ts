@@ -432,6 +432,9 @@ if (process.env.JOB_WATCHER !== "disabled") {
       apiInternalToken: process.env.API_INTERNAL_TOKEN || "",
       natsUrl: process.env.NATS_URL || "nats://nats:4222",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      hostHomeDir: process.env.HOST_HOME_DIR || undefined,
+      hostClaudeCredentialsFile:
+        process.env.HOST_CLAUDE_CREDENTIALS_FILE || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
