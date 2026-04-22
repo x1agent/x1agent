@@ -16,6 +16,12 @@ KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 # devspace port-forwards 30001 from the api pod to localhost.
 PUBLIC_API_URL = "http://localhost:30001"
 
+# dev only — the in-repo default assumes the operator is running
+# x1agent for their own solo use on their own machine with their own
+# Claude subscription. Not appropriate for shared or multi-user
+# deployments; for anything beyond solo local dev, use
+# ANTHROPIC_API_KEY via the workspace-secrets path.
+
 # ----------------------------------------------------------------------------
 # One-time-per-cluster setup: ensure the namespace + NATS mTLS Secret exist.
 # Runs before any deployment touches the cluster. Idempotent — safe to call
@@ -39,6 +45,15 @@ run = "devspace dev --namespace x1agent"
 description = "Run the x1agent setup wizard (interactive TUI)"
 run = "cd packages/cli && bun run src/index.ts setup"
 
+# (the file is also refreshed automatically by Claude Code inside the
+# pod because the hostPath mount is read/write).
+#
+# `mise run dev` depends on this task so the file is always populated
+run = """
+mkdir -p "$(dirname "$dest")"
+chmod 600 "$dest"
+"""
+
 [tasks."dev:cluster:stop"]
 description = "Tear down the devspace-managed cluster dev stack"
 run = "devspace purge --namespace x1agent"
@@ -60,7 +75,6 @@ run = "cd packages/app && bun run dev"
 # run dev:cluster:stop to tear down the cluster-side stack.
 [tasks.dev]
 description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
-depends = ["dev:setup"]
 run = [
   "devspace dev --namespace x1agent &",
   "sleep 6 && cd packages/app && bun run dev",

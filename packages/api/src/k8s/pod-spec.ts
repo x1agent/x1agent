@@ -42,6 +42,15 @@ export interface SessionPodSpec {
   sidecarImage: string;
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
   anthropicApiKey?: string;
+  /**
+   * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
+   * (file). When set, both are hostPath-mounted into the agent container
+   * at /home/node so Claude Code picks up settings/agents/etc. Expected
+   * form: `/Users/alice`.
+   */
+  /**
+   * Dev-only: absolute host path to a file in Linux credentials format
+   */
   /** K8s namespace the Job lives in. */
   namespace: string;
   /**
@@ -158,6 +167,27 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                   },
                 ]
               : []),
+              ? [
+                  {
+                    hostPath: {
+                      type: "DirectoryOrCreate" as const,
+                    },
+                  },
+                  {
+                    hostPath: {
+                      type: "FileOrCreate" as const,
+                    },
+                  },
+                ]
+              : []),
+              ? [
+                  {
+                    hostPath: {
+                      type: "File" as const,
+                    },
+                  },
+                ]
+              : []),
           ],
           containers: [
             {
@@ -196,6 +226,20 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                         mountPath: "/workspace/session_history.md",
                         subPath: "session_history.md",
                         readOnly: true,
+                      },
+                    ]
+                  : []),
+                  ? [
+                      {
+                        mountPath: "/home/node/.claude",
+                      },
+                      {
+                        mountPath: "/home/node/.claude.json",
+                      },
+                    ]
+                  : []),
+                  ? [
+                      {
                       },
                     ]
                   : []),
