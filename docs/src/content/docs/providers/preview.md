@@ -49,7 +49,9 @@ Three required capabilities plus one optional. Any provider that implements the 
 
 **`sync`** — Move code from the agent's workspace into the preview environment, unidirectionally. Agent writes files; provider pushes them. The provider MUST NOT read environment state back into the agent's workspace. This direction is deliberate: one-way sync prevents a compromised agent from using the channel to exfiltrate preview-environment state (like test database contents).
 
-**`provision`** — Spin up and tear down the preview environment based on a declarative spec. The default spec format is **Docker Compose**, because that's what most developers already have. Providers MAY accept other formats (raw Kubernetes manifests, Kustomize overlays, Helm charts) as alternatives, but Docker Compose MUST be supported as the lowest-friction path.
+**`provision`** — Spin up and tear down the preview environment based on a declarative spec. The canonical spec format is [`.x1agent/preview.yaml`](/reference/preview-spec) at the repo root — a small JSONSchema-backed file with five `entrypoint.kind` values (dockerfile, compose, helm, kustomize, manifest). Providers MUST accept this format; individual `kind`s may be unsupported per provider and will surface in validation.
+
+**`validate`** — Dry-run the spec against the repo without deploying, returning `{ ok, errors, warnings }` with structured field paths pointing at problems. The orchestrator agent calls this before handing work to a coding agent so bad config gets caught before an expensive build. The same validator runs again as step zero of every `provision`; a repo can drift between dry-run and deploy.
 
 **`introspect`** — Return read-only diagnostic data about the running environment: pod/container status, logs, service endpoints, recent events. Introspection is never mutation — no exec, no patch, no delete. If an agent needs to mutate the environment, it does it by calling `provision` again with a new spec.
 
@@ -110,8 +112,8 @@ graph TB
 
 ### Onboarding path (meet developers where they are)
 
-1. Developer drops a `docker-compose.dev.yaml` at the root of their repo.
-2. When the agent calls `preview.provision`, the provider runs [Kompose](https://kompose.io/) to convert the Compose file to Kubernetes manifests.
+1. Developer (or orchestrator agent) drops `.x1agent/preview.yaml` at the root of their repo. See [the spec reference](/reference/preview-spec) — Dockerfile-based is the shortest path; Docker Compose is supported via Kompose for repos that already have a `docker-compose.yaml`.
+2. When a session calls `preview.provision`, the provider runs the validator first. If the spec parses, the referenced entrypoint exists, declared dependencies are available in the workspace, and every `secret:<name>` reference resolves, deploy proceeds.
 3. The provider layers minimum-viable RBAC on top: a ServiceAccount with read-only log + event access; no secret reads, no exec in the preview namespace itself, no delete, no patch.
 4. Manifests are applied to a preview namespace — per-session or per-agent, operator's choice.
 5. Changes to the agent's workspace propagate via the `sync` capability — the default implementation uses DevSpace's file-sync mechanism to push the agent's `/workspace` into a target path inside the preview pods, unidirectionally.
@@ -320,6 +322,8 @@ For teams that need more control — custom manifests, Helm charts, Kustomize ov
 
 ## Related reading
 
+- [Preview environments](/architecture/preview-environments) — the durable URL-addressable entity the provider acts on, the claim model that keeps two sessions from stepping on each other, and the UI that surfaces all of it.
+- [Preview spec reference](/reference/preview-spec) — the `.x1agent/preview.yaml` format the provider reads and validates. Readable by both humans and orchestrator agents.
 - [Provider system](/providers/overview) — how providers connect to x1agent generally.
 - [Security model](/security/overview) — the trust boundaries the Preview Provider operates within.
 - [Shared agent resources](/architecture/shared-agent-resources) — the per-workspace Postgres and Redis instances that preview environments can reference instead of standing up their own.
