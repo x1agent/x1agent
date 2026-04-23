@@ -487,6 +487,28 @@ if (
   registerCleanup(() => watchdog.stop());
 }
 
+// Checkup timer — cadence-driven "just checking in" for
+// orchestrators with at least one active child. Complements the
+// watchdog (per-child silence detection) by giving the orchestrator
+// periodic glance-opportunities even when every child is emitting
+// events normally. See docs/architecture/orchestration.md §
+// Server-driven wakes.
+if (providerNats && process.env.CHECKUP_TIMER !== "disabled") {
+  const { startCheckupTimer } = await import(
+    "./orchestration/checkup-timer.js"
+  );
+  const checkup = startCheckupTimer({
+    sql: composedSql,
+    agents: composedAgents,
+    nc: providerNats,
+    intervalMs: Number(process.env.CHECKUP_TIMER_SWEEP_MS || 60_000),
+    checkupCadenceMs: Number(
+      process.env.CHECKUP_CADENCE_MS || 15 * 60_000,
+    ),
+  });
+  registerCleanup(() => checkup.stop());
+}
+
 console.log(`[api] listening on :${PORT}`);
 
 export default {
