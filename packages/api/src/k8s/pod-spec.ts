@@ -15,6 +15,13 @@ export interface LinkedRepoForPod {
   branch: string;
   mount_path: string;
   auto_push: boolean;
+  /**
+   * When false, the sidecar's credential helper refuses to hand out
+   * git credentials for this repo. `git push` and credential-helper-
+   * driven `git fetch` both fail; the agent can still read, edit, and
+   * commit locally. See docs/security/repo-access.md.
+   */
+  allow_push: boolean;
   installation_id: number;
 }
 

@@ -149,6 +149,7 @@ export class InMemoryAgentRepoStore implements AgentRepoStore {
         branch: options.branch ?? "main",
         mountPath: options.mountPath ?? defaultMountPath(repo),
         autoPush: options.autoPush ?? false,
+        allowPush: options.allowPush ?? false,
       });
     }
     this.agentRepos.set(agentId, s);
@@ -165,6 +166,7 @@ export class InMemoryAgentRepoStore implements AgentRepoStore {
       branch: patch.branch ?? cur.branch,
       mountPath: patch.mountPath ?? cur.mountPath,
       autoPush: patch.autoPush ?? cur.autoPush,
+      allowPush: patch.allowPush ?? cur.allowPush,
     });
   }
   async detachRepo(agentId: string, repo: string) {

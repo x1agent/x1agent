@@ -234,6 +234,7 @@ async function launchSession(
         branch: r.branch,
         mount_path: r.mountPath,
         auto_push: r.autoPush,
+        allow_push: r.allowPush,
         installation_id: installation as unknown as number,
       }))
     : [];

@@ -46,11 +46,12 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
     const branch = options.branch ?? "main";
     const mountPath = options.mountPath ?? defaultMountPath(repo);
     const autoPush = options.autoPush ?? false;
+    const allowPush = options.allowPush ?? false;
     await this.sql`
       INSERT INTO agent_repos
-        (agent_id, repo_full_name, branch, mount_path, auto_push)
+        (agent_id, repo_full_name, branch, mount_path, auto_push, allow_push)
       VALUES
-        (${agentId}, ${repo}, ${branch}, ${mountPath}, ${autoPush})
+        (${agentId}, ${repo}, ${branch}, ${mountPath}, ${autoPush}, ${allowPush})
       ON CONFLICT (agent_id, repo_full_name) DO NOTHING
     `;
   }
@@ -64,7 +65,8 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
       UPDATE agent_repos SET
         branch     = COALESCE(${patch.branch ?? null}, branch),
         mount_path = COALESCE(${patch.mountPath ?? null}, mount_path),
-        auto_push  = COALESCE(${patch.autoPush ?? null}, auto_push)
+        auto_push  = COALESCE(${patch.autoPush ?? null}, auto_push),
+        allow_push = COALESCE(${patch.allowPush ?? null}, allow_push)
       WHERE agent_id = ${agentId} AND repo_full_name = ${repo}
     `;
   }
@@ -83,9 +85,10 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
         branch: string;
         mount_path: string;
         auto_push: boolean;
+        allow_push: boolean;
       }[]
     >`
-      SELECT repo_full_name, branch, mount_path, auto_push
+      SELECT repo_full_name, branch, mount_path, auto_push, allow_push
       FROM agent_repos
       WHERE agent_id = ${agentId}
       ORDER BY created_at
@@ -95,6 +98,7 @@ export class PostgresAgentRepoStore implements AgentRepoStore {
       branch: r.branch,
       mountPath: r.mount_path,
       autoPush: r.auto_push,
+      allowPush: r.allow_push,
     }));
   }
 
