@@ -55,6 +55,20 @@ export interface SessionRepository {
   lastSchedulerRunFor(agentId: AgentId): Promise<Session | null>;
 
   /**
+   * The single non-terminal session for an agent, if any. Orchestrator
+   * agents are singletons: at most one session exists in 'pending' or
+   * 'running' state per orchestrator at any time. Workers may have
+   * many concurrent sessions, so this method is primarily meaningful
+   * for orchestrators — callers should only consult it for agents of
+   * kind 'orchestrator'.
+   *
+   * Returns null if no non-terminal session exists (fresh orchestrator
+   * or one whose prior session completed / failed cleanly and is ready
+   * for a new run).
+   */
+  findLiveSessionForAgent(agentId: AgentId): Promise<Session | null>;
+
+  /**
    * Child sessions spawned by the given parent. Newest-first. Powers the
    * "Children" panel on the session detail page.
    */

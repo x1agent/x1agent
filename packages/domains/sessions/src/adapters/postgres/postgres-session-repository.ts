@@ -154,6 +154,19 @@ export class PostgresSessionRepository implements SessionRepository {
     return rows[0] ? toSession(rows[0]) : null;
   }
 
+  async findLiveSessionForAgent(agentId: AgentId): Promise<Session | null> {
+    // Non-terminal = pending or running. `complete` and `failed` are
+    // terminal and mean the orchestrator is ready for a fresh session.
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE agent_id = ${agentId}
+        AND status IN ('pending', 'running')
+      ORDER BY triggered_at DESC
+      LIMIT 1
+    `;
+    return rows[0] ? toSession(rows[0]) : null;
+  }
+
   async updateStatus(
     id: SessionId,
     patch: UpdateSessionStatusInput,

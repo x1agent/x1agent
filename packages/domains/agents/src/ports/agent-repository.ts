@@ -5,6 +5,7 @@ import type {
 } from "@x1agent/kernel";
 import type { Agent, AgentId } from "../domain/agent.js";
 import type { RuntimeType } from "../domain/runtime.js";
+import type { AgentKind } from "../domain/kind.js";
 import type { CronSchedule } from "../domain/cron-schedule.js";
 
 export interface CreateAgentInput {
@@ -12,6 +13,8 @@ export interface CreateAgentInput {
   slug: WorkspaceSlug;
   name: string;
   runtimeType: RuntimeType;
+  /** Defaults to 'worker' at the repository layer if omitted. */
+  kind?: AgentKind;
   systemPrompt: string;
   heartbeatMd: string;
   schedule: CronSchedule | null;
@@ -22,6 +25,7 @@ export interface CreateAgentInput {
 export interface UpdateAgentInput {
   name?: string;
   runtimeType?: RuntimeType;
+  kind?: AgentKind;
   systemPrompt?: string;
   heartbeatMd?: string;
   schedule?: CronSchedule | null;

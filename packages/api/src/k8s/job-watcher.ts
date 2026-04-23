@@ -282,6 +282,7 @@ async function launchSession(
     sessionId: session.id,
     agentId: agent.id,
     agentSlug: agent.slug,
+    agentKind: agent.kind,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     agentPrompt: initialPrompt,

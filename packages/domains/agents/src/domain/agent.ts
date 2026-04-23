@@ -5,6 +5,7 @@ import type {
   WorkspaceSlug,
 } from "@x1agent/kernel";
 import type { RuntimeType } from "./runtime.js";
+import type { AgentKind } from "./kind.js";
 import type { CronSchedule } from "./cron-schedule.js";
 
 declare const agentIdBrand: unique symbol;
@@ -22,6 +23,13 @@ export interface Agent {
   slug: WorkspaceSlug;
   name: string;
   runtimeType: RuntimeType;
+  /**
+   * Pod-lifecycle discriminator — `worker`, `orchestrator`, or `scheduled`.
+   * Drives the session Job's `activeDeadlineSeconds`, `restartPolicy`,
+   * workspace volume type, and session singleton semantics. See
+   * docs/architecture/orchestration.md.
+   */
+  kind: AgentKind;
   systemPrompt: string;
   heartbeatMd: string;
   schedule: CronSchedule | null;

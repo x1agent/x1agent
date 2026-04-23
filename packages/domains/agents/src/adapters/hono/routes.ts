@@ -9,6 +9,7 @@ import {
 import { AgentId, AgentNotFoundError, AgentSlugTakenError, type Agent } from "../../domain/agent.js";
 import { CronSchedule } from "../../domain/cron-schedule.js";
 import { RuntimeType } from "../../domain/runtime.js";
+import { AgentKind } from "../../domain/kind.js";
 import type { AgentRepository } from "../../ports/agent-repository.js";
 import type { AdminGuard } from "../../ports/admin-guard.js";
 import { createAgent } from "../../application/create-agent.js";
@@ -40,6 +41,7 @@ function serialize(a: Agent) {
     slug: a.slug,
     name: a.name,
     runtime_type: a.runtimeType,
+    kind: a.kind,
     system_prompt: a.systemPrompt,
     heartbeat_md: a.heartbeatMd,
     schedule: a.schedule,
@@ -99,6 +101,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       slug?: string;
       name?: string;
       runtime_type?: string;
+      kind?: string;
       system_prompt?: string;
       heartbeat_md?: string;
       schedule?: string | null;
@@ -115,6 +118,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
           slug: WorkspaceSlug(body.slug),
           name: body.name,
           runtimeType: RuntimeType(body.runtime_type),
+          kind: body.kind ? AgentKind(body.kind) : undefined,
           systemPrompt: body.system_prompt,
           heartbeatMd: body.heartbeat_md,
           schedule:
@@ -152,6 +156,9 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         ...(body.name !== undefined && { name: String(body.name) }),
         ...(body.runtime_type !== undefined && {
           runtimeType: RuntimeType(String(body.runtime_type)),
+        }),
+        ...(body.kind !== undefined && {
+          kind: AgentKind(String(body.kind)),
         }),
         ...(body.system_prompt !== undefined && {
           systemPrompt: String(body.system_prompt),

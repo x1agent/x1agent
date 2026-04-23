@@ -98,6 +98,17 @@ export class InMemorySessionRepository implements SessionRepository {
     return scoped[0] ?? null;
   }
 
+  async findLiveSessionForAgent(agentId: AgentId): Promise<Session | null> {
+    const scoped = this.rows
+      .filter(
+        (r) =>
+          r.agentId === agentId &&
+          (r.status === "pending" || r.status === "running"),
+      )
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+    return scoped[0] ?? null;
+  }
+
   async updateStatus(
     id: SessionId,
     patch: UpdateSessionStatusInput,
