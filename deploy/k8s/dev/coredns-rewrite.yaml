@@ -1,0 +1,25 @@
+---
+# CoreDNS override for in-cluster preview URL resolution.
+#
+# The preview provider mints URLs of the form
+# `<slug>.preview.local.x1agent.dev`. Public DNS resolves these to
+# 127.0.0.1 so a browser on the operator's machine can reach the local
+# OrbStack ingress. From inside the cluster, that same 127.0.0.1 is
+# the pod's own loopback — nothing there. So the orchestrator can't
+# verify its own preview deploy unless CoreDNS rewrites the hostname
+# to the in-cluster ingress service.
+#
+# `answer auto` rewrites the response back to the original name, so
+# TLS / Host-header routing at the ingress still works.
+#
+# The ConfigMap name `coredns-custom` is the k3s/OrbStack convention
+# for user overrides — see the `import /etc/coredns/custom/*.override`
+# line in the coredns Corefile.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  x1agent-dev.override: |
+    rewrite name regex (.*)\.preview\.local\.x1agent\.dev ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
