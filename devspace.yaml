@@ -103,6 +103,13 @@ images:
     dockerfile: ./deploy/docker/graph-surrealdb.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  app:
+    image: x1agent-app
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/app.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
 
 deployments:
   postgres:
@@ -140,6 +147,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/networkpolicy.yaml
+  app:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/app.yaml
 
 dev:
   # Port-forward Postgres to the host so integration tests + migration
@@ -300,6 +311,35 @@ dev:
         value: x1agent-surreal-root
       - name: SURREAL_NAMESPACE
         value: x1agent
+
+  app:
+    labelSelector:
+      app: app
+    devImage: x1agent-app
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - .astro
+          - "*.log"
+        startContainer: true
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app/packages/app
+        exec bun run dev
+    env:
+      - name: PUBLIC_API_URL
+        value: https://api.local.x1agent.dev
+      - name: PUBLIC_URL
+        value: https://app.local.x1agent.dev
+      - name: NODE_ENV
+        value: development
+      - name: HOST
+        value: "0.0.0.0"
 
 pipelines:
   dev: |-

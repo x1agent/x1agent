@@ -106,9 +106,9 @@ spec:
             - name: API_PORT
               value: "30001"
             - name: API_PUBLIC_URL
-              value: http://localhost:30001
+              value: https://api.local.x1agent.dev
             - name: PUBLIC_URL
-              value: http://localhost:4322
+              value: https://app.local.x1agent.dev
             - name: PLATFORM_NAME
               value: x1agent
             - name: NODE_ENV

@@ -12,9 +12,11 @@ _.file = [".env", ".env.local"]
 # deploys to a real cluster.
 KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 
-# Where the app (running on host) finds the cluster-side API.
-# devspace port-forwards 30001 from the api pod to localhost.
-PUBLIC_API_URL = "http://localhost:30001"
+# Where the app finds the api in dev. The app runs in the cluster
+# (see deploy/k8s/dev/app.yaml); this value is the ingress-exposed
+# URL for api.local.x1agent.dev so the browser and the app pod both
+# hit the same host — cookies scope cleanly under .local.x1agent.dev.
+PUBLIC_API_URL = "https://api.local.x1agent.dev"
 
 # dev only — the in-repo default assumes the operator is running
 # x1agent for their own solo use on their own machine with their own
@@ -63,22 +65,23 @@ description = "Tail api pod logs"
 run = "kubectl logs -n x1agent -l app=api -f --tail=200"
 
 # ----------------------------------------------------------------------------
-# Host-side dev: Astro app. Assumes dev:cluster is already running so
-# localhost:30001 is port-forwarded.
+# Host-side Astro dev (optional fallback). Normally the app runs in the
+# cluster via devspace so it shares the cookie domain with the api at
+# .local.x1agent.dev. This task is kept around for running the app
+# directly on the host when iterating on Astro config without waiting
+# for a file-sync roundtrip. When used, the app talks to the api at
+# https://api.local.x1agent.dev (same URL both paths resolve through).
 # ----------------------------------------------------------------------------
 [tasks."dev:app"]
-description = "Start the Astro app on :4322 (talks to localhost:30001)"
+description = "(Fallback) Run Astro on host at localhost:4322"
 run = "cd packages/app && bun run dev"
 
-# The one-command orchestration: kick the cluster off in a tmux-style
-# background, then run the app in the foreground. Ctrl-C stops the app;
-# run dev:cluster:stop to tear down the cluster-side stack.
+# The one-command orchestration: devspace in the foreground manages the
+# full cluster-side stack (postgres, nats, api, app, providers). Ctrl-C
+# stops everything; run dev:cluster:stop to tear the deployments down.
 [tasks.dev]
-description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
-run = [
-  "devspace dev --namespace x1agent &",
-  "sleep 6 && cd packages/app && bun run dev",
-]
+description = "Full local dev: devspace in the foreground"
+run = "devspace dev --namespace x1agent"
 
 # ----------------------------------------------------------------------------
 # Tests
