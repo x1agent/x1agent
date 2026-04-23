@@ -150,6 +150,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/preview.yaml
+  coredns-rewrite:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/coredns-rewrite.yaml
   registry:
     kubectl:
       manifests:
