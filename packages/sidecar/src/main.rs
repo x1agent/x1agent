@@ -145,6 +145,10 @@ async fn main() {
             routing::post(orchestration::handle_message_caller),
         )
         .route(
+            "/quiet-hint",
+            routing::post(orchestration::handle_quiet_hint),
+        )
+        .route(
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
         )

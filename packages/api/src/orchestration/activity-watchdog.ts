@@ -3,6 +3,7 @@ import type { NatsConnection } from "nats";
 import type { AgentRepository, AgentId } from "@x1agent/domain-agents";
 import { isOrchestratorKind } from "@x1agent/domain-agents";
 import { publishWatchdogWake } from "./wake-publisher.js";
+import type { QuietHintStore } from "./quiet-hints.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -33,6 +34,13 @@ export interface ActivityWatchdogConfig {
   sql: Sql;
   agents: AgentRepository;
   nc: NatsConnection;
+  /**
+   * Optional store of child-emitted "expect quiet for N seconds"
+   * hints. When a hint is active for a child, the watchdog skips
+   * that child on the current sweep — the child asked us to wait.
+   * When absent, the watchdog runs without the hint short-circuit.
+   */
+  quietHints?: QuietHintStore;
   /** Poll interval in ms. Defaults to 60s. */
   intervalMs?: number;
   /** Called on fatal per-tick errors. Defaults to console.warn. */
@@ -117,6 +125,12 @@ export function startActivityWatchdog(
       const seenChildren = new Set<string>();
       for (const row of rows) {
         seenChildren.add(row.child_id);
+
+        // Skip children that issued an active expect_quiet_for hint.
+        // The child told us it would be silent for a reason (long
+        // npm install, build, test suite); honor the hint rather
+        // than escalate.
+        if (cfg.quietHints?.isQuiet(row.child_id, now)) continue;
 
         // Check parent's agent kind — watchdog only fires for
         // orchestrator parents. Cache miss is fine; this is a small N.

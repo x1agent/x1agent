@@ -36,6 +36,13 @@ pub struct MessageCallerRequest {
 }
 
 #[derive(Deserialize)]
+pub struct QuietHintRequest {
+    pub seconds: i64,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct ReadChildQuery {
     pub after_seq: Option<i64>,
     pub limit: Option<u32>,
@@ -188,6 +195,33 @@ pub async fn handle_message_caller(
         "summary": req.summary,
         "body": req.body,
         "needs_response": req.needs_response.unwrap_or(false),
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        .send()
+        .await;
+    relay_json(res).await
+}
+
+/// Child → watchdog "expect quiet for N seconds" hint. The child
+/// agent calls the `expect_quiet_for` MCP tool; its sidecar forwards
+/// to the api's internal route which records the hint in an
+/// in-process store the watchdog consults before firing.
+pub async fn handle_quiet_hint(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<QuietHintRequest>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/quiet-hint",
+        state.api_url.trim_end_matches('/'),
+        state.session_id,
+    );
+    let body = serde_json::json!({
+        "seconds": req.seconds,
+        "reason": req.reason,
     });
     let res = client
         .post(&url)

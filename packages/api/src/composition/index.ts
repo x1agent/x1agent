@@ -1,4 +1,5 @@
 import { NatsMessageInjector } from "../orchestration/nats-message-injector.js";
+import { QuietHintStore } from "../orchestration/quiet-hints.js";
 import {
   GoogleAuthProvider,
   DevBypassAuthProvider,
@@ -144,6 +145,12 @@ export interface Composition {
   agentRepoStore: PostgresAgentRepoStore;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
+  /**
+   * Shared in-memory store of child `expect_quiet_for` hints. The
+   * activity watchdog consults this to skip legitimately-quiet
+   * children on the current sweep.
+   */
+  quietHints: QuietHintStore;
 }
 
 export interface CompositionEnv {
@@ -331,6 +338,11 @@ export function compose(env: CompositionEnv): Composition {
         : undefined,
     });
 
+  // One QuietHintStore shared between the internal route that
+  // receives `expect_quiet_for` from children and the watchdog
+  // that consults them. Lives on the api process in-memory.
+  const quietHints = new QuietHintStore();
+
   const internalRoutes = createInternalRoutes({
     events: sessionEvents,
     sessions,
@@ -339,6 +351,7 @@ export function compose(env: CompositionEnv): Composition {
     githubClient,
     internalToken: env.internalToken ?? "",
     natsConnection: env.natsConnection,
+    quietHints,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -606,5 +619,6 @@ export function compose(env: CompositionEnv): Composition {
     collections: collectionsRepo,
     agentRepoStore: agentRepos,
     tickScheduler,
+    quietHints,
   };
 }

@@ -38,6 +38,12 @@ export interface InternalRoutesConfig {
    * platform_wakes_disabled. Wired from the composition root.
    */
   natsConnection?: import("nats").NatsConnection;
+  /**
+   * Shared store for `expect_quiet_for` hints from children. The
+   * watchdog consults the same store. When absent, the hint route
+   * returns 503 and the watchdog runs without hint support.
+   */
+  quietHints?: import("../orchestration/quiet-hints.js").QuietHintStore;
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -311,6 +317,32 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         502,
       );
     }
+  });
+
+  // Child → watchdog "expect quiet for N seconds" hint. Called via
+  // the child's MCP tool `expect_quiet_for`. The watchdog checks
+  // the shared store before firing, so a child about to run a
+  // 10-minute npm install or test suite doesn't get escalated as
+  // if it were stuck. See docs/architecture/orchestration.md §
+  // Server-driven wakes.
+  app.post("/sessions/:sessionId/quiet-hint", async (c) => {
+    if (!cfg.quietHints) {
+      return c.json({ error: "quiet_hints_disabled" }, 503);
+    }
+    const sessionId = c.req.param("sessionId")!;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      seconds?: number;
+      reason?: string | null;
+    };
+    if (typeof body.seconds !== "number") {
+      return c.json({ error: "missing_fields", need: ["seconds"] }, 400);
+    }
+    cfg.quietHints.record(
+      sessionId,
+      body.seconds,
+      typeof body.reason === "string" ? body.reason : null,
+    );
+    return c.json({ ok: true });
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.
