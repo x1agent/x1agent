@@ -65,7 +65,7 @@ export interface JobWatcherConfig {
   hostHomeDir?: string;
   /**
    * Dev-only: host path to the exported Max OAuth credentials file.
-   * Mounted to `/home/node/.claude/.credentials.json` so Claude Code
+   * Mounted to `/home/agent/.claude/.credentials.json` so Claude Code
    * authenticates without an API key.
    */
   hostClaudeCredentialsFile?: string;

@@ -46,7 +46,7 @@ const PLATFORM_PRESETS = [
     name: "preset-go",
     display_name: "Go 1.24",
     description:
-      "runtime-core + the Go 1.24 toolchain from the official go.dev tarball. GOPATH at /home/node/go; `go install` targets land on PATH.",
+      "runtime-core + the Go 1.24 toolchain from the official go.dev tarball. GOPATH at /home/agent/go; `go install` targets land on PATH.",
     built_ref: `${REGISTRY}/x1agent/preset-go:v1`,
     dockerfile_path: "go/Dockerfile",
   },
