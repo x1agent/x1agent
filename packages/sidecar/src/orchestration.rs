@@ -27,6 +27,15 @@ pub struct InjectRequest {
 }
 
 #[derive(Deserialize)]
+pub struct MessageCallerRequest {
+    pub summary: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub needs_response: Option<bool>,
+}
+
+#[derive(Deserialize)]
 pub struct ReadChildQuery {
     pub after_seq: Option<i64>,
     pub limit: Option<u32>,
@@ -158,6 +167,35 @@ pub async fn handle_inject_child(
             &e.to_string(),
         ),
     }
+}
+
+/// Child → parent explicit signal. The child agent calls the
+/// `message_caller` MCP tool; its sidecar forwards to the api
+/// internal route which validates + publishes the wake into the
+/// parent orchestrator's input subject. The sidecar itself doesn't
+/// touch NATS directly here — the api holds the parent-lookup logic.
+pub async fn handle_message_caller(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MessageCallerRequest>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/message-caller",
+        state.api_url.trim_end_matches('/'),
+        state.session_id,
+    );
+    let body = serde_json::json!({
+        "summary": req.summary,
+        "body": req.body,
+        "needs_response": req.needs_response.unwrap_or(false),
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        .send()
+        .await;
+    relay_json(res).await
 }
 
 pub async fn handle_spawnable(

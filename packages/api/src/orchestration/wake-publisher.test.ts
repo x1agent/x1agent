@@ -233,6 +233,52 @@ describe("publishStateChangeWake", () => {
   });
 });
 
+describe("formatMessageWakeText", () => {
+  it("summary-only (no body, no response needed)", async () => {
+    const { formatMessageWakeText } = await import("./wake-publisher.js");
+    const t = formatMessageWakeText({
+      childSessionId: "019d1111-aaaa-7000-8000-000000000000",
+      childSlug: "hirer-app",
+      summary: "feat/jobs-list ready at abc1234",
+      body: null,
+      needsResponse: false,
+    });
+    expect(t).toContain("019d1111");
+    expect(t).toContain("hirer-app");
+    expect(t).toContain("feat/jobs-list ready at abc1234");
+    expect(t).toContain("does not need a response");
+    expect(t).toContain("driverless");
+  });
+
+  it("summary + body appended", async () => {
+    const { formatMessageWakeText } = await import("./wake-publisher.js");
+    const t = formatMessageWakeText({
+      childSessionId: "019d1111-aaaa-7000-8000-000000000000",
+      childSlug: "hirer-app",
+      summary: "Ready for review",
+      body: "Commit SHA: abc1234\nFiles touched: 12\nTests: all green",
+      needsResponse: false,
+    });
+    expect(t).toContain("Ready for review");
+    expect(t).toContain("Commit SHA: abc1234");
+    expect(t).toContain("Tests: all green");
+  });
+
+  it("needs_response=true surfaces the blocking framing", async () => {
+    const { formatMessageWakeText } = await import("./wake-publisher.js");
+    const t = formatMessageWakeText({
+      childSessionId: "019d1111-aaaa-7000-8000-000000000000",
+      childSlug: "child",
+      summary: "Should I use Postgres or SQLite?",
+      body: null,
+      needsResponse: true,
+    });
+    expect(t).toContain("needs_response=true");
+    expect(t).toContain("waiting for you to inject_message");
+    expect(t).toContain("post-mortem");
+  });
+});
+
 describe("formatStateChangeWakeText", () => {
   it("complete variant references read_session and CLAUDE.md", () => {
     const t = formatStateChangeWakeText({

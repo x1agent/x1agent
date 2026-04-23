@@ -31,6 +31,13 @@ export interface InternalRoutesConfig {
   grants: PermissionGrantRepository;
   githubClient: GitHubAppClient | null;
   internalToken: string;
+  /**
+   * Optional NATS connection used by the `/sessions/:id/message-caller`
+   * route to publish a `message` wake into the parent orchestrator's
+   * input subject. When absent, `message_caller` calls return 503
+   * platform_wakes_disabled. Wired from the composition root.
+   */
+  natsConnection?: import("nats").NatsConnection;
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -248,6 +255,62 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
     const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
     return c.json({ ok: true, total_size: totalSize });
+  });
+
+  // Child → parent explicit signal. The child's sidecar calls this
+  // when the child invokes the `message_caller` MCP tool. We look
+  // up the child's parent, confirm the parent is alive + an
+  // orchestrator, and publish a `message` wake to the parent's
+  // input subject. See docs/architecture/orchestration.md §
+  // Server-driven wakes.
+  app.post("/sessions/:sessionId/message-caller", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      summary?: string;
+      body?: string | null;
+      needs_response?: boolean;
+    };
+    if (!body.summary || typeof body.summary !== "string") {
+      return c.json({ error: "missing_fields", need: ["summary"] }, 400);
+    }
+    if (!cfg.natsConnection) {
+      return c.json({ error: "platform_wakes_disabled" }, 503);
+    }
+
+    const child = await cfg.sessions.findById(sessionId);
+    if (!child) return c.json({ error: "session_not_found" }, 404);
+    if (!child.parentSessionId) {
+      return c.json({ error: "no_parent" }, 400);
+    }
+    const parent = await cfg.sessions.findById(child.parentSessionId);
+    if (!parent || parent.status === "complete" || parent.status === "failed") {
+      return c.json({ error: "parent_not_live" }, 410);
+    }
+    const parentAgent = await cfg.agents.findById(parent.agentId as never);
+    if (!parentAgent || parentAgent.kind !== "orchestrator") {
+      // Workers don't get platform wakes. Accept but no-op — the
+      // child's call succeeded, just nothing to route.
+      return c.json({ ok: true, delivered: false, reason: "parent_not_orchestrator" });
+    }
+    const childAgent = await cfg.agents.findById(child.agentId as never);
+    const { publishMessageWake } = await import(
+      "../orchestration/wake-publisher.js"
+    );
+    try {
+      await publishMessageWake(cfg.natsConnection, parent.id, {
+        childSessionId: child.id,
+        childSlug: String(childAgent?.slug ?? "<unknown>"),
+        summary: body.summary,
+        body: typeof body.body === "string" ? body.body : null,
+        needsResponse: body.needs_response === true,
+      });
+      return c.json({ ok: true, delivered: true });
+    } catch (err) {
+      return c.json(
+        { error: "publish_failed", message: (err as Error).message },
+        502,
+      );
+    }
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.
