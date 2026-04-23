@@ -117,6 +117,25 @@ The local install is a single-operator, single-machine configuration. It explici
 
 **OrbStack API stalls.** Symptoms: `kubectl` hangs or times out. Fix: `orbctl stop k8s && orbctl start k8s`, or fully restart the OrbStack app. Do not fall back to raw Docker containers — local dev requires OrbStack.
 
+**OrbStack VM wedges after a long session.** Symptoms: pods restart in tight loops, `kubectl logs` prints `rpc error: code = Unknown desc = docker does not support reopening container log files`, node disk fills up. Cause: OrbStack's Kubernetes uses Docker + cri-dockerd, and cri-dockerd's `ReopenContainerLog` CRI method is a [stub that always fails](https://github.com/Mirantis/cri-dockerd/issues/337). When any container's log file exceeds kubelet's `containerLogMaxSize` (10Mi by default), kubelet tries to rotate via `ReopenContainerLog` every 10 seconds and never succeeds. The file grows without bound on the container's original fd.
+
+The fix is to configure Docker's json-file log driver to rotate **before** kubelet's threshold, so kubelet never has a reason to call the broken method. Edit `~/.orbstack/config/docker.json`:
+
+```json
+{
+  "features": { "buildkit": true },
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "20"
+  }
+}
+```
+
+Then restart OrbStack (`orbctl stop && orbctl start`). Existing containers keep their old log config — the restart recreates them. Verify with `docker inspect <container-id> --format '{{json .HostConfig.LogConfig}}'`; the output should show `max-size: 10m, max-file: 20`.
+
+This is an OrbStack-local workaround. Production Kubernetes with containerd has no such bug.
+
 **Postgres says "too many clients already".** Restart the api pod: `kubectl -n x1agent rollout restart deploy/api-devspace`. A known dev-mode issue when many hot reloads stack tick loops — the fix is a single restart.
 
 **Agent pod stuck in "pending".** Usually a missing image. Rebuild from the repo: `devspace build -b agent,sidecar -n x1agent`. New sessions pick up the rebuild; in-flight sessions keep their old image.
