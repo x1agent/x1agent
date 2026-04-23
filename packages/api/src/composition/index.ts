@@ -352,6 +352,7 @@ export function compose(env: CompositionEnv): Composition {
     internalToken: env.internalToken ?? "",
     natsConnection: env.natsConnection,
     quietHints,
+    sql: env.sql,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so

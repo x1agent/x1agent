@@ -1,0 +1,138 @@
+---
+# ServiceAccount the preview-provider pod runs as.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x1agent-preview
+  namespace: x1agent
+  labels:
+    app: x1agent-preview
+---
+# Role in x1agent namespace — scoped to creating Kaniko Jobs + reading
+# their pod logs for debugging.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: x1agent-preview-build
+  namespace: x1agent
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs", "jobs/status"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: x1agent-preview-build
+  namespace: x1agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: x1agent-preview-build
+subjects:
+  - kind: ServiceAccount
+    name: x1agent-preview
+    namespace: x1agent
+---
+# Role in the preview namespace — creates/replaces/deletes
+# Deployments, Services, Ingresses, and reads their status.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: x1agent-preview-deploy
+  namespace: x1-previews
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: x1agent-preview-deploy
+  namespace: x1-previews
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: x1agent-preview-deploy
+subjects:
+  - kind: ServiceAccount
+    name: x1agent-preview
+    namespace: x1agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preview
+  namespace: x1agent
+  labels:
+    app: preview
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: preview
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: preview
+    spec:
+      serviceAccountName: x1agent-preview
+      containers:
+        - name: preview
+          image: x1agent-provider-preview
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            - name: API_URL
+              value: http://api:30001
+            - name: API_INTERNAL_TOKEN
+              value: dev-internal-token-change-me
+            - name: REGISTRY_ADDRESS
+              value: x1-registry.x1agent.svc.cluster.local:5000
+            - name: REGISTRY_INSECURE
+              value: "true"
+            - name: BUILD_NAMESPACE
+              value: x1agent
+            - name: PREVIEW_NAMESPACE
+              value: x1-previews
+            - name: PREVIEW_DOMAIN
+              value: preview.local.x1agent.dev
+            - name: TLS_SECRET_NAME
+              value: x1agent-wildcard
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { cpu: 1, memory: 1Gi }
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-tls

@@ -443,6 +443,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "preview_deploy",
+      description:
+        "Deploy the current branch of an attached repo to a preview environment. The platform reads `.x1agent/preview.yaml` at the root of the repo's checked-out tree at commit_sha, builds a Docker image via Kaniko, pushes it to the in-cluster registry, applies a Deployment + Service + Ingress, and returns the public URL. Blocks until the preview is reachable (usually 1–3 minutes). Returns { ok, url, slug, image } on success or { ok: false, code, message } on failure. The resulting URL is stable for the lifetime of the preview and is what humans will bookmark — prefer writing the URL into your session summary share.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          repo_full_name: {
+            type: "string",
+            description:
+              "owner/repo of the attached repo to deploy (e.g. 'hirer-co/app').",
+          },
+          branch: {
+            type: "string",
+            description:
+              "Branch name (e.g. 'feat/scaffold'). The provider clones this ref for the build.",
+          },
+          commit_sha: {
+            type: "string",
+            description:
+              "Commit SHA to build. The provider tags the resulting image with a short form of this SHA so redeploys of the same sha are idempotent.",
+          },
+        },
+        required: ["repo_full_name", "branch", "commit_sha"],
+      },
+    },
+    {
       name: "expect_quiet_for",
       description:
         "Tell the platform you'll be silent for a while so the activity watchdog doesn't escalate you as 'stuck'. Use before running a long tool call that doesn't emit events (npm install, large test suite, docker build, heavy LLM sub-task). Pass `seconds` — the platform suppresses watchdog wakes for your parent about you for that duration. A subsequent call extends / overrides the window. A 0 or negative value clears the hint immediately. Doesn't silence emit_status or other events — only the silent-child watchdog check.",
@@ -842,6 +868,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `spawn_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "preview_deploy": {
+      try {
+        const res = await fetch(`${sidecarUrl}/preview/deploy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repo_full_name: String(a?.repo_full_name ?? ""),
+            branch: String(a?.branch ?? ""),
+            commit_sha: String(a?.commit_sha ?? ""),
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `preview_deploy failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
