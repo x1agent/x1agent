@@ -295,7 +295,19 @@ async function launchSession(
     systemPromptText: composedSystemPrompt,
     heartbeatMd: agent.heartbeatMd,
     sessionMode: "interactive",
-    idleTimeoutMs: 900_000,
+    // Orchestrators are long-lived singletons that legitimately sit
+    // idle for hours between user messages or child signals. Letting
+    // the agent container exit on idle (exit code 0) defeats the
+    // whole pod-lifetime contract — restartPolicy: OnFailure won't
+    // revive it because a clean exit isn't a failure. Bump the idle
+    // cap to 7 days so the agent parks on its NATS subscription
+    // instead of exiting. Workers keep the 15-min disposable idle.
+    // Proper fix is the server-driven wake model described in
+    // docs/architecture/orchestration.md § Server-driven wakes:
+    // platform injects user.message per wake kind when events fire,
+    // orchestrator ends its turn between wakes. No blocking tool.
+    idleTimeoutMs:
+      agent.kind === "orchestrator" ? 7 * 24 * 60 * 60 * 1000 : 900_000,
     maxTurns: 200,
     repos,
     collections,
