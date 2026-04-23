@@ -1,6 +1,7 @@
 import { DomainError, type Clock } from "@x1agent/kernel";
 import {
   AgentNotFoundError,
+  isOrchestratorKind,
   type Agent,
   type AgentId,
   type AgentRepository,
@@ -90,6 +91,16 @@ export async function spawnChildSession(
   );
   if (!allowed)
     throw new PermissionRequiredError(parentAgent.id, childAgent.id);
+
+  // Orchestrator children are singletons just like orchestrator roots —
+  // if the child agent is an orchestrator and already has a live session,
+  // return that session rather than creating a second one. Matches the
+  // trigger-session contract; defends the 018 DB trigger from firing on
+  // the expected happy-path.
+  if (isOrchestratorKind(childAgent.kind)) {
+    const existing = await deps.sessions.findLiveSessionForAgent(childAgent.id);
+    if (existing) return existing;
+  }
 
   return deps.sessions.create({
     agentId: childAgent.id,
