@@ -290,13 +290,10 @@ async fn clone_single(repo: &RepoConfig, username: &str, token: &str) -> Result<
         .output()
         .await;
 
-    // The sidecar clones as root; the agent container runs as uid 1000
-    // (Claude Code refuses root). Hand ownership over so the agent can
-    // write in its workspace and commit from there.
-    let _ = Command::new("chown")
-        .args(["-R", "1000:1000", &target])
-        .output()
-        .await;
+    // The sidecar and agent both run as uid 1000 (see the sidecar
+    // Dockerfile and the pod-spec securityContext). Files cloned
+    // here are already owned by 1000:1000, so the agent can read
+    // and write directly with no chown / chmod dance.
 
     Ok(())
 }
