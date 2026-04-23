@@ -93,7 +93,7 @@ export interface SessionPodSpec {
  * here.
  */
 export function buildSessionJob(spec: SessionPodSpec): V1Job {
-  const jobName = `x1-session-${shortId(spec.sessionId)}`;
+  const jobName = sessionJobName(spec.sessionId);
   const imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
   const labels = {
     app: "x1agent",
@@ -153,10 +153,15 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
   // agents get the disposable shape. See
   // docs/architecture/orchestration.md § Pod-shape by kind.
   const isOrchestrator = spec.agentKind === "orchestrator";
+  // PVC name matches the jobName exactly — the Job watcher creates a
+  // PVC under this name before creating the Job, so the scheduler can
+  // bind it immediately. Keep the names coupled so the reaper can
+  // find the PVC from a known Job name.
+  const pvcName = jobName;
   const workspaceVolume = isOrchestrator
     ? {
         name: "workspace",
-        persistentVolumeClaim: { claimName: `x1-session-${jobName}` },
+        persistentVolumeClaim: { claimName: pvcName },
       }
     : { name: "workspace", emptyDir: {} };
   const agentResources = isOrchestrator
@@ -338,4 +343,15 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
 // staying readable — the full session_id is on the labels for joins.
 function shortId(id: string): string {
   return id.replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * Job name == PVC name for orchestrator workspaces. Consumers that
+ * need to create the PVC before the Job (so the scheduler can bind
+ * it at Pod creation time) or find the PVC later for reaping can
+ * derive the name from the session id the same way buildSessionJob
+ * does.
+ */
+export function sessionJobName(sessionId: string): string {
+  return `x1-session-${shortId(sessionId)}`;
 }
