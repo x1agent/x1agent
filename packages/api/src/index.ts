@@ -291,6 +291,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       natsUrl,
       events: sessionEvents,
       sessions: composedSessions,
+      agents: composedAgents,
     });
     registerCleanup(() => sub.stop());
     console.log(`[nats] connected to ${natsUrl}`);

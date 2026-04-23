@@ -5,7 +5,9 @@ import {
   type SessionEventRepository,
   type SessionRepository,
 } from "@x1agent/domain-sessions";
+import type { AgentRepository } from "@x1agent/domain-agents";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
+import { publishStateChangeWake } from "../orchestration/wake-publisher.js";
 
 /**
  * Subscribe to `x1.session.*.events`, parse the envelope published by
@@ -25,6 +27,12 @@ export interface StartSubscriberOptions {
   natsUrl: string;
   events: SessionEventRepository;
   sessions: SessionRepository;
+  /**
+   * Needed to look up the parent agent's `kind` when a child session
+   * hits a terminal state — we only fire a state_change wake into
+   * orchestrator parents, not worker parents.
+   */
+  agents: AgentRepository;
 }
 
 export interface Subscriber {
@@ -114,17 +122,36 @@ export async function startSessionEventSubscriber(
               result?: unknown;
               error?: string;
             };
+            const terminalStatus =
+              parsed.type === "session.completed" ? "complete" : "failed";
+            const completedAt = parsed.timestamp
+              ? new Date(parsed.timestamp)
+              : new Date();
+            const errorMessage = payload.error ? String(payload.error) : null;
             await opts.sessions.updateStatus(sessionId, {
-              status: parsed.type === "session.completed" ? "complete" : "failed",
-              completedAt: parsed.timestamp
-                ? new Date(parsed.timestamp)
-                : new Date(),
-              errorMessage: payload.error
-                ? String(payload.error)
-                : typeof payload.result === "string"
-                  ? null
-                  : null,
+              status: terminalStatus,
+              completedAt,
+              errorMessage,
             });
+
+            // If this session had an orchestrator parent, publish a
+            // `state_change` wake so the parent gets re-activated on
+            // its next turn. Silent for worker parents, human-spawned
+            // sessions, and orphans. See
+            // docs/architecture/orchestration.md § Server-driven wakes.
+            try {
+              await publishStateChangeWake(
+                { nc, sessions: opts.sessions, agents: opts.agents },
+                session,
+                terminalStatus,
+                completedAt,
+                errorMessage,
+              );
+            } catch (wakeErr) {
+              console.warn(
+                `[nats] state_change wake failed for session ${sessionId}: ${(wakeErr as Error).message}`,
+              );
+            }
           }
         } catch (err) {
           console.warn(
