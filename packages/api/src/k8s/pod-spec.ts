@@ -61,7 +61,7 @@ export interface SessionPodSpec {
   /**
    * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
    * (file). When set, both are hostPath-mounted into the agent container
-   * at /home/node so Claude Code picks up settings/agents/etc. Expected
+   * at /home/agent so Claude Code picks up settings/agents/etc. Expected
    * form: `/Users/alice`.
    */
   hostHomeDir?: string;
@@ -69,7 +69,7 @@ export interface SessionPodSpec {
    * Dev-only: absolute host path to a file in Linux credentials format
    * `{"claudeAiOauth":{...}}` — typically exported from the macOS
    * Keychain entry `Claude Code-credentials`. Mounted over the
-   * container's `/home/node/.claude/.credentials.json` so Claude Code
+   * container's `/home/agent/.claude/.credentials.json` so Claude Code
    * authenticates as the Max user without needing an API key.
    */
   hostClaudeCredentialsFile?: string;
@@ -270,7 +270,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 allowPrivilegeEscalation: false,
                 capabilities: { drop: ["ALL"] },
                 // The agent writes to /workspace (emptyDir) and to
-                // /home/node/.claude (hostPath in dev). Both are
+                // /home/agent/.claude (hostPath in dev). Both are
                 // mounted volumes; the rest of the FS can stay
                 // read-only — Claude Code's caches that need writable
                 // paths inside $HOME live under .claude already.
@@ -297,11 +297,11 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                   ? [
                       {
                         name: "host-claude-dir",
-                        mountPath: "/home/node/.claude",
+                        mountPath: "/home/agent/.claude",
                       },
                       {
                         name: "host-claude-json",
-                        mountPath: "/home/node/.claude.json",
+                        mountPath: "/home/agent/.claude.json",
                       },
                     ]
                   : []),
@@ -309,7 +309,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                   ? [
                       {
                         name: "host-claude-creds",
-                        mountPath: "/home/node/.claude/.credentials.json",
+                        mountPath: "/home/agent/.claude/.credentials.json",
                       },
                     ]
                   : []),

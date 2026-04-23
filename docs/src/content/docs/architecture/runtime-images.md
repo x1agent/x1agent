@@ -61,7 +61,7 @@ Pod teardown is governed by the session lifecycle documented in [Sessions](/arch
 | `gh` CLI | Installed from GitHub's apt source | GitHub operations in-session via the credential proxy. |
 | Git credential helper | `git-credential-x1` shim | Routes git credentials through the sidecar; see [GitHub credential proxy](/security/credential-proxy). |
 | Agent entrypoint | `/x1/bin/entrypoint` | Launches the LLM runtime, wires events to the sidecar, accepts user inject on `:8788`. |
-| User | `node` at uid 1000, home at `/home/node` | Non-root; Claude Code refuses `--dangerously-skip-permissions` as root. |
+| User | `agent` at uid 1000, gid 1000, home at `/home/agent` | Every x1agent runtime image — runtime-core and all presets — exposes the same user identity. The name is runtime-agnostic (Claude today, Codex / Gemini / Pi later) and decoupled from the base image's default user. uid 1000 satisfies Claude Code's refusal to run as root with `--dangerously-skip-permissions`, and is the gid the pod spec's `fsGroup` targets for shared volumes. |
 | Workspace dir | `/workspace` with agent-owned permissions | Where the cloned repo and agent scratch files live. |
 | `/x1/` tree | Self-contained agent overlay | Exists so language presets can `COPY --from=runtime-core /x1 /x1` rather than inheriting the whole image as a base. See below. |
 
@@ -145,14 +145,16 @@ A valid preset Dockerfile following the overlay pattern:
 2. Adds `FROM ${AGENT_OVERLAY} AS x1` as the first named stage.
 3. Starts from a bookworm-based language image (see *libc compatibility* below).
 4. `COPY --from=x1 /x1 /x1` brings in the overlay.
-5. Creates a uid 1000 user if the base image doesn't already have one.
+5. **Creates the canonical `agent` user.** Every runtime image must provide a single uid 1000 / gid 1000 user named `agent` with a home at `/home/agent` — no exceptions, even when the base image ships its own uid 1000 user (node:slim's `node`, etc.). If a conflicting uid 1000 exists in the base, the preset deletes or renames it so the image has exactly one uid 1000 identity and that identity is unambiguously the agent.
 6. `ln -sf /x1/etc/gitconfig /etc/gitconfig`.
-7. `chown -R 1000:1000 /x1 /workspace`.
-8. Sets `ENV PATH="/x1/bin:${PATH}"`.
-9. `USER 1000` (or the named user with that uid).
+7. `chown -R agent:agent /x1 /workspace /home/agent`.
+8. Sets `ENV PATH="/x1/bin:${PATH}"` and `ENV HOME=/home/agent`.
+9. `USER agent`.
 10. `ENTRYPOINT ["/x1/bin/entrypoint"]`.
 
-The save-time validator rejects images that end `USER 0`, omit the `/x1/bin/entrypoint` entrypoint, or `RUN rm` against `/x1/`.
+The `agent` convention is deliberate: it's runtime-agnostic (the same uid and home apply whether the container is running Claude Code, Codex, opencode, Gemini, or a future SDK), decoupled from base-image defaults, and makes home-directory-based platform artifacts (`/home/agent/.claude/`, `/home/agent/.codex/`, `/home/agent/bin/`, `/home/agent/.gitconfig`) predictable across the whole image catalog. The platform's hostPath mounts, credential injections, and `$HOME`-relative lookups all target `/home/agent` — a preset that diverges will silently fail those paths.
+
+The save-time validator rejects images that end `USER 0`, name their uid 1000 user anything other than `agent`, omit the `/x1/bin/entrypoint` entrypoint, or `RUN rm` against `/x1/`.
 
 ### libc compatibility
 
