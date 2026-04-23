@@ -15,6 +15,18 @@ data:
     port: 4222
     http_port: 8222
 
+    # Stderr-only logging. Sinking to a file path has historically
+    # combined badly with kubelet's docker-shim log rotation on
+    # OrbStack: kubelet tried to rotate NATS's container log every
+    # ~10s and hit "docker does not support reopening container log
+    # files", tight-looping and eventually wedging the VM. By capping
+    # verbosity here at NATS's own layer (no debug, no trace) and
+    # letting the container log scroll naturally, the rotation
+    # pressure stays manageable.
+    debug: false
+    trace: false
+    logtime: true
+
     # Cluster-internal clients (api, sidecars, providers) must
     # present a client cert signed by our dev CA. Without a cert the
     # TLS handshake fails before any NATS protocol runs. The agent
