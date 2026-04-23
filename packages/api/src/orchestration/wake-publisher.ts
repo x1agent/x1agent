@@ -112,6 +112,80 @@ export async function publishStateChangeWake(
 }
 
 /**
+ * Platform → orchestrator watchdog wake. Fires when a child session
+ * has been silent (no new events) for longer than the configured
+ * threshold. Carries the child session id, slug, and the observed
+ * silence duration so the orchestrator can decide whether to
+ * investigate, wait longer, or cancel.
+ *
+ * The activity watchdog (see activity-watchdog.ts) applies
+ * exponential backoff per child so a truly stuck child doesn't
+ * generate wake spam.
+ */
+export async function publishWatchdogWake(
+  nc: import("nats").NatsConnection,
+  parentSessionId: string,
+  childSessionId: string,
+  childSlug: string,
+  silenceSeconds: number,
+  attempt: number,
+): Promise<void> {
+  const envelope = {
+    session_id: parentSessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: formatWatchdogWakeText({
+        childSessionId,
+        childSlug,
+        silenceSeconds,
+        attempt,
+      }),
+      kind: "watchdog",
+      from_session_id: childSessionId,
+      from_agent_slug: childSlug,
+      silence_seconds: silenceSeconds,
+      attempt,
+      driverless: true,
+      source: "platform",
+    },
+  };
+  const sc = StringCodec();
+  nc.publish(
+    `x1.session.${parentSessionId}.input`,
+    sc.encode(JSON.stringify(envelope)),
+  );
+}
+
+export function formatWatchdogWakeText(opts: {
+  childSessionId: string;
+  childSlug: string;
+  silenceSeconds: number;
+  attempt: number;
+}): string {
+  const shortId = opts.childSessionId.slice(0, 8);
+  const mins = Math.floor(opts.silenceSeconds / 60);
+  const attemptNote =
+    opts.attempt === 1
+      ? "First watchdog tick on this child."
+      : `Watchdog attempt ${opts.attempt} — backoff still growing.`;
+  return [
+    `[driverless wake: watchdog — child silent]`,
+    "",
+    `Child session ${shortId} (${opts.childSlug}) has emitted no events for ${mins} minutes.`,
+    attemptNote,
+    "",
+    "Options per your CLAUDE.md governance rules:",
+    "  - read_session to inspect last activity — may be a legitimate long-running operation",
+    "  - inject_message to ask the child for a status update",
+    "  - cancel_session + post-mortem share if the child is genuinely stuck",
+    "  - end the turn to let the next watchdog tick re-escalate",
+    "",
+    "No human is watching — do not ask clarifying questions.",
+  ].join("\n");
+}
+
+/**
  * Scheduler → orchestrator heartbeat wake. The scheduler calls this
  * when it ticks for an orchestrator whose live session already
  * exists; it injects the agent's `heartbeat_md` into the session

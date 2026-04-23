@@ -463,6 +463,27 @@ if (process.env.JOB_WATCHER !== "disabled") {
   }
 }
 
+// Activity watchdog — periodically sweeps children of live
+// orchestrators and fires watchdog wakes when they've been silent
+// past the backoff threshold. Requires NATS to publish wakes;
+// no-op if NATS isn't configured. See
+// docs/architecture/orchestration.md § Server-driven wakes.
+if (
+  providerNats &&
+  process.env.ACTIVITY_WATCHDOG !== "disabled"
+) {
+  const { startActivityWatchdog } = await import(
+    "./orchestration/activity-watchdog.js"
+  );
+  const watchdog = startActivityWatchdog({
+    sql: composedSql,
+    agents: composedAgents,
+    nc: providerNats,
+    intervalMs: Number(process.env.ACTIVITY_WATCHDOG_INTERVAL_MS || 60_000),
+  });
+  registerCleanup(() => watchdog.stop());
+}
+
 console.log(`[api] listening on :${PORT}`);
 
 export default {
