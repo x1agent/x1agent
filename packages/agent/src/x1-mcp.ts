@@ -443,6 +443,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "expect_quiet_for",
+      description:
+        "Tell the platform you'll be silent for a while so the activity watchdog doesn't escalate you as 'stuck'. Use before running a long tool call that doesn't emit events (npm install, large test suite, docker build, heavy LLM sub-task). Pass `seconds` — the platform suppresses watchdog wakes for your parent about you for that duration. A subsequent call extends / overrides the window. A 0 or negative value clears the hint immediately. Doesn't silence emit_status or other events — only the silent-child watchdog check.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          seconds: {
+            type: "number",
+            description:
+              "Expected silent duration in seconds. Pass 0 or negative to clear.",
+          },
+          reason: {
+            type: "string",
+            description:
+              "Optional human-readable note (e.g., 'npm install'). Surfaced in logs.",
+          },
+        },
+        required: ["seconds"],
+      },
+    },
+    {
       name: "message_caller",
       description:
         "Push an explicit signal up to the session that spawned you. Use when you want to notify your parent orchestrator of a milestone, an ask, or a blocker — not for every progress update (use emit_status for cheap heartbeats). The platform routes this as a driverless wake into the parent's turn so the parent reasons about your signal without polling. Only works when this session has a parent (was spawned by another agent). Returns { ok, delivered }. delivered=false with reason='parent_not_orchestrator' means your parent is a worker and platform wakes aren't routed there; the call still succeeded as a no-op.",
@@ -821,6 +842,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `spawn_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "expect_quiet_for": {
+      try {
+        const res = await fetch(`${sidecarUrl}/quiet-hint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            seconds: Number(a?.seconds ?? 0),
+            reason: typeof a?.reason === "string" ? a.reason : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `expect_quiet_for failed: ${(err as Error).message}`,
             },
           ],
           isError: true,

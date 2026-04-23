@@ -127,6 +127,7 @@ const {
   sessions: composedSessions,
   agentRepoStore: composedAgentRepos,
   tickScheduler,
+  quietHints: composedQuietHints,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -483,6 +484,7 @@ if (
     agents: composedAgents,
     nc: providerNats,
     intervalMs: Number(process.env.ACTIVITY_WATCHDOG_INTERVAL_MS || 60_000),
+    quietHints: composedQuietHints,
   });
   registerCleanup(() => watchdog.stop());
 }
