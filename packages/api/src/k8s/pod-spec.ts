@@ -1,5 +1,15 @@
 import type { V1Job } from "@kubernetes/client-node";
 
+/**
+ * Agent kind — mirrors `agents.kind` in the DB. Pod-spec branches on
+ * this value: orchestrators get no hard deadline, OnFailure restart,
+ * a PVC-backed workspace, and smaller resource requests (they spend
+ * most wall-clock time idle). Workers and scheduled agents share the
+ * disposable pod shape. See docs/architecture/orchestration.md §
+ * Pod-shape by kind.
+ */
+export type AgentKind = "worker" | "orchestrator" | "scheduled";
+
 export interface LinkedRepoForPod {
   repo_full_name: string;
   branch: string;
@@ -22,6 +32,12 @@ export interface SessionPodSpec {
   sessionId: string;
   agentId: string;
   agentSlug: string;
+  /**
+   * Discriminator from `agents.kind`. Drives activeDeadlineSeconds,
+   * restartPolicy, backoffLimit, resource requests, and the workspace
+   * volume type (emptyDir vs PVC). See AgentKind above.
+   */
+  agentKind: AgentKind;
   workspaceSlug: string;
   workspaceName: string;
   agentPrompt: string;
@@ -134,6 +150,31 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     },
   ];
 
+  // Pod-shape branching by agent kind. Orchestrators are long-lived
+  // singletons that spend most of their time blocked on NATS waiting
+  // for a child signal or a user message; they get no hard deadline,
+  // OnFailure restart, a PVC-backed workspace (so the SDK transcript
+  // survives pod restarts and the agent can `resume: SESSION_ID` on
+  // re-entry), and smaller resource requests. Workers and scheduled
+  // agents get the disposable shape. See
+  // docs/architecture/orchestration.md § Pod-shape by kind.
+  const isOrchestrator = spec.agentKind === "orchestrator";
+  const workspaceVolume = isOrchestrator
+    ? {
+        name: "workspace",
+        persistentVolumeClaim: { claimName: `x1-session-${jobName}` },
+      }
+    : { name: "workspace", emptyDir: {} };
+  const agentResources = isOrchestrator
+    ? {
+        requests: { memory: "512Mi", cpu: "50m" },
+        limits: { memory: "2Gi", cpu: "1" },
+      }
+    : {
+        requests: { memory: "1Gi", cpu: "500m" },
+        limits: { memory: "2Gi", cpu: "1" },
+      };
+
   return {
     apiVersion: "batch/v1",
     kind: "Job",
@@ -144,12 +185,16 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     },
     spec: {
       ttlSecondsAfterFinished: 300,
-      activeDeadlineSeconds: 3600,
-      backoffLimit: 0,
+      // Orchestrators intentionally have no hard deadline — they're
+      // meant to live for days. Workers cap at 1h as a runaway-loop
+      // guard. Keep backoffLimit paired: orchestrators retry on crash
+      // (OnFailure + backoffLimit 6), workers fail fast.
+      ...(isOrchestrator ? {} : { activeDeadlineSeconds: 3600 }),
+      backoffLimit: isOrchestrator ? 6 : 0,
       template: {
         metadata: { labels },
         spec: {
-          restartPolicy: "Never",
+          restartPolicy: isOrchestrator ? "OnFailure" : "Never",
           securityContext: {
             // fsGroup owns the /workspace emptyDir so both containers
             // (agent as uid 1000, sidecar as root) can read/write.
@@ -157,7 +202,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
             seccompProfile: { type: "RuntimeDefault" },
           },
           volumes: [
-            { name: "workspace", emptyDir: {} },
+            workspaceVolume,
             // NATS mTLS material — only the sidecar mounts this. The
             // agent container has no NATS cert and no way to pick one
             // up, so any direct NATS connect from the agent container
@@ -264,10 +309,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                     ]
                   : []),
               ],
-              resources: {
-                requests: { memory: "1Gi", cpu: "500m" },
-                limits: { memory: "2Gi", cpu: "1" },
-              },
+              resources: agentResources,
               readinessProbe: {
                 httpGet: { path: "/health", port: 3100 },
                 initialDelaySeconds: 5,

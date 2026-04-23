@@ -88,21 +88,90 @@ ALTER TABLE sessions
 - A child inherits the parent's workspace. Cross-workspace spawning is rejected at the api layer.
 - Cycles are rejected at spawn time: a session cannot spawn an ancestor.
 
-## Runtime differences for orchestrator sessions
+## Agent kind — the discriminator
 
-The Job watcher checks whether the session's agent has any active persistent `spawn` grants. If yes, the pod spec changes:
+Whether an agent is a worker or an orchestrator is an explicit property on the agent record, not inferred. The discriminator is `agents.kind`:
 
-| Property                     | Worker             | Orchestrator            |
-|------------------------------|--------------------|--------------------------|
-| `activeDeadlineSeconds`      | 3600               | unset (no hard deadline) |
-| `restartPolicy`              | `Never`            | `OnFailure`              |
-| `backoffLimit`               | 0                  | 6                        |
-| Idle timeout                 | 15 min default     | paused while children are active |
-| Workspace volume             | `emptyDir`         | per-session `PersistentVolumeClaim` |
-| Extra MCP tools exposed      | none               | spawn / read / message / await |
-| System prompt addition       | none               | "Other agents you can spawn" block |
+```sql
+ALTER TABLE agents
+  ADD COLUMN kind TEXT NOT NULL DEFAULT 'worker'
+    CHECK (kind IN ('worker', 'orchestrator', 'scheduled'));
+```
 
-Both shapes share the same agent container image and the same wire event schema. The difference is the lifetime contract and which tools the agent sees.
+Three values, three pod-shape families. The enum is finite and binding — adding a fourth kind (say, `ingest` for long-lived no-spawn data pumps) is a schema change, deliberately.
+
+| kind | Intended use |
+|---|---|
+| `worker` | Default. Short-lived per-task invocation. One session per triggering event. |
+| `orchestrator` | Long-lived singleton that plans and commissions. One session per agent, resumed across pod restarts. |
+| `scheduled` | Periodic invocation. Starts on a cron trigger, runs one pass of the agent's heartbeat, exits. Same pod shape as `worker`; differs only in how sessions are triggered (the scheduler, not a human). |
+
+`kind` is orthogonal to [permission grants](../security/permission-grants) and to `runtime_type` (the SDK / runtime image — Claude Code, Codex, Gemini, etc.). An orchestrator agent can drive any supported runtime; permissions (spawn, git, etc.) are granted separately. The three are layered:
+
+- `runtime_type` — which agent SDK runs inside the container
+- `kind` — how the pod lives and dies
+- `permission_grants` — what the agent is allowed to do
+
+## One agent, one session (orchestrators only)
+
+For a `worker`, the mapping is familiar: agent is a class, each session is an instance. Many sessions per agent, disposable.
+
+For an `orchestrator`, the agent **is** the session. At most one non-terminal session exists per orchestrator agent, and every trigger — a user message, a child signal, a scheduled wake, a pod restart — routes to that same session. Starting a session for an orchestrator is "find or create": if a session with `status IN ('pending', 'running')` already exists, return that id. Don't create a second row.
+
+```sql
+-- Enforce the singleton at the database layer (simplest: application-level
+-- "find or create" in the session-start use case, which already looks up
+-- the agent to read its kind and can short-circuit for orchestrators).
+```
+
+Consequences the rest of the system is built around:
+
+- **Restart means resume, not recreate.** When the orchestrator pod dies, `restartPolicy: OnFailure` brings it back. The new pod uses the same `SESSION_ID` (from the Job's labels) and calls `query({ resume: SESSION_ID, ... })`. The Claude Agent SDK rehydrates the transcript from the PVC. The session row's `status` stays `running` through the restart; pod failure is invisible at the session layer.
+- **Triggers inject, not create.** A scheduled wake for an orchestrator doesn't create a session — it injects a user message (e.g. "heartbeat tick") into the existing session. A "Run" click on an orchestrator that already has a live session opens that session; it doesn't start a new one.
+- **Terminal states are noteworthy.** A worker reaching `complete` is success. An orchestrator reaching `complete` or `failed` is a real end — deliberate shutdown, or an unrecoverable crash. The UI surfaces this clearly rather than burying it in a history list.
+- **Children remain disparate.** An orchestrator spawns many children over its lifetime. Each child is a normal worker session with its own memory, bound to the orchestrator via `parent_session_id`. The tree has one permanent root and many transient branches.
+
+## Orchestrator idle model
+
+An orchestrator spends most of its wall-clock time idle. Three states worth naming:
+
+1. **Active** — reasoning, calling tools, writing to its repo, responding to a message.
+2. **Attentive idle** — blocked on `wait_for_child_signal`. A child may be running for hours; the orchestrator is idle but attentive to wakes.
+3. **Quiescent** — no active children, no pending wakes. Nothing to do until a scheduled tick, a user message, or an external event.
+
+State 3 is most of the time. That shapes the pod's resource requests: an idle orchestrator holding 1GB + 0.5 CPU as the scheduler books is wasteful. The request/limit split matters here — request is what gets booked by the K8s scheduler, limit is the ceiling when active.
+
+The agent process inside an orchestrator pod runs something like:
+
+```
+while true:
+  signal = wait_for_input()          # blocks on NATS subscription
+  context = load_history()           # from PVC transcript
+  response = model(context, signal)  # active
+  act_on(response)                   # tool calls, commits, spawns
+  # loop — may go back to blocking for days
+```
+
+No activity between wakes means no model calls, no tokens. The pod is alive (memory holds the transcript), the process is parked on a subscription. Kernel-level efficient — off-CPU until a message arrives.
+
+## Pod-shape by kind
+
+The Job watcher reads `agents.kind` when building the session Job:
+
+| Property                     | `worker`                  | `orchestrator`                      | `scheduled`               |
+|------------------------------|---------------------------|--------------------------------------|---------------------------|
+| `activeDeadlineSeconds`      | 3600                      | **unset** (no hard deadline)         | 3600                      |
+| `restartPolicy`              | `Never`                   | `OnFailure`                          | `Never`                   |
+| `backoffLimit`               | 0                         | 6                                    | 0                         |
+| Idle timeout                 | 15 min default → exit     | pod stays; agent blocks on input     | tight (next cron wake)    |
+| Resources (requests)         | cpu 500m, mem 1Gi         | cpu 50m, mem 512Mi                   | cpu 500m, mem 1Gi         |
+| Resources (limits)           | cpu 1, mem 2Gi            | cpu 1, mem 2Gi                       | cpu 1, mem 2Gi            |
+| Workspace volume             | `emptyDir`                | per-session `PersistentVolumeClaim`  | `emptyDir`                |
+| Session model                | one per trigger           | one singleton, resumed               | one per cron tick         |
+| Extra MCP tools exposed      | none                      | spawn / read / message / await       | none                      |
+| System prompt addition       | none                      | "Other agents you can spawn" block   | none                      |
+
+All kinds share the same agent container image and the same wire event schema. The difference is the lifetime contract, the pod's resource footprint, and which tools the agent sees.
 
 ## Six operations
 

@@ -44,6 +44,7 @@ async function makeAgent(opts: {
   slug?: string;
   schedule?: string | null;
   isActive?: boolean;
+  kind?: "worker" | "orchestrator" | "scheduled";
 } = {}) {
   const a = await createAgent(
     { agents, adminGuard: new AgentsAllowAll() },
@@ -53,6 +54,7 @@ async function makeAgent(opts: {
       slug: WorkspaceSlug(opts.slug ?? "heartbeat"),
       name: "H",
       runtimeType: RuntimeType("claude_code"),
+      kind: opts.kind,
       schedule:
         opts.schedule === null
           ? null
@@ -98,6 +100,118 @@ describe("triggerSession", () => {
         { actor: ACTOR, agentId: AgentId(uuid(999)) },
       ),
     ).rejects.toBeInstanceOf(AgentNotFoundError);
+  });
+
+  describe("orchestrator singleton semantics", () => {
+    it("worker triggers always produce a new session", async () => {
+      const a = await makeAgent({ kind: "worker" });
+      const s1 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const s2 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s2.id).not.toBe(s1.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("orchestrator with no live session creates one", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const s = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s.status).toBe("pending");
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator with a pending session returns the same session — no new row", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).toBe(first.id);
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator with a running session returns the same session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, { status: "running" });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).toBe(first.id);
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator whose prior session completed gets a fresh session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, {
+        status: "complete",
+        completedAt: clock.now(),
+      });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).not.toBe(first.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("orchestrator whose prior session failed gets a fresh session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, {
+        status: "failed",
+        completedAt: clock.now(),
+        errorMessage: "crashed",
+      });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).not.toBe(first.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("scheduled agent behaves like worker — new session per trigger", async () => {
+      const a = await makeAgent({ kind: "scheduled" });
+      const s1 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const s2 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s2.id).not.toBe(s1.id);
+      expect(sessions.rows.length).toBe(2);
+    });
   });
 });
 
