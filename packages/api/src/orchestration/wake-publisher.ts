@@ -157,6 +157,90 @@ export async function publishWatchdogWake(
   );
 }
 
+/**
+ * Platform → orchestrator checkup wake. Cadence-driven "just
+ * checking in" with a lightweight snapshot of all the
+ * orchestrator's active children. Complementary to watchdog
+ * (which is per-child silent-detection): checkup gives the
+ * orchestrator periodic glance-opportunities even when every
+ * child is happily emitting events and no watchdog would fire.
+ *
+ * The snapshot is rendered inline in the wake text so the agent
+ * doesn't have to call read_child_output on each — most checkups
+ * end with "looks fine, end turn" after one glance.
+ */
+export interface ChildSnapshot {
+  sessionId: string;
+  agentSlug: string;
+  status: "pending" | "running";
+  secondsSinceLastEvent: number;
+  lastStatus: string | null;
+}
+
+export async function publishCheckupWake(
+  nc: import("nats").NatsConnection,
+  parentSessionId: string,
+  snapshot: readonly ChildSnapshot[],
+): Promise<void> {
+  const envelope = {
+    session_id: parentSessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: formatCheckupWakeText(snapshot),
+      kind: "checkup",
+      snapshot: snapshot.map((s) => ({
+        session_id: s.sessionId,
+        agent_slug: s.agentSlug,
+        status: s.status,
+        seconds_since_last_event: s.secondsSinceLastEvent,
+        last_status: s.lastStatus,
+      })),
+      driverless: true,
+      source: "platform",
+    },
+  };
+  const sc = StringCodec();
+  nc.publish(
+    `x1.session.${parentSessionId}.input`,
+    sc.encode(JSON.stringify(envelope)),
+  );
+}
+
+export function formatCheckupWakeText(
+  snapshot: readonly ChildSnapshot[],
+): string {
+  if (snapshot.length === 0) {
+    return [
+      "[driverless wake: platform checkup — no active children]",
+      "",
+      "No children are currently in flight. If there's work to do",
+      "per your roadmap, commission it. Otherwise end the turn.",
+      "",
+      "No human is watching — do not ask clarifying questions.",
+    ].join("\n");
+  }
+  const lines = snapshot.map((c) => {
+    const mins = Math.floor(c.secondsSinceLastEvent / 60);
+    const statusLine = c.lastStatus ? ` — "${c.lastStatus}"` : "";
+    return `  ${c.sessionId.slice(0, 8)} (${c.agentSlug}) [${c.status}] — idle ${mins}m${statusLine}`;
+  });
+  return [
+    "[driverless wake: platform checkup]",
+    "",
+    `Active children (${snapshot.length}):`,
+    ...lines,
+    "",
+    "Glance at the snapshot. Most checkups end with 'looks fine, continue'.",
+    "If something looks stuck or wrong:",
+    "  - read_session on the suspicious child for detail",
+    "  - cancel_session + post-mortem if genuinely stuck",
+    "  - otherwise end the turn; the next checkup or wake will re-engage you",
+    "",
+    "No human is watching — do not ask clarifying questions.",
+  ].join("\n");
+}
+
 export function formatWatchdogWakeText(opts: {
   childSessionId: string;
   childSlug: string;
