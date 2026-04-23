@@ -30,6 +30,12 @@ pub struct RepoConfig {
     pub mount_path: String,
     #[serde(default)]
     pub auto_push: bool,
+    /// When false, the credential helper refuses to mint credentials
+    /// for this repo. Push (and network-dependent fetch) fail; the
+    /// agent can still read/edit/commit locally. Safe-by-default for
+    /// new attachments. See docs/security/repo-access.md.
+    #[serde(default)]
+    pub allow_push: bool,
     pub installation_id: u64,
 }
 
@@ -67,6 +73,36 @@ pub async fn handle_git_credential(
     State(state): State<Arc<AppState>>,
     Query(params): Query<CredentialQuery>,
 ) -> axum::response::Response {
+    // Push gating: if EVERY attached repo has allow_push=false, refuse
+    // to hand out credentials. The initial clone (which the sidecar
+    // performs internally at startup) bypasses this path and uses
+    // /api/internal/git-credential directly — so clones continue to
+    // work regardless of allow_push. The agent can still read + edit
+    // + commit locally. Only network operations that require creds
+    // (push, non-initial fetch) are blocked.
+    //
+    // Per-repo gating would require parsing the git credential-helper
+    // stdin for the remote URL and matching against RepoConfig.
+    // Today's coarse gate says "if ANY repo in this session allows
+    // push, mint creds." Most sessions attach one repo, so the two
+    // models are equivalent in practice.
+    //
+    // Repos are parsed fresh from AGENT_REPOS_JSON rather than
+    // threaded through AppState — they're static for the pod's
+    // lifetime, and keeping the check self-contained here avoids
+    // widening AppState.
+    if let Ok(repos_json) = std::env::var("AGENT_REPOS_JSON") {
+        if let Ok(repos) = serde_json::from_str::<Vec<RepoConfig>>(&repos_json) {
+            if !repos.is_empty() && repos.iter().all(|r| !r.allow_push) {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "push_denied",
+                    "No attached repo has allow_push=true. Update the attachment in the agent's settings to opt into pushes.",
+                );
+            }
+        }
+    }
+
     let Some(installation_id) = installation_for_runtime(&state).await else {
         return error_response(
             StatusCode::BAD_GATEWAY,
