@@ -43,6 +43,13 @@ pub struct QuietHintRequest {
 }
 
 #[derive(Deserialize)]
+pub struct PreviewDeployRequest {
+    pub repo_full_name: String,
+    pub branch: String,
+    pub commit_sha: String,
+}
+
+#[derive(Deserialize)]
 pub struct ReadChildQuery {
     pub after_seq: Option<i64>,
     pub limit: Option<u32>,
@@ -227,6 +234,38 @@ pub async fn handle_quiet_hint(
         .post(&url)
         .header("x-internal-token", &state.api_internal_token)
         .json(&body)
+        .send()
+        .await;
+    relay_json(res).await
+}
+
+/// Agent → api → preview-provider → agent. The agent invokes
+/// preview_deploy; the sidecar forwards to the api's internal route,
+/// which makes a NATS request to the preview provider and relays the
+/// reply back. The api handles installation-id lookup + preview.yaml
+/// fetch so the agent doesn't need the token or the git operation.
+pub async fn handle_preview_deploy(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PreviewDeployRequest>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/preview-deploy",
+        state.api_url.trim_end_matches('/'),
+        state.session_id,
+    );
+    let body = serde_json::json!({
+        "repo_full_name": req.repo_full_name,
+        "branch": req.branch,
+        "commit_sha": req.commit_sha,
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        // Preview builds (Kaniko + deploy + health wait) legitimately
+        // take minutes. Don't timeout on the happy path.
+        .timeout(std::time::Duration::from_secs(30 * 60))
         .send()
         .await;
     relay_json(res).await

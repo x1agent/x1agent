@@ -108,6 +108,13 @@ images:
     dockerfile: ./deploy/docker/graph-surrealdb.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  preview:
+    image: x1agent-provider-preview
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/preview.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
   app:
     image: x1agent-app
     tags:
@@ -144,6 +151,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/graph-surrealdb.yaml
+  preview:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/preview.yaml
   registry:
     kubectl:
       manifests:
@@ -320,6 +331,50 @@ dev:
         value: x1agent-surreal-root
       - name: SURREAL_NAMESPACE
         value: x1agent
+
+  preview:
+    labelSelector:
+      app: preview
+    devImage: x1agent-provider-preview
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - "*.log"
+        startContainer: true
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app
+        exec bun --hot run packages/providers/preview/src/index.ts
+    env:
+      - name: NATS_URL
+        value: nats://nats:4222
+      - name: NATS_CA_FILE
+        value: /etc/nats-tls/ca.crt
+      - name: NATS_CLIENT_CERT
+        value: /etc/nats-tls/client.crt
+      - name: NATS_CLIENT_KEY
+        value: /etc/nats-tls/client.key
+      - name: API_URL
+        value: http://api:30001
+      - name: API_INTERNAL_TOKEN
+        value: ${API_INTERNAL_TOKEN}
+      - name: REGISTRY_ADDRESS
+        value: x1-registry.x1agent.svc.cluster.local:5000
+      - name: REGISTRY_INSECURE
+        value: "true"
+      - name: BUILD_NAMESPACE
+        value: x1agent
+      - name: PREVIEW_NAMESPACE
+        value: x1-previews
+      - name: PREVIEW_DOMAIN
+        value: preview.local.x1agent.dev
+      - name: TLS_SECRET_NAME
+        value: x1agent-wildcard
 
   app:
     labelSelector:

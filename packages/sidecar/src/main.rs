@@ -149,6 +149,10 @@ async fn main() {
             routing::post(orchestration::handle_quiet_hint),
         )
         .route(
+            "/preview/deploy",
+            routing::post(orchestration::handle_preview_deploy),
+        )
+        .route(
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
         )
