@@ -326,10 +326,18 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               image: spec.sidecarImage,
               imagePullPolicy,
               securityContext: {
-                // Sidecar still runs as root (alpine image default)
-                // because git wants to chown /workspace contents to
-                // uid 1000 to match the agent. Switching the sidecar
-                // image to a dedicated non-root user is a follow-up.
+                // Sidecar runs as the same uid as the agent (1000) so
+                // files it writes into the shared /workspace volume
+                // (notably: git clones at startup) are owned by an
+                // id the agent can read AND write. Running as root
+                // caused a silent perm bug: the chown-to-1000 attempt
+                // failed because CAP_CHOWN was dropped, and the
+                // agent had to re-clone repos to a writable location
+                // as a workaround. Matching uids end-to-end removes
+                // the workaround.
+                runAsUser: 1000,
+                runAsGroup: 1000,
+                runAsNonRoot: true,
                 allowPrivilegeEscalation: false,
                 capabilities: { drop: ["ALL"] },
               },
