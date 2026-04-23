@@ -75,6 +75,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [name, setName] = useState("");
   const [slugInput, setSlugInput] = useState("");
   const [runtimeType, setRuntimeType] = useState<RuntimeType>("claude_code");
+  const [kind, setKind] = useState<"worker" | "orchestrator" | "scheduled">(
+    "worker",
+  );
   const [schedule, setSchedule] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [heartbeatMd, setHeartbeatMd] = useState("");
@@ -113,6 +116,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setName(existing.name);
       setSlugInput(existing.slug);
       setRuntimeType(existing.runtime_type);
+      if (
+        existing.kind === "worker" ||
+        existing.kind === "orchestrator" ||
+        existing.kind === "scheduled"
+      ) {
+        setKind(existing.kind);
+      }
       setSchedule(existing.schedule ?? "");
       setSystemPrompt(existing.system_prompt);
       setHeartbeatMd(existing.heartbeat_md);
@@ -168,6 +178,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           slug: slugInput.trim(),
           name: name.trim(),
           runtime_type: runtimeType,
+          kind,
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
@@ -177,6 +188,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         await update(workspaceSlug, existing.id, {
           name: name.trim(),
           runtime_type: runtimeType,
+          kind,
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
@@ -269,6 +281,32 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         <SelectContent>
                           <SelectItem value="claude_code">
                             claude_code
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="agent-kind">Kind</Label>
+                      <Select
+                        value={kind}
+                        onValueChange={(v) =>
+                          setKind(
+                            v as "worker" | "orchestrator" | "scheduled",
+                          )
+                        }
+                      >
+                        <SelectTrigger id="agent-kind">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="worker">
+                            worker — short-lived, one session per trigger
+                          </SelectItem>
+                          <SelectItem value="orchestrator">
+                            orchestrator — long-lived singleton, platform-driven wakes
+                          </SelectItem>
+                          <SelectItem value="scheduled">
+                            scheduled — cron-triggered worker
                           </SelectItem>
                         </SelectContent>
                       </Select>

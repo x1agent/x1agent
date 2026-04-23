@@ -31,10 +31,60 @@ function isMermaid(content: string): boolean {
   );
 }
 
+/**
+ * Platform-originated wakes (server-driven) arrive as user.message
+ * events with `source: "platform"` and a `kind` discriminator. We
+ * render them distinctly from human-typed messages so operators can
+ * tell at a glance what drove a given turn. See
+ * docs/architecture/orchestration.md § Server-driven wakes.
+ */
+const WAKE_KIND_LABELS: Record<string, { label: string; tint: string }> = {
+  state_change: { label: "child finished", tint: "border-blue-700/60 bg-blue-950/40" },
+  heartbeat: { label: "scheduler heartbeat", tint: "border-purple-700/60 bg-purple-950/40" },
+  watchdog: { label: "watchdog — silent child", tint: "border-amber-700/60 bg-amber-950/40" },
+  checkup: { label: "platform checkup", tint: "border-zinc-700/60 bg-zinc-900/60" },
+  message: { label: "message from child", tint: "border-emerald-700/60 bg-emerald-950/40" },
+};
+
 function UserBubble({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   const fromSessionId = payload["from_session_id"] as string | undefined;
   const fromAgent = payload["from_agent_slug"] as string | undefined;
+  const source = payload["source"] as string | undefined;
+  const kind = payload["kind"] as string | undefined;
+  const driverless = payload["driverless"] === true;
+
+  // Platform-originated wake: render as a labeled card with a kind
+  // badge, not a human-chat bubble. The operator shouldn't think a
+  // server-driven wake was typed by a user.
+  if (source === "platform" && kind && WAKE_KIND_LABELS[kind]) {
+    const { label, tint } = WAKE_KIND_LABELS[kind];
+    return (
+      <div className="px-4 py-2">
+        <div className={`rounded-md border ${tint} px-3 py-2 text-xs`}>
+          <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-zinc-400">
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-medium text-zinc-200">
+              Platform wake
+            </span>
+            <span>{label}</span>
+            {driverless && (
+              <span className="text-zinc-500">· driverless</span>
+            )}
+            {fromSessionId && (
+              <span className="text-zinc-500">
+                · from {String(fromSessionId).slice(0, 8)}
+                {fromAgent ? ` (${fromAgent})` : ""}
+              </span>
+            )}
+          </div>
+          <p className="whitespace-pre-wrap text-zinc-200">
+            {String(payload["text"] ?? "")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-end px-4 py-3">
       <div className="max-w-[80%] rounded-2xl rounded-br-md bg-zinc-800 px-4 py-2 text-sm text-zinc-100">
