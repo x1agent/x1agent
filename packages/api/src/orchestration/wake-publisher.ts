@@ -158,6 +158,81 @@ export async function publishWatchdogWake(
 }
 
 /**
+ * Child → orchestrator explicit message. Fires when a child calls
+ * the `message_caller` MCP tool to push a signal to its parent.
+ * Distinct from the other wake kinds — this one is initiated by
+ * the child, not by a server-side watcher — but it flows through
+ * the same `x1.session.<parent>.input` publish path.
+ */
+export async function publishMessageWake(
+  nc: import("nats").NatsConnection,
+  parentSessionId: string,
+  opts: {
+    childSessionId: string;
+    childSlug: string;
+    summary: string;
+    body: string | null;
+    needsResponse: boolean;
+  },
+): Promise<void> {
+  const envelope = {
+    session_id: parentSessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: formatMessageWakeText(opts),
+      kind: "message",
+      from_session_id: opts.childSessionId,
+      from_agent_slug: opts.childSlug,
+      summary: opts.summary,
+      body: opts.body,
+      needs_response: opts.needsResponse,
+      driverless: true,
+      source: "platform",
+    },
+  };
+  const sc = StringCodec();
+  nc.publish(
+    `x1.session.${parentSessionId}.input`,
+    sc.encode(JSON.stringify(envelope)),
+  );
+}
+
+export function formatMessageWakeText(opts: {
+  childSessionId: string;
+  childSlug: string;
+  summary: string;
+  body: string | null;
+  needsResponse: boolean;
+}): string {
+  const shortId = opts.childSessionId.slice(0, 8);
+  const lines = [
+    `[driverless wake: message from child ${opts.childSlug}]`,
+    "",
+    `Child session ${shortId} (${opts.childSlug}) pushed a signal:`,
+    "",
+    `  "${opts.summary}"`,
+  ];
+  if (opts.body) {
+    lines.push("", opts.body);
+  }
+  lines.push("");
+  if (opts.needsResponse) {
+    lines.push(
+      "The child flagged needs_response=true — it is waiting for you to inject_message back.",
+      "Decide and respond, or cancel_session + post-mortem if the ask is out of scope.",
+    );
+  } else {
+    lines.push(
+      "The child does not need a response — it will keep working. Glance, record any",
+      "decisions you need to, and end the turn.",
+    );
+  }
+  lines.push("", "No human is watching — do not ask clarifying questions.");
+  return lines.join("\n");
+}
+
+/**
  * Platform → orchestrator checkup wake. Cadence-driven "just
  * checking in" with a lightweight snapshot of all the
  * orchestrator's active children. Complementary to watchdog
