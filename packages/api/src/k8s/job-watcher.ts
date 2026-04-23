@@ -90,6 +90,20 @@ export interface JobWatcherConfig {
   postgresBranches?: PostgresBranchRepository | null;
   redisMinter?: RedisBranchMinter | null;
   redisBranches?: RedisBranchRepository | null;
+  /**
+   * Called when a session reaches a terminal state via the reaper
+   * path (pod disappeared, Job failed without an emitted
+   * session.completed event). Fires the state_change wake into
+   * any orchestrator parent so both the NATS-subscriber path and
+   * the reaper path produce the same wake behavior.
+   * See docs/architecture/orchestration.md § Server-driven wakes.
+   */
+  wakePublisher?: (
+    session: import("@x1agent/domain-sessions").Session,
+    terminalStatus: "complete" | "failed",
+    completedAt: Date,
+    errorMessage: string | null,
+  ) => Promise<void>;
 }
 
 export interface JobWatcherHandle {
@@ -509,14 +523,32 @@ async function markTerminal(
   if (!session || session.status === "complete" || session.status === "failed") {
     return;
   }
+  const terminalStatus = success ? "complete" : "failed";
+  const completedAt = new Date();
   await cfg.sessions.updateStatus(sessionId as SessionId, {
-    status: success ? "complete" : "failed",
-    completedAt: new Date(),
+    status: terminalStatus,
+    completedAt,
     errorMessage,
   });
   console.log(
-    `[jobs] reaped session ${sessionId} as ${success ? "complete" : "failed"}${errorMessage ? `: ${errorMessage}` : ""}`,
+    `[jobs] reaped session ${sessionId} as ${terminalStatus}${errorMessage ? `: ${errorMessage}` : ""}`,
   );
+
+  // Reaper-triggered terminations (pod crashed before emitting a
+  // terminal event, Job vanished, etc.) bypass the NATS subscriber
+  // and therefore bypass its state_change wake hook. Fire the wake
+  // from here too so orchestrator parents are notified consistently
+  // regardless of which termination path ran. See
+  // docs/architecture/orchestration.md § Server-driven wakes.
+  if (cfg.wakePublisher) {
+    try {
+      await cfg.wakePublisher(session, terminalStatus, completedAt, errorMessage);
+    } catch (err) {
+      console.warn(
+        `[jobs] state_change wake failed for session ${sessionId}: ${(err as Error).message}`,
+      );
+    }
+  }
 }
 
 // Export used by unit tests to avoid hitting a real cluster.

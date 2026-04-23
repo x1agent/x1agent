@@ -16,6 +16,7 @@ export type {
   AppendSessionEventInput,
 } from "./ports/session-event-repository.js";
 export type { AdminGuard } from "./ports/admin-guard.js";
+export type { MessageInjector } from "./ports/message-injector.js";
 
 // Application
 export * from "./application/trigger-session.js";

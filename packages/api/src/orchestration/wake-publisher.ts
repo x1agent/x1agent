@@ -112,6 +112,71 @@ export async function publishStateChangeWake(
 }
 
 /**
+ * Scheduler → orchestrator heartbeat wake. The scheduler calls this
+ * when it ticks for an orchestrator whose live session already
+ * exists; it injects the agent's `heartbeat_md` into the session
+ * with `driverless: true` and `kind: "heartbeat"`, wrapped so the
+ * agent knows the wake is automated.
+ *
+ * Unlike publishStateChangeWake, this path doesn't look anything up
+ * — the scheduler already knows the session id and the heartbeat
+ * text. We just publish.
+ */
+export async function publishHeartbeatWake(
+  nc: import("nats").NatsConnection,
+  sessionId: string,
+  heartbeatText: string,
+): Promise<void> {
+  const envelope = {
+    session_id: sessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: wrapHeartbeatText(heartbeatText),
+      kind: "heartbeat",
+      driverless: true,
+      source: "platform",
+    },
+  };
+  const sc = StringCodec();
+  nc.publish(
+    `x1.session.${sessionId}.input`,
+    sc.encode(JSON.stringify(envelope)),
+  );
+}
+
+/**
+ * Wrap the agent's heartbeat_md with a preamble that tells it this is
+ * a scheduler-driven wake. Exported for testability. The preamble is
+ * the standard driverless-mode framing described in
+ * docs/architecture/orchestration.md § Driverless mode.
+ */
+export function wrapHeartbeatText(heartbeatMd: string): string {
+  return [
+    "[driverless wake: scheduler heartbeat]",
+    "",
+    "You are being woken by the scheduler, not by a user. No human is",
+    "watching this turn in real time. Per your CLAUDE.md:",
+    "",
+    "  1. Read your current state (roadmap, last session, pending",
+    "     post-mortems).",
+    "  2. Is there work that can progress without human input?",
+    "     - Yes: commission it via the normal loop.",
+    "     - No: emit `agent.status` = \"quiescent\" and end the turn.",
+    "  3. Do NOT ask clarifying questions. If something is genuinely",
+    "     blocked on a human decision, post a `share` titled",
+    "     \"Needs human review: <short>\" and end the turn.",
+    "",
+    "Preserve tokens. If nothing has changed since the last heartbeat,",
+    "your turn should be short.",
+    "",
+    "---",
+    "",
+    heartbeatMd || "(no heartbeat_md configured for this agent)",
+  ].join("\n");
+}
+
+/**
  * Extracted so it's testable without a NATS connection. The text is
  * what the agent actually reads — everything the orchestrator needs
  * to know to decide its next step has to be in this string.

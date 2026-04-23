@@ -443,6 +443,20 @@ if (process.env.JOB_WATCHER !== "disabled") {
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,
       redisBranches: composedRedisBranches,
+      wakePublisher: providerNats
+        ? async (session, terminalStatus, completedAt, errorMessage) => {
+            const { publishStateChangeWake } = await import(
+              "./orchestration/wake-publisher.js"
+            );
+            await publishStateChangeWake(
+              { nc: providerNats!, sessions: composedSessions, agents: composedAgents },
+              session,
+              terminalStatus,
+              completedAt,
+              errorMessage,
+            );
+          }
+        : undefined,
     });
     registerCleanup(() => watcher.stop());
   } catch (err) {
