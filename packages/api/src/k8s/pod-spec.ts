@@ -61,7 +61,7 @@ export interface SessionPodSpec {
   /**
    * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
    * (file). When set, both are hostPath-mounted into the agent container
-   * at /home/node so Claude Code picks up settings/agents/etc. Expected
+   * at /home/agent so Claude Code picks up settings/agents/etc. Expected
    * form: `/Users/alice`.
    */
   /**
@@ -256,7 +256,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 allowPrivilegeEscalation: false,
                 capabilities: { drop: ["ALL"] },
                 // The agent writes to /workspace (emptyDir) and to
-                // /home/node/.claude (hostPath in dev). Both are
+                // /home/agent/.claude (hostPath in dev). Both are
                 // mounted volumes; the rest of the FS can stay
                 // read-only — Claude Code's caches that need writable
                 // paths inside $HOME live under .claude already.
@@ -281,10 +281,10 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                   : []),
                   ? [
                       {
-                        mountPath: "/home/node/.claude",
+                        mountPath: "/home/agent/.claude",
                       },
                       {
-                        mountPath: "/home/node/.claude.json",
+                        mountPath: "/home/agent/.claude.json",
                       },
                     ]
                   : []),

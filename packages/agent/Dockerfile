@@ -97,14 +97,33 @@ RUN set -e \
 COPY x1-entrypoint.sh /x1/bin/entrypoint
 RUN chmod +x /x1/bin/entrypoint
 
-# Claude Code refuses --dangerously-skip-permissions as root. The
-# node:22-slim base image ships a `node` user at uid 1000; we reuse
-# it. When used via COPY --from overlay, the preset ensures its own
-# uid 1000 exists.
-RUN mkdir -p /home/node/.claude \
-  && chown -R node:node /app /workspace /home/node /x1
-USER node
-ENV HOME=/home/node
+# Every x1agent runtime image — this one plus every preset that
+# COPY --from's the /x1 overlay — provides a uid 1000 user named
+# `agent` with a home at /home/agent. The name is deliberate:
+# `agent` is runtime-agnostic (Claude Code today, Codex / opencode /
+# Gemini tomorrow), decoupled from the base image's default user
+# (node:22-slim's `node`, python:slim's root, etc.), and carries the
+# semantic that this identity IS the agent's execution context —
+# not "a JavaScript runtime user who happens to be us."
+#
+# Claude Code's refusal to run as root with --dangerously-skip-
+# permissions forces uid > 0; we pick 1000 because it's the POSIX
+# convention for the first regular user, it matches what node:slim
+# and most language-tooling images expose, and it lines up with the
+# fsGroup the pod spec sets on shared volumes.
+#
+# node:22-slim's built-in `node` user is removed so the image has
+# exactly one uid 1000 identity and that identity is unambiguously
+# the agent. This avoids a class of bugs where mounts owned by
+# "node" leak into agent-writable paths and vice versa.
+RUN userdel -f node 2>/dev/null || true \
+  && groupadd --system --gid 1000 agent \
+  && useradd --system --uid 1000 --gid 1000 --home /home/agent \
+       --create-home --shell /bin/bash agent \
+  && mkdir -p /home/agent/.claude \
+  && chown -R agent:agent /app /workspace /home/agent /x1
+USER agent
+ENV HOME=/home/agent
 
 LABEL org.x1agent.image="runtime-core" \
       org.x1agent.image.role="base-and-overlay-source"
