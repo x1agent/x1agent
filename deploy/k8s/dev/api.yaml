@@ -40,7 +40,7 @@ rules:
     verbs: ["create", "get", "list", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "delete"]
+    verbs: ["create", "get", "list", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     verbs: ["create", "get", "list", "patch", "delete"]

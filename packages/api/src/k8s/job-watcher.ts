@@ -37,6 +37,7 @@ import {
 } from "@x1agent/agent-resources-redis";
 import {
   buildSessionJob,
+  sessionJobName,
   type AttachedCollectionForPod,
   type LinkedRepoForPod,
 } from "./pod-spec.js";
@@ -311,6 +312,56 @@ async function launchSession(
     sessionCredentialsSecretName: credentialsSecretName,
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,
   });
+
+  // Orchestrator pods use a PVC-backed workspace so the SDK transcript
+  // survives pod restarts (OnFailure restarts rehydrate from it, and
+  // the session singleton means the same PVC is reused forever). We
+  // have to create the PVC before the Job or the Kubernetes scheduler
+  // fails to bind and parks the Pod in Pending. Idempotent — if it
+  // already exists we treat that as fine.
+  if (agent.kind === "orchestrator") {
+    const pvcName = sessionJobName(session.id);
+    const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+    try {
+      await coreApi.createNamespacedPersistentVolumeClaim({
+        namespace: cfg.namespace,
+        body: {
+          apiVersion: "v1",
+          kind: "PersistentVolumeClaim",
+          metadata: {
+            name: pvcName,
+            namespace: cfg.namespace,
+            labels: {
+              app: "x1agent",
+              component: "agent-session-workspace",
+              "session-id": session.id,
+              "agent-id": agent.id,
+              "agent-kind": agent.kind,
+            },
+          },
+          spec: {
+            accessModes: ["ReadWriteOnce"],
+            resources: { requests: { storage: "5Gi" } },
+          },
+        },
+      });
+    } catch (err) {
+      const code = (err as { code?: number }).code;
+      if (code !== 409) {
+        const message = (err as { body?: { message?: string } }).body?.message
+          ?? (err as Error).message;
+        console.warn(
+          `[jobs] PVC create for session ${session.id} failed: ${message}`,
+        );
+        await cfg.sessions.updateStatus(sessionId, {
+          status: "failed",
+          completedAt: new Date(),
+          errorMessage: `pvc create: ${message}`,
+        });
+        return;
+      }
+    }
+  }
 
   try {
     await batchApi.createNamespacedJob({ namespace: cfg.namespace, body: job });
