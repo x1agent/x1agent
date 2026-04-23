@@ -44,6 +44,15 @@ export interface Agent {
   createdBy: UserId | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Anchor for the scheduler's next-tick computation. Bumped on
+   * every successful tick whether the tick created a new session
+   * (worker/scheduled) or injected a heartbeat wake into an
+   * existing orchestrator session. Null for agents that have
+   * never been scheduled. See migration 019 and
+   * docs/architecture/orchestration.md § Scheduler integration.
+   */
+  lastSchedulerTickAt: Date | null;
 }
 
 export class AgentNotFoundError extends DomainError {

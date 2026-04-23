@@ -31,6 +31,7 @@ interface Row {
   created_by: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  last_scheduler_tick_at: Date | string | null;
 }
 
 function toAgent(r: Row): Agent {
@@ -49,13 +50,16 @@ function toAgent(r: Row): Agent {
     createdBy: r.created_by ? UserId(r.created_by) : null,
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
+    lastSchedulerTickAt: r.last_scheduler_tick_at
+      ? new Date(r.last_scheduler_tick_at)
+      : null,
   };
 }
 
 const SELECT = `
   id, workspace_id, slug, name, runtime_type, kind, system_prompt,
   heartbeat_md, schedule, is_active, image_id, created_by,
-  created_at, updated_at
+  created_at, updated_at, last_scheduler_tick_at
 `;
 
 export class PostgresAgentRepository implements AgentRepository {
@@ -133,5 +137,11 @@ export class PostgresAgentRepository implements AgentRepository {
       WHERE schedule IS NOT NULL AND is_active = true
     `;
     return rows.map(toAgent);
+  }
+
+  async recordSchedulerTick(id: AgentId, at: Date): Promise<void> {
+    await this.sql`
+      UPDATE agents SET last_scheduler_tick_at = ${at} WHERE id = ${id}
+    `;
   }
 }

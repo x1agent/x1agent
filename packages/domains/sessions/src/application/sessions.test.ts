@@ -364,4 +364,243 @@ describe("scheduleDueSessions", () => {
     expect(result.considered).toBe(0);
     expect(result.created).toBe(0);
   });
+
+  describe("orchestrator heartbeat semantics", () => {
+    class RecordingInjector {
+      calls: Array<{ sessionId: string; text: string }> = [];
+      async injectHeartbeatWake(sessionId: string, text: string) {
+        this.calls.push({ sessionId, text });
+      }
+    }
+
+    it("orchestrator with a live session — injects into it, no new row", async () => {
+      const a = await makeAgent({
+        slug: "orch",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      // Seed the orchestrator's singleton live session (user-triggered,
+      // still running).
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Orchestrator has never ticked before; anchor is agent.createdAt.
+      // Move the clock well past the next-due boundary.
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.injected).toBe(1);
+      expect(result.created).toBe(0);
+      expect(injector.calls).toHaveLength(1);
+      expect(injector.calls[0]!.sessionId).toBe(live.id);
+      // live session + no second row
+      const all = await sessions.listByAgent(a.id, 10);
+      expect(all).toHaveLength(1);
+      expect(all[0]!.id).toBe(live.id);
+      // Tick anchor updated so next tick doesn't fire immediately.
+      const reloaded = await agents.findById(a.id);
+      expect(reloaded!.lastSchedulerTickAt).not.toBeNull();
+    });
+
+    it("orchestrator with no live session — creates one (like a worker)", async () => {
+      const a = await makeAgent({
+        slug: "orch-cold",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.created).toBe(1);
+      expect(result.injected).toBe(0);
+      expect(injector.calls).toHaveLength(0);
+      const rows = await sessions.listByAgent(a.id, 10);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.triggeredBy).toBe("scheduler");
+    });
+
+    it("orchestrator with a completed session — creates a new one (singleton is free)", async () => {
+      const a = await makeAgent({
+        slug: "orch-prior",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const prior = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(prior.id, {
+        status: "complete",
+        completedAt: new Date("2026-04-18T10:30:00Z"),
+      });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.created).toBe(1);
+      expect(result.injected).toBe(0);
+    });
+
+    it("does not re-fire on the next tick in the same window (anchor advanced)", async () => {
+      const a = await makeAgent({
+        slug: "orch-anchor",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Seed the anchor within the current hour so there's exactly one
+      // due slot to fire. Seeding further back triggers the catch-up
+      // loop (one slot per call), which is intentional behavior but a
+      // different property to test.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T12:30:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+
+      // First tick fired for 13:00 slot, anchor advanced to 13:00.
+      // Second tick: next-due is 14:00 > clock 13:05, skip.
+      expect(injector.calls).toHaveLength(1);
+    });
+
+    it("heartbeat wake text is the agent's heartbeatMd verbatim", async () => {
+      const a = await makeAgent({
+        slug: "orch-hb",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      await agents.update(a.id, {
+        heartbeatMd: "## Heartbeat\n\nCheck the roadmap and decide.",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+
+      expect(injector.calls[0]!.text).toBe(
+        "## Heartbeat\n\nCheck the roadmap and decide.",
+      );
+    });
+
+    it("throws a surfaced error if no injector is configured and a live session exists", async () => {
+      const a = await makeAgent({
+        slug: "orch-no-injector",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T12:30:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      let surfaced: unknown = null;
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        onError: (_, err) => {
+          surfaced = err;
+        },
+      });
+
+      expect(result.errors).toBe(1);
+      expect(result.injected).toBe(0);
+      expect(result.created).toBe(0);
+      expect((surfaced as Error).message).toContain("MessageInjector");
+    });
+  });
 });

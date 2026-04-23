@@ -47,6 +47,7 @@ export class InMemoryAgentRepository implements AgentRepository {
       createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
+      lastSchedulerTickAt: null,
     };
     this.rows.set(id, a);
     return a;
@@ -91,6 +92,11 @@ export class InMemoryAgentRepository implements AgentRepository {
     return [...this.rows.values()].filter(
       (a) => a.schedule !== null && a.isActive,
     );
+  }
+  async recordSchedulerTick(id: AgentId, at: Date) {
+    const a = this.rows.get(id);
+    if (!a) return;
+    this.rows.set(id, { ...a, lastSchedulerTickAt: at });
   }
 }
 

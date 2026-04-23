@@ -54,4 +54,12 @@ export interface AgentRepository {
    * scheduler (when it lands) to walk candidates.
    */
   listScheduled(): Promise<readonly Agent[]>;
+
+  /**
+   * Bump `agents.last_scheduler_tick_at` on a successful scheduler
+   * tick (create or inject). The scheduler uses this as the anchor
+   * for computing the next-due time, independent of whether a
+   * session was created.
+   */
+  recordSchedulerTick(id: AgentId, at: Date): Promise<void>;
 }

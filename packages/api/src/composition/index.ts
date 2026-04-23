@@ -1,3 +1,4 @@
+import { NatsMessageInjector } from "../orchestration/nats-message-injector.js";
 import {
   GoogleAuthProvider,
   DevBypassAuthProvider,
@@ -321,7 +322,14 @@ export function compose(env: CompositionEnv): Composition {
   });
 
   const tickScheduler = () =>
-    scheduleDueSessions({ agents, sessions, clock: systemClock });
+    scheduleDueSessions({
+      agents,
+      sessions,
+      clock: systemClock,
+      injector: env.natsConnection
+        ? new NatsMessageInjector(env.natsConnection)
+        : undefined,
+    });
 
   const internalRoutes = createInternalRoutes({
     events: sessionEvents,
