@@ -185,6 +185,35 @@ done
 echo "[images] done — images available at ${REGISTRY_LOCAL}/x1agent/*"
 """
 
+# ----------------------------------------------------------------------------
+# Session-pod images — the agent + sidecar that a K8s Job runs as a pair
+# per session. devspace's file-sync overlays code onto long-running pods
+# (api, app), but Jobs spawn fresh from sealed images, so changes under
+# packages/agent/ or packages/sidecar/ won't appear in new sessions until
+# the images are rebuilt. Run this after touching either package — new
+# sessions (or restarted existing sessions) pick up the rebuild.
+#
+# imagePullPolicy: IfNotPresent in pod-spec means the rebuilt image is
+# picked up automatically when the pod is (re)created; no push to a
+# registry is needed because OrbStack shares its docker daemon with k8s.
+# ----------------------------------------------------------------------------
+[tasks."images:session"]
+description = "Rebuild x1agent-agent + x1agent-sidecar images for session pods"
+run = """
+set -euo pipefail
+echo "[images:session] building x1agent-agent:latest"
+DOCKER_BUILDKIT=1 docker build \\
+  -f packages/agent/Dockerfile \\
+  -t x1agent-agent:latest \\
+  packages/agent
+echo "[images:session] building x1agent-sidecar:latest"
+DOCKER_BUILDKIT=1 docker build \\
+  -f packages/sidecar/Dockerfile \\
+  -t x1agent-sidecar:latest \\
+  packages/sidecar
+echo "[images:session] done — restart any running session pods to pick up"
+"""
+
 [tasks.review]
 description = "Run Claude code review on staged changes"
 run = "claude --print .claude/commands/review.md"

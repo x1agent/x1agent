@@ -138,7 +138,11 @@ This is an OrbStack-local workaround. Production Kubernetes with containerd has 
 
 **Postgres says "too many clients already".** Restart the api pod: `kubectl -n x1agent rollout restart deploy/api-devspace`. A known dev-mode issue when many hot reloads stack tick loops — the fix is a single restart.
 
-**Agent pod stuck in "pending".** Usually a missing image. Rebuild from the repo: `devspace build -b agent,sidecar -n x1agent`. New sessions pick up the rebuild; in-flight sessions keep their old image.
+**Pod stuck on `(Still waiting...)` after a cluster restart.** The `api-devspace` or `app-devspace` pod logs just repeat `(Still waiting...)` and never boot. Cause: devspace's `devspace-restart-helper` watches for a `/.devspace/start` marker that the devspace client writes once the initial file-sync completes. After an OrbStack / kubelet restart the helper is re-running inside the new container but devspace's client-side sync state has already flipped to "synced," so the marker never arrives. Fix: `kubectl -n x1agent delete pod <pod-name>` — devspace's watch reconciles against the fresh pod, the sync runs again, the marker lands, the app boots. Affects any deployment listed under `devspace.yaml`'s `dev:` block.
+
+**New MCP tool or sidecar route not visible in a session.** The `x1agent-agent` and `x1agent-sidecar` images are built once and referenced verbatim by every session Job — `devspace dev`'s file-sync only overlays long-running pods (api, app), not Jobs. Changes under `packages/agent/` or `packages/sidecar/` need a manual image rebuild before new session pods pick them up. Run `mise run images:session` to rebuild and tag both images, then cancel + restart the session that needs the change.
+
+**Agent pod stuck in "pending".** Usually a missing image. Rebuild from the repo: `mise run images:session` (rebuilds agent + sidecar) or `devspace build -b agent,sidecar -n x1agent`. New sessions pick up the rebuild; in-flight sessions keep their old image.
 
 **Session starts but agent says "Not logged in · Please run /login".** The Anthropic key wasn't set correctly. Rerun `mise run quickstart` and re-enter the key at the secrets step.
 
