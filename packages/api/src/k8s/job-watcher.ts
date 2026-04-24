@@ -493,15 +493,21 @@ async function reconcileRunning(
     if ((status.succeeded ?? 0) >= 1) {
       await markTerminal(cfg, row.id, true, null);
     } else if (
-      (status.failed ?? 0) > 0 ||
       status.conditions?.some((c) => c.type === "Failed" && c.status === "True")
     ) {
+      // `conditions[Failed]=True` is the Job-level terminal signal — set
+      // by K8s after the Job exhausts backoffLimit. `status.failed` is
+      // the running count of pod failures inside the Job; for
+      // orchestrators (OnFailure + backoffLimit: 6) a single pod
+      // restart bumps it to 1 without the Job itself being done. Only
+      // the condition is authoritative.
       const failureReason =
-        status.conditions?.find((c) => c.type === "Failed")?.message ??
+        status.conditions.find((c) => c.type === "Failed")?.message ??
         "job failed";
       await markTerminal(cfg, row.id, false, failureReason);
     }
-    // else: Job is still running; leave the row as 'running'.
+    // else: Job is still running (possibly with failed pods being
+    // retried up to backoffLimit); leave the row as 'running'.
   }
 }
 
