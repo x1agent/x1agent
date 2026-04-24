@@ -129,6 +129,18 @@ export class InMemorySessionRepository implements SessionRepository {
     this.rows[i] = updated;
     return updated;
   }
+
+  async listNonTerminalOlderThan(
+    threshold: Date,
+  ): Promise<readonly Session[]> {
+    return this.rows
+      .filter(
+        (r) =>
+          (r.status === "pending" || r.status === "running") &&
+          r.triggeredAt < threshold,
+      )
+      .sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime());
+  }
 }
 
 class FakeAdminDeniedError extends DomainError {

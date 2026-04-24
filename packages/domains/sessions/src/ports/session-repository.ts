@@ -78,4 +78,15 @@ export interface SessionRepository {
     id: SessionId,
     patch: UpdateSessionStatusInput,
   ): Promise<Session>;
+
+  /**
+   * Sessions still in a non-terminal state (`pending` or `running`)
+   * whose `triggered_at` is older than `threshold`. Used by the pod
+   * reconciler to find ghost sessions — rows left as "running" after
+   * a cluster crash or kubelet restart where the Job-watcher never
+   * observed the terminal event. The time threshold is a grace
+   * window: don't reap a session that was created seconds ago while
+   * its Job is still being applied.
+   */
+  listNonTerminalOlderThan(threshold: Date): Promise<readonly Session[]>;
 }
