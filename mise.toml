@@ -89,12 +89,26 @@ description = "(Fallback) Run Astro on host at localhost:4322"
 run = "cd packages/app && bun run dev"
 
 # The one-command orchestration: devspace in the foreground manages the
-# full cluster-side stack (postgres, nats, api, app, providers). Ctrl-C
-# stops everything; run dev:cluster:stop to tear the deployments down.
+# full cluster-side stack (postgres, nats, api, app, providers) WITH
+# hot reload. File sync + restart-helper + port-forwards are all on,
+# so edits under packages/ reflect in running pods within seconds.
+# Ctrl-C stops everything; run dev:cluster:stop to tear the
+# deployments down.
 [tasks.dev]
-description = "Full local dev: devspace in the foreground"
+description = "Full local dev with hot reload (devspace dev, blocks)"
 depends = ["dev:setup", "dev:claude-creds"]
 run = "devspace dev --namespace x1agent"
+
+# Same stack, NO hot reload. `devspace deploy` builds the images once
+# and applies the manifests; pods run their baked-in CMD directly
+# (bun on the COPY'd source), with no devspace-restart-helper, no
+# file-sync, no port-forwarding. Rebuild + redeploy is required to
+# pick up code changes. Use when hot-reload / devspace dev-mode is
+# suspected of masking or causing issues and you want a baseline.
+[tasks."dev:cold"]
+description = "Full local dev without hot reload (devspace deploy, one-shot)"
+depends = ["dev:setup", "dev:claude-creds"]
+run = "devspace deploy --namespace x1agent"
 
 # ----------------------------------------------------------------------------
 # Tests
