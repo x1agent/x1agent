@@ -167,6 +167,18 @@ export class PostgresSessionRepository implements SessionRepository {
     return rows[0] ? toSession(rows[0]) : null;
   }
 
+  async listNonTerminalOlderThan(
+    threshold: Date,
+  ): Promise<readonly Session[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE status IN ('pending', 'running')
+        AND triggered_at < ${threshold}
+      ORDER BY triggered_at ASC
+    `;
+    return rows.map(toSession);
+  }
+
   async updateStatus(
     id: SessionId,
     patch: UpdateSessionStatusInput,

@@ -28,6 +28,7 @@ export * from "./application/append-session-event.js";
 export * from "./application/list-session-events.js";
 export * from "./application/spawn-child-session.js";
 export * from "./application/resume-session.js";
+export * from "./application/reconcile-session-status.js";
 
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";

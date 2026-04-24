@@ -464,6 +464,99 @@ if (process.env.JOB_WATCHER !== "disabled") {
   }
 }
 
+// Session-status reconciler. The Job-watcher is authoritative when
+// the cluster is healthy, but if the node restarts or kubelet crashes
+// we can lose the terminal Job event — session rows end up stuck in
+// `running` forever, and orchestrator singletons wedge because
+// find-or-create sees a live-looking row that isn't. This reconciler
+// walks non-terminal sessions older than the grace window, asks
+// whether their Job still exists, and flips to `failed` with a
+// state_change wake when the Job is gone. See
+// packages/domains/sessions/src/application/reconcile-session-status.ts.
+const SESSION_RECONCILE_INTERVAL_MS = Number(
+  process.env.SESSION_RECONCILE_INTERVAL_MS || 30_000,
+);
+const SESSION_RECONCILE_GRACE_MS = Number(
+  process.env.SESSION_RECONCILE_GRACE_MS || 120_000,
+);
+if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
+  const { reconcileSessionStatuses } = await import(
+    "@x1agent/domain-sessions"
+  );
+  const { sessionJobName } = await import("./k8s/pod-spec.js");
+  const { systemClock } = await import("@x1agent/kernel");
+  const batchApi = sharedKubeConfig.makeApiClient(k8s.BatchV1Api);
+  const namespace = process.env.K8S_NAMESPACE || "x1agent";
+  let reconciling = false;
+  const reconcile = async () => {
+    if (reconciling) return;
+    reconciling = true;
+    try {
+      const r = await reconcileSessionStatuses({
+        sessions: composedSessions,
+        clock: systemClock,
+        jobExists: async (sessionId) => {
+          try {
+            await batchApi.readNamespacedJob({
+              name: sessionJobName(sessionId),
+              namespace,
+            });
+            return true;
+          } catch (err) {
+            const status = (err as { code?: number; statusCode?: number }).code
+              ?? (err as { statusCode?: number }).statusCode;
+            if (status === 404) return false;
+            // Anything else (5xx, network) → throw so the tick
+            // counts it as an error and leaves the row alone.
+            throw err;
+          }
+        },
+        notify: async (session, completedAt, errorMessage) => {
+          if (!providerNats) return;
+          const { publishStateChangeWake } = await import(
+            "./orchestration/wake-publisher.js"
+          );
+          await publishStateChangeWake(
+            {
+              nc: providerNats,
+              sessions: composedSessions,
+              agents: composedAgents,
+            },
+            session,
+            "failed",
+            completedAt,
+            errorMessage,
+          );
+        },
+        gracePeriodMs: SESSION_RECONCILE_GRACE_MS,
+      });
+      if (r.flipped > 0 || r.errors > 0) {
+        console.log(
+          `[sessions] reconciled ${r.flipped}/${r.checked} ghost sessions (errors=${r.errors})`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[sessions] reconcile tick crashed:",
+        (err as Error).message,
+      );
+    } finally {
+      reconciling = false;
+    }
+  };
+  const handle = setInterval(() => {
+    void reconcile();
+  }, SESSION_RECONCILE_INTERVAL_MS);
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  registerCleanup(() => clearInterval(handle));
+  void reconcile();
+  console.log(
+    `[sessions] reconciler started (interval=${SESSION_RECONCILE_INTERVAL_MS}ms grace=${SESSION_RECONCILE_GRACE_MS}ms)`,
+  );
+}
+
 // Activity watchdog — periodically sweeps children of live
 // orchestrators and fires watchdog wakes when they've been silent
 // past the backoff threshold. Requires NATS to publish wakes;
