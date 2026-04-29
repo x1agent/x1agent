@@ -1,7 +1,7 @@
 # Dev image for @x1agent/provider-graph-surrealdb. Same layering as the
 # api image: manifests first for cache, source copied in last, devspace
 # sync overlays at runtime for hot reload.
-FROM oven/bun:1-alpine
+FROM oven/bun:1.2.16-alpine
 
 RUN apk add --no-cache bash tini
 
@@ -9,6 +9,7 @@ WORKDIR /app
 
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
+COPY packages/observability/package.json packages/observability/tsconfig.json ./packages/observability/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
 COPY packages/app/package.json packages/app/tsconfig.json ./packages/app/
