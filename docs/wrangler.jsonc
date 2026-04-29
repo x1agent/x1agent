@@ -18,6 +18,10 @@
  */
 {
   "name": "x1agent",
+  // Pinned to the c.toivola account because the operator has multiple
+  // Cloudflare accounts on the wrangler login. Without this, every
+  // deploy hits "More than one account available" in non-interactive runs.
+  "account_id": "be928b4524439bc81b668ace95413d6c",
   "compatibility_date": "2026-04-23",
   "assets": {
     "directory": "./dist",
