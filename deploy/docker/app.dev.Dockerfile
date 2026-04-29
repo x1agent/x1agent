@@ -5,7 +5,7 @@
 # The app runs in the cluster (not on the host) so it can be reached
 # through ingress-nginx at https://app.local.x1agent.dev, sharing the
 # cookie domain with the api.
-FROM oven/bun:1-alpine
+FROM oven/bun:1.2.16-alpine
 
 RUN apk add --no-cache bash tini
 
@@ -16,6 +16,7 @@ WORKDIR /app
 # doesn't fail on a missing manifest.
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
+COPY packages/observability/package.json packages/observability/tsconfig.json ./packages/observability/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
 COPY packages/app/package.json packages/app/tsconfig.json ./packages/app/

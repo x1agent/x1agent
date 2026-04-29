@@ -121,8 +121,16 @@ spec:
               value: /etc/nats-tls/client.crt
             - name: NATS_CLIENT_KEY
               value: /etc/nats-tls/client.key
-          # Secrets come in via devspace env-var injection at dev time so
-          # values never land in committed manifests.
+          # Secrets:
+          # - devspace dev mode injects them via devspace.yaml `dev:` block (its
+          #   `env:` overrides identical names from envFrom).
+          # - dev:direct creates the Secret from .env.local and pods read it via
+          #   envFrom below. `optional: true` keeps the manifest applyable even
+          #   when no Secret exists yet (e.g. devspace dev path).
+          envFrom:
+            - secretRef:
+                name: x1agent-dev-secrets
+                optional: true
           readinessProbe:
             httpGet:
               path: /health
