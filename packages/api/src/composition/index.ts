@@ -113,6 +113,7 @@ import {
   createWorkspaceSharesIndexRoutes,
 } from "../shares/routes.js";
 import { createAdminAnthropicModelsRoutes } from "../capabilities/admin-routes.js";
+import { createAdminWorkspacesRoutes } from "../admin/workspaces-routes.js";
 
 export interface Composition {
   authRoutes: Hono;
@@ -139,6 +140,8 @@ export interface Composition {
   workspaceImageCatalogRoutes: Hono;
   /** /api/admin/anthropic/models — platform-admin model curation. */
   adminAnthropicModelsRoutes: Hono;
+  /** /api/admin/workspaces — platform-admin cross-workspace list. */
+  adminWorkspacesRoutes: Hono;
   sharedResources: SharedResourceRepository;
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
@@ -660,6 +663,12 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
   });
 
+  const adminWorkspacesRoutes = createAdminWorkspacesRoutes({
+    sql: env.sql,
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+  });
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
@@ -682,6 +691,7 @@ export function compose(env: CompositionEnv): Composition {
     sharedAgentResourcesRoutes,
     workspaceImageCatalogRoutes,
     adminAnthropicModelsRoutes,
+    adminWorkspacesRoutes,
     sharedResources,
     postgresBranches,
     postgresProvisioner,
