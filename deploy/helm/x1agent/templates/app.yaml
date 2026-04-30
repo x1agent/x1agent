@@ -1,0 +1,64 @@
+# app Deployment + Service. Static-ish Astro frontend, talks to api.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ .Values.app.port }}
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "app") | nindent 8 }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.images.app.repository }}:{{ .Values.images.app.tag }}"
+          imagePullPolicy: {{ .Values.images.app.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - containerPort: {{ .Values.app.port }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PUBLIC_API_URL
+              value: "https://{{ include "x1agent.apiHost" . }}"
+            - name: PUBLIC_URL
+              value: "https://{{ include "x1agent.appHost" . }}"
+            - name: HOST
+              value: "0.0.0.0"
+            {{- if .Values.monitoring.opentelemetry.enabled }}
+            # The Astro SSR process picks up these via the same env-driven
+            # initOtel pattern used by the api/providers. App-side OTel
+            # bootstrap is wired in a follow-up — these vars are set now
+            # so the rollout doesn't need to touch the chart later.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Values.monitoring.opentelemetry.serviceName }}-collector:{{ .Values.monitoring.opentelemetry.grpcPort }}"
+            - name: OTEL_SERVICE_NAME
+              value: x1agent-app
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Release.Namespace }},service.namespace=x1agent"
+            {{- end }}
+          resources: {{- toYaml .Values.app.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /, port: {{ .Values.app.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 5
