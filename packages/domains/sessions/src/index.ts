@@ -49,6 +49,8 @@ export {
   createSessionRoutes,
   createWorkspaceSessionRoutes,
 } from "./adapters/hono/routes.js";
+export { createSessionShareRoutes } from "./adapters/hono/share-routes.js";
+export type { SessionShareRoutesConfig } from "./adapters/hono/share-routes.js";
 export { createWorkspaceTokenUsageRoutes } from "./adapters/hono/token-usage-routes.js";
 
 // Fakes
