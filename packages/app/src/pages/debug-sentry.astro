@@ -1,0 +1,48 @@
+---
+/**
+ * Sentry verify page. The button throws in the browser to fire the
+ * client SDK; the ?server=1 query param throws in the SSR pass to
+ * fire the server SDK. Both flow into the x1agent-app project.
+ *
+ * Token-gated in production via X1AGENT_DEBUG_TOKEN matching
+ * ?token=<secret> so the route doesn't sit as a public 500-trigger.
+ * Remove or leave as-is once Sentry has its first organic event.
+ */
+const url = Astro.url;
+const wantServerThrow = url.searchParams.get("server") === "1";
+// Gate uses API_INTERNAL_TOKEN (already in env via ESO) for parity
+// with the api's /debug-sentry route. Skipped entirely when the token
+// env is unset so non-prod installs don't need to set anything.
+const expectedToken = import.meta.env.API_INTERNAL_TOKEN;
+const tokenOk =
+  import.meta.env.MODE !== "production" ||
+  !expectedToken ||
+  url.searchParams.get("token") === expectedToken;
+
+if (wantServerThrow && tokenOk) {
+  throw new Error("x1agent app SSR: first Sentry event");
+}
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sentry verify</title>
+  </head>
+  <body style="font-family: system-ui; padding: 2rem;">
+    <h1>Sentry verify</h1>
+    {!tokenOk && <p style="color: tomato;">token required in production</p>}
+    {tokenOk && (
+      <>
+        <p>Click the button to fire a browser-side error.</p>
+        <button id="error-button">Throw test error</button>
+        <p>Or visit <code>/debug-sentry?server=1{import.meta.env.MODE === "production" ? "&token=..." : ""}</code> to fire a server-side error.</p>
+        <script>
+          document.querySelector("#error-button")!.addEventListener("click", () => {
+            throw new Error("x1agent app browser: first Sentry event");
+          });
+        </script>
+      </>
+    )}
+  </body>
+</html>

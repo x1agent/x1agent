@@ -2,12 +2,31 @@
 import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
 import node from "@astrojs/node";
+import sentry from "@sentry/astro";
 import tailwindcss from "@tailwindcss/vite";
+
+// Sentry integration is registered unconditionally; the runtime SDK
+// inside sentry.client.config.js / sentry.server.config.js no-ops when
+// PUBLIC_SENTRY_DSN_APP is empty. Source-map upload runs only when
+// SENTRY_AUTH_TOKEN is set at build time (gated by the `enabled` flag).
+const sentryDsn = process.env.PUBLIC_SENTRY_DSN_APP || "";
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+const sentryRelease = process.env.SENTRY_RELEASE || process.env.IMAGE_TAG;
 
 export default defineConfig({
   output: "server",
   adapter: node({ mode: "standalone" }),
-  integrations: [react()],
+  integrations: [
+    react(),
+    sentry({
+      enabled: Boolean(sentryDsn),
+      dsn: sentryDsn,
+      release: { name: sentryRelease },
+      sourceMapsUploadOptions: sentryAuthToken
+        ? { project: "x1agent-app", org: "x1agent", authToken: sentryAuthToken }
+        : undefined,
+    }),
+  ],
   vite: {
     plugins: [tailwindcss()],
     server: {
