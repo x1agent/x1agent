@@ -83,15 +83,27 @@ async function listVertexModels(): Promise<AnthropicModel[]> {
     headers: { "x-goog-user-project": project },
   });
 
-  const out: AnthropicModel[] = [];
+  const candidates: AnthropicModel[] = [];
   for (const m of res.data.publisherModels ?? []) {
     // name = "publishers/anthropic/models/claude-sonnet-4-5"
     const baseId = m.name?.split("/").pop();
     const ver = m.versionId;
     if (!baseId || !ver) continue;
     const id = `${baseId}@${ver}`;
-    out.push({ id, label: prettifyVertexLabel(baseId, ver), source: "vertex" });
+    candidates.push({
+      id,
+      label: prettifyVertexLabel(baseId, ver),
+      source: "vertex",
+    });
   }
+
+  // Return the full catalog — operators use the per-model Test
+  // endpoint (POST /api/capabilities/anthropic/models/test) to verify
+  // enablement on demand. Earlier auto-probe-and-filter was rejected
+  // because (a) it's a slow first-hit, (b) when probes all 404 the UI
+  // surfaces "no models" with no actionable signal, (c) the right UX
+  // is admin-managed enablement state, not real-time probing.
+  const out = candidates;
   // Sort: GA (date-versioned) first, then "@default" preview labels
   // last. Inside each group, newest first by string sort on the
   // yyyymmdd version. The catalog lists @default aliases for some
@@ -105,6 +117,51 @@ async function listVertexModels(): Promise<AnthropicModel[]> {
     return b.id.localeCompare(a.id);
   });
   return out;
+}
+
+/**
+ * 1-token rawPredict probe. Returns true iff the project has accepted
+ * the Anthropic ToS for this specific model id (i.e. inference would
+ * actually work). Distinguishes 404 "not enabled" from 5xx "transient"
+ * — transient errors are treated as enabled to avoid hiding models
+ * during a Vertex blip.
+ */
+async function probeVertexEnabled(
+  client: { request: (opts: unknown) => Promise<unknown> },
+  region: string,
+  project: string,
+  modelId: string,
+): Promise<boolean> {
+  const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/anthropic/models/${modelId}:rawPredict`;
+  try {
+    await client.request({
+      url,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-user-project": project,
+      },
+      data: {
+        anthropic_version: "vertex-2023-10-16",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 1,
+      },
+    });
+    return true;
+  } catch (err: unknown) {
+    const status = (err as { response?: { status?: number } })?.response
+      ?.status;
+    if (status === 404) return false;
+    if (status === 403) return false;
+    // 4xx other than 404/403 → likely shape issue (e.g. bad model id);
+    // treat as not-enabled to be safe.
+    if (status && status >= 400 && status < 500) return false;
+    // 5xx / network → optimistically assume enabled, log for ops.
+    console.warn(
+      `[anthropic-models] probe of ${modelId} returned ${status ?? "?"} — treating as enabled`,
+    );
+    return true;
+  }
 }
 
 function prettifyVertexLabel(baseId: string, version: string): string {
