@@ -1,0 +1,49 @@
+---
+import TrustDiagram from "./TrustDiagram.astro";
+---
+
+<section class="relative overflow-hidden border-b border-[var(--color-border)] bg-noise">
+  <div class="absolute inset-0 bg-grid opacity-60"></div>
+  <div class="absolute inset-x-0 top-0 -z-10 h-[600px] bg-gradient-to-b from-[var(--color-accent-soft)] via-transparent to-transparent"></div>
+
+  <div class="relative mx-auto max-w-6xl px-6 pt-24 pb-20 md:pt-32 md:pb-28">
+    <div class="mb-7 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)]/60 px-3 py-1 text-xs text-[var(--color-text-muted)] backdrop-blur">
+      <span class="relative flex h-1.5 w-1.5">
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-accent)] opacity-50"></span>
+        <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]"></span>
+      </span>
+      Self-hosted on Kubernetes · private beta
+    </div>
+
+    <h1 class="max-w-4xl font-sans text-4xl font-medium tracking-tight text-[var(--color-text)] md:text-6xl md:leading-[1.05]">
+      Run agents in <span class="italic font-normal text-[var(--color-accent)]">your</span> cluster.
+      <br />
+      Keep <span class="italic font-normal text-[var(--color-accent)]">your</span> credentials.
+    </h1>
+
+    <p class="mt-7 max-w-xl text-base text-[var(--color-text-muted)] md:text-lg">
+      x1agent runs LLM agents on your Kubernetes. Each session gets its own pod. The agent container holds no secrets — a Rust sidecar proxies every credentialed call, so a prompt injection can't exfiltrate what it can't see.
+    </p>
+
+    <div class="mt-9 flex flex-wrap items-center gap-3">
+      <a
+        href="#access"
+        class="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)] px-5 py-2.5 text-sm font-medium text-[var(--color-bg)] transition hover:opacity-90"
+      >
+        Get access
+        <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h8M9 5l3 3-3 3"/></svg>
+      </a>
+      <a
+        href="https://docs.x1agent.com"
+        class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-strong)] bg-[var(--color-surface)]/60 px-5 py-2.5 text-sm text-[var(--color-text)] backdrop-blur transition hover:border-[var(--color-text-faint)]"
+      >
+        Read the docs
+      </a>
+      <span class="ml-1 text-xs text-[var(--color-text-faint)]">No trial. Talk to us first.</span>
+    </div>
+
+    <div class="mt-16 md:mt-20">
+      <TrustDiagram />
+    </div>
+  </div>
+</section>

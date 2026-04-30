@@ -1,0 +1,177 @@
+{{- /*
+Graph + vector provider — SurrealDB-backed.
+
+Renders only when `providers.graph.kind == "surrealdb"`. Shipping two
+resources together because the provider is meaningless without its
+backing datastore:
+
+  1. SurrealDB StatefulSet + headless Service — single-node, RocksDB on
+     a PVC. Sized small for v1; multi-node SurrealDB clustering is a
+     follow-up that swaps the StatefulSet for the official surrealdb
+     operator.
+  2. graph-surrealdb provider Deployment — subscribes to NATS subjects
+     `x1.provider.graph.>` and `x1.provider.vector.>`. mTLS to NATS via
+     the cert-manager-issued `nats-session-client-tls` Secret.
+
+The api gates UI surfaces on PROVIDER_GRAPH (see capabilities). When
+this template renders, PROVIDER_GRAPH must also be set to "surrealdb"
+in values.yaml so the gate stays consistent. The configure wizard
+sets both together.
+
+Eventual refactor: lift this into deploy/helm/x1agent/charts/graph-surrealdb/
+as a real subchart so adding providers stops bloating the umbrella's
+templates/ directory.
+*/}}
+{{- if eq (default "none" .Values.providers.graph) "surrealdb" }}
+---
+# Backing datastore — SurrealDB single-node.
+apiVersion: v1
+kind: Service
+metadata:
+  name: surrealdb
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "surrealdb") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: surrealdb
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  serviceName: surrealdb
+  replicas: 1
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "surrealdb") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "surrealdb") | nindent 8 }}
+    spec:
+      # SurrealDB v2.x ships as a non-root user but the GKE PD volume
+      # mounts root-owned by default → "Permission denied" creating
+      # /data/db. fsGroup tells kubelet to chown the volume to gid 1000
+      # at mount time so the container process can write.
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: surrealdb
+          image: {{ .Values.providers.graphSurrealdb.surrealImage | default "surrealdb/surrealdb:v2.3" | quote }}
+          imagePullPolicy: IfNotPresent
+          # Root credentials — env-injected from a K8s Secret named
+          # `surrealdb-root` (created by ESO from GSM). Falls back to
+          # the values-supplied default for installs without secret
+          # rotation; operators should always rotate via GSM in prod.
+          args:
+            - start
+            - --log=info
+            - --user=$(SURREAL_USER)
+            - --pass=$(SURREAL_PASS)
+            - --bind=0.0.0.0:8000
+            - rocksdb:/data/db
+          env:
+            - name: SURREAL_USER
+              value: root
+            - name: SURREAL_PASS
+              value: {{ .Values.providers.graphSurrealdb.rootPassword | default "x1agent-surreal-root" | quote }}
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          resources: {{- toYaml .Values.providers.graphSurrealdb.surrealResources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.providers.graphSurrealdb.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.providers.graphSurrealdb.storageSize | default "10Gi" | quote }}
+---
+# Provider — translates NATS x1.provider.graph.* / x1.provider.vector.*
+# requests into SurrealDB queries.
+apiVersion: v1
+kind: Service
+metadata:
+  name: graph-surrealdb
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "graph-surrealdb") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: graph-surrealdb
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.providers.graphSurrealdb.replicas | default 1 }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "graph-surrealdb") | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "graph-surrealdb") | nindent 8 }}
+    spec:
+      containers:
+        - name: provider
+          image: "{{ .Values.providers.graphSurrealdb.image.repository }}:{{ .Values.providers.graphSurrealdb.image.tag | default .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.providers.graphSurrealdb.image.pullPolicy | default "Always" | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: tls://nats:4222
+            # Same mTLS pattern as the api — see api.yaml. Cert-manager
+            # issues nats-session-client-tls; the Secret items projection
+            # renames tls.* → client.* so the provider's hardcoded
+            # /etc/nats-tls paths work without env churn.
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            - name: SURREAL_URL
+              value: http://surrealdb:8000
+            - name: SURREAL_USER
+              value: root
+            - name: SURREAL_PASS
+              value: {{ .Values.providers.graphSurrealdb.rootPassword | default "x1agent-surreal-root" | quote }}
+            - name: SURREAL_NAMESPACE
+              value: x1agent
+          resources: {{- toYaml .Values.providers.graphSurrealdb.resources | nindent 12 }}
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            # Shared provider cert — see nats-certs.yaml header.
+            secretName: nats-provider-client-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: client.crt
+              - key: tls.key
+                path: client.key
+{{- end }}

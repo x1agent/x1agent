@@ -34,12 +34,30 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: 'x1agent',
+      title: 'x1agent docs',
+      // Force dark-only theme — marketing site is dark, docs match.
+      // The light mode toggle is also hidden in theme.css.
+      defaultLocale: 'en',
+      customCss: ['./src/styles/theme.css'],
       components: {
         Head: './src/components/Head.astro',
       },
-      social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/x1agent/x1agent' },
+      head: [
+        {
+          tag: 'link',
+          attrs: { rel: 'preconnect', href: 'https://rsms.me/' },
+        },
+        {
+          tag: 'link',
+          attrs: { rel: 'stylesheet', href: 'https://rsms.me/inter/inter.css' },
+        },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'stylesheet',
+            href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap',
+          },
+        },
       ],
       sidebar: [
         {

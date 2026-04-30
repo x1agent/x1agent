@@ -7,6 +7,7 @@ import type { AgentRepository } from "../ports/agent-repository.js";
 import type { AdminGuard } from "../ports/admin-guard.js";
 import type { Agent } from "../domain/agent.js";
 import type { RuntimeType } from "../domain/runtime.js";
+import type { AgentKind } from "../domain/kind.js";
 import type { CronSchedule } from "../domain/cron-schedule.js";
 import { AgentSlugTakenError } from "../domain/agent.js";
 
@@ -21,10 +22,13 @@ export interface CreateAgentInput {
   slug: WorkspaceSlug;
   name: string;
   runtimeType: RuntimeType;
+  kind?: AgentKind;
   systemPrompt?: string;
   heartbeatMd?: string;
   schedule?: CronSchedule | null;
   imageId?: string | null;
+  /** Per-agent override for the SDK model. Null = deployment default. */
+  model?: string | null;
 }
 
 export async function createAgent(
@@ -44,10 +48,12 @@ export async function createAgent(
     slug: input.slug,
     name: input.name,
     runtimeType: input.runtimeType,
+    kind: input.kind ?? "worker",
     systemPrompt: input.systemPrompt ?? "",
     heartbeatMd: input.heartbeatMd ?? "",
     schedule: input.schedule ?? null,
     imageId: input.imageId ?? null,
+    model: input.model ?? null,
     createdBy: input.actor,
   });
 }

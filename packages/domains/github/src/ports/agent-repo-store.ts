@@ -4,18 +4,31 @@ import type { InstallationId } from "../domain/installation.js";
 /**
  * A linked repo with the on-disk placement and git branching configuration
  * the sidecar needs to clone and check out at session start.
+ *
+ * Push gating — see docs/security/repo-access.md.
+ *
+ *   autoPush  — orchestration hint: whether the agent is expected to
+ *               push on its own cadence (vs. a human merging the
+ *               branch). Advisory.
+ *   allowPush — enforcement: when false, the sidecar's credential
+ *               helper refuses to hand out credentials. `git push`
+ *               and network-dependent `git fetch` fail; the agent
+ *               can still read, edit, and commit locally. Defaults
+ *               to false on new attachments (safe-by-default).
  */
 export interface LinkedRepo {
   repoFullName: string;
   branch: string;
   mountPath: string;
   autoPush: boolean;
+  allowPush: boolean;
 }
 
 export interface AttachRepoOptions {
   branch?: string;
   mountPath?: string;
   autoPush?: boolean;
+  allowPush?: boolean;
 }
 
 /**

@@ -230,6 +230,7 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
         branch: r.branch,
         mount_path: r.mountPath,
         auto_push: r.autoPush,
+        allow_push: r.allowPush,
       })),
     });
   });
@@ -243,6 +244,7 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
       branch?: string;
       mount_path?: string;
       auto_push?: boolean;
+      allow_push?: boolean;
     };
     if (!body.installation_id || !body.repo_full_name)
       return c.json({ error: "missing_fields" }, 400);
@@ -261,6 +263,7 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
           branch: body.branch,
           mountPath: body.mount_path,
           autoPush: body.auto_push,
+          allowPush: body.allow_push,
         },
       );
       return c.json({ ok: true }, 201);
@@ -276,6 +279,7 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
       branch?: string;
       mount_path?: string;
       auto_push?: boolean;
+      allow_push?: boolean;
     };
     try {
       await cfg.agentRepos.updateRepo(
@@ -285,6 +289,7 @@ export function createAgentRepoRoutes(cfg: GitHubRoutesConfig): Hono {
           branch: body.branch,
           mountPath: body.mount_path,
           autoPush: body.auto_push,
+          allowPush: body.allow_push,
         },
       );
       return c.json({ ok: true });

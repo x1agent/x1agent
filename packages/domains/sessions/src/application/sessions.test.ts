@@ -44,6 +44,7 @@ async function makeAgent(opts: {
   slug?: string;
   schedule?: string | null;
   isActive?: boolean;
+  kind?: "worker" | "orchestrator" | "scheduled";
 } = {}) {
   const a = await createAgent(
     { agents, adminGuard: new AgentsAllowAll() },
@@ -53,6 +54,7 @@ async function makeAgent(opts: {
       slug: WorkspaceSlug(opts.slug ?? "heartbeat"),
       name: "H",
       runtimeType: RuntimeType("claude_code"),
+      kind: opts.kind,
       schedule:
         opts.schedule === null
           ? null
@@ -98,6 +100,118 @@ describe("triggerSession", () => {
         { actor: ACTOR, agentId: AgentId(uuid(999)) },
       ),
     ).rejects.toBeInstanceOf(AgentNotFoundError);
+  });
+
+  describe("orchestrator singleton semantics", () => {
+    it("worker triggers always produce a new session", async () => {
+      const a = await makeAgent({ kind: "worker" });
+      const s1 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const s2 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s2.id).not.toBe(s1.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("orchestrator with no live session creates one", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const s = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s.status).toBe("pending");
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator with a pending session returns the same session — no new row", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).toBe(first.id);
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator with a running session returns the same session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, { status: "running" });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).toBe(first.id);
+      expect(sessions.rows.length).toBe(1);
+    });
+
+    it("orchestrator whose prior session completed gets a fresh session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, {
+        status: "complete",
+        completedAt: clock.now(),
+      });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).not.toBe(first.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("orchestrator whose prior session failed gets a fresh session", async () => {
+      const a = await makeAgent({ kind: "orchestrator" });
+      const first = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      await sessions.updateStatus(first.id, {
+        status: "failed",
+        completedAt: clock.now(),
+        errorMessage: "crashed",
+      });
+      clock.advance(1000);
+      const second = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(second.id).not.toBe(first.id);
+      expect(sessions.rows.length).toBe(2);
+    });
+
+    it("scheduled agent behaves like worker — new session per trigger", async () => {
+      const a = await makeAgent({ kind: "scheduled" });
+      const s1 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      clock.advance(1000);
+      const s2 = await triggerSession(
+        { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+        { actor: ACTOR, agentId: a.id },
+      );
+      expect(s2.id).not.toBe(s1.id);
+      expect(sessions.rows.length).toBe(2);
+    });
   });
 });
 
@@ -249,5 +363,244 @@ describe("scheduleDueSessions", () => {
     const result = await scheduleDueSessions({ agents, sessions, clock });
     expect(result.considered).toBe(0);
     expect(result.created).toBe(0);
+  });
+
+  describe("orchestrator heartbeat semantics", () => {
+    class RecordingInjector {
+      calls: Array<{ sessionId: string; text: string }> = [];
+      async injectHeartbeatWake(sessionId: string, text: string) {
+        this.calls.push({ sessionId, text });
+      }
+    }
+
+    it("orchestrator with a live session — injects into it, no new row", async () => {
+      const a = await makeAgent({
+        slug: "orch",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      // Seed the orchestrator's singleton live session (user-triggered,
+      // still running).
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Orchestrator has never ticked before; anchor is agent.createdAt.
+      // Move the clock well past the next-due boundary.
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.injected).toBe(1);
+      expect(result.created).toBe(0);
+      expect(injector.calls).toHaveLength(1);
+      expect(injector.calls[0]!.sessionId).toBe(live.id);
+      // live session + no second row
+      const all = await sessions.listByAgent(a.id, 10);
+      expect(all).toHaveLength(1);
+      expect(all[0]!.id).toBe(live.id);
+      // Tick anchor updated so next tick doesn't fire immediately.
+      const reloaded = await agents.findById(a.id);
+      expect(reloaded!.lastSchedulerTickAt).not.toBeNull();
+    });
+
+    it("orchestrator with no live session — creates one (like a worker)", async () => {
+      const a = await makeAgent({
+        slug: "orch-cold",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.created).toBe(1);
+      expect(result.injected).toBe(0);
+      expect(injector.calls).toHaveLength(0);
+      const rows = await sessions.listByAgent(a.id, 10);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.triggeredBy).toBe("scheduler");
+    });
+
+    it("orchestrator with a completed session — creates a new one (singleton is free)", async () => {
+      const a = await makeAgent({
+        slug: "orch-prior",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const prior = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(prior.id, {
+        status: "complete",
+        completedAt: new Date("2026-04-18T10:30:00Z"),
+      });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.created).toBe(1);
+      expect(result.injected).toBe(0);
+    });
+
+    it("does not re-fire on the next tick in the same window (anchor advanced)", async () => {
+      const a = await makeAgent({
+        slug: "orch-anchor",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Seed the anchor within the current hour so there's exactly one
+      // due slot to fire. Seeding further back triggers the catch-up
+      // loop (one slot per call), which is intentional behavior but a
+      // different property to test.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T12:30:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+
+      // First tick fired for 13:00 slot, anchor advanced to 13:00.
+      // Second tick: next-due is 14:00 > clock 13:05, skip.
+      expect(injector.calls).toHaveLength(1);
+    });
+
+    it("heartbeat wake text is the agent's heartbeatMd verbatim", async () => {
+      const a = await makeAgent({
+        slug: "orch-hb",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      await agents.update(a.id, {
+        heartbeatMd: "## Heartbeat\n\nCheck the roadmap and decide.",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Seed an anchor in the past so the next-due calc fires. Without
+      // this, the fake agent's wall-clock createdAt anchors the tick
+      // in the future and nothing fires.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T10:00:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const injector = new RecordingInjector();
+      await scheduleDueSessions({ agents, sessions, clock, injector });
+
+      expect(injector.calls[0]!.text).toBe(
+        "## Heartbeat\n\nCheck the roadmap and decide.",
+      );
+    });
+
+    it("throws a surfaced error if no injector is configured and a live session exists", async () => {
+      const a = await makeAgent({
+        slug: "orch-no-injector",
+        schedule: "@hourly",
+        kind: "orchestrator",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-04-18T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-18T12:30:00Z"),
+      );
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      let surfaced: unknown = null;
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        onError: (_, err) => {
+          surfaced = err;
+        },
+      });
+
+      expect(result.errors).toBe(1);
+      expect(result.injected).toBe(0);
+      expect(result.created).toBe(0);
+      expect((surfaced as Error).message).toContain("MessageInjector");
+    });
   });
 });

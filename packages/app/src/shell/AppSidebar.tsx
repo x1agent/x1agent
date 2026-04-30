@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   Bot,
   ChevronsUpDown,
+  Cpu,
   Database,
   FileText,
   LayoutDashboard,
@@ -45,16 +46,24 @@ import { Avatar, initials, workspaceInitials } from "../components/ui/avatar";
 import { useAuthStore } from "../stores/authStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useAccountsStore } from "../stores/accountsStore";
+import {
+  useCapabilitiesStore,
+  useHasCollections,
+} from "../stores/capabilitiesStore";
 
 interface NavItem {
   title: string;
   url: string;
-  icon: typeof Bot;
+  // Accepts both lucide-react icons (typeof Bot) and the inline Github
+  // SVG component above — both have the same `({ className }) => JSX`
+  // call shape.
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 export function AppSidebar() {
   const user = useAuthStore((s) => s.user);
   const memberships = useAuthStore((s) => s.memberships);
+  const isPlatformAdmin = useAuthStore((s) => s.isPlatformAdmin);
   const signOut = useAuthStore((s) => s.signOut);
 
   const activeSlug = useWorkspaceStore((s) => s.activeSlug);
@@ -65,10 +74,14 @@ export function AppSidebar() {
   const loadAccounts = useAccountsStore((s) => s.load);
   const startAddAccount = useAccountsStore((s) => s.startAddAccount);
 
+  const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
+  const hasCollections = useHasCollections();
+
   useEffect(() => {
     syncSlugFromUrl();
     loadAccounts();
-  }, [syncSlugFromUrl, loadAccounts]);
+    fetchCapabilities();
+  }, [syncSlugFromUrl, loadAccounts, fetchCapabilities]);
 
   const activeMembership = memberships.find((m) => m.slug === activeSlug);
   const otherAccounts = linkedAccounts.filter((a) => !a.is_current);
@@ -79,7 +92,17 @@ export function AppSidebar() {
         { title: "Agents", url: `${navBase}`, icon: Bot },
         { title: "Sessions", url: `${navBase}/sessions`, icon: Play },
         { title: "Shares", url: `${navBase}/shares`, icon: FileText },
-        { title: "Collections", url: `${navBase}/collections`, icon: Database },
+        // Collections live behind a graph provider — hide the entry
+        // when the deployment ships without one (see capabilitiesStore).
+        ...(hasCollections
+          ? [
+              {
+                title: "Collections",
+                url: `${navBase}/collections`,
+                icon: Database,
+              },
+            ]
+          : []),
         { title: "GitHub", url: `${navBase}/github`, icon: Github },
         { title: "Settings", url: `${navBase}/settings`, icon: Settings },
       ]
@@ -175,6 +198,22 @@ export function AppSidebar() {
                   <span>{item.title}</span>
                 </a>
               ))}
+            </nav>
+          </div>
+        )}
+        {isPlatformAdmin && (
+          <div>
+            <div className="px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              Admin
+            </div>
+            <nav className="flex flex-col">
+              <a
+                href="/admin/anthropic-models"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+              >
+                <Cpu className="size-4" />
+                <span>Claude models</span>
+              </a>
             </nav>
           </div>
         )}

@@ -25,7 +25,9 @@
     "@x1agent/domain-sessions": "workspace:*",
     "@x1agent/domain-workspaces": "workspace:*",
     "@x1agent/kernel": "workspace:*",
+    "@x1agent/observability": "workspace:*",
     "@x1agent/shared": "workspace:*",
+    "@sentry/node": "^9.0.0",
     "hono": "^4.6.0",
     "nats": "^2.29.3",
     "postgres": "^3.4.4"

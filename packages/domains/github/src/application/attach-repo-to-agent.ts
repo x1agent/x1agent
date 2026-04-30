@@ -40,6 +40,7 @@ export async function attachRepoToAgent(
     branch?: string;
     mountPath?: string;
     autoPush?: boolean;
+    allowPush?: boolean;
   },
 ): Promise<void> {
   const install = await deps.installations.findByInstallationId(
@@ -86,5 +87,6 @@ export async function attachRepoToAgent(
     branch: input.branch ?? match.defaultBranch,
     mountPath: input.mountPath,
     autoPush: input.autoPush,
+    allowPush: input.allowPush,
   });
 }

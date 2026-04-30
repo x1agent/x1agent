@@ -1,0 +1,63 @@
+# DEV ONLY — applied by devspace against OrbStack. Prod path is the Helm
+# chart at deploy/helm/x1agent (when the app ships via CDN/static hosting,
+# this Deployment goes away). Differences from prod:
+#  - Runs the Astro dev server (Vite HMR) instead of a built bundle
+#  - Devspace file-sync overlays packages/ for hot reload
+#  - imagePullPolicy: IfNotPresent with a locally-built dev image
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  labels:
+    app: app
+spec:
+  selector:
+    app: app
+  ports:
+    - name: http
+      port: 4322
+      targetPort: 4322
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: x1agent-app
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 4322
+          env:
+            - name: PUBLIC_API_URL
+              value: https://api.local.x1agent.dev
+            - name: PUBLIC_URL
+              value: https://app.local.x1agent.dev
+            - name: NODE_ENV
+              value: development
+            - name: HOST
+              value: "0.0.0.0"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4322
+            initialDelaySeconds: 15
+            periodSeconds: 5

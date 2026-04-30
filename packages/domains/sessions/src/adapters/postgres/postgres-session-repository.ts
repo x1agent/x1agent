@@ -135,6 +135,40 @@ export class PostgresSessionRepository implements SessionRepository {
     return rows.map(toSession);
   }
 
+  async listForUser(
+    workspaceId: WorkspaceId,
+    userId: UserId,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    // Owned by the user OR explicitly shared. workspace_id pinned via
+    // the agents join so a malformed share row can never leak across
+    // workspaces.
+    // The LEFT JOIN can't multiply rows because the share row is
+    // pinned to ${userId} and (session_id, user_id) is unique, so no
+    // DISTINCT is needed.
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(
+        SELECT
+          .split(",")
+          .map((c) => `sessions.${c.trim()}`)
+          .join(", "),
+      )}
+      FROM sessions
+      JOIN agents ON agents.id = sessions.agent_id
+      LEFT JOIN session_user_shares
+        ON session_user_shares.session_id = sessions.id
+       AND session_user_shares.user_id = ${userId}
+      WHERE agents.workspace_id = ${workspaceId}
+        AND (
+          sessions.triggered_by_user_id = ${userId}
+          OR session_user_shares.id IS NOT NULL
+        )
+      ORDER BY sessions.triggered_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(toSession);
+  }
+
   async listChildren(parentSessionId: SessionId): Promise<readonly Session[]> {
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM sessions
@@ -152,6 +186,31 @@ export class PostgresSessionRepository implements SessionRepository {
       LIMIT 1
     `;
     return rows[0] ? toSession(rows[0]) : null;
+  }
+
+  async findLiveSessionForAgent(agentId: AgentId): Promise<Session | null> {
+    // Non-terminal = pending or running. `complete` and `failed` are
+    // terminal and mean the orchestrator is ready for a fresh session.
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE agent_id = ${agentId}
+        AND status IN ('pending', 'running')
+      ORDER BY triggered_at DESC
+      LIMIT 1
+    `;
+    return rows[0] ? toSession(rows[0]) : null;
+  }
+
+  async listNonTerminalOlderThan(
+    threshold: Date,
+  ): Promise<readonly Session[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM sessions
+      WHERE status IN ('pending', 'running')
+        AND triggered_at < ${threshold}
+      ORDER BY triggered_at ASC
+    `;
+    return rows.map(toSession);
   }
 
   async updateStatus(

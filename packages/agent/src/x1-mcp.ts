@@ -442,6 +442,79 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["child_agent_id"],
       },
     },
+    {
+      name: "preview_deploy",
+      description:
+        "Deploy the current branch of an attached repo to a preview environment. The platform reads `.x1agent/preview.yaml` at the root of the repo's checked-out tree at commit_sha, builds a Docker image via Kaniko, pushes it to the in-cluster registry, applies a Deployment + Service + Ingress, and returns the public URL. Blocks until the preview is reachable (usually 1–3 minutes). Returns { ok, url, slug, image } on success or { ok: false, code, message } on failure. The resulting URL is stable for the lifetime of the preview and is what humans will bookmark — prefer writing the URL into your session summary share.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          repo_full_name: {
+            type: "string",
+            description:
+              "owner/repo of the attached repo to deploy (e.g. 'hirer-co/app').",
+          },
+          branch: {
+            type: "string",
+            description:
+              "Branch name (e.g. 'feat/scaffold'). The provider clones this ref for the build.",
+          },
+          commit_sha: {
+            type: "string",
+            description:
+              "Commit SHA to build. The provider tags the resulting image with a short form of this SHA so redeploys of the same sha are idempotent.",
+          },
+        },
+        required: ["repo_full_name", "branch", "commit_sha"],
+      },
+    },
+    {
+      name: "expect_quiet_for",
+      description:
+        "Tell the platform you'll be silent for a while so the activity watchdog doesn't escalate you as 'stuck'. Use before running a long tool call that doesn't emit events (npm install, large test suite, docker build, heavy LLM sub-task). Pass `seconds` — the platform suppresses watchdog wakes for your parent about you for that duration. A subsequent call extends / overrides the window. A 0 or negative value clears the hint immediately. Doesn't silence emit_status or other events — only the silent-child watchdog check.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          seconds: {
+            type: "number",
+            description:
+              "Expected silent duration in seconds. Pass 0 or negative to clear.",
+          },
+          reason: {
+            type: "string",
+            description:
+              "Optional human-readable note (e.g., 'npm install'). Surfaced in logs.",
+          },
+        },
+        required: ["seconds"],
+      },
+    },
+    {
+      name: "message_caller",
+      description:
+        "Push an explicit signal up to the session that spawned you. Use when you want to notify your parent orchestrator of a milestone, an ask, or a blocker — not for every progress update (use emit_status for cheap heartbeats). The platform routes this as a driverless wake into the parent's turn so the parent reasons about your signal without polling. Only works when this session has a parent (was spawned by another agent). Returns { ok, delivered }. delivered=false with reason='parent_not_orchestrator' means your parent is a worker and platform wakes aren't routed there; the call still succeeded as a no-op.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          summary: {
+            type: "string",
+            description:
+              "Short, parent-readable signal (one line). This is what the parent reads first.",
+          },
+          body: {
+            type: "string",
+            description:
+              "Optional longer detail — commit SHAs, file references, evidence for a decision.",
+          },
+          needs_response: {
+            type: "boolean",
+            description:
+              "True if you're blocked and need the parent to inject_message back to you. False if you're just reporting status and will keep working.",
+          },
+        },
+        required: ["summary"],
+      },
+    },
   ],
 }));
 
@@ -795,6 +868,98 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `spawn_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "preview_deploy": {
+      try {
+        const res = await fetch(`${sidecarUrl}/preview/deploy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repo_full_name: String(a?.repo_full_name ?? ""),
+            branch: String(a?.branch ?? ""),
+            commit_sha: String(a?.commit_sha ?? ""),
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `preview_deploy failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "expect_quiet_for": {
+      try {
+        const res = await fetch(`${sidecarUrl}/quiet-hint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            seconds: Number(a?.seconds ?? 0),
+            reason: typeof a?.reason === "string" ? a.reason : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `expect_quiet_for failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "message_caller": {
+      try {
+        const res = await fetch(`${sidecarUrl}/message-caller`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: String(a?.summary ?? ""),
+            body: a?.body != null ? String(a.body) : null,
+            needs_response: a?.needs_response === true,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `message_caller failed: ${(err as Error).message}`,
             },
           ],
           isError: true,

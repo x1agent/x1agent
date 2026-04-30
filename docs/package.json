@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "deploy": "gcloud run deploy x1agent-docs --source . --region us-central1 --allow-unauthenticated"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.38.3",

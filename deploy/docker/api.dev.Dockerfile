@@ -4,7 +4,7 @@
 #
 # Prod images will be built per-package from a different Dockerfile when
 # we cut our first release.
-FROM oven/bun:1-alpine
+FROM oven/bun:1.2.16-alpine
 
 RUN apk add --no-cache bash tini
 
@@ -13,6 +13,7 @@ WORKDIR /app
 # Copy only manifests first so layer caching works when source changes.
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
+COPY packages/observability/package.json packages/observability/tsconfig.json ./packages/observability/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
 COPY packages/app/package.json packages/app/tsconfig.json ./packages/app/

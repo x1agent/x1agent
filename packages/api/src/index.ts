@@ -1,10 +1,50 @@
+// Sentry FIRST — the SDK auto-instruments http/pg/etc., which means
+// it has to load before the modules it patches. instrument.ts no-ops
+// when SENTRY_DSN_API is unset.
+import "./instrument.js";
+import * as Sentry from "@sentry/node";
+
+// initOtel must run BEFORE any auto-instrumented imports (hono / nats /
+// pg-driver / undici) so their patches land. The package no-ops cleanly
+// when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+import { initOtel } from "@x1agent/observability";
+initOtel({ serviceName: "x1agent-api" });
+
 import { Hono } from "hono";
 import * as k8s from "@kubernetes/client-node";
 import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
-import { seedIfDev } from "./seed.js";
+import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import { capabilitiesRoutes } from "./capabilities/routes.js";
+import { listAnthropicModels } from "./capabilities/anthropic-models.js";
+
+/**
+ * Resolve the deployment-wide default model id for new session pods.
+ * Explicit ANTHROPIC_MODEL env wins; otherwise pick the first Sonnet
+ * from the upstream catalog. Catalog fetch is cached for 5 min so
+ * boot adds at most one Vertex / Anthropic round-trip per restart.
+ * Returns undefined when nothing is available (let the SDK pick).
+ */
+async function resolveDefaultAnthropicModel(): Promise<string | undefined> {
+  const explicit = process.env.ANTHROPIC_MODEL;
+  if (explicit && explicit.trim()) return explicit.trim();
+  try {
+    const models = await listAnthropicModels();
+    // Skip @default preview aliases — Vertex lists them in the catalog
+    // but they often 400 with "not servable in region" until promoted
+    // to GA. Prefer a dated (GA) version.
+    const ga = models.filter((m) => !m.id.endsWith("@default"));
+    const sonnet = ga.find((m) => m.id.toLowerCase().includes("sonnet"));
+    return sonnet?.id ?? ga[0]?.id ?? models[0]?.id;
+  } catch (err) {
+    console.warn(
+      `[anthropic-models] default resolve failed at boot: ${(err as Error).message}`,
+    );
+    return undefined;
+  }
+}
 import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
@@ -97,12 +137,15 @@ try {
 const {
   authRoutes,
   workspaceInvitationRoutes,
+  workspaceCreateRoutes,
   publicInvitationRoutes,
   agentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
+  workspaceTokenUsageRoutes,
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
+  sessionShareRoutes,
   internalRoutes,
   githubInstallRoutes,
   installationApiRoutes,
@@ -112,6 +155,7 @@ const {
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
   workspaceImageCatalogRoutes,
+  adminAnthropicModelsRoutes,
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
@@ -122,16 +166,25 @@ const {
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
+  tokenUsage: composedTokenUsage,
   sql: composedSql,
   agents: composedAgents,
   sessions: composedSessions,
   agentRepoStore: composedAgentRepos,
   tickScheduler,
+  quietHints: composedQuietHints,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
   googleClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
   googleClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+  // GOOGLE_OAUTH_SCOPES is a space-separated scope list that overrides
+  // the identity-only default. Set in the install file when provider
+  // domains (Drive, Calendar, Gmail) are enabled so the consent screen
+  // prompts up-front rather than after-the-fact.
+  googleScopes: process.env.GOOGLE_OAUTH_SCOPES
+    ? process.env.GOOGLE_OAUTH_SCOPES.split(/\s+/).filter(Boolean)
+    : undefined,
   appUrl: PUBLIC_URL,
   apiUrl: API_PUBLIC_URL,
   allowedDomains: (process.env.ALLOWED_DOMAINS || "")
@@ -156,6 +209,15 @@ const {
 
 const app = new Hono();
 
+// Sentry sees every unhandled error before Hono's default 500 page
+// reaches the client. Reraises so any per-route .onError still fires
+// downstream and the response shape stays the same as before.
+app.onError((err, c) => {
+  Sentry.captureException(err);
+  console.error(`[hono] unhandled: ${(err as Error).message}`);
+  return c.json({ error: "internal_server_error" }, 500);
+});
+
 app.use("*", async (c, next) => {
   c.header("Access-Control-Allow-Origin", PUBLIC_URL);
   c.header("Access-Control-Allow-Credentials", "true");
@@ -169,6 +231,23 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
+app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
+
+// Sentry verify route — throws so the SDK captures the first event
+// during the onboarding flow. Gated to non-production OR by token so
+// it doesn't sit as a public 500-trigger forever. Remove after the
+// project has its first organic event.
+app.get("/debug-sentry", (c) => {
+  const token = c.req.query("token");
+  if (
+    process.env.NODE_ENV === "production" &&
+    token !== process.env.API_INTERNAL_TOKEN
+  ) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  throw new Error("x1agent api: first Sentry event");
+});
 app.get("/auth/github/config", (c) =>
   c.json({
     configured:
@@ -182,15 +261,21 @@ app.get("/auth/github/config", (c) =>
 app.route("/auth", authRoutes);
 app.route("/auth/github", githubInstallRoutes);
 app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
+app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
+app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/shares",
   workspaceShareRoutes,
 );
 app.route("/api/workspaces/:slug/shares", workspaceSharesIndexRoutes);
+app.route(
+  "/api/workspaces/:slug/sessions/:sessionId/user-shares",
+  sessionShareRoutes,
+);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
@@ -209,8 +294,13 @@ app.route(
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
 
+// Always-run seed: platform image presets. Idempotent.
+await seedPlatformPresets().catch((err) => {
+  console.warn("[seed] platform presets skipped:", (err as Error).message);
+});
+// Dev-only seed: default workspace + test user.
 await seedIfDev().catch((err) => {
-  console.warn("[seed] skipped:", (err as Error).message);
+  console.warn("[seed] dev skipped:", (err as Error).message);
 });
 
 const SCHEDULER_INTERVAL_MS = Number(
@@ -291,6 +381,8 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       natsUrl,
       events: sessionEvents,
       sessions: composedSessions,
+      agents: composedAgents,
+      tokenUsage: composedTokenUsage,
     });
     registerCleanup(() => sub.stop());
     console.log(`[nats] connected to ${natsUrl}`);
@@ -432,6 +524,24 @@ if (process.env.JOB_WATCHER !== "disabled") {
       apiInternalToken: process.env.API_INTERNAL_TOKEN || "",
       natsUrl: process.env.NATS_URL || "nats://nats:4222",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      // Vertex path: the api Deployment's env (set by the Helm chart
+      // when anthropic.provider == vertex) drives every session pod
+      // it spawns. Default falls through to api_key for back-compat
+      // with local dev that has no notion of Vertex.
+      anthropicProvider:
+        (process.env.ANTHROPIC_PROVIDER as "api_key" | "vertex" | undefined) ??
+        "api_key",
+      vertexRegion: process.env.CLOUD_ML_REGION || undefined,
+      vertexProjectId: process.env.ANTHROPIC_VERTEX_PROJECT_ID || undefined,
+      // ANTHROPIC_MODEL pins the SDK to a specific model id. Falls
+      // back to the first Sonnet model in the upstream catalog (Vertex
+      // or Anthropic API) when the env is unset, so a fresh install
+      // doesn't have to manually pick a model just to spawn a session.
+      anthropicModel: await resolveDefaultAnthropicModel(),
+      sessionServiceAccount:
+        process.env.SESSION_SERVICE_ACCOUNT || undefined,
+      natsClientTlsSecret:
+        process.env.SESSION_NATS_TLS_SECRET || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
@@ -439,6 +549,20 @@ if (process.env.JOB_WATCHER !== "disabled") {
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,
       redisBranches: composedRedisBranches,
+      wakePublisher: providerNats
+        ? async (session, terminalStatus, completedAt, errorMessage) => {
+            const { publishStateChangeWake } = await import(
+              "./orchestration/wake-publisher.js"
+            );
+            await publishStateChangeWake(
+              { nc: providerNats!, sessions: composedSessions, agents: composedAgents },
+              session,
+              terminalStatus,
+              completedAt,
+              errorMessage,
+            );
+          }
+        : undefined,
     });
     registerCleanup(() => watcher.stop());
   } catch (err) {
@@ -446,6 +570,143 @@ if (process.env.JOB_WATCHER !== "disabled") {
       `[jobs] watcher start failed: ${(err as Error).message} — sessions will stay pending`,
     );
   }
+}
+
+// Session-status reconciler. The Job-watcher is authoritative when
+// the cluster is healthy, but if the node restarts or kubelet crashes
+// we can lose the terminal Job event — session rows end up stuck in
+// `running` forever, and orchestrator singletons wedge because
+// find-or-create sees a live-looking row that isn't. This reconciler
+// walks non-terminal sessions older than the grace window, asks
+// whether their Job still exists, and flips to `failed` with a
+// state_change wake when the Job is gone. See
+// packages/domains/sessions/src/application/reconcile-session-status.ts.
+const SESSION_RECONCILE_INTERVAL_MS = Number(
+  process.env.SESSION_RECONCILE_INTERVAL_MS || 30_000,
+);
+const SESSION_RECONCILE_GRACE_MS = Number(
+  process.env.SESSION_RECONCILE_GRACE_MS || 120_000,
+);
+if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
+  const { reconcileSessionStatuses } = await import(
+    "@x1agent/domain-sessions"
+  );
+  const { sessionJobName } = await import("./k8s/pod-spec.js");
+  const { systemClock } = await import("@x1agent/kernel");
+  const batchApi = sharedKubeConfig.makeApiClient(k8s.BatchV1Api);
+  const namespace = process.env.K8S_NAMESPACE || "x1agent";
+  let reconciling = false;
+  const reconcile = async () => {
+    if (reconciling) return;
+    reconciling = true;
+    try {
+      const r = await reconcileSessionStatuses({
+        sessions: composedSessions,
+        clock: systemClock,
+        jobExists: async (sessionId) => {
+          try {
+            await batchApi.readNamespacedJob({
+              name: sessionJobName(sessionId),
+              namespace,
+            });
+            return true;
+          } catch (err) {
+            const status = (err as { code?: number; statusCode?: number }).code
+              ?? (err as { statusCode?: number }).statusCode;
+            if (status === 404) return false;
+            // Anything else (5xx, network) → throw so the tick
+            // counts it as an error and leaves the row alone.
+            throw err;
+          }
+        },
+        notify: async (session, completedAt, errorMessage) => {
+          if (!providerNats) return;
+          const { publishStateChangeWake } = await import(
+            "./orchestration/wake-publisher.js"
+          );
+          await publishStateChangeWake(
+            {
+              nc: providerNats,
+              sessions: composedSessions,
+              agents: composedAgents,
+            },
+            session,
+            "failed",
+            completedAt,
+            errorMessage,
+          );
+        },
+        gracePeriodMs: SESSION_RECONCILE_GRACE_MS,
+      });
+      if (r.flipped > 0 || r.errors > 0) {
+        console.log(
+          `[sessions] reconciled ${r.flipped}/${r.checked} ghost sessions (errors=${r.errors})`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[sessions] reconcile tick crashed:",
+        (err as Error).message,
+      );
+    } finally {
+      reconciling = false;
+    }
+  };
+  const handle = setInterval(() => {
+    void reconcile();
+  }, SESSION_RECONCILE_INTERVAL_MS);
+  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+    (handle as unknown as { unref: () => void }).unref();
+  }
+  registerCleanup(() => clearInterval(handle));
+  void reconcile();
+  console.log(
+    `[sessions] reconciler started (interval=${SESSION_RECONCILE_INTERVAL_MS}ms grace=${SESSION_RECONCILE_GRACE_MS}ms)`,
+  );
+}
+
+// Activity watchdog — periodically sweeps children of live
+// orchestrators and fires watchdog wakes when they've been silent
+// past the backoff threshold. Requires NATS to publish wakes;
+// no-op if NATS isn't configured. See
+// docs/architecture/orchestration.md § Server-driven wakes.
+if (
+  providerNats &&
+  process.env.ACTIVITY_WATCHDOG !== "disabled"
+) {
+  const { startActivityWatchdog } = await import(
+    "./orchestration/activity-watchdog.js"
+  );
+  const watchdog = startActivityWatchdog({
+    sql: composedSql,
+    agents: composedAgents,
+    nc: providerNats,
+    intervalMs: Number(process.env.ACTIVITY_WATCHDOG_INTERVAL_MS || 60_000),
+    quietHints: composedQuietHints,
+  });
+  registerCleanup(() => watchdog.stop());
+}
+
+// Checkup timer — cadence-driven "just checking in" for
+// orchestrators with at least one active child. Complements the
+// watchdog (per-child silence detection) by giving the orchestrator
+// periodic glance-opportunities even when every child is emitting
+// events normally. See docs/architecture/orchestration.md §
+// Server-driven wakes.
+if (providerNats && process.env.CHECKUP_TIMER !== "disabled") {
+  const { startCheckupTimer } = await import(
+    "./orchestration/checkup-timer.js"
+  );
+  const checkup = startCheckupTimer({
+    sql: composedSql,
+    agents: composedAgents,
+    nc: providerNats,
+    intervalMs: Number(process.env.CHECKUP_TIMER_SWEEP_MS || 60_000),
+    checkupCadenceMs: Number(
+      process.env.CHECKUP_CADENCE_MS || 15 * 60_000,
+    ),
+  });
+  registerCleanup(() => checkup.stop());
 }
 
 console.log(`[api] listening on :${PORT}`);

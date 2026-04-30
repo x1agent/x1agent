@@ -234,13 +234,21 @@ export function natsConnectOpts(url: string) {
   const certFile = process.env.NATS_CLIENT_CERT;
   const keyFile = process.env.NATS_CLIENT_KEY;
   const caFile = process.env.NATS_CA_FILE;
+  // waitOnFirstConnect + unlimited reconnect: api boot can race NATS
+  // pod readiness. Without this, a single TIMEOUT during startup leaves
+  // env.natsConnection undefined and every provider call dies with
+  // "provider unavailable" until the api pod is restarted by hand.
+  const base = {
+    servers: url,
+    waitOnFirstConnect: true,
+    reconnect: true,
+    maxReconnectAttempts: -1,
+    reconnectTimeWait: 1000,
+  } as const;
   if (certFile && keyFile && caFile) {
-    return {
-      servers: url,
-      tls: { certFile, keyFile, caFile },
-    } as const;
+    return { ...base, tls: { certFile, keyFile, caFile } } as const;
   }
-  return { servers: url } as const;
+  return base;
 }
 
 export async function connectNats(url: string): Promise<NatsConnection> {

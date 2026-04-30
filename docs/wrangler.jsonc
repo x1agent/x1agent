@@ -1,0 +1,30 @@
+/**
+ * Cloudflare Workers Static Assets config for the docs site.
+ *
+ * The Cloudflare Pages project was created via the Workers-with-Static-Assets
+ * flow, so the build step runs `npx wrangler deploy` by default. Without
+ * this file, wrangler runs `astro add cloudflare` on every deploy — which
+ * triggers `npm install` and blows up on the monorepo's `workspace:*`
+ * protocol (npm doesn't understand it; bun does).
+ *
+ * This config tells wrangler the project is already set up as a
+ * pure-static asset upload, so it skips the auto-configure step and
+ * just ships `./dist/` as static files. No Worker runtime, no adapter,
+ * no npm re-install.
+ *
+ * Deploy flow: `bun run build` emits dist/ → wrangler uploads dist/
+ * to Cloudflare's edge → served at the Pages project's URL (plus
+ * x1agent.com once the custom domain is wired).
+ */
+{
+  "name": "x1agent",
+  // Pinned to the c.toivola account because the operator has multiple
+  // Cloudflare accounts on the wrangler login. Without this, every
+  // deploy hits "More than one account available" in non-interactive runs.
+  "account_id": "be928b4524439bc81b668ace95413d6c",
+  "compatibility_date": "2026-04-23",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}

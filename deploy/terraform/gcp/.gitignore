@@ -1,0 +1,14 @@
+# Local state — never commit. Operators should configure a remote
+# backend (GCS bucket per install) before sharing state across
+# operators or CI. Backend config goes in backend.tf (gitignored too,
+# since it usually carries the bucket name).
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+backend.tf
+
+# Per-install variable files. terraform.tfvars.example is committed;
+# the real files contain project IDs and shouldn't be.
+terraform.tfvars
+*.auto.tfvars
