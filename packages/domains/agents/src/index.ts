@@ -28,6 +28,8 @@ export * from "./application/can-access-agent.js";
 export { PostgresAgentRepository } from "./adapters/postgres/postgres-agent-repository.js";
 export { PostgresAgentGrantRepository } from "./adapters/postgres/postgres-agent-grant-repository.js";
 export { createAgentRoutes } from "./adapters/hono/routes.js";
+export { createAgentGrantRoutes } from "./adapters/hono/grant-routes.js";
+export type { AgentGrantRoutesConfig } from "./adapters/hono/grant-routes.js";
 
 // Fakes
 export * from "./application/fakes.js";
