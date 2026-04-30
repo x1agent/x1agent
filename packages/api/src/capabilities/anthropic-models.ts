@@ -92,8 +92,18 @@ async function listVertexModels(): Promise<AnthropicModel[]> {
     const id = `${baseId}@${ver}`;
     out.push({ id, label: prettifyVertexLabel(baseId, ver), source: "vertex" });
   }
-  // Newest first — version is yyyymmdd, so a string sort works.
-  out.sort((a, b) => b.id.localeCompare(a.id));
+  // Sort: GA (date-versioned) first, then "@default" preview labels
+  // last. Inside each group, newest first by string sort on the
+  // yyyymmdd version. The catalog lists @default aliases for some
+  // pre-GA models (Sonnet 4.6, Opus 4.7 etc.) that show up in the
+  // publisher list but aren't yet inference-servable — keep them
+  // visible but never auto-select.
+  out.sort((a, b) => {
+    const aDefault = a.id.endsWith("@default");
+    const bDefault = b.id.endsWith("@default");
+    if (aDefault !== bDefault) return aDefault ? 1 : -1;
+    return b.id.localeCompare(a.id);
+  });
   return out;
 }
 
@@ -109,7 +119,7 @@ function prettifyVertexLabel(baseId: string, version: string): string {
   const yyyymmdd = version.match(/^(\d{4})(\d{2})(\d{2})$/);
   const dateLabel = yyyymmdd
     ? `${yyyymmdd[1]}-${yyyymmdd[2]}-${yyyymmdd[3]}`
-    : version;
+    : `${version} — preview, may 400`;
   return `Claude ${cleaned} (${dateLabel})`;
 }
 
