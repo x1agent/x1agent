@@ -73,7 +73,7 @@ function isTabKey(value: string): value is TabKey {
 }
 
 export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
-  const { status, memberships, fetchMe } = useAuthStore();
+  const { status, memberships, fetchMe, isPlatformAdmin } = useAuthStore();
   const { bySlug, load, create, update, remove } = useAgentsStore();
   const isCreate = !agentSlug;
 
@@ -406,12 +406,23 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Input
-                        id="agent-model"
-                        placeholder="(deployment default)"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                      />
+                      <div className="rounded-md border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+                        No Claude models enabled in this deployment.{" "}
+                        {isPlatformAdmin ? (
+                          <>
+                            Curate the list at{" "}
+                            <a
+                              href="/admin/anthropic-models"
+                              className="underline"
+                            >
+                              /admin/anthropic-models
+                            </a>
+                            .
+                          </>
+                        ) : (
+                          <>Ask a platform admin to enable one.</>
+                        )}
+                      </div>
                     )}
                     {modelCatalog.length > 0 &&
                       model !== "" &&
@@ -424,10 +435,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         />
                       )}
                     <p className="text-xs text-zinc-500">
-                      The list comes from your provider's catalog
-                      (Vertex Model Garden or Anthropic's /v1/models).
-                      A model that appears here still has to be enabled
-                      in your Vertex project before sessions actually run.
+                      The list shows only models a platform admin has
+                      enabled at /admin/anthropic-models. The full Vertex
+                      catalog is intentionally not exposed — Vertex lists
+                      models that aren't actually servable in the
+                      deployment's region.
                     </p>
                   </div>
                 </CardContent>

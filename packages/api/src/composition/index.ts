@@ -112,7 +112,10 @@ import {
   createWorkspaceShareRoutes,
   createWorkspaceSharesIndexRoutes,
 } from "../shares/routes.js";
-import { createAdminAnthropicModelsRoutes } from "../capabilities/admin-routes.js";
+import {
+  createAdminAnthropicModelsRoutes,
+  listEnabledOverrides,
+} from "../capabilities/admin-routes.js";
 import { createAdminWorkspacesRoutes } from "../admin/workspaces-routes.js";
 
 export interface Composition {
@@ -328,6 +331,11 @@ export function compose(env: CompositionEnv): Composition {
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
+    // Strict mode mirrors the dropdown: agent.model must be in the
+    // admin-enabled set. Empty set rejects every model — users fall
+    // back to the deployment-wide ANTHROPIC_MODEL default until an
+    // admin curates at /admin/anthropic-models.
+    enabledModels: async () => listEnabledOverrides(env.sql),
   });
 
   const sessionsConfig = {
