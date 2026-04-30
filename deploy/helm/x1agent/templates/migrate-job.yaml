@@ -1,0 +1,72 @@
+{{- /*
+Pre-upgrade migration Job. Runs the api image's migrator against the
+in-cluster Postgres before helm rolls the api/app pods. The contract:
+"this image and its migrations always ship together." A new column the
+api code expects is in place before any pod that requires it starts.
+
+helm.sh/hook: pre-install,pre-upgrade — runs on `helm upgrade --install`
+                                        every time, before the workloads
+                                        are reconciled.
+helm.sh/hook-weight: -5              — runs before any other hooks (none today,
+                                        but reserved so we can add ordered
+                                        hooks later).
+helm.sh/hook-delete-policy:
+   before-hook-creation,hook-succeeded — old completed Job is GC'd before
+                                        the new one runs; on success the
+                                        Job is removed so `kubectl get jobs`
+                                        stays clean. Failed Jobs stay so
+                                        operators can inspect logs.
+
+Re-uses x1agent-secrets (DATABASE_URL bits) and postgres-credentials
+the same way the api Deployment does. Same image as api so the migrator
+script ships with the same code.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Helm replaces this Job between releases when delete-policy
+  # `before-hook-creation` fires. Suffix the chart's revision-isolated
+  # name so previous helm release histories don't collide.
+  name: x1agent-migrate
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # No retries — if the migration fails, surface it loud. Operators
+  # re-run `x1agent deploy` (or helm rollback) after fixing the SQL.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Re-use the api SA — it has the GSM accessor binding via
+      # Workload Identity, which is what the api uses to read secrets.
+      # Migrator only needs DATABASE_URL but using the api SA keeps
+      # one IAM surface.
+      serviceAccountName: {{ .Values.api.serviceAccountName }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.images.api.repository }}:{{ .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.images.api.pullPolicy }}
+          # Match the api Deployment CMD: cd to packages/api so bun's
+          # script-resolution + relative imports line up identically.
+          command: ["sh", "-c", "cd packages/api && bun run migrate"]
+          env:
+            - name: DATABASE_URL
+              value: "postgres://x1agent:$(POSTGRES_PASSWORD)@postgres:5432/x1agent"
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
