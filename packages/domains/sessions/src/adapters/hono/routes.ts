@@ -33,11 +33,21 @@ import {
   SessionNotTerminalError,
 } from "../../application/resume-session.js";
 
+// Lazy import keeps the adapters import surface small.
+import type { SessionShareRepository } from "../../ports/session-share-repository.js";
+
 export interface SessionRoutesConfig {
   agents: AgentRepository;
   sessions: SessionRepository;
   events: SessionEventRepository;
   adminGuard: AdminGuard;
+  /**
+   * Optional — when provided, session detail / events allow owner +
+   * sharees through, not just workspace admins. Required for the
+   * "sessions are private by default" policy. Composition root wires
+   * this from PostgresSessionShareRepository.
+   */
+  shares?: SessionShareRepository;
   /**
    * slug → workspace id, mirroring the agents + invitations routes. Used
    * only to reject cross-workspace agent ids in the URL.
@@ -273,20 +283,26 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     }
   };
 
-  // List every session across every agent in the workspace, newest first.
+  // List sessions visible to the caller. Owners + sharees see what
+  // they should; workspace admins/owners see everything. By default
+  // sessions are PRIVATE — a workspace member who didn't trigger the
+  // session and isn't on the share list won't see it in the list.
   app.get("/", async (c) => {
     const actor = cfg.getActor(c);
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    let isAdmin = true;
     try {
       await cfg.adminGuard.assertAdmin(actor.userId, wsId);
-    } catch (err) {
-      return c.json(errBody(err), errStatus(err) as 400);
+    } catch {
+      isAdmin = false;
     }
     const limitRaw = c.req.query("limit");
     const limit = Math.max(1, Math.min(500, Number(limitRaw ?? 100)));
-    const sessions = await cfg.sessions.listByWorkspace(wsId, limit);
+    const sessions = isAdmin
+      ? await cfg.sessions.listByWorkspace(wsId, limit)
+      : await cfg.sessions.listForUser(wsId, actor.userId, limit);
     // Enrich each row with the agent slug + name so the UI table can
     // render "which agent ran this" without a second fetch.
     const agentIds = Array.from(new Set(sessions.map((s) => s.agentId)));
@@ -316,12 +332,20 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     const agent = await cfg.agents.findById(session.agentId);
     if (!agent || agent.workspaceId !== wsId)
       return { error: "session_not_found" as const };
+    // Owner always passes — they triggered it.
+    if (session.triggeredByUserId === actorId) return { session, agent };
+    // Workspace admin/owner passes — they see everything in the ws.
     try {
       await cfg.adminGuard.assertAdmin(actorId, agent.workspaceId);
+      return { session, agent };
     } catch (err) {
+      // Not admin — try the share table.
+      if (cfg.shares) {
+        const share = await cfg.shares.findForUser(session.id, actorId);
+        if (share) return { session, agent };
+      }
       return { error: "forbidden" as const, raised: err };
     }
-    return { session, agent };
   };
 
   app.get("/:sessionId", async (c) => {

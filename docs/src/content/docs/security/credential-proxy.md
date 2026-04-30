@@ -68,3 +68,7 @@ containers:
 The proxy request includes a `scope` field (e.g., `files.read`, `calendar.write`, `email.send`). The sidecar checks this against the permission ledger before proceeding. If the user hasn't granted this scope for the current session, the request fails immediately.
 
 Scopes are registered by providers at startup. Each provider declares the scopes it needs. The sidecar's scope catalog is built from these registrations. The permission consent UI uses the catalog to show human-readable descriptions of what each scope allows.
+
+## Related: Git repository access
+
+The same trust-boundary pattern applies to git credentials. GitHub App installs are installed once at broad scope; x1agent narrows per-attachment at the sidecar, not at GitHub. See [Repository Access](/security/repo-access) for the attachment model, the `allow_push` gate, and why the working tree is always agent-writable.

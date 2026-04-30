@@ -4,8 +4,12 @@ import {
   appendSessionEvent,
   type SessionEventRepository,
   type SessionRepository,
+  type TokenUsageRepository,
 } from "@x1agent/domain-sessions";
+import type { AgentRepository } from "@x1agent/domain-agents";
+import { recordTokenUsageMetric } from "@x1agent/observability";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
+import { publishStateChangeWake } from "../orchestration/wake-publisher.js";
 
 /**
  * Subscribe to `x1.session.*.events`, parse the envelope published by
@@ -25,6 +29,18 @@ export interface StartSubscriberOptions {
   natsUrl: string;
   events: SessionEventRepository;
   sessions: SessionRepository;
+  /**
+   * Needed to look up the parent agent's `kind` when a child session
+   * hits a terminal state — we only fire a state_change wake into
+   * orchestrator parents, not worker parents.
+   */
+  agents: AgentRepository;
+  /**
+   * Per-turn token usage capture. Written on `agent.usage` events.
+   * Optional so older deployments that haven't migrated 021 yet can
+   * still ingest events without the subscriber crashing.
+   */
+  tokenUsage?: TokenUsageRepository;
 }
 
 export interface Subscriber {
@@ -99,6 +115,55 @@ export async function startSessionEventSubscriber(
         );
       }
 
+      // Token usage capture. The agent emits one `agent.usage` event
+      // per SDK turn (see packages/agent/src/normalize.ts). We persist
+      // a denormalized row keyed on (session_id, event_seq) so dashboards
+      // can answer "tokens by workspace × agent × day" without touching
+      // session_events. Idempotent on dedup index — NATS replays no-op.
+      // Session has agentId; the Agent has workspaceId; one extra lookup
+      // per usage event is cheap (~1/turn) compared to a tri-table join
+      // on every dashboard read.
+      if (parsed.type === "agent.usage" && opts.tokenUsage) {
+        try {
+          const session = await opts.sessions.findById(sessionId);
+          if (session) {
+            const agent = await opts.agents.findById(session.agentId);
+            if (agent) {
+              const p = (parsed.payload ?? {}) as {
+                model?: string;
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_creation_input_tokens?: number;
+                cache_read_input_tokens?: number;
+              };
+              const usage = {
+                sessionId,
+                workspaceId: agent.workspaceId,
+                agentId: session.agentId,
+                model: p.model ?? "unknown",
+                inputTokens: Number(p.input_tokens ?? 0),
+                outputTokens: Number(p.output_tokens ?? 0),
+                cacheCreationInputTokens: Number(
+                  p.cache_creation_input_tokens ?? 0,
+                ),
+                cacheReadInputTokens: Number(p.cache_read_input_tokens ?? 0),
+              };
+              await opts.tokenUsage.record({
+                ...usage,
+                eventSeq: parsed.sequence,
+                ts: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
+              });
+              // Bridge to OTel — no-op when collector isn't configured.
+              recordTokenUsageMetric(usage);
+            }
+          }
+        } catch (err) {
+          console.warn(
+            `[nats] token_usage write failed for session ${sessionId} seq=${parsed.sequence}: ${(err as Error).message}`,
+          );
+        }
+      }
+
       // Terminal events flip sessions.status so the UI and listing
       // queries see "done" immediately. Idempotent — running → terminal
       // transitions only, and a second terminal event on the same row
@@ -114,17 +179,36 @@ export async function startSessionEventSubscriber(
               result?: unknown;
               error?: string;
             };
+            const terminalStatus =
+              parsed.type === "session.completed" ? "complete" : "failed";
+            const completedAt = parsed.timestamp
+              ? new Date(parsed.timestamp)
+              : new Date();
+            const errorMessage = payload.error ? String(payload.error) : null;
             await opts.sessions.updateStatus(sessionId, {
-              status: parsed.type === "session.completed" ? "complete" : "failed",
-              completedAt: parsed.timestamp
-                ? new Date(parsed.timestamp)
-                : new Date(),
-              errorMessage: payload.error
-                ? String(payload.error)
-                : typeof payload.result === "string"
-                  ? null
-                  : null,
+              status: terminalStatus,
+              completedAt,
+              errorMessage,
             });
+
+            // If this session had an orchestrator parent, publish a
+            // `state_change` wake so the parent gets re-activated on
+            // its next turn. Silent for worker parents, human-spawned
+            // sessions, and orphans. See
+            // docs/architecture/orchestration.md § Server-driven wakes.
+            try {
+              await publishStateChangeWake(
+                { nc, sessions: opts.sessions, agents: opts.agents },
+                session,
+                terminalStatus,
+                completedAt,
+                errorMessage,
+              );
+            } catch (wakeErr) {
+              console.warn(
+                `[nats] state_change wake failed for session ${sessionId}: ${(wakeErr as Error).message}`,
+              );
+            }
           }
         } catch (err) {
           console.warn(

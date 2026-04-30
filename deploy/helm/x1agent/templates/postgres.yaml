@@ -1,0 +1,67 @@
+# In-cluster Postgres for v1. Sized small (db-f1-micro equivalent).
+# Follow-up: switch to Cloud SQL via a values flag for installs that
+# want managed DB. Spelling out a full Postgres operator (CNPG, Zalando)
+# is overkill for early customers — this StatefulSet works.
+{{- if .Values.infra.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.infra.postgres.image | quote }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: x1agent
+            - name: POSTGRES_DB
+              value: x1agent
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
+            - secretRef:
+                name: postgres-credentials   # supplies POSTGRES_PASSWORD
+          resources: {{- toYaml .Values.infra.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "x1agent", "-d", "x1agent"] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.infra.postgres.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.infra.postgres.storageSize }}
+{{- end }}

@@ -17,6 +17,9 @@ class StubClock {
   now() {
     return this.t;
   }
+  advance(ms: number) {
+    this.t = new Date(this.t.getTime() + ms);
+  }
 }
 
 class AllowEverything implements SpawnCheck {
@@ -46,12 +49,14 @@ beforeEach(() => {
 async function seedAgent(overrides: {
   slug: string;
   workspaceId?: typeof ws;
+  kind?: "worker" | "orchestrator" | "scheduled";
 }): Promise<Agent> {
   return agents.create({
     workspaceId: overrides.workspaceId ?? ws,
     slug: overrides.slug as never,
     name: overrides.slug,
     runtimeType: "claude_code" as never,
+    kind: overrides.kind,
     systemPrompt: "",
     heartbeatMd: "",
     schedule: null,
@@ -240,5 +245,109 @@ describe("spawnChildSession", () => {
       ),
       "agent_not_found",
     );
+  });
+
+  describe("orchestrator-as-child singleton semantics", () => {
+    async function seedParentAndSession() {
+      const parent = await seedAgent({ slug: "top-orchestrator" });
+      const parentSession = await sessions.create({
+        agentId: parent.id,
+        triggeredBy: "user",
+        triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: clock.now(),
+      });
+      return { parent, parentSession };
+    }
+
+    it("worker child always creates a new session", async () => {
+      const { parentSession } = await seedParentAndSession();
+      const worker = await seedAgent({ slug: "writer", kind: "worker" });
+
+      const first = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: worker.id },
+      );
+      clock.advance(1000);
+      const second = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: worker.id },
+      );
+
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it("orchestrator child with no live session — creates one", async () => {
+      const { parentSession } = await seedParentAndSession();
+      const sub = await seedAgent({ slug: "sub-orchestrator", kind: "orchestrator" });
+
+      const session = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sub.id },
+      );
+
+      expect(session.agentId).toBe(sub.id);
+      expect(session.parentSessionId).toBe(parentSession.id);
+    });
+
+    it("orchestrator child with a live session — returns the same session, no duplicate row", async () => {
+      const { parentSession } = await seedParentAndSession();
+      const sub = await seedAgent({ slug: "sub-orchestrator", kind: "orchestrator" });
+
+      const first = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sub.id },
+      );
+      const beforeCount = sessions.rows.length;
+
+      const second = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sub.id },
+      );
+
+      expect(second.id).toBe(first.id);
+      expect(sessions.rows.length).toBe(beforeCount);
+    });
+
+    it("orchestrator child whose prior session completed — new session", async () => {
+      const { parentSession } = await seedParentAndSession();
+      const sub = await seedAgent({ slug: "sub-orchestrator", kind: "orchestrator" });
+
+      const first = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sub.id },
+      );
+      await sessions.updateStatus(first.id, {
+        status: "complete",
+        completedAt: clock.now(),
+      });
+      clock.advance(1000);
+
+      const second = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sub.id },
+      );
+
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it("scheduled child behaves like worker", async () => {
+      const { parentSession } = await seedParentAndSession();
+      const sched = await seedAgent({ slug: "cron-worker", kind: "scheduled" });
+
+      const first = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sched.id },
+      );
+      clock.advance(1000);
+      const second = await spawnChildSession(
+        { agents, sessions, permission: new AllowEverything(), clock },
+        { parentSessionId: parentSession.id, childAgentId: sched.id },
+      );
+
+      expect(second.id).not.toBe(first.id);
+    });
   });
 });

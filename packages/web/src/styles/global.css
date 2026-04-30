@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #09090b;
+  --color-surface: #111114;
+  --color-surface-2: #18181c;
+  --color-border: #232328;
+  --color-border-strong: #2a2a30;
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-text-faint: #71717a;
+  --color-accent: #c5fb45;
+  --color-accent-soft: rgba(197, 251, 69, 0.12);
+  --color-accent-glow: rgba(197, 251, 69, 0.35);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-serif: "Instrument Serif", "Times New Roman", serif;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* The dotted grid backdrop behind the hero. Subtle — operators notice
+   when a marketing site has texture instead of flat fill. */
+.bg-grid {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.bg-noise {
+  position: relative;
+}
+.bg-noise::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* A faint rule that fades to transparent at the edges — used to
+   separate sections without committing a hard divider. */
+.rule-fade {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-border-strong) 20%,
+    var(--color-border-strong) 80%,
+    transparent
+  );
+}
+
+/* Animated dashed wire between the agent pod and a provider in the
+   trust diagram. Kept slow — fast animation reads as a "fake demo"
+   tell. */
+@keyframes dash-flow {
+  to { stroke-dashoffset: -24; }
+}
+.wire {
+  stroke-dasharray: 4 4;
+  animation: dash-flow 3s linear infinite;
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
+
+/* Tab content cross-fade. */
+.tab-panel { display: none; }
+.tab-panel[data-active="true"] { display: block; }

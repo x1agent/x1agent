@@ -13,6 +13,7 @@
     "@x1agent/domain-graph": "workspace:*",
     "@x1agent/domain-vector": "workspace:*",
     "@x1agent/kernel": "workspace:*",
+    "@x1agent/observability": "workspace:*",
     "nats": "^2.29.3"
   },
   "devDependencies": {

@@ -17,6 +17,7 @@ import {
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
 import { writeShareFiles } from "../shares/storage.js";
+import { StringCodec, JSONCodec } from "nats";
 
 /**
  * Endpoints only the sidecar calls (same-cluster). Gated on a shared
@@ -31,6 +32,26 @@ export interface InternalRoutesConfig {
   grants: PermissionGrantRepository;
   githubClient: GitHubAppClient | null;
   internalToken: string;
+  /**
+   * Optional NATS connection used by the `/sessions/:id/message-caller`
+   * route to publish a `message` wake into the parent orchestrator's
+   * input subject. When absent, `message_caller` calls return 503
+   * platform_wakes_disabled. Wired from the composition root.
+   */
+  natsConnection?: import("nats").NatsConnection;
+  /**
+   * Shared store for `expect_quiet_for` hints from children. The
+   * watchdog consults the same store. When absent, the hint route
+   * returns 503 and the watchdog runs without hint support.
+   */
+  quietHints?: import("../orchestration/quiet-hints.js").QuietHintStore;
+  /**
+   * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
+   * up the linked installation id directly on `agents`. When absent,
+   * the preview-deploy route returns 503. Narrow escape hatch until
+   * the agent-repo-store adapter exposes this as a first-class method.
+   */
+  sql?: import("postgres").Sql<Record<string, unknown>>;
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -248,6 +269,225 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
     const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
     return c.json({ ok: true, total_size: totalSize });
+  });
+
+  // Child → parent explicit signal. The child's sidecar calls this
+  // when the child invokes the `message_caller` MCP tool. We look
+  // up the child's parent, confirm the parent is alive + an
+  // orchestrator, and publish a `message` wake to the parent's
+  // input subject. See docs/architecture/orchestration.md §
+  // Server-driven wakes.
+  app.post("/sessions/:sessionId/message-caller", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      summary?: string;
+      body?: string | null;
+      needs_response?: boolean;
+    };
+    if (!body.summary || typeof body.summary !== "string") {
+      return c.json({ error: "missing_fields", need: ["summary"] }, 400);
+    }
+    if (!cfg.natsConnection) {
+      return c.json({ error: "platform_wakes_disabled" }, 503);
+    }
+
+    const child = await cfg.sessions.findById(sessionId);
+    if (!child) return c.json({ error: "session_not_found" }, 404);
+    if (!child.parentSessionId) {
+      return c.json({ error: "no_parent" }, 400);
+    }
+    const parent = await cfg.sessions.findById(child.parentSessionId);
+    if (!parent || parent.status === "complete" || parent.status === "failed") {
+      return c.json({ error: "parent_not_live" }, 410);
+    }
+    const parentAgent = await cfg.agents.findById(parent.agentId as never);
+    if (!parentAgent || parentAgent.kind !== "orchestrator") {
+      // Workers don't get platform wakes. Accept but no-op — the
+      // child's call succeeded, just nothing to route.
+      return c.json({ ok: true, delivered: false, reason: "parent_not_orchestrator" });
+    }
+    const childAgent = await cfg.agents.findById(child.agentId as never);
+    const { publishMessageWake } = await import(
+      "../orchestration/wake-publisher.js"
+    );
+    try {
+      await publishMessageWake(cfg.natsConnection, parent.id, {
+        childSessionId: child.id,
+        childSlug: String(childAgent?.slug ?? "<unknown>"),
+        summary: body.summary,
+        body: typeof body.body === "string" ? body.body : null,
+        needsResponse: body.needs_response === true,
+      });
+      return c.json({ ok: true, delivered: true });
+    } catch (err) {
+      return c.json(
+        { error: "publish_failed", message: (err as Error).message },
+        502,
+      );
+    }
+  });
+
+  // Child → watchdog "expect quiet for N seconds" hint. Called via
+  // the child's MCP tool `expect_quiet_for`. The watchdog checks
+  // the shared store before firing, so a child about to run a
+  // 10-minute npm install or test suite doesn't get escalated as
+  // if it were stuck. See docs/architecture/orchestration.md §
+  // Server-driven wakes.
+  app.post("/sessions/:sessionId/quiet-hint", async (c) => {
+    if (!cfg.quietHints) {
+      return c.json({ error: "quiet_hints_disabled" }, 503);
+    }
+    const sessionId = c.req.param("sessionId")!;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      seconds?: number;
+      reason?: string | null;
+    };
+    if (typeof body.seconds !== "number") {
+      return c.json({ error: "missing_fields", need: ["seconds"] }, 400);
+    }
+    cfg.quietHints.record(
+      sessionId,
+      body.seconds,
+      typeof body.reason === "string" ? body.reason : null,
+    );
+    return c.json({ ok: true });
+  });
+
+  // Agent → preview-provider. The sidecar forwards the agent's
+  // preview_deploy MCP call here. We:
+  //   1. Resolve the attached repo for the session's agent, pull the
+  //      installation_id.
+  //   2. Fetch .x1agent/preview.yaml at the requested sha via the
+  //      GitHub API (using a freshly minted installation token).
+  //   3. Fire a NATS request to the provider and relay the reply.
+  //
+  // Keeps the agent's MCP surface tiny: it names a repo + branch +
+  // sha; the platform handles installation lookup, preview.yaml
+  // retrieval, and provider routing.
+  app.post("/sessions/:sessionId/preview-deploy", async (c) => {
+    if (!cfg.natsConnection) {
+      return c.json({ error: "preview_provider_unavailable" }, 503);
+    }
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      repo_full_name?: string;
+      branch?: string;
+      commit_sha?: string;
+    };
+    if (!body.repo_full_name || !body.branch || !body.commit_sha) {
+      return c.json(
+        {
+          error: "missing_fields",
+          need: ["repo_full_name", "branch", "commit_sha"],
+        },
+        400,
+      );
+    }
+
+    const session = await cfg.sessions.findById(sessionId);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+
+    if (!cfg.sql) {
+      return c.json(
+        { error: "preview_provider_unavailable", message: "sql not wired" },
+        503,
+      );
+    }
+
+    // Look up the attached installation for this session's agent. The
+    // agent_repos linkage already provides it; we query directly here
+    // rather than add a new port just for this path.
+    const agent = await cfg.agents.findById(session.agentId as never);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    const linkedRows = await cfg.sql<
+      { installation_id: string | null }[]
+    >`SELECT linked_installation_id AS installation_id FROM agents WHERE id = ${session.agentId}`;
+    const installationIdStr = linkedRows[0]?.installation_id;
+    if (!installationIdStr) {
+      return c.json(
+        {
+          error: "no_installation",
+          message:
+            "Agent has no linked GitHub installation — attach a repo first.",
+        },
+        400,
+      );
+    }
+    const installationId = Number(installationIdStr);
+
+    // Fetch preview.yaml at the requested sha. Mint a token directly
+    // rather than going through a second HTTP hop to ourselves; the
+    // logic is the same as the git-credential route.
+    const tokenRes = await fetch(
+      `http://localhost:${process.env.API_PORT ?? "30001"}/api/internal/git-credential?installation_id=${installationId}`,
+      { headers: { "X-Internal-Token": cfg.internalToken } },
+    );
+    if (!tokenRes.ok) {
+      return c.json(
+        { error: "token_mint_failed", message: `status ${tokenRes.status}` },
+        502,
+      );
+    }
+    const { token } = (await tokenRes.json()) as {
+      username: string;
+      token: string;
+    };
+
+    const ghRes = await fetch(
+      `https://api.github.com/repos/${body.repo_full_name}/contents/.x1agent/preview.yaml?ref=${encodeURIComponent(body.commit_sha)}`,
+      {
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: "application/vnd.github.raw",
+        },
+      },
+    );
+    if (!ghRes.ok) {
+      return c.json(
+        {
+          error: "preview_yaml_missing",
+          message: `GitHub returned ${ghRes.status} for ${body.repo_full_name}@${body.commit_sha}:.x1agent/preview.yaml`,
+        },
+        ghRes.status === 404 ? 400 : 502,
+      );
+    }
+    const previewYaml = await ghRes.text();
+
+    // NATS request/reply to the provider. Timeout covers a full
+    // Kaniko build + Deployment ready — hence 20 minutes.
+    const jc = JSONCodec();
+    const sc = StringCodec();
+    void sc;
+    try {
+      const reply = await cfg.natsConnection.request(
+        "x1.providers.preview.provision",
+        jc.encode({
+          preview_yaml: previewYaml,
+          repo_full_name: body.repo_full_name,
+          branch: body.branch,
+          commit_sha: body.commit_sha,
+          installation_id: installationId,
+        }),
+        { timeout: 20 * 60 * 1000 },
+      );
+      const result = jc.decode(reply.data) as
+        | { ok: true; url: string; slug: string; image: string; job_name: string }
+        | { ok: false; code: string; message: string };
+      if (!result.ok) {
+        const status =
+          result.code === "invalid_preview_spec" ? 400 : 502;
+        return c.json(result, status);
+      }
+      return c.json(result);
+    } catch (err) {
+      return c.json(
+        {
+          error: "provider_request_failed",
+          message: (err as Error).message,
+        },
+        504,
+      );
+    }
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.

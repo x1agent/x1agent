@@ -1,0 +1,93 @@
+# Ingress for app + api on the install's base domain.
+#
+# Stack:
+#   - ingress-nginx as the Ingress controller (operator helm-installs it
+#     before this chart). Same controller as local OrbStack dev, so
+#     manifests are portable across environments.
+#   - cert-manager for TLS via Let's Encrypt + DNS-01 challenge against
+#     Cloud DNS. cert-manager.io/cluster-issuer annotation tells it
+#     which ClusterIssuer to use; the Certificate is created separately
+#     in cert-manager-issuer.yaml so renewals are decoupled from
+#     Ingress lifecycle.
+#
+# The wildcard preview ingress lives in preview-ingress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x1agent-main
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  tls:
+    - hosts:
+        - {{ include "x1agent.appHost" . | quote }}
+        - {{ include "x1agent.apiHost" . | quote }}
+      # Secret populated by the matching Certificate in cert-manager-issuer.yaml.
+      secretName: x1agent-app-api-tls
+  rules:
+    - host: {{ include "x1agent.appHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 80
+    - host: {{ include "x1agent.apiHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+---
+# Public WebSocket endpoint for browsers to receive session events
+# from NATS. ingress-nginx terminates TLS with a Let's Encrypt cert
+# (the Certificate at the bottom of cert-manager-issuer.yaml).
+#
+# The proxy-read-timeout is bumped to 1h because NATS WS connections
+# are long-lived; the default 60s would tear them down constantly.
+# Annotations match the canonical nginx WebSocket pattern.
+#
+# v1 SECURITY NOTE: NATS treats unauthenticated WS clients as user
+# CN=x1agent-api (see nats.conf `no_auth_user`). That means anyone
+# reaching this endpoint gets the api's full publish/subscribe perms
+# until the JWT auth_callout flow ships. Acceptable for single-user
+# deployments; lock down before opening to other tenants.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x1agent-nats-ws
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  tls:
+    - hosts:
+        - {{ include "x1agent.natsWsHost" . | quote }}
+      secretName: x1agent-nats-ws-tls
+  rules:
+    - host: {{ include "x1agent.natsWsHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nats
+                port:
+                  number: 8080

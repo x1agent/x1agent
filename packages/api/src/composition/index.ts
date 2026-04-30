@@ -1,3 +1,5 @@
+import { NatsMessageInjector } from "../orchestration/nats-message-injector.js";
+import { QuietHintStore } from "../orchestration/quiet-hints.js";
 import {
   GoogleAuthProvider,
   DevBypassAuthProvider,
@@ -6,6 +8,7 @@ import {
   PostgresPersonRepository,
   PostgresLinkAttemptStore,
   PostgresPasswordCredentialStore,
+  PostgresAccessGate,
   createAuthRoutes,
   createRequireAuth,
   type AuthProvider,
@@ -15,6 +18,7 @@ import {
 import {
   PostgresMembershipRepository,
   PostgresWorkspaceRepository,
+  createWorkspaceRoutes,
 } from "@x1agent/domain-workspaces";
 import {
   CryptoTokenGenerator,
@@ -29,8 +33,12 @@ import {
 import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
+  PostgresTokenUsageRepository,
+  PostgresSessionShareRepository,
   createSessionRoutes,
   createWorkspaceSessionRoutes,
+  createWorkspaceTokenUsageRoutes,
+  createSessionShareRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
   type SessionEventRepository,
@@ -104,15 +112,21 @@ import {
   createWorkspaceShareRoutes,
   createWorkspaceSharesIndexRoutes,
 } from "../shares/routes.js";
+import { createAdminAnthropicModelsRoutes } from "../capabilities/admin-routes.js";
 
 export interface Composition {
   authRoutes: Hono;
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
+  /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
+  workspaceCreateRoutes: Hono;
   agentRoutes: Hono;
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
+  workspaceTokenUsageRoutes: Hono;
   workspaceShareRoutes: Hono;
+  /** /api/workspaces/:slug/sessions/:sessionId/user-shares — per-user share grants. */
+  sessionShareRoutes: Hono;
   workspaceSharesIndexRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
@@ -123,6 +137,8 @@ export interface Composition {
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
   workspaceImageCatalogRoutes: Hono;
+  /** /api/admin/anthropic/models — platform-admin model curation. */
+  adminAnthropicModelsRoutes: Hono;
   sharedResources: SharedResourceRepository;
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
@@ -134,6 +150,8 @@ export interface Composition {
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
   sessionEvents: SessionEventRepository;
+  /** Per-turn token usage rows for billing + dashboards. */
+  tokenUsage: PostgresTokenUsageRepository;
   /** Exposed for the Job watcher — reads directly without reconnecting. */
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
@@ -143,6 +161,12 @@ export interface Composition {
   agentRepoStore: PostgresAgentRepoStore;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
+  /**
+   * Shared in-memory store of child `expect_quiet_for` hints. The
+   * activity watchdog consults this to skip legitimately-quiet
+   * children on the current sweep.
+   */
+  quietHints: QuietHintStore;
 }
 
 export interface CompositionEnv {
@@ -150,6 +174,14 @@ export interface CompositionEnv {
   jwtSecret: string;
   googleClientId: string;
   googleClientSecret: string;
+  /**
+   * OAuth scopes requested at Google sign-in. Defaults to identity-only
+   * (openid + email + profile). Operators expand this to include
+   * Drive / Calendar / Gmail scopes when those providers are enabled,
+   * so the consent screen prompts the user on first sign-in instead
+   * of after-the-fact when they hit a feature.
+   */
+  googleScopes?: readonly string[];
   appUrl: string;
   apiUrl: string;
   allowedDomains: readonly string[];
@@ -196,6 +228,8 @@ export function compose(env: CompositionEnv): Composition {
   const agents = new PostgresAgentRepository(env.sql);
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
+  const sessionShares = new PostgresSessionShareRepository(env.sql);
+  const tokenUsage = new PostgresTokenUsageRepository(env.sql);
   const permissionGrants = new PostgresPermissionGrantRepository(env.sql);
   const collectionsRepo = new PostgresCollectionRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
@@ -205,6 +239,7 @@ export function compose(env: CompositionEnv): Composition {
   const google = new GoogleAuthProvider({
     clientId: env.googleClientId,
     clientSecret: env.googleClientSecret,
+    scopes: env.googleScopes,
   });
 
   let bypass: AuthProvider | undefined;
@@ -241,6 +276,11 @@ export function compose(env: CompositionEnv): Composition {
     apiUrl: env.apiUrl,
     allowedDomains: env.allowedDomains,
     platformAdmins: env.platformAdmins,
+    // Lets emails outside the domain whitelist sign in if they have a
+    // pending invitation or an existing user row. Always wired in
+    // prod; the in-memory tests still use the in-memory fake or skip
+    // accessGate entirely.
+    accessGate: new PostgresAccessGate(env.sql),
     bypassProvider: bypass,
     persons,
     linkAttempts,
@@ -292,6 +332,9 @@ export function compose(env: CompositionEnv): Composition {
     sessions,
     events: sessionEvents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    // Lets non-admin sharees read sessions they were granted; without
+    // this the only ways through loadScoped are owner + admin.
+    shares: sessionShares,
     resolveWorkspace: async (slug: string) =>
       resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
@@ -300,6 +343,24 @@ export function compose(env: CompositionEnv): Composition {
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
+  const workspaceTokenUsageRoutes = createWorkspaceTokenUsageRoutes({
+    tokenUsage,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
+  // POST /api/workspaces — platform-admin-only. Used by NoAccessRoot's
+  // "Create your first workspace" CTA on a fresh install. Auth gating
+  // (platform admin check) lives inside createWorkspace, not here.
+  const workspaceCreateRoutes = createWorkspaceRoutes({
+    workspaces,
+    memberships,
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+    getActor,
+  });
 
   const workspaceShareRoutes = createWorkspaceShareRoutes({
     sessions,
@@ -320,8 +381,36 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  const sessionShareRoutes = createSessionShareRoutes({
+    sessions,
+    shares: sessionShares,
+    findUserIdByEmail: async (email) => {
+      const u = await users.findByEmail(email as Email);
+      return u?.id ?? null;
+    },
+    isWorkspaceAdmin: async (userId, workspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m?.role === "admin" || m?.role === "owner";
+    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
   const tickScheduler = () =>
-    scheduleDueSessions({ agents, sessions, clock: systemClock });
+    scheduleDueSessions({
+      agents,
+      sessions,
+      clock: systemClock,
+      injector: env.natsConnection
+        ? new NatsMessageInjector(env.natsConnection)
+        : undefined,
+    });
+
+  // One QuietHintStore shared between the internal route that
+  // receives `expect_quiet_for` from children and the watchdog
+  // that consults them. Lives on the api process in-memory.
+  const quietHints = new QuietHintStore();
 
   const internalRoutes = createInternalRoutes({
     events: sessionEvents,
@@ -330,6 +419,9 @@ export function compose(env: CompositionEnv): Composition {
     grants: permissionGrants,
     githubClient,
     internalToken: env.internalToken ?? "",
+    natsConnection: env.natsConnection,
+    quietHints,
+    sql: env.sql,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -562,14 +654,23 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  const adminAnthropicModelsRoutes = createAdminAnthropicModelsRoutes({
+    sql: env.sql,
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+  });
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
     publicInvitationRoutes,
+    workspaceCreateRoutes,
     agentRoutes,
     sessionRoutes,
     workspaceSessionRoutes,
+    workspaceTokenUsageRoutes,
     workspaceShareRoutes,
+    sessionShareRoutes,
     workspaceSharesIndexRoutes,
     internalRoutes,
     githubInstallRoutes,
@@ -580,6 +681,7 @@ export function compose(env: CompositionEnv): Composition {
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,
     workspaceImageCatalogRoutes,
+    adminAnthropicModelsRoutes,
     sharedResources,
     postgresBranches,
     postgresProvisioner,
@@ -590,6 +692,7 @@ export function compose(env: CompositionEnv): Composition {
     tokenizer,
     users,
     sessionEvents,
+    tokenUsage,
     sql: env.sql,
     agents,
     sessions,
@@ -597,5 +700,6 @@ export function compose(env: CompositionEnv): Composition {
     collections: collectionsRepo,
     agentRepoStore: agentRepos,
     tickScheduler,
+    quietHints,
   };
 }

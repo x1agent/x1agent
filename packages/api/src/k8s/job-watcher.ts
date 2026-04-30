@@ -37,6 +37,7 @@ import {
 } from "@x1agent/agent-resources-redis";
 import {
   buildSessionJob,
+  sessionJobName,
   type AttachedCollectionForPod,
   type LinkedRepoForPod,
 } from "./pod-spec.js";
@@ -58,13 +59,45 @@ export interface JobWatcherConfig {
   natsUrl: string;
   anthropicApiKey?: string;
   /**
+   * Anthropic credential source. "vertex" makes session pods call
+   * Claude through Google Vertex AI using Workload Identity (no key
+   * file needed); "api_key" uses the direct Anthropic API. Defaults
+   * to api_key for back-compat with local dev paths that have no
+   * notion of Vertex.
+   */
+  anthropicProvider?: "api_key" | "vertex";
+  /** Required when anthropicProvider === "vertex". E.g. "us-east5". */
+  vertexRegion?: string;
+  /** Required when anthropicProvider === "vertex". GCP project hosting Vertex models. */
+  vertexProjectId?: string;
+  /**
+   * Override the Claude Code SDK's default model. Vertex installs
+   * may need an explicit pin to a model that's been rolled out to
+   * their CLOUD_ML_REGION. Set via ANTHROPIC_MODEL env on the api.
+   */
+  anthropicModel?: string;
+  /**
+   * K8s ServiceAccount the session pod runs as. Required for the
+   * Vertex path (the SA carries the Workload Identity annotation).
+   * Helm chart's session-sa.yaml creates "x1agent-session"; the api
+   * forwards that name here.
+   */
+  sessionServiceAccount?: string;
+  /**
+   * K8s Secret name for the sidecar's NATS client cert. See
+   * pod-spec.ts SessionPodSpec.natsClientTlsSecret for details.
+   * Default "nats-tls" (local dev); prod chart sets to
+   * "nats-session-client-tls" (cert-manager-issued).
+   */
+  natsClientTlsSecret?: string;
+  /**
    * Dev-only: host home directory to mount `.claude` + `.claude.json`
    * from, for Max users. Empty string / undefined disables the mount.
    */
   hostHomeDir?: string;
   /**
    * Dev-only: host path to the exported Max OAuth credentials file.
-   * Mounted to `/home/node/.claude/.credentials.json` so Claude Code
+   * Mounted to `/home/agent/.claude/.credentials.json` so Claude Code
    * authenticates without an API key.
    */
   hostClaudeCredentialsFile?: string;
@@ -89,6 +122,20 @@ export interface JobWatcherConfig {
   postgresBranches?: PostgresBranchRepository | null;
   redisMinter?: RedisBranchMinter | null;
   redisBranches?: RedisBranchRepository | null;
+  /**
+   * Called when a session reaches a terminal state via the reaper
+   * path (pod disappeared, Job failed without an emitted
+   * session.completed event). Fires the state_change wake into
+   * any orchestrator parent so both the NATS-subscriber path and
+   * the reaper path produce the same wake behavior.
+   * See docs/architecture/orchestration.md § Server-driven wakes.
+   */
+  wakePublisher?: (
+    session: import("@x1agent/domain-sessions").Session,
+    terminalStatus: "complete" | "failed",
+    completedAt: Date,
+    errorMessage: string | null,
+  ) => Promise<void>;
 }
 
 export interface JobWatcherHandle {
@@ -224,6 +271,7 @@ async function launchSession(
         branch: r.branch,
         mount_path: r.mountPath,
         auto_push: r.autoPush,
+        allow_push: r.allowPush,
         installation_id: installation as unknown as number,
       }))
     : [];
@@ -287,13 +335,26 @@ async function launchSession(
     sessionId: session.id,
     agentId: agent.id,
     agentSlug: agent.slug,
+    agentKind: agent.kind,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     agentPrompt: initialPrompt,
     systemPromptText: composedSystemPrompt,
     heartbeatMd: agent.heartbeatMd,
     sessionMode: "interactive",
-    idleTimeoutMs: 900_000,
+    // Orchestrators are long-lived singletons that legitimately sit
+    // idle for hours between user messages or child signals. Letting
+    // the agent container exit on idle (exit code 0) defeats the
+    // whole pod-lifetime contract — restartPolicy: OnFailure won't
+    // revive it because a clean exit isn't a failure. Bump the idle
+    // cap to 7 days so the agent parks on its NATS subscription
+    // instead of exiting. Workers keep the 15-min disposable idle.
+    // Proper fix is the server-driven wake model described in
+    // docs/architecture/orchestration.md § Server-driven wakes:
+    // platform injects user.message per wake kind when events fire,
+    // orchestrator ends its turn between wakes. No blocking tool.
+    idleTimeoutMs:
+      agent.kind === "orchestrator" ? 7 * 24 * 60 * 60 * 1000 : 900_000,
     maxTurns: 200,
     repos,
     collections,
@@ -304,12 +365,71 @@ async function launchSession(
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
+    anthropicProvider: cfg.anthropicProvider,
+    // Per-agent override (agent.model) wins over the deployment-wide
+    // default (cfg.anthropicModel from ANTHROPIC_MODEL env). NULL on
+    // both sides leaves the SDK to pick its built-in default.
+    anthropicModel: agent.model ?? cfg.anthropicModel,
+    vertexRegion: cfg.vertexRegion,
+    vertexProjectId: cfg.vertexProjectId,
+    serviceAccountName: cfg.sessionServiceAccount,
+    natsClientTlsSecret: cfg.natsClientTlsSecret,
     hostHomeDir: cfg.hostHomeDir,
     hostClaudeCredentialsFile: cfg.hostClaudeCredentialsFile,
     namespace: cfg.namespace,
     sessionCredentialsSecretName: credentialsSecretName,
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,
   });
+
+  // Orchestrator pods use a PVC-backed workspace so the SDK transcript
+  // survives pod restarts (OnFailure restarts rehydrate from it, and
+  // the session singleton means the same PVC is reused forever). We
+  // have to create the PVC before the Job or the Kubernetes scheduler
+  // fails to bind and parks the Pod in Pending. Idempotent — if it
+  // already exists we treat that as fine.
+  if (agent.kind === "orchestrator") {
+    const pvcName = sessionJobName(session.id);
+    const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+    try {
+      await coreApi.createNamespacedPersistentVolumeClaim({
+        namespace: cfg.namespace,
+        body: {
+          apiVersion: "v1",
+          kind: "PersistentVolumeClaim",
+          metadata: {
+            name: pvcName,
+            namespace: cfg.namespace,
+            labels: {
+              app: "x1agent",
+              component: "agent-session-workspace",
+              "session-id": session.id,
+              "agent-id": agent.id,
+              "agent-kind": agent.kind,
+            },
+          },
+          spec: {
+            accessModes: ["ReadWriteOnce"],
+            resources: { requests: { storage: "5Gi" } },
+          },
+        },
+      });
+    } catch (err) {
+      const code = (err as { code?: number }).code;
+      if (code !== 409) {
+        const message = (err as { body?: { message?: string } }).body?.message
+          ?? (err as Error).message;
+        console.warn(
+          `[jobs] PVC create for session ${session.id} failed: ${message}`,
+        );
+        await cfg.sessions.updateStatus(sessionId, {
+          status: "failed",
+          completedAt: new Date(),
+          errorMessage: `pvc create: ${message}`,
+        });
+        return;
+      }
+    }
+  }
 
   try {
     await batchApi.createNamespacedJob({ namespace: cfg.namespace, body: job });
@@ -421,15 +541,21 @@ async function reconcileRunning(
     if ((status.succeeded ?? 0) >= 1) {
       await markTerminal(cfg, row.id, true, null);
     } else if (
-      (status.failed ?? 0) > 0 ||
       status.conditions?.some((c) => c.type === "Failed" && c.status === "True")
     ) {
+      // `conditions[Failed]=True` is the Job-level terminal signal — set
+      // by K8s after the Job exhausts backoffLimit. `status.failed` is
+      // the running count of pod failures inside the Job; for
+      // orchestrators (OnFailure + backoffLimit: 6) a single pod
+      // restart bumps it to 1 without the Job itself being done. Only
+      // the condition is authoritative.
       const failureReason =
-        status.conditions?.find((c) => c.type === "Failed")?.message ??
+        status.conditions.find((c) => c.type === "Failed")?.message ??
         "job failed";
       await markTerminal(cfg, row.id, false, failureReason);
     }
-    // else: Job is still running; leave the row as 'running'.
+    // else: Job is still running (possibly with failed pods being
+    // retried up to backoffLimit); leave the row as 'running'.
   }
 }
 
@@ -445,14 +571,32 @@ async function markTerminal(
   if (!session || session.status === "complete" || session.status === "failed") {
     return;
   }
+  const terminalStatus = success ? "complete" : "failed";
+  const completedAt = new Date();
   await cfg.sessions.updateStatus(sessionId as SessionId, {
-    status: success ? "complete" : "failed",
-    completedAt: new Date(),
+    status: terminalStatus,
+    completedAt,
     errorMessage,
   });
   console.log(
-    `[jobs] reaped session ${sessionId} as ${success ? "complete" : "failed"}${errorMessage ? `: ${errorMessage}` : ""}`,
+    `[jobs] reaped session ${sessionId} as ${terminalStatus}${errorMessage ? `: ${errorMessage}` : ""}`,
   );
+
+  // Reaper-triggered terminations (pod crashed before emitting a
+  // terminal event, Job vanished, etc.) bypass the NATS subscriber
+  // and therefore bypass its state_change wake hook. Fire the wake
+  // from here too so orchestrator parents are notified consistently
+  // regardless of which termination path ran. See
+  // docs/architecture/orchestration.md § Server-driven wakes.
+  if (cfg.wakePublisher) {
+    try {
+      await cfg.wakePublisher(session, terminalStatus, completedAt, errorMessage);
+    } catch (err) {
+      console.warn(
+        `[jobs] state_change wake failed for session ${sessionId}: ${(err as Error).message}`,
+      );
+    }
+  }
 }
 
 // Export used by unit tests to avoid hitting a real cluster.

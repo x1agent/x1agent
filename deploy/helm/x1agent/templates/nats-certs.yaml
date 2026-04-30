@@ -1,0 +1,105 @@
+# NATS mTLS certs — issued by the internal CA in cert-manager-issuer.yaml.
+#
+# Three certs:
+#   - nats-server         — server cert NATS presents on :4222 + :8080
+#   - nats-api-client     — client cert the api uses to connect
+#   - nats-session-client — client cert each session sidecar uses
+#
+# v1 uses a SHARED session client cert across all sessions. Per-session
+# certs (which would let NATS subject ACLs pin a sidecar to its own
+# session-id subjects via the cert CN) is the open question called
+# out in docs/configuration/nats-mtls.md — deferred until we ship a
+# small csi-driver / cert-manager Job that issues per-pod.
+#
+# CN values are LOAD-BEARING: NATS extracts CN as the username via
+# `verify_and_map: true` and matches it against the authorization users
+# in nats.conf (see nats.yaml). Don't change without updating both.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nats-server
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: nats-server-tls
+  duration: 8760h     # 1 year
+  renewBefore: 720h   # 30d
+  commonName: nats-server
+  dnsNames:
+    - nats
+    - nats.{{ .Release.Namespace }}
+    - nats.{{ .Release.Namespace }}.svc
+    - nats.{{ .Release.Namespace }}.svc.cluster.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - server auth
+  issuerRef:
+    name: x1agent-internal-ca-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nats-api-client
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: nats-api-client-tls
+  duration: 8760h
+  renewBefore: 720h
+  # CN matches `authorization.users` entry in nats.conf. NATS uses CN
+  # as username via verify_and_map.
+  commonName: x1agent-api
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - client auth
+  issuerRef:
+    name: x1agent-internal-ca-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nats-session-client
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: nats-session-client-tls
+  duration: 8760h
+  renewBefore: 720h
+  commonName: session-sidecar
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - client auth
+  issuerRef:
+    name: x1agent-internal-ca-issuer
+    kind: ClusterIssuer
+---
+# Cert used by every provider Deployment (graph-surrealdb,
+# messaging-slack, preview, ...). Shared across providers in v1; per-
+# provider certs would let NATS subject ACLs pin a single provider to
+# its own subject tree (e.g. graph can't accidentally subscribe to
+# messaging). Acceptable for v1 because the provider plane is fully
+# operator-managed — no untrusted code runs as a provider.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nats-provider-client
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: nats-provider-client-tls
+  duration: 8760h
+  renewBefore: 720h
+  # CN matches the authorization.users entry in nats.conf.
+  commonName: x1agent-provider
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - client auth
+  issuerRef:
+    name: x1agent-internal-ca-issuer
+    kind: ClusterIssuer

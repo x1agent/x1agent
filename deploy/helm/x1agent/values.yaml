@@ -1,0 +1,329 @@
+# Default values for the x1agent chart.
+# `mise run install:plan` writes a deployment-specific override at
+# deploy/helm/x1agent/values.<deployment>.yaml from your .env.local.
+
+# ============================================================================
+# Identity
+# ============================================================================
+
+# Used in resource names + labels.
+nameOverride: ""
+
+# Base domain for derived URLs. app.<domain>, api.<domain>, *.preview.<domain>.
+baseDomain: x1agent.com
+
+# ============================================================================
+# Cloud bindings (only GCP supported in v1)
+# ============================================================================
+
+cloud:
+  provider: gcp
+  gcp:
+    # Project ID where this install lives.
+    projectId: ""
+    # Region for the GKE cluster + cloud-managed certs.
+    region: us-central1
+    # GSA emails Workload Identity binds to. Terraform outputs.
+    workloadIdentityServiceAccount: ""
+    sessionWorkloadIdentityServiceAccount: ""
+    # Artifact Registry hosting the prod images.
+    artifactRegistry: us-central1-docker.pkg.dev/REPLACE/x1agent
+
+# ============================================================================
+# TLS — cert-manager + Let's Encrypt via DNS-01 (Cloud DNS).
+#
+# clusterIssuer = name of the prod ClusterIssuer the chart creates.
+#                 The "<name>-staging" issuer also gets created
+#                 automatically; flip the api/preview Certificate
+#                 issuerRef to it when iterating to avoid Let's Encrypt's
+#                 5-duplicate-certs-per-week rate limit on prod.
+# email         = ACME account email (Let's Encrypt sends renewal +
+#                 expiry alerts here). Defaults to first PLATFORM_ADMIN_EMAIL.
+# ============================================================================
+tls:
+  clusterIssuer: x1agent-letsencrypt
+  email: ""
+
+# ============================================================================
+# Anthropic credential source — switches what env the api + session pods get.
+#
+#   provider: vertex   — Workload Identity, no key file. Quota lives on the
+#                        GCP project. Recommended for GCP installs.
+#   provider: api_key  — Direct Anthropic API. Rate-limited per Anthropic
+#                        account tier; use only when Vertex isn't an option.
+#
+# Installer fills these in from .env.local at render time.
+# ============================================================================
+anthropic:
+  provider: vertex
+  # Set when provider=vertex. Region must be one Anthropic supports on
+  # Vertex (us-east5 covers the v4.x lineup).
+  vertexRegion: us-east5
+  # GCP project hosting the Vertex models — almost always the same as
+  # cloud.gcp.projectId, kept separate for cross-project Vertex setups.
+  vertexProjectId: ""
+
+# ============================================================================
+# Image overrides — installer fills in :tag from VERSION captured at apply.
+# ============================================================================
+
+images:
+  api:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  app:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  preview:
+    repository: ""
+    tag: latest
+    pullPolicy: Always
+  # The agent + sidecar images session pods spawn from. Same registry
+  # as the platform images. Installer fills repository at render time.
+  agent:
+    repository: ""
+    tag: latest
+  sidecar:
+    repository: ""
+    tag: latest
+
+# ============================================================================
+# api Deployment
+# ============================================================================
+
+api:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi }
+  serviceAccountName: x1agent-api
+  port: 30001
+
+# ============================================================================
+# app Deployment
+# ============================================================================
+
+app:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  port: 4322
+
+# ============================================================================
+# Ingress
+# ============================================================================
+
+ingress:
+  # Operator helm-installs ingress-nginx into the cluster (one-time);
+  # this chart's Ingress resources reference it via ingressClassName.
+  # Same controller as local OrbStack dev — no GKE-specific magic.
+  className: nginx
+
+# ============================================================================
+# Secrets — backed by Google Secret Manager via External Secrets Operator.
+# Each entry binds an env var the api/preview pods read to a GSM secret name.
+# Terraform creates the GSM Secret resources; you populate values via gcloud.
+# ============================================================================
+
+externalSecrets:
+  # Refresh interval — how often ESO syncs from GSM into K8s Secret.
+  refreshInterval: 5m
+  # The ClusterSecretStore created by terraform.
+  clusterSecretStoreName: x1agent-gsm
+  # Map of env-var name → GSM secret name.
+  # GSM secret names are derived: x1agent-<deployment>-<lowercased-env-name>.
+  bindings:
+    - envName: JWT_SECRET
+      gsmSecretName: x1agent-jwt-secret
+    - envName: API_INTERNAL_TOKEN
+      gsmSecretName: x1agent-api-internal-token
+    # ANTHROPIC_API_KEY: rendered into bindings only when
+    # anthropic.provider == api_key. The installer drops this entry on
+    # vertex installs so neither the GSM secret nor the env var are
+    # required. See templates/external-secrets.yaml for the gate.
+    - envName: ANTHROPIC_API_KEY
+      gsmSecretName: x1agent-anthropic-api-key
+    - envName: GOOGLE_OAUTH_CLIENT_ID
+      gsmSecretName: x1agent-google-oauth-client-id
+    - envName: GOOGLE_OAUTH_CLIENT_SECRET
+      gsmSecretName: x1agent-google-oauth-client-secret
+    - envName: GITHUB_APP_ID
+      gsmSecretName: x1agent-github-app-id
+    - envName: GITHUB_APP_SLUG
+      gsmSecretName: x1agent-github-app-slug
+    - envName: GITHUB_APP_CLIENT_ID
+      gsmSecretName: x1agent-github-app-client-id
+    - envName: GITHUB_APP_CLIENT_SECRET
+      gsmSecretName: x1agent-github-app-client-secret
+    - envName: GITHUB_APP_PRIVATE_KEY
+      gsmSecretName: x1agent-github-app-private-key
+    - envName: GITHUB_APP_WEBHOOK_SECRET
+      gsmSecretName: x1agent-github-app-webhook-secret
+    - envName: SLACK_BOT_TOKEN
+      gsmSecretName: x1agent-slack-bot-token
+    # Sentry DSNs — one per runtime so error rates / releases stay
+    # isolated. Optional; SDKs no-op when the env var is unset.
+    - envName: SENTRY_DSN_API
+      gsmSecretName: x1agent-sentry-dsn-api
+    - envName: SENTRY_DSN_APP
+      gsmSecretName: x1agent-sentry-dsn-app
+    - envName: SENTRY_DSN_SIDECAR
+      gsmSecretName: x1agent-sentry-dsn-sidecar
+
+# ============================================================================
+# Non-secret config — injected as inline env vars on api/app deployments.
+# Installer fills these in from .env.local at render time.
+# ============================================================================
+
+config:
+  PLATFORM_NAME: x1agent
+  PLATFORM_ADMIN_EMAILS: ""
+  ALLOWED_DOMAINS: ""
+  # OAuth scopes requested at Google sign-in. Space-separated. Default
+  # is identity-only — operators add Drive / Calendar / Gmail scopes
+  # when those providers are enabled so the consent screen prompts
+  # up-front. The Google Cloud OAuth consent screen ALSO needs the
+  # scopes added there before they'll work.
+  GOOGLE_OAUTH_SCOPES: ""
+  # Claude Code SDK model id. Empty = let the SDK pick. Set on Vertex
+  # installs when the SDK default isn't live in CLOUD_ML_REGION yet.
+  # Examples: "claude-sonnet-4@20250514" (vertex us-east5),
+  # "claude-sonnet-4-5@20250929" (current SDK default, broader rollout).
+  ANTHROPIC_MODEL: ""
+
+# ============================================================================
+# Provider domains — capability gating
+#
+# Each entry names which provider implementation handles a domain in
+# this deployment. The api echoes these through GET /api/capabilities;
+# the frontend hides UI surfaces (Collections tab, attach cards, etc.)
+# when the matching provider is "none".
+#
+# "none" is explicit by design: a missing key is ambiguous, an explicit
+# none documents the operator's choice in the install file. Set via
+# `mise run configure` → "Graph + vector provider?" prompt.
+#
+# Today only graph-surrealdb exists. Adding another graph implementation
+# means a new value here ("graph: neo4j" etc) plus a new provider
+# Deployment under templates/.
+# ============================================================================
+providers:
+  # Singleton domains. "none" disables the capability + skips the
+  # provider Deployment. Today the only graph kind is surrealdb, which
+  # also implements vector — so vector is locked to graph in v1.
+  graph: none
+  vector: none
+
+  # Per-kind config — only the block matching `graph` is consumed. New
+  # graph kinds (e.g. neo4j) add their own block here + a sibling
+  # provider-graph-<kind>.yaml template.
+  graphSurrealdb:
+    # Provider container image — built + pushed by `mise run install`.
+    # repository defaults to <artifactRegistry>/graph-surrealdb at render time.
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    # Backing SurrealDB datastore — single-node v1.
+    surrealImage: "surrealdb/surrealdb:v2.3"
+    surrealResources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
+    storageSize: 10Gi
+    # Override per cloud — empty leaves storage class to cluster default.
+    storageClass: ""
+    # Default for v1; rotate via GSM + ESO before going live.
+    rootPassword: "x1agent-surreal-root"
+
+# ============================================================================
+# Telemetry — OpenTelemetry collector + per-pod env wiring
+#
+# Off by default. Enable when:
+#   - The OpenTelemetry Operator is installed cluster-wide (operator
+#     runs `helm install opentelemetry-operator open-telemetry/opentelemetry-operator`)
+#   - You want traces/metrics/logs out of api/providers
+#
+# When enabled, a single OpenTelemetryCollector resource gets created in
+# the install namespace and api+app+providers receive env pointing at it.
+# Without that CRD installed, leave this off — the chart will fail to
+# apply otherwise.
+#
+# The default exporter config ships to GCP Cloud Operations (Trace,
+# Monitoring, Logging) — free up to small daily caps, scales with
+# project billing. Override `monitoring.opentelemetry.config` to swap
+# in Honeycomb/Datadog/Tempo/etc.
+# ============================================================================
+
+monitoring:
+  opentelemetry:
+    enabled: false
+    image: otel/opentelemetry-collector-contrib:0.105.0
+    serviceName: otel-collector
+    grpcPort: 4317
+    httpPort: 4318
+    # Resource cap — small enough that a constrained 1-node install can
+    # afford it; bump for high-volume deployments.
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    # Inline collector config. Defaults to a minimal pipeline that
+    # logs everything to stdout (cheap, zero deps). Replace with a
+    # real exporter (gcp / otlphttp / honeycomb) when you set up a
+    # backend.
+    config: |
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+      processors:
+        batch:
+          timeout: 5s
+          send_batch_size: 512
+      exporters:
+        debug:
+          verbosity: normal
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [debug]
+          metrics:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [debug]
+          logs:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [debug]
+
+# ============================================================================
+# In-cluster infra (deferred: Cloud SQL, managed NATS, GCS for backups).
+# v1 keeps Postgres + NATS in-cluster for cost — fine for early customers.
+# ============================================================================
+
+infra:
+  postgres:
+    enabled: true
+    image: postgres:16-alpine
+    storageSize: 20Gi
+    storageClass: standard-rwo
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
+  nats:
+    enabled: true
+    image: nats:2.10-alpine
+    resources:
+      requests: { cpu: 50m,  memory: 64Mi }
+      limits:   { cpu: 500m, memory: 512Mi }

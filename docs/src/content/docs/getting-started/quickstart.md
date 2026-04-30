@@ -118,9 +118,32 @@ The local install is a single-operator, single-machine configuration. It explici
 
 **OrbStack API stalls.** Symptoms: `kubectl` hangs or times out. Fix: `orbctl stop k8s && orbctl start k8s`, or fully restart the OrbStack app. Do not fall back to raw Docker containers — local dev requires OrbStack.
 
+**OrbStack VM wedges after a long session.** Symptoms: pods restart in tight loops, `kubectl logs` prints `rpc error: code = Unknown desc = docker does not support reopening container log files`, node disk fills up. Cause: OrbStack's Kubernetes uses Docker + cri-dockerd, and cri-dockerd's `ReopenContainerLog` CRI method is a [stub that always fails](https://github.com/Mirantis/cri-dockerd/issues/337). When any container's log file exceeds kubelet's `containerLogMaxSize` (10Mi by default), kubelet tries to rotate via `ReopenContainerLog` every 10 seconds and never succeeds. The file grows without bound on the container's original fd.
+
+The fix is to configure Docker's json-file log driver to rotate **before** kubelet's threshold, so kubelet never has a reason to call the broken method. Edit `~/.orbstack/config/docker.json`:
+
+```json
+{
+  "features": { "buildkit": true },
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "20"
+  }
+}
+```
+
+Then restart OrbStack (`orbctl stop && orbctl start`). Existing containers keep their old log config — the restart recreates them. Verify with `docker inspect <container-id> --format '{{json .HostConfig.LogConfig}}'`; the output should show `max-size: 10m, max-file: 20`.
+
+This is an OrbStack-local workaround. Production Kubernetes with containerd has no such bug.
+
 **Postgres says "too many clients already".** Restart the api pod: `kubectl -n x1agent rollout restart deploy/api-devspace`. A known dev-mode issue when many hot reloads stack tick loops — the fix is a single restart.
 
-**Agent pod stuck in "pending".** Usually a missing image. Rebuild from the repo: `devspace build -b agent,sidecar -n x1agent`. New sessions pick up the rebuild; in-flight sessions keep their old image.
+**Pod stuck on `(Still waiting...)` after a cluster restart.** The `api-devspace` or `app-devspace` pod logs just repeat `(Still waiting...)` and never boot. Cause: devspace's `devspace-restart-helper` watches for a `/.devspace/start` marker that the devspace client writes once the initial file-sync completes. After an OrbStack / kubelet restart the helper is re-running inside the new container but devspace's client-side sync state has already flipped to "synced," so the marker never arrives. Fix: `kubectl -n x1agent delete pod <pod-name>` — devspace's watch reconciles against the fresh pod, the sync runs again, the marker lands, the app boots. Affects any deployment listed under `devspace.yaml`'s `dev:` block.
+
+**New MCP tool or sidecar route not visible in a session.** The `x1agent-agent` and `x1agent-sidecar` images are built once and referenced verbatim by every session Job — `devspace dev`'s file-sync only overlays long-running pods (api, app), not Jobs. Changes under `packages/agent/` or `packages/sidecar/` need a manual image rebuild before new session pods pick them up. Run `mise run images:session` to rebuild and tag both images, then cancel + restart the session that needs the change.
+
+**Agent pod stuck in "pending".** Usually a missing image. Rebuild from the repo: `mise run images:session` (rebuilds agent + sidecar) or `devspace build -b agent,sidecar -n x1agent`. New sessions pick up the rebuild; in-flight sessions keep their old image.
 
 **Session starts but agent says "Not logged in · Please run /login".** The Anthropic key wasn't set correctly. Rerun `mise run quickstart` and re-enter the key at the secrets step.
 

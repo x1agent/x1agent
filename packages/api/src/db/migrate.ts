@@ -27,7 +27,14 @@ async function run() {
     }
     const content = await readFile(join(migrationsDir, file), "utf8");
     console.log(`[migrate] apply ${version}`);
-    await sql.unsafe(content);
+    await sql.begin(async (tx) => {
+      await tx.unsafe(content);
+      // ON CONFLICT covers two cases: (1) the SQL file itself records
+      // its own version (legacy migrations 001+ do this), (2) a previous
+      // partially-failed run got past the SQL but crashed before
+      // returning. Either way: row already there, no-op safely.
+      await tx`INSERT INTO schema_migrations (version) VALUES (${version}) ON CONFLICT (version) DO NOTHING`;
+    });
   }
 
   await sql.end();

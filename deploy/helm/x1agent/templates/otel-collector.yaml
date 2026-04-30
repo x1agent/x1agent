@@ -1,0 +1,20 @@
+{{- if .Values.monitoring.opentelemetry.enabled }}
+# OpenTelemetry collector for the install. Conditional — only renders
+# when monitoring.opentelemetry.enabled = true. Requires the
+# OpenTelemetry Operator's CRDs to be installed cluster-wide first.
+# Comments live inside the if-block so that when the feature is off,
+# the file emits NOTHING (an empty doc with `apiVersion` missing trips
+# helm's validator).
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: {{ .Values.monitoring.opentelemetry.serviceName }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  mode: deployment
+  image: {{ .Values.monitoring.opentelemetry.image | quote }}
+  replicas: 1
+  resources: {{- toYaml .Values.monitoring.opentelemetry.resources | nindent 4 }}
+  config: |
+{{ .Values.monitoring.opentelemetry.config | indent 4 }}
+{{- end }}

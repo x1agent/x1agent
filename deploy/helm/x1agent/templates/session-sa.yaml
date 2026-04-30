@@ -1,0 +1,21 @@
+# ServiceAccount the agent session Job pods run as. The api spawns each
+# session with `serviceAccountName: x1agent-session` so this SA is
+# attached to every agent pod.
+#
+# When anthropic.provider == vertex, the SA is annotated for Workload
+# Identity → impersonates the x1agent-session GSA (which holds
+# roles/aiplatform.user). No service-account key file ever exists in
+# the pod.
+#
+# When anthropic.provider == api_key, the WI annotation is omitted —
+# the agent's runtime reads ANTHROPIC_API_KEY from env via the GSM
+# binding instead. The SA is still required (every pod needs one).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x1agent-session
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  {{- if eq .Values.anthropic.provider "vertex" }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.cloud.gcp.sessionWorkloadIdentityServiceAccount | quote }}
+  {{- end }}

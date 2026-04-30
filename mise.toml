@@ -12,9 +12,11 @@ _.file = [".env", ".env.local"]
 # deploys to a real cluster.
 KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 
-# Where the app (running on host) finds the cluster-side API.
-# devspace port-forwards 30001 from the api pod to localhost.
-PUBLIC_API_URL = "http://localhost:30001"
+# Where the app finds the api in dev. The app runs in the cluster
+# (see deploy/k8s/dev/app.yaml); this value is the ingress-exposed
+# URL for api.local.x1agent.dev so the browser and the app pod both
+# hit the same host — cookies scope cleanly under .local.x1agent.dev.
+PUBLIC_API_URL = "https://api.local.x1agent.dev"
 
 # Dev-only: Claude Code Max credentials mount for agent pods. Local
 # dev only — the in-repo default assumes the operator is running
@@ -45,8 +47,128 @@ depends = ["dev:setup"]
 run = "devspace dev --namespace x1agent"
 
 [tasks.quickstart]
-description = "Run the x1agent setup wizard (interactive TUI)"
+description = "Run the x1agent CLUSTER setup wizard (creates secrets + admin)"
 run = "cd packages/cli && bun run src/index.ts setup"
+
+# ----------------------------------------------------------------------------
+# Pre-flight configuration. Captures everything needed to install x1agent
+# (cloud target, base domain, secrets) into .env.local — no cluster touch.
+# Idempotent: re-running shows existing values and only updates what you
+# change. Other tasks `depend` on `configure:check` so they fail fast with
+# a friendly message when the bare-minimum vars aren't set.
+# ----------------------------------------------------------------------------
+[tasks.configure]
+description = "Interactive wizard — pick local-dev or a deployment, write the right file"
+run = "cd packages/cli && bun run src/index.ts configure"
+
+[tasks."configure:check"]
+description = "Verify the active deployment file (installs/<base-domain>.local) is install-ready"
+run = "cd packages/cli && bun run src/index.ts configure:check"
+
+# ----------------------------------------------------------------------------
+# Cloud install — currently GCP only. ONE command does the whole thing:
+#
+#   mise run configure   # one-time, prompts for cloud + secrets
+#   mise run install     # everything else: terraform, operator helm
+#                          charts (ESO + cert-manager + ingress-nginx),
+#                          WI annotations, GSM secret population,
+#                          image build + push, helm install x1agent,
+#                          wait for cert
+#
+# Re-running `install` is safe — every phase is idempotent.
+#
+# The install:<phase> tasks below are escape hatches for re-running a
+# single phase when something goes wrong. Most operators won't use them.
+# ----------------------------------------------------------------------------
+[tasks.install]
+description = "One-shot installer — terraform → ESO + cert-manager + ingress-nginx → secrets → images → helm install x1agent"
+depends = ["configure:check"]
+run = "cd packages/cli && bun run src/index.ts install"
+
+[tasks."install:build-images"]
+description = "Build + push the 3 prod images (api, app, preview) to Artifact Registry"
+depends = ["configure:check"]
+run = "deploy/scripts/build-push-prod.sh"
+
+# Subsequent ships against an already-installed deployment. Use this
+# (not `install`) once `install` has run at least once. Pass --yes for
+# unattended runs (CI), --tag <sha> to deploy a specific build.
+[tasks.deploy]
+description = "Build + push images and helm-upgrade the active deployment"
+depends = ["configure:check"]
+run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=true)}}"
+
+[tasks."install:plan"]
+description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
+depends = ["configure:check"]
+run = "cd packages/cli && bun run src/index.ts install:plan"
+
+# Terraform tasks — provision the GCP-side infra (cluster, IAM, GSM
+# placeholders, AR, DNS, static IP) before the chart goes in. Two-step
+# apply because the ESO ClusterSecretStore needs ESO's CRDs first.
+#
+# Sequence:
+#   mise run terraform:init           # one-time per machine
+#   mise run terraform:plan           # preview changes, no mutation
+#   mise run terraform:apply:cluster  # cluster + IAM + GSM + AR + DNS
+#   <operator: helm install external-secrets ... + annotate ESO SA>
+#   mise run terraform:apply          # adds the ClusterSecretStore now CRDs exist
+[tasks."terraform:init"]
+description = "Initialize the GCP terraform module (one-time per machine)"
+run = "cd deploy/terraform/gcp && terraform init"
+
+[tasks."terraform:plan"]
+description = "terraform plan against the GCP module (renders tfvars from .env.local)"
+depends = ["configure:check"]
+run = """
+cd packages/cli && bun run src/index.ts install:render-tfvars
+cd ../../deploy/terraform/gcp && terraform plan
+"""
+
+[tasks."terraform:apply:cluster"]
+description = "First-pass apply — cluster + IAM + GSM + AR + DNS (skips ClusterSecretStore until ESO CRDs exist)"
+depends = ["configure:check"]
+run = """
+cd packages/cli && bun run src/index.ts install:render-tfvars
+cd ../../deploy/terraform/gcp && terraform apply \\
+  -target=google_container_cluster.x1agent \\
+  -target=google_container_node_pool.primary \\
+  -target=google_service_account.api \\
+  -target=google_service_account.eso \\
+  -target=google_service_account_iam_binding.api_wi \\
+  -target=google_service_account_iam_binding.eso_wi \\
+  -target=google_secret_manager_secret.secrets \\
+  -target=google_artifact_registry_repository.x1agent \\
+  -target=google_compute_global_address.ingress \\
+  -target=google_dns_managed_zone.x1agent \\
+  -target=google_dns_record_set.app \\
+  -target=google_dns_record_set.api
+"""
+
+[tasks."terraform:apply"]
+description = "Full terraform apply — call after operator installs ESO CRDs (creates ClusterSecretStore)"
+depends = ["configure:check"]
+run = """
+cd packages/cli && bun run src/index.ts install:render-tfvars
+cd ../../deploy/terraform/gcp && terraform apply
+"""
+
+[tasks."terraform:destroy"]
+description = "terraform destroy — wipes the entire install's GCP infra (with confirm)"
+run = "cd deploy/terraform/gcp && terraform destroy"
+
+[tasks."install:apply"]
+description = "helm upgrade --install x1agent into the configured GCP cluster"
+depends = ["configure:check"]
+run = "cd packages/cli && bun run src/index.ts install:apply"
+
+[tasks."install:status"]
+description = "Read-only snapshot — deployments, ingress IP, managed cert state"
+run = "cd packages/cli && bun run src/index.ts install:status"
+
+[tasks."install:destroy"]
+description = "helm uninstall x1agent (double-confirm; deletes in-cluster Postgres data)"
+run = "cd packages/cli && bun run src/index.ts install:destroy"
 
 # macOS-only: export the Claude Code Max OAuth credentials from the
 # Keychain to a file so the Job watcher can mount it into agent pods
@@ -75,23 +197,85 @@ description = "Tail api pod logs"
 run = "kubectl logs -n x1agent -l app=api -f --tail=200"
 
 # ----------------------------------------------------------------------------
-# Host-side dev: Astro app. Assumes dev:cluster is already running so
-# localhost:30001 is port-forwarded.
+# Host-side Astro dev (optional fallback). Normally the app runs in the
+# cluster via devspace so it shares the cookie domain with the api at
+# .local.x1agent.dev. This task is kept around for running the app
+# directly on the host when iterating on Astro config without waiting
+# for a file-sync roundtrip. When used, the app talks to the api at
+# https://api.local.x1agent.dev (same URL both paths resolve through).
 # ----------------------------------------------------------------------------
 [tasks."dev:app"]
-description = "Start the Astro app on :4322 (talks to localhost:30001)"
+description = "(Fallback) Run Astro on host at localhost:4322"
 run = "cd packages/app && bun run dev"
 
-# The one-command orchestration: kick the cluster off in a tmux-style
-# background, then run the app in the foreground. Ctrl-C stops the app;
-# run dev:cluster:stop to tear down the cluster-side stack.
+# The one-command orchestration: devspace in the foreground manages the
+# full cluster-side stack (postgres, nats, api, app, providers) WITH
+# hot reload. File sync + restart-helper + port-forwards are all on,
+# so edits under packages/ reflect in running pods within seconds.
+# Ctrl-C stops everything; run dev:cluster:stop to tear the
+# deployments down.
 [tasks.dev]
-description = "Full local dev: dev:cluster (bg) + dev:app (fg)"
+description = "Full local dev with hot reload (devspace dev, blocks)"
 depends = ["dev:setup", "dev:claude-creds"]
-run = [
-  "devspace dev --namespace x1agent &",
-  "sleep 6 && cd packages/app && bun run dev",
-]
+run = "devspace dev --namespace x1agent"
+
+# Same stack, NO hot reload. `devspace deploy` builds the images once
+# and applies the manifests; pods run their baked-in CMD directly
+# (bun on the COPY'd source), with no devspace-restart-helper, no
+# file-sync, no port-forwarding. Rebuild + redeploy is required to
+# pick up code changes. Use when hot-reload / devspace dev-mode is
+# suspected of masking or causing issues and you want a baseline.
+[tasks."dev:cold"]
+description = "Full local dev without hot reload (devspace deploy, one-shot)"
+depends = ["dev:setup", "dev:claude-creds"]
+run = "devspace deploy --namespace x1agent"
+
+# Same stack, NO devspace at all. Plain `docker build` for the 5 dev
+# images, plain `kubectl apply` for the manifests, secrets injected as
+# a K8s Secret built from .env.local. The most deterministic local-up
+# we have — useful for proving the platform works independent of
+# devspace's image-build / hot-reload machinery.
+#
+# Iteration model: edit code → `mise run dev:direct:rebuild <component>`
+# rebuilds that one image and restarts the deployment.
+#   <component> ∈ api | app | provider-preview |
+#                 provider-messaging-slack | provider-graph-surrealdb
+[tasks."dev:direct"]
+description = "Bring the dev stack up without devspace (build + apply + wait)"
+depends = ["dev:setup", "dev:claude-creds"]
+run = "deploy/scripts/dev-direct-up.sh"
+
+[tasks."dev:direct:rebuild"]
+description = "Rebuild one dev image + rollout-restart its deployment (arg: component name)"
+usage = "dev:direct:rebuild <component>  e.g. api, app, provider-preview"
+run = """
+set -euo pipefail
+COMP="${1:-}"
+if [ -z "$COMP" ]; then
+  echo "usage: mise run dev:direct:rebuild <api|app|provider-preview|provider-messaging-slack|provider-graph-surrealdb>" >&2
+  exit 2
+fi
+case "$COMP" in
+  api)                       DF=deploy/docker/api.dev.Dockerfile; DEPLOY=api ;;
+  app)                       DF=deploy/docker/app.dev.Dockerfile; DEPLOY=app ;;
+  provider-preview)          DF=deploy/docker/preview.dev.Dockerfile; DEPLOY=preview ;;
+  provider-messaging-slack)  DF=deploy/docker/messaging-slack.dev.Dockerfile; DEPLOY=messaging-slack ;;
+  provider-graph-surrealdb)  DF=deploy/docker/graph-surrealdb.dev.Dockerfile; DEPLOY=graph-surrealdb ;;
+  *) echo "unknown component: $COMP" >&2; exit 2 ;;
+esac
+echo "[dev:direct:rebuild] building x1agent-$COMP:latest"
+DOCKER_BUILDKIT=1 docker build -f "$DF" -t "x1agent-$COMP:latest" .
+echo "[dev:direct:rebuild] rolling deploy/$DEPLOY"
+kubectl -n x1agent rollout restart "deploy/$DEPLOY"
+kubectl -n x1agent rollout status "deploy/$DEPLOY" --timeout=180s
+"""
+
+[tasks."dev:direct:stop"]
+description = "Tear down the dev:direct stack (delete deployments only)"
+run = """
+kubectl -n x1agent delete -f deploy/k8s/dev/ --ignore-not-found
+kubectl -n x1agent delete secret x1agent-dev-secrets --ignore-not-found
+"""
 
 # ----------------------------------------------------------------------------
 # Tests
@@ -193,6 +377,35 @@ for P in $PRESETS; do
 done
 
 echo "[images] done — images available at ${REGISTRY_LOCAL}/x1agent/*"
+"""
+
+# ----------------------------------------------------------------------------
+# Session-pod images — the agent + sidecar that a K8s Job runs as a pair
+# per session. devspace's file-sync overlays code onto long-running pods
+# (api, app), but Jobs spawn fresh from sealed images, so changes under
+# packages/agent/ or packages/sidecar/ won't appear in new sessions until
+# the images are rebuilt. Run this after touching either package — new
+# sessions (or restarted existing sessions) pick up the rebuild.
+#
+# imagePullPolicy: IfNotPresent in pod-spec means the rebuilt image is
+# picked up automatically when the pod is (re)created; no push to a
+# registry is needed because OrbStack shares its docker daemon with k8s.
+# ----------------------------------------------------------------------------
+[tasks."images:session"]
+description = "Rebuild x1agent-agent + x1agent-sidecar images for session pods"
+run = """
+set -euo pipefail
+echo "[images:session] building x1agent-agent:latest"
+DOCKER_BUILDKIT=1 docker build \\
+  -f packages/agent/Dockerfile \\
+  -t x1agent-agent:latest \\
+  packages/agent
+echo "[images:session] building x1agent-sidecar:latest"
+DOCKER_BUILDKIT=1 docker build \\
+  -f packages/sidecar/Dockerfile \\
+  -t x1agent-sidecar:latest \\
+  packages/sidecar
+echo "[images:session] done — restart any running session pods to pick up"
 """
 
 [tasks.review]

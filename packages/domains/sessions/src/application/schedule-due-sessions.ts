@@ -1,6 +1,11 @@
 import type { Clock } from "@x1agent/kernel";
-import type { Agent, AgentRepository } from "@x1agent/domain-agents";
+import {
+  isOrchestratorKind,
+  type Agent,
+  type AgentRepository,
+} from "@x1agent/domain-agents";
 import type { SessionRepository } from "../ports/session-repository.js";
+import type { MessageInjector } from "../ports/message-injector.js";
 import { SessionDuplicateTickError } from "../domain/session.js";
 import { nextDueAfter } from "./next-due.js";
 
@@ -8,6 +13,14 @@ export interface ScheduleDueSessionsDeps {
   agents: AgentRepository;
   sessions: SessionRepository;
   clock: Clock;
+  /**
+   * Optional: message injector used when the agent is an orchestrator
+   * with a live session. When unset, orchestrator ticks fall back to
+   * the create-new-session path (which will fail the DB singleton
+   * trigger if a live session exists — so this should always be wired
+   * in prod composition).
+   */
+  injector?: MessageInjector;
   /**
    * Optional: surface per-agent failures without aborting the whole tick.
    * Defaults to console.warn. Returning normally is enough — the tick
@@ -19,6 +32,8 @@ export interface ScheduleDueSessionsDeps {
 export interface ScheduleDueSessionsResult {
   considered: number;
   created: number;
+  /** Orchestrator ticks that injected into an existing live session. */
+  injected: number;
   skippedDuplicate: number;
   errors: number;
 }
@@ -39,6 +54,7 @@ export async function scheduleDueSessions(
   const result: ScheduleDueSessionsResult = {
     considered: agents.length,
     created: 0,
+    injected: 0,
     skippedDuplicate: 0,
     errors: 0,
   };
@@ -46,11 +62,49 @@ export async function scheduleDueSessions(
   for (const agent of agents) {
     if (!agent.schedule) continue;
     try {
-      const last = await deps.sessions.lastSchedulerRunFor(agent.id);
-      const anchor = last?.triggeredAt ?? agent.createdAt;
+      // Orchestrators use `last_scheduler_tick_at` as the anchor because
+      // a tick that injects (doesn't create a new sessions row) wouldn't
+      // advance lastSchedulerRunFor. Workers + scheduled keep using the
+      // session-row anchor for backward compat and to preserve the
+      // duplicate-tick-caught-at-insert semantics.
+      const anchor = isOrchestratorKind(agent.kind)
+        ? (agent.lastSchedulerTickAt ?? agent.createdAt)
+        : ((await deps.sessions.lastSchedulerRunFor(agent.id))?.triggeredAt
+            ?? agent.createdAt);
       const due = nextDueAfter(agent.schedule, anchor);
       if (due.getTime() > now.getTime()) continue;
 
+      if (isOrchestratorKind(agent.kind)) {
+        // Branch: find-or-create. Live session → inject heartbeat;
+        // no live session → create a new session with heartbeat as
+        // initial prompt (existing create path, same as workers).
+        const live = await deps.sessions.findLiveSessionForAgent(agent.id);
+        if (live) {
+          if (!deps.injector) {
+            throw new Error(
+              "orchestrator tick requires a MessageInjector but none was configured",
+            );
+          }
+          await deps.injector.injectHeartbeatWake(live.id, agent.heartbeatMd);
+          result.injected += 1;
+        } else {
+          await deps.sessions.create({
+            agentId: agent.id,
+            triggeredBy: "scheduler",
+            triggeredByUserId: null,
+            parentSessionId: null,
+            parentAgentId: null,
+            resumedFromSessionId: null,
+            triggeredAt: due,
+          });
+          result.created += 1;
+        }
+        await deps.agents.recordSchedulerTick(agent.id, due);
+        continue;
+      }
+
+      // worker / scheduled kinds — unchanged behavior, create a new
+      // session per tick.
       try {
         await deps.sessions.create({
           agentId: agent.id,
@@ -62,6 +116,7 @@ export async function scheduleDueSessions(
           triggeredAt: due,
         });
         result.created += 1;
+        await deps.agents.recordSchedulerTick(agent.id, due);
       } catch (err) {
         if (err instanceof SessionDuplicateTickError) {
           result.skippedDuplicate += 1;

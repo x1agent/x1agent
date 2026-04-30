@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RuntimeType } from "@x1agent/shared";
+import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -28,6 +29,10 @@ import {
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { useImagesStore } from "../../stores/imagesStore";
+import {
+  useCapabilitiesStore,
+  useHasCollections,
+} from "../../stores/capabilitiesStore";
 import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
@@ -75,11 +80,22 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [name, setName] = useState("");
   const [slugInput, setSlugInput] = useState("");
   const [runtimeType, setRuntimeType] = useState<RuntimeType>("claude_code");
+  const [kind, setKind] = useState<"worker" | "orchestrator" | "scheduled">(
+    "worker",
+  );
   const [schedule, setSchedule] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [heartbeatMd, setHeartbeatMd] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
+  const [model, setModel] = useState<string>("");
+  // Model catalog comes from /api/capabilities/anthropic/models so the
+  // frontend doesn't hardcode model ids. Empty list = upstream
+  // unreachable; UI falls back to a free-text input.
+  const [modelCatalog, setModelCatalog] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const {
     bySlug: imagesBySlug,
     load: loadImages,
@@ -91,9 +107,24 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [tabRaw, setTab] = useUrlSearchParam("tab", DEFAULT_TAB);
   const tab: TabKey = isTabKey(tabRaw) ? tabRaw : DEFAULT_TAB;
 
+  const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
+  const hasCollections = useHasCollections();
+
   useEffect(() => {
     if (status === "idle") fetchMe();
-  }, [status, fetchMe]);
+    fetchCapabilities();
+    void apiFetch<{
+      models: { id: string; label: string }[];
+      default: string | null;
+    }>("/api/capabilities/anthropic/models")
+      .then((r) => {
+        setModelCatalog(r.models);
+        setDefaultModel(r.default);
+      })
+      .catch(() => {
+        // Upstream Vertex/Anthropic unreachable — fall back to free-text.
+      });
+  }, [status, fetchMe, fetchCapabilities]);
 
   useEffect(() => {
     load(workspaceSlug);
@@ -113,11 +144,19 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setName(existing.name);
       setSlugInput(existing.slug);
       setRuntimeType(existing.runtime_type);
+      if (
+        existing.kind === "worker" ||
+        existing.kind === "orchestrator" ||
+        existing.kind === "scheduled"
+      ) {
+        setKind(existing.kind);
+      }
       setSchedule(existing.schedule ?? "");
       setSystemPrompt(existing.system_prompt);
       setHeartbeatMd(existing.heartbeat_md);
       setIsActive(existing.is_active);
       setImageId((existing as { image_id?: string | null }).image_id ?? "");
+      setModel((existing as { model?: string | null }).model ?? "");
     }
   }, [existing]);
 
@@ -168,6 +207,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           slug: slugInput.trim(),
           name: name.trim(),
           runtime_type: runtimeType,
+          kind,
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
@@ -177,11 +217,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         await update(workspaceSlug, existing.id, {
           name: name.trim(),
           runtime_type: runtimeType,
+          kind,
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
           is_active: isActive,
           image_id: imageId === "" ? null : imageId,
+          model: model.trim() === "" ? null : model.trim(),
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
@@ -215,7 +257,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
             {!isCreate && (
               <>
                 <TabsTrigger value="repos">Repositories</TabsTrigger>
-                <TabsTrigger value="collections">Collections</TabsTrigger>
+                {hasCollections && (
+                  <TabsTrigger value="collections">Collections</TabsTrigger>
+                )}
                 <TabsTrigger value="permissions">Permissions</TabsTrigger>
               </>
             )}
@@ -274,6 +318,32 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
+                      <Label htmlFor="agent-kind">Kind</Label>
+                      <Select
+                        value={kind}
+                        onValueChange={(v) =>
+                          setKind(
+                            v as "worker" | "orchestrator" | "scheduled",
+                          )
+                        }
+                      >
+                        <SelectTrigger id="agent-kind">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="worker">
+                            worker — short-lived, one session per trigger
+                          </SelectItem>
+                          <SelectItem value="orchestrator">
+                            orchestrator — long-lived singleton, platform-driven wakes
+                          </SelectItem>
+                          <SelectItem value="scheduled">
+                            scheduled — cron-triggered worker
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="agent-image">Container image</Label>
                       <Select
                         value={imageId === "" ? "__default__" : imageId}
@@ -302,6 +372,64 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     "Platform default" uses the deployment-wide AGENT_IMAGE;
                     pick a preset or a workspace image to override per agent.
                   </p>
+                  <div className="space-y-1.5 pt-2">
+                    <Label htmlFor="agent-model">Claude model</Label>
+                    {modelCatalog.length > 0 ? (
+                      <Select
+                        value={
+                          model === ""
+                            ? "__default__"
+                            : modelCatalog.some((m) => m.id === model)
+                              ? model
+                              : "__custom__"
+                        }
+                        onValueChange={(v) => {
+                          if (v === "__default__") setModel("");
+                          else if (v === "__custom__") setModel(model || " ");
+                          else setModel(v);
+                        }}
+                      >
+                        <SelectTrigger id="agent-model">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">
+                            Deployment default
+                            {defaultModel ? ` (${defaultModel})` : ""}
+                          </SelectItem>
+                          {modelCatalog.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__custom__">Custom…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id="agent-model"
+                        placeholder="(deployment default)"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                      />
+                    )}
+                    {modelCatalog.length > 0 &&
+                      model !== "" &&
+                      !modelCatalog.some((m) => m.id === model) && (
+                        <Input
+                          placeholder="claude-sonnet-4-5@20250929"
+                          value={model.trim()}
+                          onChange={(e) => setModel(e.target.value)}
+                          className="mt-2"
+                        />
+                      )}
+                    <p className="text-xs text-zinc-500">
+                      The list comes from your provider's catalog
+                      (Vertex Model Garden or Anthropic's /v1/models).
+                      A model that appears here still has to be enabled
+                      in your Vertex project before sessions actually run.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -397,14 +525,16 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   />
                 </TabsContent>
 
-                <TabsContent value="collections" className="mt-0">
-                  <CollectionsAttachCard
-                    workspaceSlug={workspaceSlug}
-                    agentId={existing.id}
-                    agentName={existing.name}
-                    canManage={!!canManage}
-                  />
-                </TabsContent>
+                {hasCollections && (
+                  <TabsContent value="collections" className="mt-0">
+                    <CollectionsAttachCard
+                      workspaceSlug={workspaceSlug}
+                      agentId={existing.id}
+                      agentName={existing.name}
+                      canManage={!!canManage}
+                    />
+                  </TabsContent>
+                )}
 
                 <TabsContent value="permissions" className="mt-0">
                   <CanSpawnCard

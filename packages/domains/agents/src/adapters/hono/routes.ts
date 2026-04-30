@@ -9,6 +9,7 @@ import {
 import { AgentId, AgentNotFoundError, AgentSlugTakenError, type Agent } from "../../domain/agent.js";
 import { CronSchedule } from "../../domain/cron-schedule.js";
 import { RuntimeType } from "../../domain/runtime.js";
+import { AgentKind } from "../../domain/kind.js";
 import type { AgentRepository } from "../../ports/agent-repository.js";
 import type { AdminGuard } from "../../ports/admin-guard.js";
 import { createAgent } from "../../application/create-agent.js";
@@ -40,11 +41,13 @@ function serialize(a: Agent) {
     slug: a.slug,
     name: a.name,
     runtime_type: a.runtimeType,
+    kind: a.kind,
     system_prompt: a.systemPrompt,
     heartbeat_md: a.heartbeatMd,
     schedule: a.schedule,
     is_active: a.isActive,
     image_id: a.imageId,
+    model: a.model,
     created_by: a.createdBy,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
@@ -99,6 +102,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       slug?: string;
       name?: string;
       runtime_type?: string;
+      kind?: string;
       system_prompt?: string;
       heartbeat_md?: string;
       schedule?: string | null;
@@ -115,6 +119,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
           slug: WorkspaceSlug(body.slug),
           name: body.name,
           runtimeType: RuntimeType(body.runtime_type),
+          kind: body.kind ? AgentKind(body.kind) : undefined,
           systemPrompt: body.system_prompt,
           heartbeatMd: body.heartbeat_md,
           schedule:
@@ -153,6 +158,9 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         ...(body.runtime_type !== undefined && {
           runtimeType: RuntimeType(String(body.runtime_type)),
         }),
+        ...(body.kind !== undefined && {
+          kind: AgentKind(String(body.kind)),
+        }),
         ...(body.system_prompt !== undefined && {
           systemPrompt: String(body.system_prompt),
         }),
@@ -173,6 +181,12 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
             body.image_id === null || body.image_id === ""
               ? null
               : String(body.image_id),
+        }),
+        ...(body.model !== undefined && {
+          model:
+            body.model === null || body.model === ""
+              ? null
+              : String(body.model),
         }),
       };
       const a = await updateAgent(

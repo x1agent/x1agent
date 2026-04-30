@@ -40,7 +40,7 @@ rules:
     verbs: ["create", "get", "list", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "delete"]
+    verbs: ["create", "get", "list", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     verbs: ["create", "get", "list", "patch", "delete"]
@@ -106,9 +106,9 @@ spec:
             - name: API_PORT
               value: "30001"
             - name: API_PUBLIC_URL
-              value: http://localhost:30001
+              value: https://api.local.x1agent.dev
             - name: PUBLIC_URL
-              value: http://localhost:4322
+              value: https://app.local.x1agent.dev
             - name: PLATFORM_NAME
               value: x1agent
             - name: NODE_ENV
@@ -121,8 +121,16 @@ spec:
               value: /etc/nats-tls/client.crt
             - name: NATS_CLIENT_KEY
               value: /etc/nats-tls/client.key
-          # Secrets come in via devspace env-var injection at dev time so
-          # values never land in committed manifests.
+          # Secrets:
+          # - devspace dev mode injects them via devspace.yaml `dev:` block (its
+          #   `env:` overrides identical names from envFrom).
+          # - dev:direct creates the Secret from .env.local and pods read it via
+          #   envFrom below. `optional: true` keeps the manifest applyable even
+          #   when no Secret exists yet (e.g. devspace dev path).
+          envFrom:
+            - secretRef:
+                name: x1agent-dev-secrets
+                optional: true
           readinessProbe:
             httpGet:
               path: /health

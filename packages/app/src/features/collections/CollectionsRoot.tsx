@@ -35,6 +35,10 @@ import {
 import { Textarea } from "../../components/ui/textarea";
 import { useAuthStore } from "../../stores/authStore";
 import { useCollectionsStore } from "../../stores/collectionsStore";
+import {
+  useCapabilitiesStore,
+  useHasCollections,
+} from "../../stores/capabilitiesStore";
 
 interface Props {
   workspaceSlug: string;
@@ -58,9 +62,14 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
     remove,
   } = useCollectionsStore();
 
+  const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
+  const capsStatus = useCapabilitiesStore((s) => s.status);
+  const hasCollections = useHasCollections();
+
   useEffect(() => {
     if (status === "idle") fetchMe();
-  }, [status, fetchMe]);
+    fetchCapabilities();
+  }, [status, fetchMe, fetchCapabilities]);
 
   useEffect(() => {
     if (status === "anonymous" && typeof window !== "undefined") {
@@ -69,8 +78,33 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
   }, [status]);
 
   useEffect(() => {
-    load(workspaceSlug);
-  }, [workspaceSlug, load]);
+    // Only fetch when the deployment has a graph provider; otherwise
+    // the api will return an empty list anyway and we want to show the
+    // "not installed" state, not a generic empty list.
+    if (hasCollections) load(workspaceSlug);
+  }, [workspaceSlug, load, hasCollections]);
+
+  if (capsStatus === "ready" && !hasCollections) {
+    return (
+      <AppShell
+        breadcrumbs={[
+          { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
+          { label: "Collections" },
+        ]}
+      >
+        <div className="mx-auto max-w-md p-8 text-sm text-zinc-400">
+          <h1 className="mb-2 text-lg font-semibold text-zinc-100">
+            Collections aren't installed
+          </h1>
+          <p>
+            This deployment was configured without a graph provider, so
+            collections are not available. Re-run <code>mise run configure</code>{" "}
+            and pick a provider, then redeploy.
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
 
   const rows = bySlug[workspaceSlug] ?? [];
   const err = errorBySlug[workspaceSlug];

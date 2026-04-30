@@ -1,0 +1,117 @@
+# cert-manager Issuers + the certs the chart issues.
+#
+# Two ACME ClusterIssuers (Let's Encrypt prod + staging) for public TLS
+# on app/api/preview. Plus a self-signed CA chain for INTERNAL mTLS:
+# NATS server + the api/session client certs that talk to it.
+#
+# The internal CA is its own root, separate from the public Let's
+# Encrypt cert chain. Why: public certs aren't designed for client
+# auth + can't carry x1agent's NATS subject ACL identities.
+#
+# Why ClusterIssuer not Issuer: ClusterIssuer is cluster-scoped, so the
+# preview Certificates in x1-previews can use the same issuer without
+# a separate per-namespace Issuer.
+#
+# DNS-01 against Cloud DNS — works for both leaf domains (app.<base>,
+# api.<base>) and wildcards (*.preview.<base>). HTTP-01 wouldn't work
+# for wildcards.
+#
+# Auth: Workload Identity. cert-manager's K8s SA in the cert-manager
+# namespace is annotated to impersonate x1agent-cert-manager GSA, which
+# holds roles/dns.admin on the install's project. No service-account
+# key file ever exists.
+#
+# Two issuers shipped — staging + prod. Default to prod; flip to
+# staging when iterating to avoid Let's Encrypt rate limits (5
+# duplicate certs per week per domain set).
+{{ $issuerStaging := printf "%s-staging" .Values.tls.clusterIssuer }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.tls.clusterIssuer | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ .Values.tls.email | quote }}
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: {{ printf "%s-account" .Values.tls.clusterIssuer | quote }}
+    solvers:
+      - dns01:
+          cloudDNS:
+            project: {{ .Values.cloud.gcp.projectId | quote }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $issuerStaging | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ .Values.tls.email | quote }}
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: {{ printf "%s-account" $issuerStaging | quote }}
+    solvers:
+      - dns01:
+          cloudDNS:
+            project: {{ .Values.cloud.gcp.projectId | quote }}
+---
+# NOTE: explicit Certificate for app+api removed. ingress-nginx's
+# cert-manager.io/cluster-issuer annotation on the Ingress causes
+# cert-manager's ingress-shim to auto-create a Certificate named
+# `<Ingress's tls.secretName>` (i.e. `x1agent-app-api-tls`). Having both
+# left two Certificates fighting over the same Secret — the explicit
+# one always lost with "IncorrectCertificate" + the orchestrator's
+# cert-wait phase polled it forever. Source of truth is now solely
+# the Ingress annotation.
+---
+# ── Internal CA chain for NATS mTLS ────────────────────────────────
+#
+# Selfsigned ClusterIssuer → bootstrap-only, used to sign the root CA.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: x1agent-selfsigned-bootstrap
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+# Root CA Certificate. Signed by the selfsigned bootstrap. cert-manager
+# stores it as a Secret named x1agent-internal-ca; the CA-issuer below
+# uses that Secret to sign downstream certs.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: x1agent-internal-ca
+  # MUST live in the cert-manager namespace — ClusterIssuers look up
+  # their CA Secret in cert-manager's `--cluster-resource-namespace`
+  # (defaults to `cert-manager`). If we put this in the release namespace,
+  # the CA-Issuer below fails with "secret not found" + every cert
+  # using it stays Pending forever.
+  namespace: cert-manager
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: x1agent-internal-ca
+  isCA: true
+  commonName: x1agent-internal-ca
+  duration: 87600h    # 10y — root CA renewal is operator-driven, not automatic
+  renewBefore: 720h   # 30d
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: x1agent-selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+# CA-Issuer that signs the actual NATS server + client certs from the
+# x1agent-internal-ca Secret.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: x1agent-internal-ca-issuer
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: x1agent-internal-ca
