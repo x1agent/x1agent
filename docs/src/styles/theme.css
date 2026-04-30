@@ -1,0 +1,167 @@
+/* x1agent docs theme — overrides Starlight's defaults to match the
+   marketing site at x1agent.com. Same palette, same fonts, same
+   restraint. Forces dark mode (light mode toggle is hidden via the
+   Starlight config). */
+
+:root,
+[data-theme="dark"],
+[data-theme="light"] {
+  /* Brand */
+  --color-bg: #09090b;
+  --color-surface: #111114;
+  --color-surface-2: #18181c;
+  --color-border: #232328;
+  --color-border-strong: #2a2a30;
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-text-faint: #71717a;
+  --color-accent: #c5fb45;
+
+  /* Starlight color tokens */
+  --sl-color-white: #fafafa;
+  --sl-color-gray-1: #fafafa;
+  --sl-color-gray-2: #e4e4e7;
+  --sl-color-gray-3: #a1a1aa;
+  --sl-color-gray-4: #71717a;
+  --sl-color-gray-5: #3f3f46;
+  --sl-color-gray-6: #232328;
+  --sl-color-gray-7: #18181c;
+  --sl-color-black: #09090b;
+
+  --sl-color-accent-low: rgba(197, 251, 69, 0.12);
+  --sl-color-accent: #c5fb45;
+  --sl-color-accent-high: #d6ff7a;
+
+  --sl-color-bg: var(--color-bg);
+  --sl-color-bg-nav: var(--color-bg);
+  --sl-color-bg-sidebar: var(--color-bg);
+  --sl-color-bg-inline-code: var(--color-surface-2);
+  --sl-color-bg-accent: var(--color-accent);
+
+  --sl-color-text: var(--color-text);
+  --sl-color-text-accent: var(--color-accent);
+  --sl-color-text-invert: var(--color-bg);
+
+  --sl-color-hairline: var(--color-border);
+  --sl-color-hairline-light: var(--color-border);
+  --sl-color-hairline-shade: var(--color-border-strong);
+
+  /* Fonts — same as the marketing site */
+  --sl-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --sl-text-h1: 2.25rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.25rem;
+  --sl-line-height-headings: 1.15;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* Site title — match the marketing nav voice. */
+.site-title {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Body prose — use the marketing site's measured tone. */
+.sl-markdown-content {
+  color: var(--color-text-muted);
+}
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-text);
+  letter-spacing: -0.015em;
+  font-weight: 500;
+}
+.sl-markdown-content :is(h2, h3) {
+  border-top: 1px solid var(--color-border);
+  padding-top: 1.75rem;
+  margin-top: 2.5rem;
+}
+
+/* Inline code looks better with the surface-2 chip. */
+.sl-markdown-content :not(pre) > code {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.85em;
+  padding: 0.125em 0.4em;
+  border-radius: 0.3rem;
+}
+
+/* Code blocks — Starlight's expressive-code already handles syntax,
+   but soften the frame to match the marketing palette. */
+.expressive-code .frame {
+  --ec-frm-edBg: var(--color-surface);
+  --ec-frm-edActTabBg: var(--color-surface-2);
+  --ec-frm-edActTabIndBtmCol: var(--color-accent);
+  --ec-brdRad: 0.65rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* Sidebar — make active item the accent. */
+.sidebar-content a[aria-current="page"] {
+  background: var(--sl-color-accent-low);
+  color: var(--color-accent);
+  border-left: 2px solid var(--color-accent);
+}
+
+/* Top nav — subtle border like the marketing nav. */
+.header {
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(9, 9, 11, 0.8);
+  backdrop-filter: blur(8px);
+}
+
+/* Hide the theme toggle — we're dark-only to keep parity with the
+   marketing site. */
+starlight-theme-select {
+  display: none !important;
+}
+
+/* Mermaid diagrams render as <pre class="mermaid">. Make their
+   container respect the surface palette so diagrams don't look pasted
+   on top of the page. */
+pre.mermaid {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+
+/* Search button (cmd-k) — match the marketing input style. */
+button[data-open-modal] {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-faint);
+}
+button[data-open-modal]:hover {
+  border-color: var(--color-text-faint);
+  color: var(--color-text);
+}
+
+/* CTAs in cards / hero - lime pill style like the marketing site. */
+.action.primary {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border: 0;
+}
+.action.primary:hover {
+  opacity: 0.9;
+  color: var(--color-bg);
+}

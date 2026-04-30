@@ -1,0 +1,23 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-[var(--color-border)] py-10">
+  <div class="mx-auto flex max-w-6xl flex-col items-start justify-between gap-6 px-6 md:flex-row md:items-center">
+    <div class="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+      <svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true">
+        <rect x="2" y="2" width="20" height="20" rx="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M7 12 L11 16 L17 8" fill="none" stroke="var(--color-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="text-[var(--color-text)]">x1agent</span>
+      <span class="ml-3 text-xs text-[var(--color-text-faint)]">© {year}</span>
+    </div>
+
+    <nav class="flex flex-wrap items-center gap-6 text-sm text-[var(--color-text-muted)]">
+      <a href="https://docs.x1agent.com" class="transition hover:text-[var(--color-text)]">Docs</a>
+      <a href="mailto:christian@x1agent.com" class="transition hover:text-[var(--color-text)]">Contact</a>
+      <a href="/privacy" class="transition hover:text-[var(--color-text)]">Privacy</a>
+      <a href="/terms" class="transition hover:text-[var(--color-text)]">Terms</a>
+    </nav>
+  </div>
+</footer>

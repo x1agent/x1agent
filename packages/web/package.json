@@ -1,0 +1,21 @@
+{
+  "name": "@x1agent/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 0.0.0.0 --port 4323",
+    "build": "astro build",
+    "preview": "astro preview",
+    "start": "node ./dist/server/entry.mjs",
+    "typecheck": "astro check",
+    "deploy": "gcloud run deploy x1agent-web --source . --region us-central1 --allow-unauthenticated --set-env-vars=NODE_ENV=production --set-secrets=RESEND_API_KEY=resend-api-key:latest"
+  },
+  "dependencies": {
+    "@astrojs/node": "^10.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "astro": "^6.1.0",
+    "resend": "^4.0.0",
+    "tailwindcss": "^4.0.0"
+  }
+}
