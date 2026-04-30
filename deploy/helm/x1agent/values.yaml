@@ -80,6 +80,14 @@ images:
     repository: ""
     tag: latest
     pullPolicy: Always
+  # The agent + sidecar images session pods spawn from. Same registry
+  # as the platform images. Installer fills repository at render time.
+  agent:
+    repository: ""
+    tag: latest
+  sidecar:
+    repository: ""
+    tag: latest
 
 # ============================================================================
 # api Deployment
@@ -156,6 +164,14 @@ externalSecrets:
       gsmSecretName: x1agent-github-app-webhook-secret
     - envName: SLACK_BOT_TOKEN
       gsmSecretName: x1agent-slack-bot-token
+    # Sentry DSNs — one per runtime so error rates / releases stay
+    # isolated. Optional; SDKs no-op when the env var is unset.
+    - envName: SENTRY_DSN_API
+      gsmSecretName: x1agent-sentry-dsn-api
+    - envName: SENTRY_DSN_APP
+      gsmSecretName: x1agent-sentry-dsn-app
+    - envName: SENTRY_DSN_SIDECAR
+      gsmSecretName: x1agent-sentry-dsn-sidecar
 
 # ============================================================================
 # Non-secret config — injected as inline env vars on api/app deployments.
@@ -184,8 +200,36 @@ config:
 # Deployment under templates/.
 # ============================================================================
 providers:
+  # Singleton domains. "none" disables the capability + skips the
+  # provider Deployment. Today the only graph kind is surrealdb, which
+  # also implements vector — so vector is locked to graph in v1.
   graph: none
   vector: none
+
+  # Per-kind config — only the block matching `graph` is consumed. New
+  # graph kinds (e.g. neo4j) add their own block here + a sibling
+  # provider-graph-<kind>.yaml template.
+  graphSurrealdb:
+    # Provider container image — built + pushed by `mise run install`.
+    # repository defaults to <artifactRegistry>/graph-surrealdb at render time.
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    # Backing SurrealDB datastore — single-node v1.
+    surrealImage: "surrealdb/surrealdb:v2.3"
+    surrealResources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
+    storageSize: 10Gi
+    # Override per cloud — empty leaves storage class to cluster default.
+    storageClass: ""
+    # Default for v1; rotate via GSM + ESO before going live.
+    rootPassword: "x1agent-surreal-root"
 
 # ============================================================================
 # Telemetry — OpenTelemetry collector + per-pod env wiring
