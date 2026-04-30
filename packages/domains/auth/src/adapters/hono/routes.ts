@@ -34,6 +34,12 @@ export interface AuthRoutesConfig {
 
   allowedDomains?: readonly string[];
   platformAdmins?: readonly string[];
+  /**
+   * Optional per-email allowlist. When set, sign-in lets through emails
+   * that fail the domain allowlist if the gate says they're known
+   * (existing user or pending invitation).
+   */
+  accessGate?: import("../../ports/access-gate.js").AccessGate;
 
   /**
    * Optional second provider for dev-only direct sign-in. When set, a
@@ -130,6 +136,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           tokenizer: cfg.tokenizer,
           allowedDomains: cfg.allowedDomains ?? [],
           platformAdmins: cfg.platformAdmins ?? [],
+          accessGate: cfg.accessGate,
         },
         code,
         redirectUri(),
@@ -162,6 +169,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
             tokenizer: cfg.tokenizer,
             allowedDomains: cfg.allowedDomains ?? [],
             platformAdmins: cfg.platformAdmins ?? [],
+            accessGate: cfg.accessGate,
           },
           profile,
         );
