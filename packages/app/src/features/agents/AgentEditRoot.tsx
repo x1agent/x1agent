@@ -87,6 +87,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [heartbeatMd, setHeartbeatMd] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
+  const [model, setModel] = useState<string>("");
   const {
     bySlug: imagesBySlug,
     load: loadImages,
@@ -136,6 +137,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setHeartbeatMd(existing.heartbeat_md);
       setIsActive(existing.is_active);
       setImageId((existing as { image_id?: string | null }).image_id ?? "");
+      setModel((existing as { model?: string | null }).model ?? "");
     }
   }, [existing]);
 
@@ -202,6 +204,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           schedule: schedule.trim() ? schedule.trim() : null,
           is_active: isActive,
           image_id: imageId === "" ? null : imageId,
+          model: model.trim() === "" ? null : model.trim(),
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
@@ -350,6 +353,21 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     "Platform default" uses the deployment-wide AGENT_IMAGE;
                     pick a preset or a workspace image to override per agent.
                   </p>
+                  <div className="space-y-1.5 pt-2">
+                    <Label htmlFor="agent-model">Claude model</Label>
+                    <Input
+                      id="agent-model"
+                      placeholder="(deployment default)"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                    />
+                    <p className="text-xs text-zinc-500">
+                      Override the SDK model id for this agent. Leave empty
+                      to use the deployment-wide ANTHROPIC_MODEL. Examples:{" "}
+                      <code>claude-sonnet-4@20250514</code> (vertex us-east5),{" "}
+                      <code>claude-sonnet-4-5@20250929</code>.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
 

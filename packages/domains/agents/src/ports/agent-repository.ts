@@ -19,6 +19,8 @@ export interface CreateAgentInput {
   heartbeatMd: string;
   schedule: CronSchedule | null;
   imageId?: string | null;
+  /** Per-agent override for ANTHROPIC_MODEL. Null = use deployment default. */
+  model?: string | null;
   createdBy: UserId | null;
 }
 
@@ -31,6 +33,8 @@ export interface UpdateAgentInput {
   schedule?: CronSchedule | null;
   isActive?: boolean;
   imageId?: string | null;
+  /** Setting `null` explicitly clears the override; `undefined` leaves untouched. */
+  model?: string | null;
 }
 
 export interface AgentRepository {
