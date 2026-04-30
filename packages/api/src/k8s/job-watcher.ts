@@ -59,6 +59,38 @@ export interface JobWatcherConfig {
   natsUrl: string;
   anthropicApiKey?: string;
   /**
+   * Anthropic credential source. "vertex" makes session pods call
+   * Claude through Google Vertex AI using Workload Identity (no key
+   * file needed); "api_key" uses the direct Anthropic API. Defaults
+   * to api_key for back-compat with local dev paths that have no
+   * notion of Vertex.
+   */
+  anthropicProvider?: "api_key" | "vertex";
+  /** Required when anthropicProvider === "vertex". E.g. "us-east5". */
+  vertexRegion?: string;
+  /** Required when anthropicProvider === "vertex". GCP project hosting Vertex models. */
+  vertexProjectId?: string;
+  /**
+   * Override the Claude Code SDK's default model. Vertex installs
+   * may need an explicit pin to a model that's been rolled out to
+   * their CLOUD_ML_REGION. Set via ANTHROPIC_MODEL env on the api.
+   */
+  anthropicModel?: string;
+  /**
+   * K8s ServiceAccount the session pod runs as. Required for the
+   * Vertex path (the SA carries the Workload Identity annotation).
+   * Helm chart's session-sa.yaml creates "x1agent-session"; the api
+   * forwards that name here.
+   */
+  sessionServiceAccount?: string;
+  /**
+   * K8s Secret name for the sidecar's NATS client cert. See
+   * pod-spec.ts SessionPodSpec.natsClientTlsSecret for details.
+   * Default "nats-tls" (local dev); prod chart sets to
+   * "nats-session-client-tls" (cert-manager-issued).
+   */
+  natsClientTlsSecret?: string;
+  /**
    * Dev-only: host home directory to mount `.claude` + `.claude.json`
    */
   /**
@@ -328,6 +360,12 @@ async function launchSession(
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
+    anthropicProvider: cfg.anthropicProvider,
+    anthropicModel: cfg.anthropicModel,
+    vertexRegion: cfg.vertexRegion,
+    vertexProjectId: cfg.vertexProjectId,
+    serviceAccountName: cfg.sessionServiceAccount,
+    natsClientTlsSecret: cfg.natsClientTlsSecret,
     namespace: cfg.namespace,
     sessionCredentialsSecretName: credentialsSecretName,
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,

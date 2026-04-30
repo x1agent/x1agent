@@ -66,6 +66,45 @@ export interface SessionPodSpec {
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
   anthropicApiKey?: string;
   /**
+   * Override for the Claude Code SDK's default model. When unset, the
+   * SDK picks its own default — which on Vertex installs may resolve
+   * to a model the operator's CLOUD_ML_REGION hasn't received yet.
+   */
+  anthropicModel?: string;
+  /**
+   * Anthropic credential source for the agent runtime. "vertex" makes
+   * the SDK call Claude through Google Vertex AI using Workload
+   * Identity (no key file in the pod); "api_key" uses the direct
+   * Anthropic API and reads `anthropicApiKey` from env. Defaults to
+   * "api_key" so existing local-dev paths (which don't set this)
+   * keep working.
+   */
+  anthropicProvider?: "api_key" | "vertex";
+  /** Required when anthropicProvider === "vertex". E.g. "us-east5". */
+  vertexRegion?: string;
+  /** Required when anthropicProvider === "vertex". GCP project hosting Vertex models. */
+  vertexProjectId?: string;
+  /**
+   * K8s ServiceAccount the session pod runs as. When using Vertex,
+   * this SA must be annotated with the GSA Workload Identity binding
+   * (`iam.gke.io/gcp-service-account=...`). The Helm chart's
+   * session-sa.yaml creates the SA + annotation; the api just needs
+   * to set the name on the Job's pod spec.
+   */
+  serviceAccountName?: string;
+  /**
+   * K8s Secret holding the NATS client cert + key the sidecar uses for
+   * mTLS. Default "nats-tls" matches the local-dev bootstrap script's
+   * Secret which already has files named ca.crt / client.crt / client.key.
+   *
+   * When set to "nats-session-client-tls" (the prod chart's
+   * cert-manager-issued Secret), pod-spec applies a Secret items
+   * projection that renames tls.crt → client.crt and tls.key →
+   * client.key so the sidecar's existing /etc/nats-tls/{ca,client}.{crt,key}
+   * paths keep working without code changes.
+   */
+  natsClientTlsSecret?: string;
+  /**
    * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
    * (file). When set, both are hostPath-mounted into the agent container
    * at /home/agent so Claude Code picks up settings/agents/etc. Expected
@@ -125,8 +164,32 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
     { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },
-    ...(spec.anthropicApiKey
-      ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
+    ...(spec.anthropicProvider === "vertex"
+      ? [
+          // Vertex path: Workload Identity supplies auth; the SDK reads
+          // these to route through Google Vertex instead of api.anthropic.com.
+          { name: "CLAUDE_CODE_USE_VERTEX", value: "1" },
+          { name: "CLOUD_ML_REGION", value: spec.vertexRegion ?? "us-east5" },
+          ...(spec.vertexProjectId
+            ? [
+                {
+                  name: "ANTHROPIC_VERTEX_PROJECT_ID",
+                  value: spec.vertexProjectId,
+                },
+              ]
+            : []),
+        ]
+      : spec.anthropicApiKey
+        ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
+        : []),
+    // Override the SDK's default model. Vertex installs need a model
+    // identifier that Anthropic has actually rolled out to the
+    // CLOUD_ML_REGION (the SDK's default may be ahead of Vertex). The
+    // api reads ANTHROPIC_MODEL env at boot and propagates here so a
+    // helm value flip rolls out cluster-wide. Per-agent overrides
+    // come later via the agent.model column.
+    ...(spec.anthropicModel
+      ? [{ name: "ANTHROPIC_MODEL", value: spec.anthropicModel }]
       : []),
   ];
 
@@ -200,6 +263,14 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
       template: {
         metadata: { labels },
         spec: {
+          // SA the agent pod impersonates via Workload Identity when
+          // using Vertex. The Helm chart creates this SA with the
+          // appropriate iam.gke.io/gcp-service-account annotation.
+          // Local dev (no spec.serviceAccountName) falls through to
+          // the namespace's `default` SA — same behavior as before.
+          ...(spec.serviceAccountName
+            ? { serviceAccountName: spec.serviceAccountName }
+            : {}),
           restartPolicy: isOrchestrator ? "OnFailure" : "Never",
           securityContext: {
             // fsGroup owns the /workspace emptyDir so both containers
@@ -213,7 +284,30 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
             // agent container has no NATS cert and no way to pick one
             // up, so any direct NATS connect from the agent container
             // fails the TLS handshake.
-            { name: "nats-tls", secret: { secretName: "nats-tls" } },
+            //
+            // Secret name varies by environment: "nats-tls" in local
+            // dev (bootstrap script populates ca.crt/client.crt/client.key
+            // directly), or the prod chart's cert-manager-issued
+            // "nats-session-client-tls" (ca.crt / tls.crt / tls.key) —
+            // remap tls.* → client.* so /etc/nats-tls paths the sidecar
+            // reads stay constant.
+            (() => {
+              const name = spec.natsClientTlsSecret ?? "nats-tls";
+              const isCertManagerFormat = name !== "nats-tls";
+              return {
+                name: "nats-tls",
+                secret: isCertManagerFormat
+                  ? {
+                      secretName: name,
+                      items: [
+                        { key: "ca.crt", path: "ca.crt" },
+                        { key: "tls.crt", path: "client.crt" },
+                        { key: "tls.key", path: "client.key" },
+                      ],
+                    }
+                  : { secretName: name },
+              };
+            })(),
             ...(spec.sessionHistoryConfigMapName
               ? [
                   {

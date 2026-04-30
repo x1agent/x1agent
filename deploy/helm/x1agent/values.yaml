@@ -182,6 +182,17 @@ config:
   PLATFORM_NAME: x1agent
   PLATFORM_ADMIN_EMAILS: ""
   ALLOWED_DOMAINS: ""
+  # OAuth scopes requested at Google sign-in. Space-separated. Default
+  # is identity-only — operators add Drive / Calendar / Gmail scopes
+  # when those providers are enabled so the consent screen prompts
+  # up-front. The Google Cloud OAuth consent screen ALSO needs the
+  # scopes added there before they'll work.
+  GOOGLE_OAUTH_SCOPES: ""
+  # Claude Code SDK model id. Empty = let the SDK pick. Set on Vertex
+  # installs when the SDK default isn't live in CLOUD_ML_REGION yet.
+  # Examples: "claude-sonnet-4@20250514" (vertex us-east5),
+  # "claude-sonnet-4-5@20250929" (current SDK default, broader rollout).
+  ANTHROPIC_MODEL: ""
 
 # ============================================================================
 # Provider domains — capability gating
