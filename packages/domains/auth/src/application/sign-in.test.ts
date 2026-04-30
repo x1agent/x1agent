@@ -95,6 +95,40 @@ describe("signInWithCode", () => {
     ).rejects.toBeInstanceOf(InvalidAuthCodeError);
   });
 
+  it("bypasses the domain allowlist when accessGate.isPreAuthorized is true", async () => {
+    const deps = makeDeps({
+      allowedDomains: ["example.com"],
+      // Stranger isn't on example.com but the access gate says yes
+      // (e.g. they have a pending invitation).
+      accessGate: { async isPreAuthorized(e) {
+        return e === Email("stranger@stranger.com");
+      } },
+    });
+    const users = deps.users as InMemoryUserRepository;
+    const orig = users.upsertFromProfile.bind(users);
+    users.upsertFromProfile = async (p) => {
+      const u = await orig(p);
+      users.seedMembership(u.id, "default", "Default", Role("owner"));
+      return u;
+    };
+    const { session } = await signInWithCode(
+      deps,
+      "stranger-code",
+      "http://localhost/cb",
+    );
+    expect(session.email).toBe(Email("stranger@stranger.com"));
+  });
+
+  it("still rejects domain-blocked users when accessGate.isPreAuthorized is false", async () => {
+    const deps = makeDeps({
+      allowedDomains: ["example.com"],
+      accessGate: { async isPreAuthorized() { return false; } },
+    });
+    await expect(
+      signInWithCode(deps, "stranger-code", "http://localhost/cb"),
+    ).rejects.toBeInstanceOf(DomainNotAllowedError);
+  });
+
   it("marks platform admins in the session", async () => {
     const deps = makeDeps({ platformAdmins: ["alice@example.com"] });
     const users = deps.users as InMemoryUserRepository;

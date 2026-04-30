@@ -8,6 +8,7 @@ import {
   PostgresPersonRepository,
   PostgresLinkAttemptStore,
   PostgresPasswordCredentialStore,
+  PostgresAccessGate,
   createAuthRoutes,
   createRequireAuth,
   type AuthProvider,
@@ -249,6 +250,9 @@ export function compose(env: CompositionEnv): Composition {
     apiUrl: env.apiUrl,
     allowedDomains: env.allowedDomains,
     platformAdmins: env.platformAdmins,
+    // Lets emails outside the domain whitelist sign in if they have a
+    // pending invitation or an existing user row.
+    accessGate: new PostgresAccessGate(env.sql),
     bypassProvider: bypass,
     persons,
     linkAttempts,
