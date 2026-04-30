@@ -49,6 +49,21 @@ export interface SessionRepository {
   ): Promise<readonly Session[]>;
 
   /**
+   * Sessions visible to a specific user — sessions they own
+   * (triggered_by_user_id = userId) UNION sessions shared with them
+   * via session_user_shares. Newest-first. Workspace-scoped.
+   *
+   * Workspace admins/owners get the full set via listByWorkspace
+   * instead — they're trusted to see everything, including
+   * scheduler-triggered sessions which have no human owner.
+   */
+  listForUser(
+    workspaceId: WorkspaceId,
+    userId: UserId,
+    limit: number,
+  ): Promise<readonly Session[]>;
+
+  /**
    * The most recent scheduler-triggered session for an agent. Scheduler uses
    * this plus the agent's cron to decide the next due time.
    */
