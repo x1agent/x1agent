@@ -13,6 +13,7 @@
   "dependencies": {
     "@kubernetes/client-node": "^0.22.0",
     "@x1agent/kernel": "workspace:*",
+    "@x1agent/observability": "workspace:*",
     "js-yaml": "^4.1.0",
     "nats": "^2.29.3"
   },

@@ -1,3 +1,7 @@
+// initOtel before any auto-instrumented imports.
+import { initOtel } from "@x1agent/observability";
+initOtel({ serviceName: "x1agent-provider-messaging-slack" });
+
 /**
  * messaging-slack provider service.
  *

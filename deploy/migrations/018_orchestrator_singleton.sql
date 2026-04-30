@@ -23,6 +23,11 @@
 -- callers should have already done the find-or-create, so hitting
 -- this trigger indicates either a bug or a real race — worth logging.
 
+-- DROP-then-CREATE keeps the migration re-runnable. The function
+-- uses CREATE OR REPLACE (idempotent natively). Triggers don't
+-- support OR REPLACE, so we drop first.
+DROP TRIGGER IF EXISTS sessions_orchestrator_singleton ON sessions;
+
 CREATE OR REPLACE FUNCTION enforce_orchestrator_singleton()
 RETURNS TRIGGER AS $$
 DECLARE

@@ -12,6 +12,7 @@
   "dependencies": {
     "@x1agent/domain-messaging": "workspace:*",
     "@x1agent/kernel": "workspace:*",
+    "@x1agent/observability": "workspace:*",
     "nats": "^2.29.3"
   },
   "devDependencies": {

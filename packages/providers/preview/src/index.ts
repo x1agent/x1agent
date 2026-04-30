@@ -1,3 +1,8 @@
+// initOtel must run BEFORE any auto-instrumented imports (nats /
+// undici / k8s client). No-op when collector endpoint isn't set.
+import { initOtel } from "@x1agent/observability";
+initOtel({ serviceName: "x1agent-provider-preview" });
+
 /**
  * Preview provider entry point. Listens on NATS for provision
  * requests from the api, builds an image via Kaniko, applies
