@@ -1,0 +1,207 @@
+# api Deployment + Service + ServiceAccount + Role(Binding) for spawning
+# session Jobs in the install namespace. Workload Identity binds this SA
+# to a GSA with secretmanager.secretAccessor so pods can reach GSM via
+# ESO ClusterSecretStore.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.api.serviceAccountName }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.cloud.gcp.workloadIdentityServiceAccount | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.api.serviceAccountName }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs", "jobs/status"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.api.serviceAccountName }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.api.serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.api.serviceAccountName }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ .Values.api.port }}
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "api") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.api.serviceAccountName }}
+      containers:
+        - name: api
+          image: "{{ .Values.images.api.repository }}:{{ .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.images.api.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - containerPort: {{ .Values.api.port }}
+              name: http
+          env:
+            - name: API_PORT
+              value: {{ .Values.api.port | quote }}
+            - name: API_PUBLIC_URL
+              value: "https://{{ include "x1agent.apiHost" . }}"
+            - name: PUBLIC_URL
+              value: "https://{{ include "x1agent.appHost" . }}"
+            - name: PLATFORM_NAME
+              value: {{ .Values.config.PLATFORM_NAME | quote }}
+            - name: PLATFORM_ADMIN_EMAILS
+              value: {{ .Values.config.PLATFORM_ADMIN_EMAILS | quote }}
+            - name: ALLOWED_DOMAINS
+              value: {{ .Values.config.ALLOWED_DOMAINS | quote }}
+            # Capability gating — see values.yaml `providers:` block.
+            # The api echoes these via GET /api/capabilities; the
+            # frontend hides Collections etc. when the value is "none".
+            - name: PROVIDER_GRAPH
+              value: {{ .Values.providers.graph | default "none" | quote }}
+            - name: PROVIDER_VECTOR
+              value: {{ .Values.providers.vector | default "none" | quote }}
+            - name: NODE_ENV
+              value: production
+            - name: NATS_URL
+              value: tls://nats:4222
+            # NATS mTLS — cert-manager-issued via the internal CA.
+            # Paths inside the projected `nats-tls` volume below.
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            - name: DATABASE_URL
+              value: "postgres://x1agent:$(POSTGRES_PASSWORD)@postgres:5432/x1agent"
+            - name: K8S_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: BASE_DOMAIN
+              value: {{ .Values.baseDomain | quote }}
+            - name: PREVIEW_DOMAIN
+              value: "preview.{{ .Values.baseDomain }}"
+            # Where platform preset images live. seed.ts uses this to
+            # populate agent_images.built_ref. In prod = the install's
+            # Artifact Registry; in OrbStack dev the env is unset and
+            # seed falls back to x1-registry.x1agent.svc.cluster.local:5000.
+            - name: IMAGE_REGISTRY
+              value: {{ .Values.cloud.gcp.artifactRegistry | quote }}
+            # Anthropic credential source. The api forwards these env
+            # vars onto every spawned session Job so the agent runtime's
+            # SDK uses the right path.
+            - name: ANTHROPIC_PROVIDER
+              value: {{ .Values.anthropic.provider | quote }}
+            {{- if eq .Values.anthropic.provider "vertex" }}
+            - name: CLAUDE_CODE_USE_VERTEX
+              value: "1"
+            - name: CLOUD_ML_REGION
+              value: {{ .Values.anthropic.vertexRegion | quote }}
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              value: {{ default .Values.cloud.gcp.projectId .Values.anthropic.vertexProjectId | quote }}
+            # The K8s SA agent session Jobs run as. Must match
+            # session-sa.yaml's SA name + the terraform WI binding's
+            # session_k8s_service_account var.
+            - name: SESSION_SERVICE_ACCOUNT
+              value: x1agent-session
+            {{- end }}
+            # NATS client cert Secret the sidecar mounts. Cert-manager-issued
+            # in prod (vs the dev bootstrap script's "nats-tls"). pod-spec.ts
+            # remaps tls.* → client.* via Secret items projection.
+            - name: SESSION_NATS_TLS_SECRET
+              value: nats-session-client-tls
+            {{- if .Values.monitoring.opentelemetry.enabled }}
+            # OTel collector wiring. The OpenTelemetry Operator creates
+            # a Service named "<name>-collector" for the OpenTelemetryCollector
+            # resource — point at it via gRPC. initOtel() in the api boots
+            # against this endpoint (no-op when env is unset).
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Values.monitoring.opentelemetry.serviceName }}-collector:{{ .Values.monitoring.opentelemetry.grpcPort }}"
+            - name: OTEL_SERVICE_NAME
+              value: x1agent-api
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Release.Namespace }},service.namespace=x1agent"
+            {{- end }}
+          # ESO syncs GSM → K8s Secret/x1agent-secrets; envFrom pulls
+          # everything in. Pod restarts on Secret value change are
+          # handled by the reloader sidecar (deferred — for now, manually
+          # `kubectl rollout restart deploy/api` after a secret rotation).
+          envFrom:
+            - secretRef:
+                name: x1agent-secrets
+            - secretRef:
+                name: postgres-credentials
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /health, port: {{ .Values.api.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: {{ .Values.api.port }} }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          # NATS mTLS material — cert-manager populates the
+          # nats-api-client-tls Secret. Items projection renames
+          # tls.crt → client.crt etc. so existing api code (which
+          # hardcodes /etc/nats-tls/{ca,client}.{crt,key}) reads them
+          # without env churn.
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-api-client-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: client.crt
+              - key: tls.key
+                path: client.key

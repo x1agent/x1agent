@@ -28,6 +28,10 @@ import {
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { useImagesStore } from "../../stores/imagesStore";
+import {
+  useCapabilitiesStore,
+  useHasCollections,
+} from "../../stores/capabilitiesStore";
 import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
@@ -94,9 +98,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [tabRaw, setTab] = useUrlSearchParam("tab", DEFAULT_TAB);
   const tab: TabKey = isTabKey(tabRaw) ? tabRaw : DEFAULT_TAB;
 
+  const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
+  const hasCollections = useHasCollections();
+
   useEffect(() => {
     if (status === "idle") fetchMe();
-  }, [status, fetchMe]);
+    fetchCapabilities();
+  }, [status, fetchMe, fetchCapabilities]);
 
   useEffect(() => {
     load(workspaceSlug);
@@ -227,7 +235,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
             {!isCreate && (
               <>
                 <TabsTrigger value="repos">Repositories</TabsTrigger>
-                <TabsTrigger value="collections">Collections</TabsTrigger>
+                {hasCollections && (
+                  <TabsTrigger value="collections">Collections</TabsTrigger>
+                )}
                 <TabsTrigger value="permissions">Permissions</TabsTrigger>
               </>
             )}
@@ -435,14 +445,16 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   />
                 </TabsContent>
 
-                <TabsContent value="collections" className="mt-0">
-                  <CollectionsAttachCard
-                    workspaceSlug={workspaceSlug}
-                    agentId={existing.id}
-                    agentName={existing.name}
-                    canManage={!!canManage}
-                  />
-                </TabsContent>
+                {hasCollections && (
+                  <TabsContent value="collections" className="mt-0">
+                    <CollectionsAttachCard
+                      workspaceSlug={workspaceSlug}
+                      agentId={existing.id}
+                      agentName={existing.name}
+                      canManage={!!canManage}
+                    />
+                  </TabsContent>
+                )}
 
                 <TabsContent value="permissions" className="mt-0">
                   <CanSpawnCard

@@ -5,6 +5,7 @@ import { getSql } from "./db/client.js";
 import { seedIfDev } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import { capabilitiesRoutes } from "./capabilities/routes.js";
 import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
@@ -170,6 +171,7 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/api/capabilities", capabilitiesRoutes());
 app.get("/auth/github/config", (c) =>
   c.json({
     configured:

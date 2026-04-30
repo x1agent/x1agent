@@ -45,11 +45,18 @@ import { Avatar, initials, workspaceInitials } from "../components/ui/avatar";
 import { useAuthStore } from "../stores/authStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useAccountsStore } from "../stores/accountsStore";
+import {
+  useCapabilitiesStore,
+  useHasCollections,
+} from "../stores/capabilitiesStore";
 
 interface NavItem {
   title: string;
   url: string;
-  icon: typeof Bot;
+  // Accepts both lucide-react icons (typeof Bot) and the inline Github
+  // SVG component above — both have the same `({ className }) => JSX`
+  // call shape.
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 export function AppSidebar() {
@@ -65,10 +72,14 @@ export function AppSidebar() {
   const loadAccounts = useAccountsStore((s) => s.load);
   const startAddAccount = useAccountsStore((s) => s.startAddAccount);
 
+  const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
+  const hasCollections = useHasCollections();
+
   useEffect(() => {
     syncSlugFromUrl();
     loadAccounts();
-  }, [syncSlugFromUrl, loadAccounts]);
+    fetchCapabilities();
+  }, [syncSlugFromUrl, loadAccounts, fetchCapabilities]);
 
   const activeMembership = memberships.find((m) => m.slug === activeSlug);
   const otherAccounts = linkedAccounts.filter((a) => !a.is_current);
@@ -79,7 +90,17 @@ export function AppSidebar() {
         { title: "Agents", url: `${navBase}`, icon: Bot },
         { title: "Sessions", url: `${navBase}/sessions`, icon: Play },
         { title: "Shares", url: `${navBase}/shares`, icon: FileText },
-        { title: "Collections", url: `${navBase}/collections`, icon: Database },
+        // Collections live behind a graph provider — hide the entry
+        // when the deployment ships without one (see capabilitiesStore).
+        ...(hasCollections
+          ? [
+              {
+                title: "Collections",
+                url: `${navBase}/collections`,
+                icon: Database,
+              },
+            ]
+          : []),
         { title: "GitHub", url: `${navBase}/github`, icon: Github },
         { title: "Settings", url: `${navBase}/settings`, icon: Settings },
       ]
