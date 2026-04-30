@@ -1,0 +1,31 @@
+---
+// Top nav. Stays minimal — just brand, two links, and the primary CTA.
+// Operators don't browse marketing menus; they decide in 10 seconds.
+---
+
+<header class="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-bg)]/80 backdrop-blur">
+  <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
+    <a href="/" class="flex items-center gap-2 text-sm font-medium tracking-tight">
+      <svg viewBox="0 0 24 24" class="h-6 w-6" aria-hidden="true">
+        <rect x="2" y="2" width="20" height="20" rx="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M7 12 L11 16 L17 8" fill="none" stroke="var(--color-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>x1agent</span>
+    </a>
+
+    <nav class="hidden items-center gap-7 text-sm text-[var(--color-text-muted)] md:flex">
+      <a href="#capabilities" class="transition hover:text-[var(--color-text)]">What it does</a>
+      <a href="#trust" class="transition hover:text-[var(--color-text)]">Trust model</a>
+      <a href="#providers" class="transition hover:text-[var(--color-text)]">Providers</a>
+      <a href="https://docs.x1agent.com" class="transition hover:text-[var(--color-text)]">Docs</a>
+    </nav>
+
+    <a
+      href="#access"
+      class="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-sm font-medium text-[var(--color-bg)] transition hover:opacity-90"
+    >
+      Get access
+      <svg viewBox="0 0 16 16" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 8h8M9 5l3 3-3 3"/></svg>
+    </a>
+  </div>
+</header>

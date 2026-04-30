@@ -3,8 +3,6 @@ title: x1agent
 description: Open-source, Kubernetes-native agent platform
 ---
 
-# x1agent
-
 x1agent is a Kubernetes-native platform for running LLM agents in production. It provides a security-first container architecture, a pluggable provider system, and real-time bidirectional communication between agents and clients.
 
 ## Core ideas
