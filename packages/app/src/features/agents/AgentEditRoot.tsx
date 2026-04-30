@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RuntimeType } from "@x1agent/shared";
+import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -88,6 +89,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
   const [model, setModel] = useState<string>("");
+  // Model catalog comes from /api/capabilities/anthropic/models so the
+  // frontend doesn't hardcode model ids. Empty list = upstream
+  // unreachable; UI falls back to a free-text input.
+  const [modelCatalog, setModelCatalog] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const {
     bySlug: imagesBySlug,
     load: loadImages,
@@ -105,6 +113,17 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   useEffect(() => {
     if (status === "idle") fetchMe();
     fetchCapabilities();
+    void apiFetch<{
+      models: { id: string; label: string }[];
+      default: string | null;
+    }>("/api/capabilities/anthropic/models")
+      .then((r) => {
+        setModelCatalog(r.models);
+        setDefaultModel(r.default);
+      })
+      .catch(() => {
+        // Upstream Vertex/Anthropic unreachable — fall back to free-text.
+      });
   }, [status, fetchMe, fetchCapabilities]);
 
   useEffect(() => {
@@ -355,17 +374,60 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   </p>
                   <div className="space-y-1.5 pt-2">
                     <Label htmlFor="agent-model">Claude model</Label>
-                    <Input
-                      id="agent-model"
-                      placeholder="(deployment default)"
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                    />
+                    {modelCatalog.length > 0 ? (
+                      <Select
+                        value={
+                          model === ""
+                            ? "__default__"
+                            : modelCatalog.some((m) => m.id === model)
+                              ? model
+                              : "__custom__"
+                        }
+                        onValueChange={(v) => {
+                          if (v === "__default__") setModel("");
+                          else if (v === "__custom__") setModel(model || " ");
+                          else setModel(v);
+                        }}
+                      >
+                        <SelectTrigger id="agent-model">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">
+                            Deployment default
+                            {defaultModel ? ` (${defaultModel})` : ""}
+                          </SelectItem>
+                          {modelCatalog.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__custom__">Custom…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id="agent-model"
+                        placeholder="(deployment default)"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                      />
+                    )}
+                    {modelCatalog.length > 0 &&
+                      model !== "" &&
+                      !modelCatalog.some((m) => m.id === model) && (
+                        <Input
+                          placeholder="claude-sonnet-4-5@20250929"
+                          value={model.trim()}
+                          onChange={(e) => setModel(e.target.value)}
+                          className="mt-2"
+                        />
+                      )}
                     <p className="text-xs text-zinc-500">
-                      Override the SDK model id for this agent. Leave empty
-                      to use the deployment-wide ANTHROPIC_MODEL. Examples:{" "}
-                      <code>claude-sonnet-4@20250514</code> (vertex us-east5),{" "}
-                      <code>claude-sonnet-4-5@20250929</code>.
+                      The list comes from your provider's catalog
+                      (Vertex Model Garden or Anthropic's /v1/models).
+                      A model that appears here still has to be enabled
+                      in your Vertex project before sessions actually run.
                     </p>
                   </div>
                 </CardContent>

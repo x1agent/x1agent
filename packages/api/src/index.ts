@@ -1,11 +1,48 @@
+// Sentry FIRST — the SDK auto-instruments http/pg/etc., which means
+// it has to load before the modules it patches. instrument.ts no-ops
+// when SENTRY_DSN_API is unset.
+import "./instrument.js";
+import * as Sentry from "@sentry/node";
+
+// initOtel must run BEFORE any auto-instrumented imports (hono / nats /
+// pg-driver / undici) so their patches land. The package no-ops cleanly
+// when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+import { initOtel } from "@x1agent/observability";
+initOtel({ serviceName: "x1agent-api" });
+
 import { Hono } from "hono";
 import * as k8s from "@kubernetes/client-node";
 import { compose } from "./composition/index.js";
 import { getSql } from "./db/client.js";
-import { seedIfDev } from "./seed.js";
+import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import { capabilitiesRoutes } from "./capabilities/routes.js";
+import { listAnthropicModels } from "./capabilities/anthropic-models.js";
+
+/**
+ * Resolve the deployment-wide default model id for new session pods.
+ * Explicit ANTHROPIC_MODEL env wins; otherwise pick the first Sonnet
+ * from the upstream catalog. Catalog fetch is cached for 5 min so
+ * boot adds at most one Vertex / Anthropic round-trip per restart.
+ * Returns undefined when nothing is available (let the SDK pick).
+ */
+async function resolveDefaultAnthropicModel(): Promise<string | undefined> {
+  const explicit = process.env.ANTHROPIC_MODEL;
+  if (explicit && explicit.trim()) return explicit.trim();
+  try {
+    const models = await listAnthropicModels();
+    const sonnet = models.find((m) =>
+      m.id.toLowerCase().includes("sonnet"),
+    );
+    return sonnet?.id ?? models[0]?.id;
+  } catch (err) {
+    console.warn(
+      `[anthropic-models] default resolve failed at boot: ${(err as Error).message}`,
+    );
+    return undefined;
+  }
+}
 import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
@@ -98,10 +135,12 @@ try {
 const {
   authRoutes,
   workspaceInvitationRoutes,
+  workspaceCreateRoutes,
   publicInvitationRoutes,
   agentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
+  workspaceTokenUsageRoutes,
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
   sessionShareRoutes,
@@ -124,6 +163,7 @@ const {
   collections: composedCollections,
   permissionGrants,
   sessionEvents,
+  tokenUsage: composedTokenUsage,
   sql: composedSql,
   agents: composedAgents,
   sessions: composedSessions,
@@ -135,6 +175,13 @@ const {
   jwtSecret: process.env.JWT_SECRET,
   googleClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
   googleClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+  // GOOGLE_OAUTH_SCOPES is a space-separated scope list that overrides
+  // the identity-only default. Set in the install file when provider
+  // domains (Drive, Calendar, Gmail) are enabled so the consent screen
+  // prompts up-front rather than after-the-fact.
+  googleScopes: process.env.GOOGLE_OAUTH_SCOPES
+    ? process.env.GOOGLE_OAUTH_SCOPES.split(/\s+/).filter(Boolean)
+    : undefined,
   appUrl: PUBLIC_URL,
   apiUrl: API_PUBLIC_URL,
   allowedDomains: (process.env.ALLOWED_DOMAINS || "")
@@ -159,6 +206,15 @@ const {
 
 const app = new Hono();
 
+// Sentry sees every unhandled error before Hono's default 500 page
+// reaches the client. Reraises so any per-route .onError still fires
+// downstream and the response shape stays the same as before.
+app.onError((err, c) => {
+  Sentry.captureException(err);
+  console.error(`[hono] unhandled: ${(err as Error).message}`);
+  return c.json({ error: "internal_server_error" }, 500);
+});
+
 app.use("*", async (c, next) => {
   c.header("Access-Control-Allow-Origin", PUBLIC_URL);
   c.header("Access-Control-Allow-Credentials", "true");
@@ -173,6 +229,21 @@ app.use("*", async (c, next) => {
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/api/capabilities", capabilitiesRoutes());
+
+// Sentry verify route — throws so the SDK captures the first event
+// during the onboarding flow. Gated to non-production OR by token so
+// it doesn't sit as a public 500-trigger forever. Remove after the
+// project has its first organic event.
+app.get("/debug-sentry", (c) => {
+  const token = c.req.query("token");
+  if (
+    process.env.NODE_ENV === "production" &&
+    token !== process.env.API_INTERNAL_TOKEN
+  ) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  throw new Error("x1agent api: first Sentry event");
+});
 app.get("/auth/github/config", (c) =>
   c.json({
     configured:
@@ -186,10 +257,12 @@ app.get("/auth/github/config", (c) =>
 app.route("/auth", authRoutes);
 app.route("/auth/github", githubInstallRoutes);
 app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
+app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
+app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/shares",
   workspaceShareRoutes,
@@ -217,8 +290,13 @@ app.route(
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
 
+// Always-run seed: platform image presets. Idempotent.
+await seedPlatformPresets().catch((err) => {
+  console.warn("[seed] platform presets skipped:", (err as Error).message);
+});
+// Dev-only seed: default workspace + test user.
 await seedIfDev().catch((err) => {
-  console.warn("[seed] skipped:", (err as Error).message);
+  console.warn("[seed] dev skipped:", (err as Error).message);
 });
 
 const SCHEDULER_INTERVAL_MS = Number(
@@ -300,6 +378,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       events: sessionEvents,
       sessions: composedSessions,
       agents: composedAgents,
+      tokenUsage: composedTokenUsage,
     });
     registerCleanup(() => sub.stop());
     console.log(`[nats] connected to ${natsUrl}`);
@@ -441,6 +520,24 @@ if (process.env.JOB_WATCHER !== "disabled") {
       apiInternalToken: process.env.API_INTERNAL_TOKEN || "",
       natsUrl: process.env.NATS_URL || "nats://nats:4222",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      // Vertex path: the api Deployment's env (set by the Helm chart
+      // when anthropic.provider == vertex) drives every session pod
+      // it spawns. Default falls through to api_key for back-compat
+      // with local dev that has no notion of Vertex.
+      anthropicProvider:
+        (process.env.ANTHROPIC_PROVIDER as "api_key" | "vertex" | undefined) ??
+        "api_key",
+      vertexRegion: process.env.CLOUD_ML_REGION || undefined,
+      vertexProjectId: process.env.ANTHROPIC_VERTEX_PROJECT_ID || undefined,
+      // ANTHROPIC_MODEL pins the SDK to a specific model id. Falls
+      // back to the first Sonnet model in the upstream catalog (Vertex
+      // or Anthropic API) when the env is unset, so a fresh install
+      // doesn't have to manually pick a model just to spawn a session.
+      anthropicModel: await resolveDefaultAnthropicModel(),
+      sessionServiceAccount:
+        process.env.SESSION_SERVICE_ACCOUNT || undefined,
+      natsClientTlsSecret:
+        process.env.SESSION_NATS_TLS_SECRET || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
