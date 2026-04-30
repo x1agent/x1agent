@@ -32,10 +32,12 @@ async function resolveDefaultAnthropicModel(): Promise<string | undefined> {
   if (explicit && explicit.trim()) return explicit.trim();
   try {
     const models = await listAnthropicModels();
-    const sonnet = models.find((m) =>
-      m.id.toLowerCase().includes("sonnet"),
-    );
-    return sonnet?.id ?? models[0]?.id;
+    // Skip @default preview aliases — Vertex lists them in the catalog
+    // but they often 400 with "not servable in region" until promoted
+    // to GA. Prefer a dated (GA) version.
+    const ga = models.filter((m) => !m.id.endsWith("@default"));
+    const sonnet = ga.find((m) => m.id.toLowerCase().includes("sonnet"));
+    return sonnet?.id ?? ga[0]?.id ?? models[0]?.id;
   } catch (err) {
     console.warn(
       `[anthropic-models] default resolve failed at boot: ${(err as Error).message}`,
