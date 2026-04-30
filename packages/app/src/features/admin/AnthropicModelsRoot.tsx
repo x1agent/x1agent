@@ -184,8 +184,9 @@ export function AnthropicModelsRoot() {
                 <>
                   {" "}
                   <span className="text-amber-400">
-                    No models enabled — the dropdown falls back to the full
-                    catalog.
+                    No models enabled — the agent dropdown is empty. Hit
+                    Test on a model that returns Servable, then flip
+                    Enable.
                   </span>
                 </>
               )}
