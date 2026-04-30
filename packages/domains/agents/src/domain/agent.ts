@@ -47,6 +47,18 @@ export interface Agent {
    * the SDK + Vertex/Anthropic API are the authority on what's valid.
    */
   model: string | null;
+  /**
+   * Owner — can do everything (view/invoke/edit). Backfilled from
+   * created_by during migration; reassignable by workspace admins.
+   * NULL means no owner — only workspace admins see the agent.
+   */
+  ownerUserId: UserId | null;
+  /**
+   * Coarse visibility tier. private = owner+admins only; workspace =
+   * any workspace member can view + invoke; via_grants = consult
+   * agent_grants for every non-owner non-admin caller.
+   */
+  visibility: "private" | "workspace" | "via_grants";
   createdBy: UserId | null;
   createdAt: Date;
   updatedAt: Date;

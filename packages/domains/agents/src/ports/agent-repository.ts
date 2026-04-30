@@ -21,6 +21,13 @@ export interface CreateAgentInput {
   imageId?: string | null;
   /** Per-agent override for ANTHROPIC_MODEL. Null = use deployment default. */
   model?: string | null;
+  /**
+   * Owner. Defaults to createdBy at the adapter layer when omitted.
+   * Set to NULL explicitly to leave the agent ownerless (admin-only).
+   */
+  ownerUserId?: UserId | null;
+  /** Coarse visibility tier. Defaults to 'workspace'. */
+  visibility?: "private" | "workspace" | "via_grants";
   createdBy: UserId | null;
 }
 
@@ -35,6 +42,9 @@ export interface UpdateAgentInput {
   imageId?: string | null;
   /** Setting `null` explicitly clears the override; `undefined` leaves untouched. */
   model?: string | null;
+  /** Same convention — null clears, undefined leaves untouched. */
+  ownerUserId?: UserId | null;
+  visibility?: "private" | "workspace" | "via_grants";
 }
 
 export interface AgentRepository {
