@@ -1,0 +1,161 @@
+# In-cluster NATS with mTLS. cert-manager issues the server cert (see
+# nats-certs.yaml) into the `nats-server-tls` Secret; we mount it +
+# the internal CA Secret here. Single replica for v1; clustered NATS
+# is a follow-up.
+#
+# `verify_and_map: true` extracts the client cert's CN as the NATS
+# username + matches against the authorization.users block. Subject
+# ACLs follow the docs/configuration/nats-mtls.md design.
+{{- if .Values.infra.nats.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: ws
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 8 }}
+      annotations:
+        # Hash the values that drive the rendered nats.conf. Any change
+        # to authorization, TLS, or websocket settings shifts this
+        # annotation and helm upgrade recreates the pod. Without it a
+        # `helm upgrade` that only edited nats.conf leaves NATS running
+        # with the old config (silent — no error, just unexplained
+        # PERMISSIONS_VIOLATION from clients trying to use the new ACL).
+        # We can't `include` this file from itself (recursive); hashing
+        # the conf-relevant values is good enough.
+        checksum/config: {{ printf "%v|%v" .Values.infra.nats .Values.providers | sha256sum }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ .Values.infra.nats.image | quote }}
+          args:
+            - "-c"
+            - "/etc/nats/nats.conf"
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 8080
+              name: ws
+          resources: {{- toYaml .Values.infra.nats.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+              readOnly: true
+            # Server cert (tls.crt + tls.key) AND the issuing CA
+            # (ca.crt) — cert-manager writes all three into this one
+            # Secret, so we don't need a separate CA mount.
+            - name: server-tls
+              mountPath: /etc/nats/tls/server
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+        - name: server-tls
+          secret:
+            secretName: nats-server-tls
+---
+# NATS config. mTLS with subject-level ACLs by CN.
+#
+# Two authorized users matching the cert CNs in nats-certs.yaml:
+#   x1agent-api       — subscribes to all session events, publishes user input
+#   session-sidecar   — publishes its session's events, subscribes to its input
+#
+# v1 ACL note: `session-sidecar` is shared across all sessions, so the
+# CN-based pin doesn't constrain which session-id subjects a sidecar
+# can publish to. Per-session certs (deferred — see nats-certs.yaml
+# header) would let us narrow this to subject patterns derived from CN.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+
+    tls {
+      cert_file: "/etc/nats/tls/server/tls.crt"
+      key_file:  "/etc/nats/tls/server/tls.key"
+      ca_file:   "/etc/nats/tls/server/ca.crt"
+      verify:    true
+      verify_and_map: true
+    }
+
+    # verify_and_map extracts the username from the client cert. Order
+    # of precedence (per NATS server v2.10): Email SAN, URI SAN, then
+    # the Subject DN in RFC 2253 form. Our certs (issued by cert-manager
+    # from the internal CA) have no email/URI SANs, so the username is
+    # the DN — for a cert with only CN=x1agent-api, that's literally
+    # "CN=x1agent-api". The user entries below MUST match that form.
+    authorization {
+      users: [
+        {
+          user: "CN=x1agent-api"
+          permissions: {
+            publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>"] }
+            subscribe: { allow: ["x1.session.*.events", "x1.session.*.audit", "_INBOX.>"] }
+          }
+        }
+        {
+          user: "CN=session-sidecar"
+          permissions: {
+            # v1: shared cert means any sidecar can publish on any session
+            # id. Per-session certs would tighten this. NATS subscribes are
+            # narrower since each pod cares about its own session's input.
+            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit"] }
+            subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] }
+          }
+        }
+        {
+          # Shared by every provider Deployment. Subscribes to its
+          # subject tree to receive requests; publishes inbox replies.
+          # Per-provider certs (CN=provider-graph, CN=provider-messaging)
+          # are the v2 tightening — would let a graph pod be denied
+          # subscribing to messaging subjects.
+          user: "CN=x1agent-provider"
+          permissions: {
+            publish:   { allow: ["_INBOX.>", "x1.audit.>"] }
+            subscribe: { allow: ["x1.provider.>", "_INBOX.>"] }
+          }
+        }
+      ]
+    }
+
+    # Browser-facing WebSocket gateway. TLS termination happens at the
+    # ingress (Let's Encrypt cert that browsers trust), so this listener
+    # speaks plain WS — no in-pod TLS. The ingress carries traffic as
+    # https://nats.<base-domain> → ws://nats:8080.
+    #
+    # Auth: no_auth_user maps anonymous WS clients to CN=x1agent-api.
+    # Acceptable for v1 single-user deployments — see ingress.yaml
+    # SECURITY NOTE for the auth_callout follow-up that ties WS clients
+    # to per-session JWTs.
+    websocket {
+      port: 8080
+      no_tls: true
+      no_auth_user: "CN=x1agent-api"
+    }
+{{- end }}

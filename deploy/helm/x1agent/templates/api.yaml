@@ -106,6 +106,27 @@ spec:
               value: {{ .Values.providers.graph | default "none" | quote }}
             - name: PROVIDER_VECTOR
               value: {{ .Values.providers.vector | default "none" | quote }}
+            # Image refs for spawned session pods. Without these the api
+            # falls back to dev names (x1agent-agent:latest) that don't
+            # exist in any prod registry, so session create succeeds at
+            # the K8s API level but kubelet ImagePull fails.
+            - name: AGENT_IMAGE
+              value: "{{ .Values.images.agent.repository }}:{{ .Values.images.agent.tag | default .Values.images.api.tag }}"
+            - name: SIDECAR_IMAGE
+              value: "{{ .Values.images.sidecar.repository }}:{{ .Values.images.sidecar.tag | default .Values.images.api.tag }}"
+            # Node's bundled CA store doesn't include the cluster's
+            # API server CA. Without this the @kubernetes/client-node
+            # library calls fail with "unable to verify the first
+            # certificate" on every Job create. The kubelet projects
+            # the cluster CA into every pod at this fixed path.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            # Sentry release tag. SENTRY_DSN_API itself comes from
+            # the ESO-synced x1agent-secrets bundle (envFrom below).
+            - name: IMAGE_TAG
+              value: {{ .Values.images.api.tag | default "latest" | quote }}
+            - name: SENTRY_ENVIRONMENT
+              value: production
             - name: NODE_ENV
               value: production
             - name: NATS_URL

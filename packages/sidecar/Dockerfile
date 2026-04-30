@@ -4,7 +4,7 @@
 
 FROM rust:1-alpine AS builder
 
-RUN apk add --no-cache musl-dev pkgconf git
+RUN apk add --no-cache musl-dev pkgconf git openssl-dev openssl-libs-static
 
 WORKDIR /build
 COPY Cargo.toml ./

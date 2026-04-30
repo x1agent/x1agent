@@ -63,14 +63,52 @@ pub struct SessionMessage {
     pub payload: serde_json::Value,
 }
 
+// Sentry init returns a guard that flushes pending events on drop.
+// Must outlive every code path in main, so we hold it in a local for
+// the entire main body. No-op when SENTRY_DSN_SIDECAR is unset.
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+    let dsn = std::env::var("SENTRY_DSN_SIDECAR").ok()?;
+    if dsn.trim().is_empty() {
+        return None;
+    }
+    let release = std::env::var("SENTRY_RELEASE")
+        .ok()
+        .or_else(|| std::env::var("IMAGE_TAG").ok())
+        .map(std::borrow::Cow::Owned);
+    let environment = std::env::var("SENTRY_ENVIRONMENT")
+        .unwrap_or_else(|_| "production".into());
+    let guard = sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release,
+            environment: Some(environment.into()),
+            send_default_pii: true,
+            ..Default::default()
+        },
+    ));
+    eprintln!("[sentry] sidecar initialised");
+    Some(guard)
+}
+
 #[tokio::main]
 async fn main() {
+    // Holding the guard for the duration of main keeps the Sentry
+    // transport alive; drop happens at process exit and flushes.
+    let _sentry_guard = init_sentry();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    // Verify route hatch — `SIDECAR_DEBUG_PANIC=1` triggers a panic on
+    // boot so we can verify Sentry receives the first event end-to-end
+    // without waiting for an organic crash.
+    if std::env::var("SIDECAR_DEBUG_PANIC").as_deref() == Ok("1") {
+        panic!("x1agent sidecar: first Sentry event");
+    }
 
     let session_id = std::env::var("SESSION_ID").expect("SESSION_ID required");
     let workspace_slug = std::env::var("SESSION_WORKSPACE_SLUG").unwrap_or_default();
