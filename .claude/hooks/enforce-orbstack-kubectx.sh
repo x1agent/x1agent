@@ -84,10 +84,18 @@ if printf '%s' "$NORM" | grep -qE '(kubectl config use-context|kubectx)[[:space:
   fi
 fi
 
-# --- Rule 3: effective KUBECONFIG must be the orbstack file ---
+# --- Rule 3: effective KUBECONFIG must point at an orbstack config ---
+# Match the path suffix so this works regardless of the developer's
+# $HOME. OrbStack always installs the kubeconfig at
+# <home>/.orbstack/k8s/config.yml, so a suffix match is both strict
+# enough (only orbstack puts a file at that path) and portable across
+# dev machines.
 EFFECTIVE_KCFG="${KUBECONFIG:-$HOME/.kube/config}"
-if [[ "$EFFECTIVE_KCFG" != "$ALLOWED_KCFG" ]]; then
-  reject "KUBECONFIG=$EFFECTIVE_KCFG is not the orbstack config; .claude/settings.json env should have set this to $ALLOWED_KCFG"
-fi
+case "$EFFECTIVE_KCFG" in
+  */.orbstack/k8s/config.yml) ;;
+  *)
+    reject "KUBECONFIG=$EFFECTIVE_KCFG is not an orbstack config path; .claude/settings.json env should have set KUBECONFIG to a path ending in /.orbstack/k8s/config.yml"
+    ;;
+esac
 
 exit 0

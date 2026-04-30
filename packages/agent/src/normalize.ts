@@ -72,6 +72,40 @@ export function normalizeMessage(
       };
     }
 
+    case "result": {
+      // Final result message of an SDK turn. Carries cumulative token
+      // usage for the turn — the api persists this into token_usage so
+      // billing + per-workspace × per-agent dashboards have a source
+      // of truth. Defensive about field presence: the SDK adds new
+      // counters over time (cache fields landed in 2024) and missing
+      // fields drop to 0 in the api.
+      const r = message as {
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_creation_input_tokens?: number;
+          cache_read_input_tokens?: number;
+        };
+        model?: string;
+        stop_reason?: string;
+        duration_ms?: number;
+      };
+      if (!r.usage) return null;
+      return {
+        type: "agent.usage",
+        payload: {
+          model: r.model ?? "unknown",
+          input_tokens: r.usage.input_tokens ?? 0,
+          output_tokens: r.usage.output_tokens ?? 0,
+          cache_creation_input_tokens:
+            r.usage.cache_creation_input_tokens ?? 0,
+          cache_read_input_tokens: r.usage.cache_read_input_tokens ?? 0,
+          stop_reason: r.stop_reason,
+          duration_ms: r.duration_ms,
+        },
+      };
+    }
+
     default:
       return null;
   }
