@@ -32,8 +32,10 @@ import {
 import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
+  PostgresSessionShareRepository,
   createSessionRoutes,
   createWorkspaceSessionRoutes,
+  createSessionShareRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
   type SessionEventRepository,
@@ -117,6 +119,8 @@ export interface Composition {
   workspaceSessionRoutes: Hono;
   workspaceShareRoutes: Hono;
   workspaceSharesIndexRoutes: Hono;
+  /** /api/workspaces/:slug/sessions/:sessionId/user-shares */
+  sessionShareRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
@@ -205,6 +209,7 @@ export function compose(env: CompositionEnv): Composition {
   const agents = new PostgresAgentRepository(env.sql);
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
+  const sessionShares = new PostgresSessionShareRepository(env.sql);
   const permissionGrants = new PostgresPermissionGrantRepository(env.sql);
   const collectionsRepo = new PostgresCollectionRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
@@ -327,6 +332,22 @@ export function compose(env: CompositionEnv): Composition {
   const workspaceSharesIndexRoutes = createWorkspaceSharesIndexRoutes({
     sql: env.sql,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
+  const sessionShareRoutes = createSessionShareRoutes({
+    sessions,
+    shares: sessionShares,
+    findUserIdByEmail: async (email) => {
+      const u = await users.findByEmail(email as Email);
+      return u?.id ?? null;
+    },
+    isWorkspaceAdmin: async (userId, workspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m?.role === "admin" || m?.role === "owner";
+    },
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
@@ -597,6 +618,7 @@ export function compose(env: CompositionEnv): Composition {
     sessionRoutes,
     workspaceSessionRoutes,
     workspaceShareRoutes,
+    sessionShareRoutes,
     workspaceSharesIndexRoutes,
     internalRoutes,
     githubInstallRoutes,

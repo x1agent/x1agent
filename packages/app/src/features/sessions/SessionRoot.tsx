@@ -8,6 +8,8 @@ import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
 import { MessageInput } from "./MessageInput";
+import { ShareSessionPanel } from "./ShareSessionPanel";
+import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 
@@ -52,6 +54,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
 
   const [verbose, setVerbose] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const ncRef = useRef<NatsConnection | null>(null);
   const seqRef = useRef(0);
   const takePendingPrompt = usePendingPromptStore((s) => s.take);
@@ -253,7 +256,23 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           : []),
         { label: sessionId.slice(0, 8) },
       ]}
+      actions={
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setShareOpen((v) => !v)}
+        >
+          <Share2 className="size-3.5" />
+          <span className="ml-1">Share</span>
+        </Button>
+      }
     >
+      <ShareSessionPanel
+        workspaceSlug={workspaceSlug}
+        sessionId={sessionId}
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
       <div className="flex h-full min-h-[calc(100svh-56px)] flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b border-zinc-900 px-4 py-2 text-xs">
           {parent && (

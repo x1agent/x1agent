@@ -104,6 +104,7 @@ const {
   workspaceSessionRoutes,
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
+  sessionShareRoutes,
   internalRoutes,
   githubInstallRoutes,
   installationApiRoutes,
@@ -194,6 +195,10 @@ app.route(
   workspaceShareRoutes,
 );
 app.route("/api/workspaces/:slug/shares", workspaceSharesIndexRoutes);
+app.route(
+  "/api/workspaces/:slug/sessions/:sessionId/user-shares",
+  sessionShareRoutes,
+);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
