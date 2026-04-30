@@ -99,6 +99,15 @@ spec:
               value: {{ .Values.config.PLATFORM_ADMIN_EMAILS | quote }}
             - name: ALLOWED_DOMAINS
               value: {{ .Values.config.ALLOWED_DOMAINS | quote }}
+            - name: GOOGLE_OAUTH_SCOPES
+              value: {{ .Values.config.GOOGLE_OAUTH_SCOPES | default "" | quote }}
+            # Pin the Claude Code SDK to a model id known to be live in
+            # the install's CLOUD_ML_REGION. Skip when unset to let the
+            # SDK pick its own default.
+            {{- if .Values.config.ANTHROPIC_MODEL }}
+            - name: ANTHROPIC_MODEL
+              value: {{ .Values.config.ANTHROPIC_MODEL | quote }}
+            {{- end }}
             # Capability gating — see values.yaml `providers:` block.
             # The api echoes these via GET /api/capabilities; the
             # frontend hides Collections etc. when the value is "none".

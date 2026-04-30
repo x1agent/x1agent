@@ -162,17 +162,36 @@ export function render(input: RenderInput): RenderResult {
     `  preview:\n` +
     `    repository: ${q(arRepo + "/preview")}\n` +
     `    tag: ${q(tag)}\n` +
+    // agent + sidecar — session pods reference these via the api's
+    // AGENT_IMAGE / SIDECAR_IMAGE env (see helm chart api template).
+    // Without them set, session create succeeds at the K8s API but
+    // kubelet ImagePull fails.
+    `  agent:\n` +
+    `    repository: ${q(arRepo + "/agent")}\n` +
+    `    tag: ${q(tag)}\n` +
+    `  sidecar:\n` +
+    `    repository: ${q(arRepo + "/sidecar")}\n` +
+    `    tag: ${q(tag)}\n` +
     `\n` +
     `config:\n` +
     `  PLATFORM_NAME: ${q("x1agent")}\n` +
     `  PLATFORM_ADMIN_EMAILS: ${q(adminEmails)}\n` +
     `  ALLOWED_DOMAINS: ${q(env.get("ALLOWED_DOMAINS") || "")}\n` +
+    `  GOOGLE_OAUTH_SCOPES: ${q(env.get("GOOGLE_OAUTH_SCOPES") || "")}\n` +
+    `  ANTHROPIC_MODEL: ${q(env.get("ANTHROPIC_MODEL") || "")}\n` +
     `\n` +
     // Capability gating — wired from the configure wizard's
     // "Graph + vector provider?" prompt. "none" means hide.
     `providers:\n` +
     `  graph: ${q(env.get("PROVIDER_GRAPH") || "none")}\n` +
-    `  vector: ${q(env.get("PROVIDER_VECTOR") || "none")}\n`;
+    `  vector: ${q(env.get("PROVIDER_VECTOR") || "none")}\n` +
+    // Per-kind image repos — pinned to the same Artifact Registry as
+    // api/app. The graph-surrealdb image is built + pushed by the
+    // install orchestrator's build phase; tag tracks api.
+    `  graphSurrealdb:\n` +
+    `    image:\n` +
+    `      repository: ${q(arRepo + "/graph-surrealdb")}\n` +
+    `      tag: ${q(tag)}\n`;
 
   const valuesPath = resolve(
     input.chartDir,
