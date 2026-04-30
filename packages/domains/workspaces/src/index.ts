@@ -20,6 +20,8 @@ export { PostgresWorkspaceRepository } from "./adapters/postgres/postgres-worksp
 export { PostgresMembershipRepository } from "./adapters/postgres/postgres-membership-repository.js";
 export { PostgresGroupRepository } from "./adapters/postgres/postgres-group-repository.js";
 export { createWorkspaceRoutes } from "./adapters/hono/routes.js";
+export { createGroupRoutes } from "./adapters/hono/group-routes.js";
+export type { GroupRoutesConfig } from "./adapters/hono/group-routes.js";
 
 // In-memory fakes (exported so tests in other packages can compose)
 export * from "./application/fakes.js";
