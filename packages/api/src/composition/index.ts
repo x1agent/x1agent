@@ -18,6 +18,7 @@ import {
 import {
   PostgresMembershipRepository,
   PostgresWorkspaceRepository,
+  createWorkspaceRoutes,
 } from "@x1agent/domain-workspaces";
 import {
   CryptoTokenGenerator,
@@ -32,9 +33,11 @@ import {
 import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
+  PostgresTokenUsageRepository,
   PostgresSessionShareRepository,
   createSessionRoutes,
   createWorkspaceSessionRoutes,
+  createWorkspaceTokenUsageRoutes,
   createSessionShareRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
@@ -109,18 +112,22 @@ import {
   createWorkspaceShareRoutes,
   createWorkspaceSharesIndexRoutes,
 } from "../shares/routes.js";
+import { createAdminAnthropicModelsRoutes } from "../capabilities/admin-routes.js";
 
 export interface Composition {
   authRoutes: Hono;
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
+  /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
+  workspaceCreateRoutes: Hono;
   agentRoutes: Hono;
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
+  workspaceTokenUsageRoutes: Hono;
   workspaceShareRoutes: Hono;
-  workspaceSharesIndexRoutes: Hono;
-  /** /api/workspaces/:slug/sessions/:sessionId/user-shares */
+  /** /api/workspaces/:slug/sessions/:sessionId/user-shares — per-user share grants. */
   sessionShareRoutes: Hono;
+  workspaceSharesIndexRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
@@ -130,6 +137,8 @@ export interface Composition {
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
   workspaceImageCatalogRoutes: Hono;
+  /** /api/admin/anthropic/models — platform-admin model curation. */
+  adminAnthropicModelsRoutes: Hono;
   sharedResources: SharedResourceRepository;
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
@@ -141,6 +150,8 @@ export interface Composition {
   users: UserRepository;
   /** For the NATS subscriber to persist events as they fly by. */
   sessionEvents: SessionEventRepository;
+  /** Per-turn token usage rows for billing + dashboards. */
+  tokenUsage: PostgresTokenUsageRepository;
   /** Exposed for the Job watcher — reads directly without reconnecting. */
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
@@ -163,6 +174,14 @@ export interface CompositionEnv {
   jwtSecret: string;
   googleClientId: string;
   googleClientSecret: string;
+  /**
+   * OAuth scopes requested at Google sign-in. Defaults to identity-only
+   * (openid + email + profile). Operators expand this to include
+   * Drive / Calendar / Gmail scopes when those providers are enabled,
+   * so the consent screen prompts the user on first sign-in instead
+   * of after-the-fact when they hit a feature.
+   */
+  googleScopes?: readonly string[];
   appUrl: string;
   apiUrl: string;
   allowedDomains: readonly string[];
@@ -210,6 +229,7 @@ export function compose(env: CompositionEnv): Composition {
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
   const sessionShares = new PostgresSessionShareRepository(env.sql);
+  const tokenUsage = new PostgresTokenUsageRepository(env.sql);
   const permissionGrants = new PostgresPermissionGrantRepository(env.sql);
   const collectionsRepo = new PostgresCollectionRepository(env.sql);
   const installations = new PostgresInstallationRepository(env.sql);
@@ -219,6 +239,7 @@ export function compose(env: CompositionEnv): Composition {
   const google = new GoogleAuthProvider({
     clientId: env.googleClientId,
     clientSecret: env.googleClientSecret,
+    scopes: env.googleScopes,
   });
 
   let bypass: AuthProvider | undefined;
@@ -256,7 +277,9 @@ export function compose(env: CompositionEnv): Composition {
     allowedDomains: env.allowedDomains,
     platformAdmins: env.platformAdmins,
     // Lets emails outside the domain whitelist sign in if they have a
-    // pending invitation or an existing user row.
+    // pending invitation or an existing user row. Always wired in
+    // prod; the in-memory tests still use the in-memory fake or skip
+    // accessGate entirely.
     accessGate: new PostgresAccessGate(env.sql),
     bypassProvider: bypass,
     persons,
@@ -309,6 +332,9 @@ export function compose(env: CompositionEnv): Composition {
     sessions,
     events: sessionEvents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    // Lets non-admin sharees read sessions they were granted; without
+    // this the only ways through loadScoped are owner + admin.
+    shares: sessionShares,
     resolveWorkspace: async (slug: string) =>
       resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
@@ -317,6 +343,24 @@ export function compose(env: CompositionEnv): Composition {
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
+  const workspaceTokenUsageRoutes = createWorkspaceTokenUsageRoutes({
+    tokenUsage,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
+  // POST /api/workspaces — platform-admin-only. Used by NoAccessRoot's
+  // "Create your first workspace" CTA on a fresh install. Auth gating
+  // (platform admin check) lives inside createWorkspace, not here.
+  const workspaceCreateRoutes = createWorkspaceRoutes({
+    workspaces,
+    memberships,
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+    getActor,
+  });
 
   const workspaceShareRoutes = createWorkspaceShareRoutes({
     sessions,
@@ -610,13 +654,21 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  const adminAnthropicModelsRoutes = createAdminAnthropicModelsRoutes({
+    sql: env.sql,
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+  });
+
   return {
     authRoutes,
     workspaceInvitationRoutes,
     publicInvitationRoutes,
+    workspaceCreateRoutes,
     agentRoutes,
     sessionRoutes,
     workspaceSessionRoutes,
+    workspaceTokenUsageRoutes,
     workspaceShareRoutes,
     sessionShareRoutes,
     workspaceSharesIndexRoutes,
@@ -629,6 +681,7 @@ export function compose(env: CompositionEnv): Composition {
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,
     workspaceImageCatalogRoutes,
+    adminAnthropicModelsRoutes,
     sharedResources,
     postgresBranches,
     postgresProvisioner,
@@ -639,6 +692,7 @@ export function compose(env: CompositionEnv): Composition {
     tokenizer,
     users,
     sessionEvents,
+    tokenUsage,
     sql: env.sql,
     agents,
     sessions,

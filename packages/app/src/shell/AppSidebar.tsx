@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   Bot,
   ChevronsUpDown,
+  Cpu,
   Database,
   FileText,
   LayoutDashboard,
@@ -62,6 +63,7 @@ interface NavItem {
 export function AppSidebar() {
   const user = useAuthStore((s) => s.user);
   const memberships = useAuthStore((s) => s.memberships);
+  const isPlatformAdmin = useAuthStore((s) => s.isPlatformAdmin);
   const signOut = useAuthStore((s) => s.signOut);
 
   const activeSlug = useWorkspaceStore((s) => s.activeSlug);
@@ -196,6 +198,22 @@ export function AppSidebar() {
                   <span>{item.title}</span>
                 </a>
               ))}
+            </nav>
+          </div>
+        )}
+        {isPlatformAdmin && (
+          <div>
+            <div className="px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              Admin
+            </div>
+            <nav className="flex flex-col">
+              <a
+                href="/admin/anthropic-models"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+              >
+                <Cpu className="size-4" />
+                <span>Claude models</span>
+              </a>
             </nav>
           </div>
         )}
