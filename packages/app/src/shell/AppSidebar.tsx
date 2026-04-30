@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import {
   Bot,
   ChevronsUpDown,
-  Cpu,
   Database,
   FileText,
   LayoutDashboard,
@@ -13,6 +12,7 @@ import {
   Check,
   UserPlus,
 } from "lucide-react";
+import { ADMIN_NAV } from "../features/admin/nav";
 
 // Our lucide-react build doesn't ship brand icons. Tiny inline SVG
 // component keeps the same consumer shape `<Icon className="size-4" />`.
@@ -86,6 +86,13 @@ export function AppSidebar() {
   const activeMembership = memberships.find((m) => m.slug === activeSlug);
   const otherAccounts = linkedAccounts.filter((a) => !a.is_current);
 
+  // /admin/* pages are global, not workspace-scoped — hide the
+  // workspace switcher there so the chrome reads as cluster-wide.
+  const onAdminRoute =
+    typeof window !== "undefined" &&
+    window.location.pathname.startsWith("/admin");
+  const showWorkspaceChip = !!activeMembership && !onAdminRoute;
+
   const navBase = activeSlug ? `/workspaces/${activeSlug}` : "";
   const navItems: NavItem[] = activeSlug
     ? [
@@ -119,7 +126,7 @@ export function AppSidebar() {
           <span className="text-base font-semibold tracking-tight">x1agent</span>
         </a>
 
-        {activeMembership && (
+        {showWorkspaceChip && activeMembership && (
           <div className="flex items-stretch gap-1 rounded-md border border-zinc-800 bg-zinc-900/40">
             <a
               href={`/workspaces/${activeSlug}/settings`}
@@ -207,13 +214,16 @@ export function AppSidebar() {
               Admin
             </div>
             <nav className="flex flex-col">
-              <a
-                href="/admin/anthropic-models"
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
-              >
-                <Cpu className="size-4" />
-                <span>Claude models</span>
-              </a>
+              {ADMIN_NAV.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                >
+                  <item.icon className="size-4" />
+                  <span>{item.title}</span>
+                </a>
+              ))}
             </nav>
           </div>
         )}
