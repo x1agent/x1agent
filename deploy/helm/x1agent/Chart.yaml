@@ -1,0 +1,15 @@
+apiVersion: v2
+name: x1agent
+description: x1agent — open-source K8s-native agent platform (GCP install)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - agents
+  - kubernetes
+  - llm
+home: https://x1agent.io
+sources:
+  - https://github.com/x1agent/x1agent
+maintainers:
+  - name: x1agent maintainers

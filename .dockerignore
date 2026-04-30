@@ -1,0 +1,58 @@
+# Anything below NEVER goes into a docker build context.
+#
+# Critical: secrets + git history must not leak into images.
+# Performance: keeping node_modules + .git out cuts the context size from
+# ~1GB+ to <50MB, dramatically speeding up `docker build` upload + cache.
+
+# ── Secrets ────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*
+!.env.example
+installs/*.local
+!installs/example.local
+**/.gcloud
+**/.kube
+
+# ── Git ────────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Node ───────────────────────────────────────────────────────────
+**/node_modules
+**/dist
+**/.astro
+**/coverage
+**/.cache
+**/.parcel-cache
+*.log
+.DS_Store
+
+# ── Local dev tooling ──────────────────────────────────────────────
+.devspace
+.local
+examples/
+
+# ── Editor / OS ────────────────────────────────────────────────────
+.vscode
+.idea
+*.swp
+*.bak
+
+# ── Runtime artifacts ──────────────────────────────────────────────
+**/build
+test-results/
+playwright-report/
+**/__pycache__
+
+# ── Documentation site build outputs ───────────────────────────────
+docs/dist
+docs/.astro
+
+# ── Project-specific never-ship files ──────────────────────────────
+MEMORY.md
+ROADMAP.md
+test-site.mjs
+.claude/
+.wrangler/
