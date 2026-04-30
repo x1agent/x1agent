@@ -146,3 +146,15 @@ resource "google_project_iam_member" "api_metric_writer" {
   role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${google_service_account.api.email}"
 }
+
+# The api needs Vertex AI predict so /admin/anthropic-models can run
+# 1-token rawPredict probes against publisher models (curation page).
+# Without this every probe returns "Permission
+# 'aiplatform.endpoints.predict' denied". Scope matches the session
+# SA's aiplatform.user — tighter scoping would need per-model IAM
+# conditions we don't have a use case for.
+resource "google_project_iam_member" "api_vertex_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.api.email}"
+}
