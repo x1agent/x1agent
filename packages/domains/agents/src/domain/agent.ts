@@ -41,6 +41,12 @@ export interface Agent {
    * available images + platform presets.
    */
   imageId: string | null;
+  /**
+   * Per-agent override for the Claude Code SDK's model id. Null = fall
+   * back to the deployment-wide ANTHROPIC_MODEL env. Stored as text;
+   * the SDK + Vertex/Anthropic API are the authority on what's valid.
+   */
+  model: string | null;
   createdBy: UserId | null;
   createdAt: Date;
   updatedAt: Date;

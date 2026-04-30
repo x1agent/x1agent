@@ -366,7 +366,10 @@ async function launchSession(
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
     anthropicProvider: cfg.anthropicProvider,
-    anthropicModel: cfg.anthropicModel,
+    // Per-agent override (agent.model) wins over the deployment-wide
+    // default (cfg.anthropicModel from ANTHROPIC_MODEL env). NULL on
+    // both sides leaves the SDK to pick its built-in default.
+    anthropicModel: agent.model ?? cfg.anthropicModel,
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,
     serviceAccountName: cfg.sessionServiceAccount,

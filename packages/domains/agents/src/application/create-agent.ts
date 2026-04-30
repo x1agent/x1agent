@@ -27,6 +27,8 @@ export interface CreateAgentInput {
   heartbeatMd?: string;
   schedule?: CronSchedule | null;
   imageId?: string | null;
+  /** Per-agent override for the SDK model. Null = deployment default. */
+  model?: string | null;
 }
 
 export async function createAgent(
@@ -51,6 +53,7 @@ export async function createAgent(
     heartbeatMd: input.heartbeatMd ?? "",
     schedule: input.schedule ?? null,
     imageId: input.imageId ?? null,
+    model: input.model ?? null,
     createdBy: input.actor,
   });
 }
