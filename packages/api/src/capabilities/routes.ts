@@ -14,10 +14,14 @@ import { listEnabledOverrides } from "./admin-routes.js";
  */
 export interface CapabilitiesRoutesConfig {
   /**
-   * Optional: when set, GET /anthropic/models filters the catalog by
-   * the admin-curated allowlist in `anthropic_model_overrides`. When
-   * the table is empty (fresh install) the full catalog is returned
-   * unchanged.
+   * Required for /anthropic/models filtering. When set, the endpoint
+   * returns only models an admin has explicitly enabled in
+   * `anthropic_model_overrides`. Empty list means the admin has not
+   * curated yet — the UI surfaces a "ask your admin to enable a model"
+   * empty state. We do NOT fall back to the upstream catalog: Vertex
+   * Model Garden lists models that aren't actually servable in the
+   * deployment's region/project, and showing them in the agent
+   * dropdown produces 4xx errors at session spawn.
    */
   sql?: postgres.Sql<Record<string, unknown>>;
 }
@@ -33,21 +37,21 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
   // by ANTHROPIC_PROVIDER; the frontend never hardcodes a list.
   app.get("/anthropic/models", async (c) => {
     const catalog = await listAnthropicModels();
-    let models = catalog;
-    if (cfg.sql) {
-      const enabled = await listEnabledOverrides(cfg.sql);
-      // Filter only when the admin has actually curated something.
-      // Empty table = fresh install, show full catalog.
-      if (enabled.size > 0) {
-        models = catalog.filter((m) => enabled.has(m.id));
-      }
-    }
+    const enabled = cfg.sql
+      ? await listEnabledOverrides(cfg.sql)
+      : null;
+    // Strict filter: dropdown shows only what an admin enabled. When
+    // the override table is unavailable (no sql configured — tests),
+    // pass the catalog through.
+    const models = enabled
+      ? catalog.filter((m) => enabled.has(m.id))
+      : catalog;
     c.header("Cache-Control", "private, max-age=60");
     return c.json({
       provider: process.env.ANTHROPIC_PROVIDER ?? "api_key",
       // The deployment-wide default — what an agent inherits when no
       // per-agent override is set. Falls back to the first Sonnet
-      // model in the catalog when ANTHROPIC_MODEL env is unset.
+      // model in the curated list when ANTHROPIC_MODEL env is unset.
       default: pickDefaultModel(models),
       models,
     });

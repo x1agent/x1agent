@@ -32,6 +32,13 @@ export interface AgentRoutesConfig {
   getActor: (
     c: Context,
   ) => { userId: UserId; email: Email } | null;
+  /**
+   * Returns the set of admin-enabled Claude model ids, or null when
+   * the deployment isn't curating (resolver not wired). When set, the
+   * write path rejects model values that aren't in it — prevents
+   * raw-API bypass of the dropdown's strict allowlist.
+   */
+  enabledModels?: () => Promise<Set<string> | null>;
 }
 
 function serialize(a: Agent) {
@@ -152,6 +159,26 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       string,
       unknown
     >;
+
+    // Reject per-agent model overrides not in the admin-curated list.
+    // null/empty is always allowed — that means "use deployment default".
+    if (body.model !== undefined && body.model !== null && body.model !== "") {
+      const modelStr = String(body.model);
+      const enabled = cfg.enabledModels
+        ? await cfg.enabledModels()
+        : null;
+      if (enabled && !enabled.has(modelStr)) {
+        return c.json(
+          {
+            error: "model_not_enabled",
+            message:
+              "This Claude model is not enabled for the deployment. Ask a platform admin to enable it at /admin/anthropic-models.",
+          },
+          400,
+        );
+      }
+    }
+
     try {
       const patch = {
         ...(body.name !== undefined && { name: String(body.name) }),
