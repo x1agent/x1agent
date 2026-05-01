@@ -11,6 +11,7 @@ import {
   PostgresAccessGate,
   createAuthRoutes,
   createRequireAuth,
+  isPlatformAdmin as isEmailPlatformAdmin,
   type AuthProvider,
   type UserRepository,
   type SessionTokenizer,
@@ -371,6 +372,36 @@ export function compose(env: CompositionEnv): Composition {
     platformAdmins: env.platformAdmins,
     requireAuth,
     getActor,
+    // Refresh the caller's JWT after they create a workspace so the
+    // brand-new owner-membership row shows up in their session
+    // immediately. Without this the next /workspaces/<slug> request
+    // 403s because the auth middleware reads memberships from the
+    // JWT, which was minted at sign-in time when there were none.
+    // Cookie attributes match the auth domain's set elsewhere.
+    refreshSessionForUser: async (userId, email) => {
+      const user = await users.findById(userId);
+      if (!user) throw new Error(`user ${userId} not found`);
+      const freshMemberships = await users.listMemberships(userId);
+      const newSession = {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        memberships: freshMemberships,
+        isPlatformAdmin: isEmailPlatformAdmin(
+          user.email,
+          env.platformAdmins,
+        ),
+      };
+      const token = tokenizer.sign(newSession);
+      const maxAge = 60 * 60 * 24;
+      return [
+        `x1_session=${token}`,
+        "Path=/",
+        "HttpOnly",
+        "SameSite=Lax",
+        `Max-Age=${maxAge}`,
+      ].join("; ");
+    },
   });
 
   const workspaceShareRoutes = createWorkspaceShareRoutes({
