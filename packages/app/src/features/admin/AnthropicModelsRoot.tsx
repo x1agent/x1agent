@@ -176,7 +176,7 @@ export function AnthropicModelsRoot() {
               Curate the list of Claude models the agent dropdown exposes.
               The catalog comes from your provider
               {data?.provider === "vertex"
-                ? " (Vertex Model Garden)"
+                ? " (Agent Platform Model Garden, formerly Vertex AI)"
                 : " (Anthropic /v1/models)"}
               {data?.region ? ` in ${data.region}` : ""}. Hit Test to
               run a 1-token probe; flip Enable to allow users to pick it.

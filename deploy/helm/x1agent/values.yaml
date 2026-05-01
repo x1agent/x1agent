@@ -56,11 +56,21 @@ tls:
 # ============================================================================
 anthropic:
   provider: vertex
-  # Set when provider=vertex. Region must be one Anthropic supports on
-  # Vertex (us-east5 covers the v4.x lineup).
-  vertexRegion: us-east5
-  # GCP project hosting the Vertex models — almost always the same as
-  # cloud.gcp.projectId, kept separate for cross-project Vertex setups.
+  # Set when provider=vertex. Anthropic on Agent Platform (formerly
+  # Vertex AI) supports several locations:
+  #   - "global"     — recommended default. Listing returns the full
+  #                    Anthropic catalog; predict routes to whichever
+  #                    region has capacity. Best for "it should just work".
+  #   - "us"  / "eu" — multi-region failover within a geography
+  #   - "us-east5" / "europe-west1" / "asia-southeast1" — pinned region.
+  #     Use when data-residency mandates it; the listing endpoint will
+  #     return a sparser model set than global.
+  # Note: us-central1 hosts the predict endpoint for some models but its
+  # regional listing is incomplete — prefer "global" or "us-east5".
+  vertexRegion: global
+  # GCP project hosting the Anthropic publisher models — almost always
+  # the same as cloud.gcp.projectId, kept separate for cross-project
+  # setups (e.g. centralized Anthropic-tier project).
   vertexProjectId: ""
 
 # ============================================================================
