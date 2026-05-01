@@ -20,6 +20,23 @@ Open-source, Kubernetes-native agent platform. Runs LLM agents in isolated pods 
 
 7. **`mise run install` and `mise run deploy` are the artifact under test, not workflows you patch around.** They are what customers will run on their own clouds. If either fails on a clean (or partially-rebuilt) cluster, the install path itself is broken and the bug must be fixed inside the install/chart/Dockerfile/Terraform source — not by reaching for `helm uninstall && helm upgrade --install ...` or `kubectl apply` or `kubectl patch` to make this one cluster come up. Hand-fixes mask real install bugs, leave the path broken for the next operator, and break the dogfooding contract that says "x1agent.com runs the same install a customer does." Read-only diagnostics (`kubectl logs`, `kubectl describe`, `helm status`, `gcloud ... list`) are encouraged for *understanding* a failure; the fix lives in the chart, the Dockerfile, the Terraform module, or the installer CLI source. Once fixed, re-run from scratch and the install must succeed end-to-end with no manual steps. If it doesn't, that's another bug, fix it the same way.
 
+## Distribution target — how customers install x1agent
+
+We're optimizing for the install pattern most devops teams already run: **a Terraform module in their infra git repo, plus a helm deploy step in CI**, both pinned to versions they bump on their own schedule. Today's `mise run install` orchestrates the whole thing from inside this monorepo because that's the fastest dogfood loop, but it's a temporary shape, not the customer-facing one. Treat that gap as load-bearing direction for ongoing work.
+
+The resting state we are building toward:
+
+- **Terraform module published as a versioned, public module** (e.g. `github.com/x1agent/terraform-x1agent-gcp` with semver tags), so a customer writes 30 lines of HCL referencing `module "x1agent" { source = "github.com/x1agent/terraform-x1agent-gcp?ref=v1.2.0" }` and gets cluster + IAM + secret store + AR + DNS + ingress IP. They keep this in their existing infra repo, alongside their other modules. They never clone the x1agent monorepo.
+- **Helm chart published to a versioned OCI registry / helm repo** (e.g. `oci://ghcr.io/x1agent/charts/x1agent`) so a customer's CI runs `helm upgrade --install x1agent oci://... --version 1.2.0 -f values.yaml`. No `helm install ./deploy/helm/x1agent` against a local checkout.
+- **Image tags pinned per chart version.** Helm chart `1.2.0` always pulls api/app/sidecar/etc. at the matching image SHA, even if AR has newer tags. A customer who pins `--version 1.2.0` gets reproducible installs months later.
+- **Compatibility matrix** documented on docs.x1agent.com: Terraform module `vA.B` is known to work with chart `vX.Y`. Customers consult the matrix when bumping either side.
+- **No mise / bun / local CLI required.** Installing x1agent on a customer cloud is plain `terraform apply` plus plain `helm upgrade`. Our wrapper CLI is a dev-loop convenience and a reference orchestrator; it must never be the *only* path.
+- **Customer-side configurator output is a values file.** `installs/<basedomain>.local` is our internal shape for now, but the eventual customer artifact is a plain `values.yaml` (and a `terraform.tfvars`) that lives in their own git repo. The configurator's job is generating those, not running them.
+- **GitOps from day one.** A customer should be able to put `terraform.tfvars` and `values.yaml` in a private git repo and have CI install x1agent reproducibly — no "click these things in the cloud console first" prerequisites the wizard hasn't already rendered as code.
+- **Documentation includes a no-monorepo install path.** docs.x1agent.com must show a copy-pasteable customer install (Terraform block + helm command + values example) that does not reference our internal layout. If the docs' install steps assume our repo is checked out, that's a doc bug.
+
+Each piece of work should be evaluated against this trajectory. New chart features should be tagged versions, not "in main". Cloud-specific Terraform should live in modules a customer can `source =` cleanly. CLI improvements should make this delivery model easier, not deeper coupled. Anything that makes "clone the x1agent monorepo" harder to escape is moving the wrong direction.
+
 ## Commits
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [semantic-release](https://github.com/semantic-release/semantic-release) for automated versioning.
