@@ -1,15 +1,22 @@
 {{- /*
-Pre-upgrade migration Job. Runs the api image's migrator against the
-in-cluster Postgres before helm rolls the api/app pods. The contract:
-"this image and its migrations always ship together." A new column the
-api code expects is in place before any pod that requires it starts.
+Post-install/post-upgrade migration Job. Runs the api image's migrator
+against the in-cluster Postgres after helm has applied the chart's
+regular templates (so the postgres StatefulSet + Service exist and
+postgres-credentials Secret is populated by ESO). The api Deployment
+crash-loops briefly if it starts before migrations land — that's
+acceptable on a fresh install; subsequent restarts pick up the new
+schema once this Job finishes.
 
-helm.sh/hook: pre-install,pre-upgrade — runs on `helm upgrade --install`
-                                        every time, before the workloads
-                                        are reconciled.
-helm.sh/hook-weight: -5              — runs before any other hooks (none today,
-                                        but reserved so we can add ordered
-                                        hooks later).
+History: the Job used to be a pre-upgrade hook. That broke fresh
+installs because Postgres (regular chart template) wasn't deployed
+yet during the pre-upgrade phase, so DNS for the `postgres` Service
+ENOTFOUND'd inside this Job. Switching to post-* fixes the ordering.
+
+helm.sh/hook: post-install,post-upgrade — runs after the chart's
+                                          regular templates apply.
+helm.sh/hook-weight: 5               — runs after any future
+                                        post-install hooks at lower
+                                        weights.
 helm.sh/hook-delete-policy:
    before-hook-creation,hook-succeeded — old completed Job is GC'd before
                                         the new one runs; on success the
@@ -30,8 +37,8 @@ metadata:
   name: x1agent-migrate
   labels: {{- include "x1agent.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   # No retries — if the migration fails, surface it loud. Operators
@@ -48,6 +55,46 @@ spec:
       # Migrator only needs DATABASE_URL but using the api SA keeps
       # one IAM surface.
       serviceAccountName: {{ .Values.api.serviceAccountName }}
+      # Two reasons we can't just start the migrate container immediately:
+      # 1. ExternalSecret -> k8s Secret population is async (ESO
+      #    reconciliation interval). Block until POSTGRES_PASSWORD
+      #    actually lives in the Secret.
+      # 2. The Postgres StatefulSet is a regular chart template — on a
+      #    fresh install it's only just been created when this hook
+      #    fires. The Service DNS resolves immediately, but the pod may
+      #    not be Ready and accepting connections yet.
+      # Both initContainers cap at 60s; if either is still missing,
+      # something is genuinely broken (ESO broken, postgres image pull
+      # failing, etc.) and we want to fail loud.
+      initContainers:
+        - name: wait-for-secret
+          image: bitnami/kubectl:latest
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 60); do
+                if kubectl get secret postgres-credentials \
+                     -o 'jsonpath={.data.POSTGRES_PASSWORD}' 2>/dev/null \
+                     | grep -q .; then
+                  echo "postgres-credentials populated"; exit 0;
+                fi
+                echo "waiting for ESO to populate postgres-credentials ($i/60)…"; sleep 1;
+              done
+              echo "ERROR: postgres-credentials never populated — check ESO + ClusterSecretStore"; exit 1
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 60); do
+                if pg_isready -h postgres -p 5432 -U x1agent -d x1agent -t 1; then
+                  echo "postgres ready"; exit 0;
+                fi
+                echo "waiting for postgres to accept connections ($i/60)…"; sleep 1;
+              done
+              echo "ERROR: postgres never became ready — check StatefulSet + PVC"; exit 1
       containers:
         - name: migrate
           image: "{{ .Values.images.api.repository }}:{{ .Values.images.api.tag }}"
