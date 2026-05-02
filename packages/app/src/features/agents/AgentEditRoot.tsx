@@ -436,10 +436,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       )}
                     <p className="text-xs text-zinc-500">
                       The list shows only models a platform admin has
-                      enabled at /admin/anthropic-models. The full Vertex
-                      catalog is intentionally not exposed — Vertex lists
-                      models that aren't actually servable in the
-                      deployment's region.
+                      enabled at /admin/anthropic-models. The full
+                      Agent Platform (formerly Vertex AI) catalog is
+                      intentionally not exposed — it lists models that
+                      aren't actually servable in the deployment's
+                      region.
                     </p>
                   </div>
                 </CardContent>

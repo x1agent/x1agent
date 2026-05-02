@@ -2,6 +2,13 @@
 # session Jobs in the install namespace. Workload Identity binds this SA
 # to a GSA with secretmanager.secretAccessor so pods can reach GSM via
 # ESO ClusterSecretStore.
+#
+# The SA + Role + RoleBinding are pre-install/pre-upgrade hooks (weight
+# -20) so they exist before the pre-upgrade migrate Job (weight -5) gets
+# admitted — without this the Job's ReplicaSet controller fails with
+# "serviceaccount x1agent-api not found" on a fresh install.
+# `before-hook-creation` (default delete policy) safely re-creates these
+# on each upgrade — pod-mounted SA tokens survive the brief gap.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -9,12 +16,19 @@ metadata:
   labels: {{- include "x1agent.labels" . | nindent 4 }}
   annotations:
     iam.gke.io/gcp-service-account: {{ .Values.cloud.gcp.workloadIdentityServiceAccount | quote }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ .Values.api.serviceAccountName }}
   labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs", "jobs/status"]
@@ -34,6 +48,10 @@ kind: RoleBinding
 metadata:
   name: {{ .Values.api.serviceAccountName }}
   labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

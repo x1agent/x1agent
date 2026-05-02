@@ -77,5 +77,11 @@ EXPOSE 30001
 ENV NODE_ENV=production API_PORT=30001
 
 ENTRYPOINT ["tini", "--"]
-# Migrations run on every boot; idempotent. The api process binds 30001.
-CMD ["sh", "-c", "cd packages/api && bun run migrate && exec bun run src/index.ts"]
+# api just starts. Migrations are the chart's post-install migrate Job's
+# job (templates/migrate-job.yaml) — running them here too races that
+# Job and breaks fresh installs (two parallel migrators commit
+# different rows, second one trips on already-created types). The
+# migrate Job's hook ordering guarantees migrations land before the
+# helm release reports success, so by the time external traffic hits
+# the api the schema is current.
+CMD ["sh", "-c", "cd packages/api && exec bun run src/index.ts"]

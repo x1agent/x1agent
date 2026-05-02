@@ -1,0 +1,126 @@
+name: Deploy docs to Cloud Run
+
+# Replaces docs.yml (GitHub Pages) once the cutover is complete.
+# Until then, both run in parallel — Pages serves docs.x1agent.com
+# while this workflow proves the Cloud Run path. Switch DNS, then
+# delete docs.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/deploy-docs-cloudrun.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: deploy-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: ${{ vars.DOCS_GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.DOCS_GCP_REGION || 'us-central1' }}
+  SERVICE: x1agent-docs
+  WIF_PROVIDER: ${{ vars.DOCS_WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ vars.DOCS_WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install
+        working-directory: docs
+        run: npm ci
+
+      - name: Build (smoke)
+        working-directory: docs
+        run: npm run build
+
+      - id: auth
+        name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy production (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: docs
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Deploy PR preview (no-traffic, tagged)
+        if: github.event_name == 'pull_request'
+        id: preview
+        working-directory: docs
+        run: |
+          TAG="pr-${{ github.event.pull_request.number }}"
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --allow-unauthenticated \
+            --tag "$TAG" \
+            --no-traffic \
+            --quiet
+          URL=$(gcloud run services describe "$SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --format="json" | \
+            jq -r ".status.traffic[] | select(.tag==\"$TAG\") | .url")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request' && steps.preview.outputs.url != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.preview.outputs.url }}';
+            const body = `Docs preview: ${url}`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.user.type === 'Bot' && c.body.startsWith('Docs preview:'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
