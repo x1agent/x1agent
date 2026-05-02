@@ -57,6 +57,18 @@ gcloud iam service-accounts create "${DEPLOYER_SA}" \
   --display-name="x1agent-docs GitHub Actions deployer (resource-scoped)" \
   --project "${PROJECT_ID}" 2>/dev/null || echo "    already exists"
 
+# IAM is eventually consistent — a freshly-created SA can be invisible
+# to other gcloud commands for ~5-30s. Poll until it resolves so the
+# subsequent add-iam-policy-binding calls don't race.
+echo "    waiting for SA to propagate..."
+for _ in $(seq 1 30); do
+  if gcloud iam service-accounts describe "${DEPLOYER_EMAIL}" \
+       --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
 echo "==> ensuring Artifact Registry repo '${AR_REPO}' exists in ${REGION}"
 gcloud artifacts repositories create "${AR_REPO}" \
   --location="${REGION}" \
