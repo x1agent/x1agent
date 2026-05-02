@@ -13,6 +13,21 @@ export interface WorkspaceRoutesConfig {
   platformAdmins: readonly string[];
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
+  /**
+   * Mint a fresh session cookie for the given user with their CURRENT
+   * memberships + platform-admin status read from the database. Called
+   * after createWorkspace so the caller's JWT picks up the new
+   * membership row immediately, instead of waiting for them to sign
+   * out and back in. Returns the full Set-Cookie header value the
+   * route hands back in the response.
+   *
+   * Wired at the composition root so the workspaces domain doesn't
+   * depend on auth-domain internals (tokenizer, cookie name).
+   */
+  refreshSessionForUser: (
+    userId: UserId,
+    email: Email,
+  ) => Promise<string>;
 }
 
 /**
@@ -53,6 +68,16 @@ export function createWorkspaceRoutes(cfg: WorkspaceRoutesConfig): Hono {
           creatorEmail: actor.email,
         },
       );
+      // Refresh the caller's session cookie so the new owner-membership
+      // row is reflected in the JWT immediately. Without this the
+      // very next request to /workspaces/<slug> 403s — the auth
+      // middleware reads memberships from the JWT, which was minted at
+      // sign-in time when the user had none.
+      const cookieValue = await cfg.refreshSessionForUser(
+        actor.userId,
+        actor.email,
+      );
+      c.header("Set-Cookie", cookieValue);
       return c.json({
         id: workspace.id,
         slug: workspace.slug,

@@ -60,8 +60,32 @@ export async function listAnthropicModels(): Promise<AnthropicModel[]> {
   return models;
 }
 
+/**
+ * Vertex's regional endpoints use a `<region>-aiplatform.googleapis.com`
+ * hostname with `locations/<region>` in the path. The GLOBAL endpoint
+ * does NOT follow that pattern: there is no `global-aiplatform.*` host
+ * (the DNS record doesn't exist). Instead, global uses the unprefixed
+ * `aiplatform.googleapis.com` host with `locations/global` in the path.
+ *
+ * We pick global as the recommended default for x1agent installs:
+ *   - The listing endpoint returns the full Anthropic catalog (7+ 4.x
+ *     models) instead of the sparse 2-model regional view.
+ *   - Vertex routes traffic to whichever region has capacity, so a
+ *     single saturated region doesn't block all inference.
+ *   - ToS acceptance done at the global tier covers all regions.
+ *
+ * Operators who need data residency or predictable per-region latency
+ * can still set CLOUD_ML_REGION to us-east5 / europe-west1 / us / eu /
+ * etc.; the URL builder handles both shapes.
+ */
+export function vertexHost(region: string): string {
+  return region === "global"
+    ? "aiplatform.googleapis.com"
+    : `${region}-aiplatform.googleapis.com`;
+}
+
 async function listVertexModels(): Promise<AnthropicModel[]> {
-  const region = process.env.CLOUD_ML_REGION || "us-east5";
+  const region = process.env.CLOUD_ML_REGION || "global";
   const project =
     process.env.ANTHROPIC_VERTEX_PROJECT_ID || process.env.GCP_PROJECT_ID;
   if (!project) {
@@ -71,7 +95,7 @@ async function listVertexModels(): Promise<AnthropicModel[]> {
     scopes: ["https://www.googleapis.com/auth/cloud-platform"],
   });
   const client = await auth.getClient();
-  const url = `https://${region}-aiplatform.googleapis.com/v1beta1/publishers/anthropic/models`;
+  const url = `https://${vertexHost(region)}/v1beta1/publishers/anthropic/models`;
   const res = await client.request<{
     publisherModels?: Array<{
       name?: string;
@@ -132,7 +156,7 @@ async function probeVertexEnabled(
   project: string,
   modelId: string,
 ): Promise<boolean> {
-  const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/anthropic/models/${modelId}:rawPredict`;
+  const url = `https://${vertexHost(region)}/v1/projects/${project}/locations/${region}/publishers/anthropic/models/${modelId}:rawPredict`;
   try {
     await client.request({
       url,

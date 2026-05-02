@@ -34,9 +34,14 @@ describe("assertHasMembership", () => {
     expect(assertHasMembership(s)).toBe(s);
   });
 
-  it("throws NoWorkspaceMembershipError when memberships is empty", () => {
+  it("throws NoWorkspaceMembershipError for non-admin with zero memberships", () => {
     const s = session([]);
     expect(() => assertHasMembership(s)).toThrow(NoWorkspaceMembershipError);
+  });
+
+  it("lets a platform admin through with zero memberships (bootstrap path)", () => {
+    const s: AuthSession = { ...session([]), isPlatformAdmin: true };
+    expect(assertHasMembership(s)).toBe(s);
   });
 
   it("error carries the offending email", () => {

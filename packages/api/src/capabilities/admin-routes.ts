@@ -129,7 +129,7 @@ async function probeModel(modelId: string): Promise<ProbeResult> {
 }
 
 async function probeVertex(modelId: string): Promise<ProbeResult> {
-  const region = process.env.CLOUD_ML_REGION || "us-east5";
+  const region = process.env.CLOUD_ML_REGION || "global";
   const project =
     process.env.ANTHROPIC_VERTEX_PROJECT_ID || process.env.GCP_PROJECT_ID;
   if (!project) {
@@ -143,7 +143,16 @@ async function probeVertex(modelId: string): Promise<ProbeResult> {
     scopes: ["https://www.googleapis.com/auth/cloud-platform"],
   });
   const client = await auth.getClient();
-  const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/anthropic/models/${modelId}:rawPredict`;
+  // Vertex AI was rebranded to Gemini Enterprise Agent Platform at
+  // Cloud Next 2026. The API surface (`aiplatform.googleapis.com`) is
+  // unchanged — backward compat preserved per Google's transition doc.
+  // The "global" location uses the unprefixed hostname; everywhere
+  // else gets a `<region>-aiplatform.*` prefix.
+  const host =
+    region === "global"
+      ? "aiplatform.googleapis.com"
+      : `${region}-aiplatform.googleapis.com`;
+  const url = `https://${host}/v1/projects/${project}/locations/${region}/publishers/anthropic/models/${modelId}:rawPredict`;
   try {
     await client.request({
       url,

@@ -145,8 +145,14 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
         "Set-Cookie",
         cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
       );
-      const slug = session.memberships[0]!.slug;
-      return c.redirect(`${cfg.appUrl}/workspaces/${slug}`);
+      // Fresh-install platform admin: they signed in successfully but
+      // there's no workspace yet (assertHasMembership exempts admins
+      // for exactly this case). Send them to /workspaces/new so they
+      // can bootstrap the first workspace. Anyone else with at least
+      // one membership lands on their first workspace.
+      const slug = session.memberships[0]?.slug;
+      const dest = slug ? `/workspaces/${slug}` : "/workspaces/new";
+      return c.redirect(`${cfg.appUrl}${dest}`);
     } catch (err) {
       if (err instanceof NoWorkspaceMembershipError)
         return c.redirect(`${cfg.appUrl}/no-access`);
@@ -177,8 +183,10 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           "Set-Cookie",
           cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
         );
-        const slug = session.memberships[0]!.slug;
-        return c.redirect(`${cfg.appUrl}/workspaces/${slug}`);
+        // Same bootstrap-admin handling as the OAuth callback above.
+        const slug = session.memberships[0]?.slug;
+        const dest = slug ? `/workspaces/${slug}` : "/workspaces/new";
+        return c.redirect(`${cfg.appUrl}${dest}`);
       } catch (err) {
         if (err instanceof NoWorkspaceMembershipError)
           return c.redirect(`${cfg.appUrl}/no-access`);
@@ -214,9 +222,12 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           "Set-Cookie",
           cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
         );
+        // Bootstrap-admin path: a platform admin can sign in via
+        // password before any workspace exists. Return null slug; the
+        // app routes them to /workspaces/new.
         return c.json({
           ok: true,
-          workspace_slug: session.memberships[0]!.slug,
+          workspace_slug: session.memberships[0]?.slug ?? null,
         });
       } catch (err) {
         if (
