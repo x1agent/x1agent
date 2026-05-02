@@ -46,9 +46,16 @@ jobs:
           cache: npm
           cache-dependency-path: docs/package-lock.json
 
+      # --workspaces=false tells npm to ignore the root package.json's
+      # workspace declaration. Required because the monorepo's
+      # packages/domains/agent-resources*/package.json files reference
+      # sibling workspaces with the "workspace:*" protocol — bun handles
+      # it natively, npm does not. docs/ is genuinely standalone (no
+      # workspace siblings in its own deps) so installing it without
+      # workspace context is correct.
       - name: Install
         working-directory: docs
-        run: npm ci
+        run: npm ci --workspaces=false --include-workspace-root=false
 
       - name: Build (smoke)
         working-directory: docs
