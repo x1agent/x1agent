@@ -1,5 +1,5 @@
 import type { V1Deployment, V1Service, V1Ingress, V1Job } from "@kubernetes/client-node";
-import type { PreviewSpec } from "./preview-spec.js";
+import { type PreviewSpec, parseSecretFrom } from "./preview-spec.js";
 
 /**
  * All K8s manifest generation for the preview provider. Pure
@@ -35,6 +35,15 @@ export interface PreviewDeploymentInputs {
   tlsSecretName: string;
   /** URL the agent can address this preview at. Used for env 'preview.self_url'. */
   selfUrl: string;
+  /**
+   * Optional name of a per-preview K8s Secret in the same namespace
+   * holding workspace-secret values keyed by their workspace_secrets
+   * name. When the spec uses any `from: secret:<NAME>` env var,
+   * deploy.ts mints this Secret first and passes the name here so
+   * the Deployment can reference it via valueFrom.secretKeyRef.
+   * Plaintext never lands in this manifest.
+   */
+  secretBundleName?: string;
 }
 
 export interface KanikoBuildInputs {
@@ -148,6 +157,25 @@ export function buildDeployment(
   const envVars = inputs.spec.spec.env.map((e) => {
     if (e.from === "preview.self_url") {
       return { name: e.name, value: inputs.selfUrl };
+    }
+    const secretName = parseSecretFrom(e.from);
+    if (secretName) {
+      if (!inputs.secretBundleName) {
+        // Spec asked for a workspace secret but the deploy path
+        // didn't mint a bundle. Emit empty string and let the app
+        // surface its own missing-config error rather than silently
+        // crashing the pod with a Secret-not-found event.
+        return { name: e.name, value: "" };
+      }
+      return {
+        name: e.name,
+        valueFrom: {
+          secretKeyRef: {
+            name: inputs.secretBundleName,
+            key: secretName,
+          },
+        },
+      };
     }
     return { name: e.name, value: e.value ?? "" };
   });

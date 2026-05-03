@@ -37,6 +37,8 @@ import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
+import { AgentMcpAttachmentsCard } from "./AgentMcpAttachmentsCard";
+import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
 import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
@@ -260,6 +262,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 {hasCollections && (
                   <TabsTrigger value="collections">Collections</TabsTrigger>
                 )}
+                <TabsTrigger value="mcp">MCP &amp; env</TabsTrigger>
                 <TabsTrigger value="permissions">Permissions</TabsTrigger>
               </>
             )}
@@ -548,6 +551,19 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     />
                   </TabsContent>
                 )}
+
+                <TabsContent value="mcp" className="mt-0 space-y-6">
+                  <AgentMcpAttachmentsCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    canManage={!!canManage}
+                  />
+                  <AgentEnvBindingsCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    canManage={!!canManage}
+                  />
+                </TabsContent>
 
                 <TabsContent value="permissions" className="mt-0">
                   <CanSpawnCard

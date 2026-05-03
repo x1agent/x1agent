@@ -118,6 +118,17 @@ export interface JobWatcherConfig {
   redisMinter?: RedisBranchMinter | null;
   redisBranches?: RedisBranchRepository | null;
   /**
+   * Zone-2 agent env injection: at session-launch the watcher reads
+   * agent_env_bindings for the agent, decrypts each referenced
+   * workspace secret, and packs the (env_name → plaintext) pairs into
+   * the per-session Secret alongside any shared-resource credentials.
+   * When either dependency is null, the bindings are skipped silently —
+   * matches existing "no shared resources" behavior. See
+   * docs/security/agent-env.md for the threat model.
+   */
+  agentEnvBindings?: import("@x1agent/domain-agent-env").BindingRepository | null;
+  workspaceSecrets?: import("@x1agent/domain-workspace-secrets").SecretService | null;
+  /**
    * Called when a session reaches a terminal state via the reaper
    * path (pod disappeared, Job failed without an emitted
    * session.completed event). Fires the state_change wake into
@@ -318,6 +329,7 @@ async function launchSession(
     cfg,
     kc,
     session.id,
+    agent.id,
     agent.workspaceId,
     repos,
   );
@@ -610,74 +622,119 @@ async function mintSessionCredentials(
   cfg: JobWatcherConfig,
   kc: k8s.KubeConfig,
   sessionId: string,
+  agentId: string,
   workspaceId: string,
   repos: LinkedRepoForPod[],
 ): Promise<{
   credentialsSecretName: string | undefined;
   promptAppend: string;
 }> {
-  if (!cfg.sharedResources) {
-    return { credentialsSecretName: undefined, promptAppend: "" };
-  }
-  const primary = repos[0];
-  if (!primary) {
-    // No repo linked = nothing to scope a branch database to. Skip the
-    // mint entirely; the agent boots without DATABASE_URL.
-    return { credentialsSecretName: undefined, promptAppend: "" };
-  }
-  const resources = await cfg.sharedResources.listByWorkspace(
-    workspaceId as never,
-  );
-  const running = resources.filter(
-    (r: SharedResource) => r.status === "running",
-  );
-  if (running.length === 0) {
-    return { credentialsSecretName: undefined, promptAppend: "" };
-  }
-
   const credsEnv: Record<string, string> = {};
   const haveKinds: string[] = [];
 
-  for (const resource of running) {
-    if (resource.kind === "postgres" && cfg.postgresMinter && cfg.postgresBranches) {
-      try {
-        const cred = await mintPostgresBranchCredential(
-          cfg.postgresMinter,
-          cfg.postgresBranches,
-          {
-            resource,
-            namespace: cfg.namespace,
-            repoFullName: primary.repo_full_name,
-            branchName: primary.branch,
-          },
-        );
-        credsEnv.DATABASE_URL = cred.dsn;
-        haveKinds.push("postgres");
-      } catch (err) {
-        console.warn(
-          `[jobs] postgres mint failed for session ${sessionId}: ${(err as Error).message}`,
-        );
+  // 1) Shared agent resources — minted per-branch, optional. Only runs
+  // when the workspace has at least one running resource AND the agent
+  // has a primary repo to scope the branch database to.
+  const primary = repos[0];
+  if (cfg.sharedResources && primary) {
+    const resources = await cfg.sharedResources.listByWorkspace(
+      workspaceId as never,
+    );
+    const running = resources.filter(
+      (r: SharedResource) => r.status === "running",
+    );
+    for (const resource of running) {
+      if (
+        resource.kind === "postgres" &&
+        cfg.postgresMinter &&
+        cfg.postgresBranches
+      ) {
+        try {
+          const cred = await mintPostgresBranchCredential(
+            cfg.postgresMinter,
+            cfg.postgresBranches,
+            {
+              resource,
+              namespace: cfg.namespace,
+              repoFullName: primary.repo_full_name,
+              branchName: primary.branch,
+            },
+          );
+          credsEnv.DATABASE_URL = cred.dsn;
+          haveKinds.push("postgres");
+        } catch (err) {
+          console.warn(
+            `[jobs] postgres mint failed for session ${sessionId}: ${(err as Error).message}`,
+          );
+        }
+      }
+      if (
+        resource.kind === "redis" &&
+        cfg.redisMinter &&
+        cfg.redisBranches
+      ) {
+        try {
+          const cred = await mintRedisBranchCredential(
+            cfg.redisMinter,
+            cfg.redisBranches,
+            {
+              resource,
+              namespace: cfg.namespace,
+              repoFullName: primary.repo_full_name,
+              branchName: primary.branch,
+            },
+          );
+          credsEnv.REDIS_URL = cred.url;
+          haveKinds.push("redis");
+        } catch (err) {
+          console.warn(
+            `[jobs] redis mint failed for session ${sessionId}: ${(err as Error).message}`,
+          );
+        }
       }
     }
-    if (resource.kind === "redis" && cfg.redisMinter && cfg.redisBranches) {
-      try {
-        const cred = await mintRedisBranchCredential(
-          cfg.redisMinter,
-          cfg.redisBranches,
-          {
-            resource,
-            namespace: cfg.namespace,
-            repoFullName: primary.repo_full_name,
-            branchName: primary.branch,
-          },
-        );
-        credsEnv.REDIS_URL = cred.url;
-        haveKinds.push("redis");
-      } catch (err) {
-        console.warn(
-          `[jobs] redis mint failed for session ${sessionId}: ${(err as Error).message}`,
-        );
+  }
+
+  // 2) Zone-2 agent env bindings. Plaintext lives only in this
+  // function's scope and the K8s Secret stringData below. The agent
+  // sees these as ordinary env vars via envFrom on the per-session
+  // Secret. A binding pointing at a missing/deleted workspace secret
+  // logs a warning and is skipped — fail-soft so an admin's binding
+  // typo doesn't take down a session.
+  if (cfg.agentEnvBindings && cfg.workspaceSecrets) {
+    try {
+      const bindings = await cfg.agentEnvBindings.listByAgent(agentId);
+      for (const b of bindings) {
+        try {
+          const value = await cfg.workspaceSecrets.resolve(
+            workspaceId,
+            b.secretName,
+          );
+          if (value === null) {
+            console.warn(
+              `[jobs] zone-2 binding ${b.envName} → ${b.secretName} skipped: secret not found in workspace`,
+            );
+            continue;
+          }
+          // Last-write-wins is intentional: if a Zone-2 binding maps
+          // to the same env-var name as a shared-resource credential
+          // (e.g. operator binds DATABASE_URL to a workspace secret),
+          // the operator's explicit choice wins. The shared-resource
+          // path is the implicit default; an explicit binding overrides.
+          credsEnv[b.envName as unknown as string] = value;
+        } catch (err) {
+          console.warn(
+            `[jobs] zone-2 binding ${b.envName} resolve failed: ${(err as Error).message}`,
+          );
+        }
       }
+      if (bindings.length > 0) {
+        haveKinds.push("agent-env");
+      }
+    } catch (err) {
+      console.warn(
+        `[jobs] zone-2 listByAgent failed for agent ${agentId}: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -716,7 +773,13 @@ async function mintSessionCredentials(
 
   return {
     credentialsSecretName: secretName,
-    promptAppend: buildPromptAppend(haveKinds, primary.branch),
+    // The prompt-append documents shared-resource branches; when only
+    // Zone-2 bindings landed, pass the empty string (no shared
+    // resources to describe) and skip the append.
+    promptAppend:
+      primary && (haveKinds.includes("postgres") || haveKinds.includes("redis"))
+        ? buildPromptAppend(haveKinds, primary.branch)
+        : "",
   };
 }
 
