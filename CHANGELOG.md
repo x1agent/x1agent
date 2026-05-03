@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/x1agent/x1agent/compare/v1.6.0...v1.6.1) (2026-05-03)
+
+
+### Bug Fixes
+
+* **install:** COPY mcp-oauth-proxy package.json in all prod Dockerfiles ([#26](https://github.com/x1agent/x1agent/issues/26)) ([3e5f1c8](https://github.com/x1agent/x1agent/commit/3e5f1c81682749dd26920f5081d1432887e3ba2b)), closes [#25](https://github.com/x1agent/x1agent/issues/25) [#16](https://github.com/x1agent/x1agent/issues/16)
+
 # [1.6.0](https://github.com/x1agent/x1agent/compare/v1.5.0...v1.6.0) (2026-05-03)
 
 
