@@ -52,7 +52,7 @@ export function createAdminWorkspacesRoutes(
       FROM workspaces w
       LEFT JOIN (
         SELECT workspace_id, COUNT(*) AS member_count
-        FROM memberships GROUP BY workspace_id
+        FROM workspace_members GROUP BY workspace_id
       ) m ON m.workspace_id = w.id
       LEFT JOIN (
         SELECT workspace_id, COUNT(*) AS agent_count
