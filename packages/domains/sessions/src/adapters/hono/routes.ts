@@ -27,6 +27,7 @@ import type { SessionEvent } from "../../domain/event.js";
 import { triggerSession } from "../../application/trigger-session.js";
 import { listSessions } from "../../application/list-sessions.js";
 import { cancelSession } from "../../application/cancel-session.js";
+import { deleteSessions } from "../../application/delete-sessions.js";
 import { listSessionEvents } from "../../application/list-session-events.js";
 import {
   resumeSession,
@@ -318,6 +319,60 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
         agent: byId.get(s.agentId) ?? null,
       })),
     });
+  });
+
+  // Bulk delete. Workspace admin/owner only — body is `{ session_ids: [...] }`.
+  // POST not DELETE so we can carry a JSON body without RFC-7231 ambiguity.
+  // Path is `_bulk-delete` rather than `:sessionId/delete` because the
+  // selection model is plural-by-design (the UI grid lets you check N
+  // boxes; one round-trip beats N).
+  app.post("/_bulk-delete", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    let body: { session_ids?: unknown };
+    try {
+      body = await c.req.json<{ session_ids?: unknown }>();
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
+    if (!Array.isArray(body.session_ids) || body.session_ids.length === 0) {
+      return c.json(
+        { error: "session_ids_required" },
+        400,
+      );
+    }
+    if (body.session_ids.length > 200) {
+      return c.json({ error: "too_many", limit: 200 }, 400);
+    }
+    let ids: SessionId[];
+    try {
+      ids = body.session_ids.map((x) => {
+        if (typeof x !== "string") throw new Error("session_id_not_string");
+        return SessionId(x);
+      });
+    } catch {
+      return c.json({ error: "invalid_session_id" }, 400);
+    }
+    try {
+      const r = await deleteSessions(
+        {
+          agents: cfg.agents,
+          sessions: cfg.sessions,
+          adminGuard: cfg.adminGuard,
+        },
+        actor.userId,
+        wsId,
+        ids,
+      );
+      return c.json({
+        deleted: r.deleted,
+        not_found: r.notFound,
+      });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
   });
 
   const loadScoped = async (

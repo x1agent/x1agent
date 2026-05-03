@@ -104,4 +104,14 @@ export interface SessionRepository {
    * its Job is still being applied.
    */
   listNonTerminalOlderThan(threshold: Date): Promise<readonly Session[]>;
+
+  /**
+   * Permanently delete a session row. Children (agent-spawned sub-sessions)
+   * cascade away via the FK; events / token_usage / shares cascade too.
+   * Returns false when no row matched (already gone, or wrong workspace).
+   *
+   * Authorization is the caller's job — the service layer enforces
+   * "workspace admin only" before reaching the repository.
+   */
+  delete(id: SessionId): Promise<boolean>;
 }
