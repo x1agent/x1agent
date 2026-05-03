@@ -151,6 +151,7 @@ const {
   installationApiRoutes,
   agentRepoRoutes,
   workspaceGrantRoutes,
+  workspaceSecretsRoutes,
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
@@ -203,6 +204,7 @@ const {
   githubAppSlug: process.env.GITHUB_APP_SLUG || "",
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
   internalToken: process.env.API_INTERNAL_TOKEN || "",
+  workspaceSecretsMasterKey: process.env.WORKSPACE_SECRETS_MASTER_KEY,
   natsConnection: providerNats,
   kubeConfig: sharedKubeConfig,
   sharedResourcesNamespace: process.env.K8S_NAMESPACE || "x1agent",
@@ -280,6 +282,7 @@ app.route(
 );
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
+app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
 app.route(
   "/api/workspaces/:slug/agents/:agentId/collections",
