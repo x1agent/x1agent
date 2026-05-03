@@ -184,8 +184,8 @@ export function AgentMcpAttachmentsCard({
     setEnvInputs(init);
   }, [pickedEntry]);
 
-  async function onAttach(e: React.FormEvent) {
-    e.preventDefault();
+  async function onAttach(e?: React.FormEvent | React.MouseEvent) {
+    if (e && "preventDefault" in e) e.preventDefault();
     if (!canManage || !pickedEntry) return;
     setError(null);
     // Strip empty optional fields so the server's "missing required"
@@ -369,7 +369,11 @@ export function AgentMcpAttachmentsCard({
               first.
             </div>
           ) : (
-            <form onSubmit={onAttach} className="space-y-3">
+            // Not a <form> on purpose: this card lives inside the
+            // agent edit page's outer <form>. Nested forms would
+            // un-nest and the Attach button would trigger the agent
+            // save instead of this PUT. Plain div + onClick handler.
+            <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="mcp-pick">MCP server</Label>
                 <Select value={pickedEntryId} onValueChange={setPickedEntryId}>
@@ -424,13 +428,14 @@ export function AgentMcpAttachmentsCard({
               {error && <div className="text-sm text-red-400">{error}</div>}
               <div className="flex items-center gap-2 pt-2">
                 <Button
-                  type="submit"
+                  type="button"
                   disabled={submitting || !pickedEntry}
+                  onClick={onAttach}
                 >
                   {submitting ? "Attaching…" : "Attach"}
                 </Button>
               </div>
-            </form>
+            </div>
           )}
         </CardContent>
       </Card>
