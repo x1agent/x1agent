@@ -1,3 +1,10 @@
+## [1.6.5](https://github.com/x1agent/x1agent/compare/v1.6.4...v1.6.5) (2026-05-03)
+
+
+### Bug Fixes
+
+* **agents:** stabilize zustand selectors so the MCP & env tab renders ([#31](https://github.com/x1agent/x1agent/issues/31)) ([9e193f1](https://github.com/x1agent/x1agent/commit/9e193f1f4c5f84e66d1218546d8258bd5a82de0c)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+
 ## [1.6.4](https://github.com/x1agent/x1agent/compare/v1.6.3...v1.6.4) (2026-05-03)
 
 ## [1.6.3](https://github.com/x1agent/x1agent/compare/v1.6.2...v1.6.3) (2026-05-03)
