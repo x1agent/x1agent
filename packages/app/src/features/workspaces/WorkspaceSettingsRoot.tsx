@@ -20,6 +20,7 @@ import { InvitationsPanel } from "../invitations/InvitationsPanel";
 import { SharedAgentResourcesPanel } from "./SharedAgentResourcesPanel";
 import { ContainerRegistryPanel } from "./ContainerRegistryPanel";
 import { WorkspaceSecretsPanel } from "./WorkspaceSecretsPanel";
+import { WorkspaceMcpCatalogPanel } from "./WorkspaceMcpCatalogPanel";
 
 interface Props {
   workspaceSlug: string;
@@ -76,6 +77,7 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
               <TabsTrigger value="resources">Shared resources</TabsTrigger>
               <TabsTrigger value="registry">Container registry</TabsTrigger>
               <TabsTrigger value="secrets">Environment variables</TabsTrigger>
+              <TabsTrigger value="mcp">MCP servers</TabsTrigger>
               <TabsTrigger value="invitations">Invitations</TabsTrigger>
             </TabsList>
 
@@ -100,6 +102,13 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
 
             <TabsContent value="secrets">
               <WorkspaceSecretsPanel
+                slug={workspaceSlug}
+                canManage={!!canManage}
+              />
+            </TabsContent>
+
+            <TabsContent value="mcp">
+              <WorkspaceMcpCatalogPanel
                 slug={workspaceSlug}
                 canManage={!!canManage}
               />
