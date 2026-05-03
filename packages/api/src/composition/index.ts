@@ -55,6 +55,19 @@ import {
   createWorkspaceSecretsRoutes,
 } from "@x1agent/domain-workspace-secrets";
 import {
+  CatalogService,
+  AttachmentService,
+  PostgresCatalogRepository,
+  PostgresAttachmentRepository,
+  createMcpCatalogRoutes,
+  createAgentMcpAttachmentRoutes,
+} from "@x1agent/domain-mcp-catalog";
+import {
+  BindingService,
+  PostgresBindingRepository,
+  createAgentEnvRoutes,
+} from "@x1agent/domain-agent-env";
+import {
   PostgresCollectionRepository,
   createCollectionRoutes,
   createAgentCollectionRoutes,
@@ -146,6 +159,12 @@ export interface Composition {
   workspaceGrantRoutes: Hono;
   /** /api/workspaces/:slug/secrets — workspace-admin-only env var store. */
   workspaceSecretsRoutes: Hono;
+  /** /api/workspaces/:slug/mcp-catalog — workspace-admin MCP image registry. */
+  mcpCatalogRoutes: Hono;
+  /** /api/workspaces/:slug/agents/:agentId/mcp-attachments — per-agent MCP picks. */
+  agentMcpAttachmentRoutes: Hono;
+  /** /api/workspaces/:slug/agents/:agentId/env — Zone-2 agent env bindings. */
+  agentEnvRoutes: Hono;
   collectionRoutes: Hono;
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
@@ -536,6 +555,83 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
   });
 
+  // MCP catalog: workspace admin registers MCP server images here.
+  // Agents in the workspace then attach to entries in this catalog.
+  const mcpCatalogRepo = new PostgresCatalogRepository(env.sql);
+  const mcpAttachmentRepo = new PostgresAttachmentRepository(env.sql);
+  const catalogService = new CatalogService(mcpCatalogRepo);
+  const attachmentService = new AttachmentService(
+    mcpAttachmentRepo,
+    mcpCatalogRepo,
+  );
+  const mcpCatalogRoutes = createMcpCatalogRoutes({
+    catalog: catalogService,
+    requireAuth,
+  });
+
+  // Per-agent middleware: validates that :slug + :agentId pair is real,
+  // the user is admin/owner of that workspace, and stashes workspaceId
+  // + userId for downstream handlers. Used by both MCP attachments and
+  // Zone-2 env bindings — they share the same auth posture: only admins
+  // can edit the credentials and tools an agent runs with.
+  const requireAgent: import("hono").MiddlewareHandler = async (c, next) => {
+    const session = c.get("session") as
+      | {
+          email: string;
+          userId: string | null;
+          memberships: readonly { slug: string; workspaceId: string; role: string }[];
+        }
+      | undefined;
+    if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
+    const slug = c.req.param("slug");
+    const agentId = c.req.param("agentId");
+    if (!slug) return c.json({ error: "missing workspace slug" }, 400);
+    if (!agentId) return c.json({ error: "missing agent id" }, 400);
+    const m = session.memberships.find((x) => x.slug === slug);
+    if (!m) return c.json({ error: "forbidden" }, 403);
+    if (m.role !== "admin" && m.role !== "owner") {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    // Confirm agent belongs to the workspace before any write. Cheap
+    // guard against UI bugs that would otherwise let an admin in
+    // workspace A mutate an agent in workspace B by URL guessing.
+    const agent = await agents.findById(agentId as never);
+    if (!agent || (agent.workspaceId as unknown as string) !== m.workspaceId) {
+      return c.json({ error: "agent not found" }, 404);
+    }
+    c.set("workspaceId", m.workspaceId);
+    c.set("userId", session.userId);
+    await next();
+  };
+
+  const agentMcpAttachmentRoutes = createAgentMcpAttachmentRoutes({
+    attachments: attachmentService,
+    requireAuth,
+    requireAgent,
+  });
+
+  // Zone-2 agent env bindings. The SecretExistsCheck reads through the
+  // workspace_secrets repository; failing here means a binding rotation
+  // tried to point at a secret that no longer exists.
+  const bindingRepo = new PostgresBindingRepository(env.sql);
+  const bindingService = new BindingService(
+    bindingRepo,
+    async (workspaceId, secretName) => {
+      const blob = await workspaceSecretsRepo.getBlob(
+        workspaceId,
+        // Cast through unknown to satisfy SecretName brand without
+        // re-validating: BindingService already validated the name.
+        secretName as unknown as Parameters<typeof workspaceSecretsRepo.getBlob>[1],
+      );
+      return blob !== null;
+    },
+  );
+  const agentEnvRoutes = createAgentEnvRoutes({
+    service: bindingService,
+    requireAuth,
+    requireAgent,
+  });
+
   const collectionsWorkspaceReader: CollectionsWorkspaceReader = {
     async getIdBySlug(slug) {
       const w = await workspaces.findBySlug(slug);
@@ -757,6 +853,9 @@ export function compose(env: CompositionEnv): Composition {
     agentRepoRoutes,
     workspaceGrantRoutes,
     workspaceSecretsRoutes,
+    mcpCatalogRoutes,
+    agentMcpAttachmentRoutes,
+    agentEnvRoutes,
     collectionRoutes,
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,

@@ -152,6 +152,9 @@ const {
   agentRepoRoutes,
   workspaceGrantRoutes,
   workspaceSecretsRoutes,
+  mcpCatalogRoutes,
+  agentMcpAttachmentRoutes,
+  agentEnvRoutes,
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
@@ -283,6 +286,12 @@ app.route(
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);
+app.route("/api/workspaces/:slug/mcp-catalog", mcpCatalogRoutes);
+app.route(
+  "/api/workspaces/:slug/agents/:agentId/mcp-attachments",
+  agentMcpAttachmentRoutes,
+);
+app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
 app.route(
   "/api/workspaces/:slug/agents/:agentId/collections",
