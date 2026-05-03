@@ -1,3 +1,10 @@
+## [1.6.6](https://github.com/x1agent/x1agent/compare/v1.6.5...v1.6.6) (2026-05-03)
+
+
+### Bug Fixes
+
+* **agents:** shorten Kind dropdown options; describe choice in helper text ([#32](https://github.com/x1agent/x1agent/issues/32)) ([0913a09](https://github.com/x1agent/x1agent/commit/0913a09e2792e90962adf775c222af5cc99b67d5))
+
 ## [1.6.5](https://github.com/x1agent/x1agent/compare/v1.6.4...v1.6.5) (2026-05-03)
 
 
