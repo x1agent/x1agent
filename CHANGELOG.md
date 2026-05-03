@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/x1agent/x1agent/compare/v1.6.2...v1.6.3) (2026-05-03)
+
+
+### Bug Fixes
+
+* **agents:** MCP attach + env-binding add buttons trigger their own PUT ([#28](https://github.com/x1agent/x1agent/issues/28)) ([9392a83](https://github.com/x1agent/x1agent/commit/9392a83c018c4b218cb536909c8c928528ad1a40))
+
 ## [1.6.2](https://github.com/x1agent/x1agent/compare/v1.6.1...v1.6.2) (2026-05-03)
 
 
