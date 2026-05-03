@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/x1agent/x1agent/compare/v1.4.0...v1.5.0) (2026-05-03)
+
+
+### Features
+
+* **mcp-catalog:** per-user OAuth flow for remote_oauth MCPs (PR 2/3) ([#24](https://github.com/x1agent/x1agent/issues/24)) ([c40204f](https://github.com/x1agent/x1agent/commit/c40204fb132e37bd3259329ee4b5282a4a814c64))
+
 # [1.4.0](https://github.com/x1agent/x1agent/compare/v1.3.0...v1.4.0) (2026-05-03)
 
 
