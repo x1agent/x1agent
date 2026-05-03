@@ -30,6 +30,8 @@ function entryToJson(e: CatalogEntry) {
     name: e.name as string,
     display_name: e.displayName,
     image: e.image,
+    command: e.command,
+    args: e.args,
     manifest: e.manifest,
     description: e.description,
     created_at: e.createdAt.toISOString(),
@@ -115,7 +117,12 @@ export function createMcpCatalogRoutes(cfg: CatalogRoutesConfig): Hono {
         name: typeof body.name === "string" ? body.name : "",
         displayName:
           typeof body.display_name === "string" ? body.display_name : null,
-        image: typeof body.image === "string" ? body.image : "",
+        image: typeof body.image === "string" ? body.image : null,
+        command: typeof body.command === "string" ? body.command : null,
+        args:
+          Array.isArray(body.args) && body.args.every((a) => typeof a === "string")
+            ? (body.args as string[])
+            : [],
         manifest: body.manifest,
         description:
           typeof body.description === "string" ? body.description : "",

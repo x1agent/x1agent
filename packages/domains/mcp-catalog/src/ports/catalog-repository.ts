@@ -6,7 +6,10 @@ export interface CatalogUpsertInput {
   workspaceId: string;
   name: CatalogName;
   displayName: string | null;
-  image: string;
+  /** Exactly one of image or command is non-null; DB enforces. */
+  image: string | null;
+  command: string | null;
+  args: string[];
   manifest: Manifest;
   description: string;
   createdBy: string | null;
