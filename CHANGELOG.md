@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/x1agent/x1agent/compare/v1.3.0...v1.4.0) (2026-05-03)
+
+
+### Features
+
+* **mcp-catalog:** remote_oauth shape — discovery + DCR for hosted MCPs ([#23](https://github.com/x1agent/x1agent/issues/23)) ([d3bd3e9](https://github.com/x1agent/x1agent/commit/d3bd3e93f6871808d514f365eebd9fdd14e7bd4a))
+
 # [1.3.0](https://github.com/x1agent/x1agent/compare/v1.2.0...v1.3.0) (2026-05-03)
 
 
