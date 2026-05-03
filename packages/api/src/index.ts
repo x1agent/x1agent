@@ -176,6 +176,8 @@ const {
   agents: composedAgents,
   sessions: composedSessions,
   agentRepoStore: composedAgentRepos,
+  agentEnvBindings: composedAgentEnvBindings,
+  workspaceSecrets: composedWorkspaceSecrets,
   tickScheduler,
   quietHints: composedQuietHints,
 } = compose({
@@ -562,6 +564,8 @@ if (process.env.JOB_WATCHER !== "disabled") {
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
+      agentEnvBindings: composedAgentEnvBindings,
+      workspaceSecrets: composedWorkspaceSecrets,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,

@@ -186,6 +186,10 @@ export interface Composition {
   sessionEvents: SessionEventRepository;
   /** Per-turn token usage rows for billing + dashboards. */
   tokenUsage: PostgresTokenUsageRepository;
+  /** Zone-2 agent env bindings repository — exposed to the job watcher. */
+  agentEnvBindings: PostgresBindingRepository;
+  /** Workspace-secret service — exposed for trusted decrypt at session-launch. */
+  workspaceSecrets: SecretService;
   /** Exposed for the Job watcher — reads directly without reconnecting. */
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
@@ -873,6 +877,8 @@ export function compose(env: CompositionEnv): Composition {
     users,
     sessionEvents,
     tokenUsage,
+    agentEnvBindings: bindingRepo,
+    workspaceSecrets: workspaceSecretsService,
     sql: env.sql,
     agents,
     sessions,
