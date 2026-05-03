@@ -47,8 +47,9 @@ A workspace admin goes to **Settings -> MCP servers -> Add** and provides:
 
 - **Name** -- unique within the workspace. Used as the MCP's key in `mcpServers` and as the tool prefix (`mcp__<name>__<tool>`).
 - **Shape** -- one of:
-  - **Container image** -- OCI reference, e.g. `ghcr.io/org/linear-mcp:1.2.0`. The runtime spawns this image directly as a sibling container in the agent's pod. Use when the MCP author publishes a container.
-  - **Command** -- executable + args, e.g. `npx -y @author/mercury-mcp`. The runtime spawns the platform's generic `mcp-runner` base image (node + python + uv preinstalled) and runs the command inside it. Matches Claude Desktop's `claude.json` shape, so you can usually paste the snippet from an MCP author's README directly.
+  - **Container image** (Zone 1) -- OCI reference, e.g. `ghcr.io/org/linear-mcp:1.2.0`. The runtime spawns this image directly as a sibling container in the agent's pod. Use when the MCP author publishes a container.
+  - **Command** (Zone 1) -- executable + args, e.g. `npx -y @author/mercury-mcp`. The runtime spawns the platform's generic `mcp-runner` base image (node + python + uv preinstalled) and runs the command inside it. Matches Claude Desktop's `claude.json` shape, so you can usually paste the snippet from an MCP author's README directly.
+  - **Remote URL + OAuth** (Zone 3) -- the MCP server URL (e.g. `https://mcp.notion.com/mcp`). On save, x1agent runs RFC 9728 + RFC 8414 discovery, then RFC 7591 Dynamic Client Registration to mint workspace-scoped client credentials. Per-user OAuth tokens are minted at session-launch (per-user — each operator authenticates separately). Compatible with **worker agents only** because the agent acts AS the human currently driving the session. Notion, Mercury, and any spec-compliant hosted MCP work this way.
 - **Manifest** -- the set of env vars the MCP expects. Either fetched automatically from the image (if it ships an `/mcp-manifest.json` file under the root) or pasted by the admin:
 
 ```json
