@@ -13,6 +13,8 @@ const ENTRY: CatalogEntry = {
   name: "linear" as CatalogName,
   displayName: "Linear",
   image: "ghcr.io/x/linear-mcp:1",
+  command: null,
+  args: [],
   manifest: {
     env: {
       LINEAR_API_KEY: { kind: "secret", required: true },
