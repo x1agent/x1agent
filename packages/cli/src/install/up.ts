@@ -402,6 +402,27 @@ async function phaseGsmSecrets(env: EnvFile, projectId: string): Promise<boolean
     gsmName: "x1agent-postgres-password",
   });
 
+  // Workspace secrets master key (AES-256-GCM, 32 bytes hex). Auto-
+  // generated on first install if not in the install config and saved
+  // back so re-runs are idempotent. Rotating breaks every row in
+  // workspace_secrets (no re-encrypt path implemented yet) — installer
+  // never overwrites an existing value.
+  const wsKeyEnvKey = "WORKSPACE_SECRETS_MASTER_KEY";
+  let wsKey = env.get(wsKeyEnvKey);
+  if (!wsKey) {
+    const { randomBytes } = await import("node:crypto");
+    wsKey = randomBytes(32).toString("hex");
+    env.set(wsKeyEnvKey, wsKey);
+    env.save();
+    log.info(
+      "Generated WORKSPACE_SECRETS_MASTER_KEY and saved to deployment file. Rotating breaks all stored workspace secrets — keep this value safe.",
+    );
+  }
+  bindings.push({
+    envName: wsKeyEnvKey,
+    gsmName: "x1agent-workspace-secrets-master-key",
+  });
+
   // Push EVERY binding to GSM, even if value is empty. ESO binds
   // ALL keys at once into one K8s Secret; if any GSM secret has zero
   // versions, the whole bundle fails with "Secret does not exist".

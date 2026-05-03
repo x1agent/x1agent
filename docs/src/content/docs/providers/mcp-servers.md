@@ -66,17 +66,35 @@ A workspace admin goes to **Settings -> MCP servers -> Add** and provides:
 
 ### Workspace secrets
 
-Alongside the MCP catalog, a workspace has a named secret store. Each entry has a name (uppercase, underscore-separated, by convention) and a write-only value.
+Alongside the MCP catalog, a workspace has a named secret store. Each entry has a name (uppercase letters, digits, and underscores; matches `^[A-Z_][A-Z0-9_]{0,63}$`) and a write-only value.
 
 Behind the edit screen:
 
-- Plaintext lands once at the API, which writes a Kubernetes `Secret` resource in the workspace's namespace. The API does not log the body of this route.
-- The secret's metadata (name, `is_set`, `updated_at`, `updated_by`) is stored in Postgres. The value is not.
-- RBAC on the `Secret` is scoped to exactly two service accounts: the API (to manage) and the session pod's SA (to mount).
+- Plaintext lands once at the API. It is encrypted and persisted; the API does not log the body of this route. Two storage shapes exist depending on the deployment's chart version (see *Storage* below).
+- The metadata projection visible to the API and the UI is `{ name, is_set, created_at, updated_at, updated_by }`. The value is never returned.
+- There is no `GET /secrets/:name` endpoint. Admins who want to see the value must rotate it and re-enter the new one.
 
-There is no `GET /secrets/:name` endpoint that returns a value. Admins who want to see the value must rotate it and re-enter the new one.
+#### Storage — v1 (current implementation)
 
-**The secret store is one store, used by every system that references a secret.** MCP env, [sibling](/architecture/siblings) env, [runtime service](/architecture/runtime-services) env, and the agent container's own env all resolve `${NAME}` references against the same workspace secret store. The same `^\$\{[A-Z_][A-Z0-9_]*\}$` syntax, the same bare-reference-only rule, and the same `valueFrom.secretKeyRef` materialization apply in every case. One secret store, one write-only UI, one audit trail, many consumers.
+- Plaintext is encrypted with **AES-256-GCM**: random 96-bit nonce per call (NIST SP 800-38D), 128-bit auth tag, deployment-wide master key.
+- The master key is hex-encoded 32 bytes, loaded at api boot from the `WORKSPACE_SECRETS_MASTER_KEY` env var. The installer (`mise run install`) generates one on first run if absent and stores it in GSM as `x1agent-workspace-secrets-master-key`. The api never writes it back, never logs it.
+- The encrypted blob (`ciphertext`, `nonce`, `auth_tag`) lives in the `workspace_secrets` table alongside the metadata.
+- Rotating the master key would invalidate every existing row — there is no re-encrypt procedure built in v1, so treat the key as forever-immutable.
+
+#### Storage — v2 (target)
+
+The v2 design moves plaintext out of Postgres entirely:
+
+- Plaintext lands at the API and is written to a Kubernetes `Secret` resource in the workspace's namespace.
+- The Postgres row keeps only the metadata + a `k8s_secret_ref` pointer. The `ciphertext` / `nonce` / `auth_tag` columns are dropped.
+- RBAC on the K8s `Secret` is scoped to exactly two service accounts: the API (to manage) and the session pod's SA (to mount).
+- Pod specs reference values via `valueFrom.secretKeyRef` — plaintext never transits the pod spec.
+
+The migration path is additive: add `k8s_secret_ref` column, write to both stores during a flight window, then drop the encrypted-blob columns once every row has a K8s secret. The HTTP API contract (the metadata-only response shape, the write-only `PUT`, the lack of any value-returning `GET`) is identical between v1 and v2.
+
+#### Cross-cutting
+
+**The secret store is one store, used by every system that references a secret.** MCP env, [sibling](/architecture/siblings) env, [runtime service](/architecture/runtime-services) env, and the agent container's own env all resolve `${NAME}` references against the same workspace secret store. The same `^\$\{[A-Z_][A-Z0-9_]*\}$` syntax, the same bare-reference-only rule, and the same materialization path apply in every case. One secret store, one write-only UI, one audit trail, many consumers.
 
 ## Attaching MCPs to an agent
 

@@ -49,6 +49,12 @@ import {
   createWorkspaceGrantRoutes,
 } from "@x1agent/domain-permissions";
 import {
+  PostgresSecretRepository,
+  SecretService,
+  loadMasterKey,
+  createWorkspaceSecretsRoutes,
+} from "@x1agent/domain-workspace-secrets";
+import {
   PostgresCollectionRepository,
   createCollectionRoutes,
   createAgentCollectionRoutes,
@@ -138,6 +144,8 @@ export interface Composition {
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
   workspaceGrantRoutes: Hono;
+  /** /api/workspaces/:slug/secrets — workspace-admin-only env var store. */
+  workspaceSecretsRoutes: Hono;
   collectionRoutes: Hono;
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
@@ -201,6 +209,13 @@ export interface CompositionEnv {
   githubAppPrivateKey: string;
   /** Shared secret the sidecar sends on /api/internal/*. */
   internalToken?: string;
+  /**
+   * Hex-encoded 32-byte master key for AES-256-GCM encryption of
+   * workspace secrets. Required — compose() throws on missing/invalid.
+   * Generate with `openssl rand -hex 32`. Stored in GSM as
+   * x1agent-workspace-secrets-master-key. NEVER log or echo.
+   */
+  workspaceSecretsMasterKey?: string;
   /** Optional: inject a fake GitHubAppClient for tests; overrides octokit. */
   githubAppClient?: GitHubAppClient;
   /**
@@ -505,6 +520,22 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  // Workspace secret store. The master key is loaded once at compose
+  // time and held in memory for the life of the process. Decryption
+  // happens only inside the SecretService — repository never sees it.
+  const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
+  const workspaceSecretsKey = loadMasterKey(
+    env.workspaceSecretsMasterKey ?? process.env.WORKSPACE_SECRETS_MASTER_KEY,
+  );
+  const workspaceSecretsService = new SecretService(
+    workspaceSecretsRepo,
+    workspaceSecretsKey,
+  );
+  const workspaceSecretsRoutes = createWorkspaceSecretsRoutes({
+    service: workspaceSecretsService,
+    requireAuth,
+  });
+
   const collectionsWorkspaceReader: CollectionsWorkspaceReader = {
     async getIdBySlug(slug) {
       const w = await workspaces.findBySlug(slug);
@@ -725,6 +756,7 @@ export function compose(env: CompositionEnv): Composition {
     installationApiRoutes,
     agentRepoRoutes,
     workspaceGrantRoutes,
+    workspaceSecretsRoutes,
     collectionRoutes,
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,

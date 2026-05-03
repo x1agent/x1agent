@@ -19,6 +19,7 @@ import {
 import { InvitationsPanel } from "../invitations/InvitationsPanel";
 import { SharedAgentResourcesPanel } from "./SharedAgentResourcesPanel";
 import { ContainerRegistryPanel } from "./ContainerRegistryPanel";
+import { WorkspaceSecretsPanel } from "./WorkspaceSecretsPanel";
 
 interface Props {
   workspaceSlug: string;
@@ -74,6 +75,7 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
             <TabsList>
               <TabsTrigger value="resources">Shared resources</TabsTrigger>
               <TabsTrigger value="registry">Container registry</TabsTrigger>
+              <TabsTrigger value="secrets">Environment variables</TabsTrigger>
               <TabsTrigger value="invitations">Invitations</TabsTrigger>
             </TabsList>
 
@@ -94,6 +96,13 @@ export function WorkspaceSettingsRoot({ workspaceSlug }: Props) {
 
             <TabsContent value="registry">
               <ContainerRegistryPanel slug={workspaceSlug} />
+            </TabsContent>
+
+            <TabsContent value="secrets">
+              <WorkspaceSecretsPanel
+                slug={workspaceSlug}
+                canManage={!!canManage}
+              />
             </TabsContent>
 
             <TabsContent value="invitations">
