@@ -1,3 +1,10 @@
+## [1.6.2](https://github.com/x1agent/x1agent/compare/v1.6.1...v1.6.2) (2026-05-03)
+
+
+### Bug Fixes
+
+* **agents:** surface MCP attachments + env bindings on the detail page ([#27](https://github.com/x1agent/x1agent/issues/27)) ([2216b72](https://github.com/x1agent/x1agent/commit/2216b72f684253ee3ea0e83707d93334b4a40c27))
+
 ## [1.6.1](https://github.com/x1agent/x1agent/compare/v1.6.0...v1.6.1) (2026-05-03)
 
 
