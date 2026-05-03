@@ -138,3 +138,22 @@ When adding or modifying documentation:
 - Provider selection is driven by **Helm values**. Switching providers is a config change, not a code change.
 - Security features (mTLS, NetworkPolicy, pod security contexts) are **first-class**, not afterthoughts.
 - The default path must work out of the box. The hardened path must be well-documented and CI-tested.
+
+## Frontend state management
+
+**Use zustand for any state that crosses a component boundary or backs an API call.** The `packages/app` codebase has a consistent pattern of zustand stores in `packages/app/src/stores/` — `useAgentsStore`, `useCollectionsStore`, `useGitHubStore`, `useGrantsStore`, `useAuthStore`, `useCapabilitiesStore` all follow the same shape: a normalized cache keyed by workspace/agent, plus async actions (`load`, `attach`, `detach`, `update`) that hit `apiFetch` and write the result back into the cache.
+
+When adding a new feature that talks to the api:
+1. Create or extend a store in `packages/app/src/stores/` for the new domain.
+2. Components consume the store with a selector: `const items = useFooStore((s) => s.byKey[k] ?? [])`.
+3. Components call store actions, never `apiFetch` directly: `useFooStore.getState().attach(...)`.
+
+Local `useState` is fine for **purely local UI concerns** — open/closed, in-flight submit flag, current text-input value. As soon as the value reflects server state, persists across navigations, or needs to be visible to another component, it belongs in a store.
+
+This matters because:
+- Inconsistent patterns make the codebase hard to reason about (one feature uses zustand, another doesn't).
+- A store is the natural cross-page cache — the agent detail page's MCP count and the agent edit page's MCP list should share the same source of truth.
+- Optimistic updates and post-mutation refetches are uniform when they live in store actions.
+- Tests can reset the store between cases instead of mocking `fetch`.
+
+When you find a feature that uses raw `useState` + `apiFetch` for server state, treat it as tech debt — refactor opportunistically when you next touch it.
