@@ -29,6 +29,7 @@ interface CatalogEntry {
   id: string;
   name: string;
   display_name: string | null;
+  kind: "stdio" | "remote_oauth";
   manifest: {
     env: Record<
       string,
@@ -57,12 +58,15 @@ interface SecretRow {
 interface Props {
   workspaceSlug: string;
   agentId: string;
+  /** Agent kind — drives whether remote_oauth catalog entries are pickable. */
+  agentKind?: "worker" | "orchestrator" | "scheduled";
   canManage: boolean;
 }
 
 export function AgentMcpAttachmentsCard({
   workspaceSlug,
   agentId,
+  agentKind,
   canManage,
 }: Props) {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -285,6 +289,12 @@ export function AgentMcpAttachmentsCard({
                       .filter(
                         (c) => !attachments.some((a) => a.catalog_entry_id === c.id),
                       )
+                      .filter((c) => {
+                        // Remote OAuth MCPs require an interactive
+                        // user — only attachable to worker agents.
+                        if (c.kind !== "remote_oauth") return true;
+                        return agentKind === "worker" || agentKind === undefined;
+                      })
                       .map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.display_name ?? c.name}{" "}

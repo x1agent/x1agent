@@ -5,14 +5,23 @@ sidebar:
   order: 3
 ---
 
-The workspace secret store has **two attachment zones** for agents. Both source from the same `${NAME}` references; they differ in which container the plaintext value lands in.
+x1agent has **three credential-attachment zones**, each with a different identity model and threat surface.
 
-| Zone | Plaintext lands in | Agent can read | Use when |
-|---|---|---|---|
-| **MCP-mediated** | The MCP server's container only | No — agent only sees the MCP's tool output | Third-party API keys consumed via an MCP tool (Linear, Slack, Mercury, Drive) |
-| **Agent env** | The agent container's `process.env` | Yes — bash, scripts, the LLM's tool calls all see it | Credentials the agent itself needs to operate (its own model API key, its own GitHub PAT, deploy tokens) |
+| Zone | Plaintext lands in | Identity at the API | Compatible agent kinds | Use when |
+|---|---|---|---|---|
+| **1 · MCP-mediated** | The MCP server's container only | The workspace, configured by admin | Any (worker / scheduled / orchestrator) | Third-party API keys consumed via a stdio MCP tool (Linear self-hosted, in-house tool servers) |
+| **2 · Agent env** | The agent container's `process.env` | The workspace, as the agent's principal | Any | Credentials the agent itself needs to operate (its own model API key, its own GitHub PAT, deploy tokens) |
+| **3 · Per-user OAuth** | Server-side at the MCP provider | The user driving the current session | **Worker only** | Hosted MCPs that authenticate end-users (Mercury, Notion, Slack-as-user, Linear's hosted server) |
 
-Zone 1 (MCP-mediated) is documented in [MCP servers](/providers/mcp-servers). This page is about Zone 2.
+Zone 1 is documented in [MCP servers](/providers/mcp-servers). Zone 3 is documented there too. This page is about **Zone 2**.
+
+## Why three zones
+
+The three zones answer three different questions about credentials:
+
+- **Zone 1**: "Who at the API is being called?" → the workspace, hidden behind a tool boundary so the LLM never sees the secret.
+- **Zone 2**: "Who is the agent acting AS?" → the workspace, with the agent itself holding the credential because it needs `bash` / `git push` / `kubectl apply` to just work.
+- **Zone 3**: "Who is the human currently asking the agent to do this?" → that specific user, authenticated via OAuth at session-launch, with the bearer never reaching the agent process. Restricted to **worker (interactive) agents** — at 3 AM with no human present, there's no one to act AS, so orchestrators and scheduled agents can't use Zone 3.
 
 ## Why Zone 2 exists
 

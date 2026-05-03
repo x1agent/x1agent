@@ -8,6 +8,7 @@ declare module "hono" {
   interface ContextVariableMap {
     workspaceId: string;
     userId: string | null;
+    agentKind: "worker" | "orchestrator" | "scheduled";
   }
 }
 
@@ -29,9 +30,13 @@ function entryToJson(e: CatalogEntry) {
     id: e.id,
     name: e.name as string,
     display_name: e.displayName,
+    kind: e.kind,
     image: e.image,
     command: e.command,
     args: e.args,
+    url: e.url,
+    // We don't expose the cached oauth_authorization_server metadata
+    // to the workspace UI — internal use only at session-launch.
     manifest: e.manifest,
     description: e.description,
     created_at: e.createdAt.toISOString(),
@@ -112,17 +117,21 @@ export function createMcpCatalogRoutes(cfg: CatalogRoutesConfig): Hono {
       return c.json({ error: "body must be JSON" }, 400);
     }
     try {
+      const kind =
+        body.kind === "remote_oauth" ? "remote_oauth" : "stdio";
       const entry = await cfg.catalog.set({
         workspaceId,
         name: typeof body.name === "string" ? body.name : "",
         displayName:
           typeof body.display_name === "string" ? body.display_name : null,
+        kind,
         image: typeof body.image === "string" ? body.image : null,
         command: typeof body.command === "string" ? body.command : null,
         args:
           Array.isArray(body.args) && body.args.every((a) => typeof a === "string")
             ? (body.args as string[])
             : [],
+        url: typeof body.url === "string" ? body.url : null,
         manifest: body.manifest,
         description:
           typeof body.description === "string" ? body.description : "",
@@ -185,10 +194,16 @@ export function createAgentMcpAttachmentRoutes(
         400,
       );
     }
+    const agentKind = (c.get("agentKind") as
+      | "worker"
+      | "orchestrator"
+      | "scheduled"
+      | undefined) ?? "worker";
     try {
       const att = await cfg.attachments.attach({
         agentId,
         workspaceId,
+        agentKind,
         catalogEntryId: body.catalog_entry_id,
         envJson:
           typeof body.env_json === "object" &&

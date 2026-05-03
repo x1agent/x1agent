@@ -1,7 +1,11 @@
 import type postgres from "postgres";
-import type { CatalogEntry } from "../../domain/catalog-entry.js";
+import type {
+  CatalogEntry,
+  CatalogKind,
+} from "../../domain/catalog-entry.js";
 import { CatalogName } from "../../domain/catalog-name.js";
 import type { Manifest } from "../../domain/manifest.js";
+import type { AuthorizationServerMetadataMinimal } from "../../domain/catalog-entry.js";
 import type {
   CatalogRepository,
   CatalogUpsertInput,
@@ -12,9 +16,12 @@ interface CatalogRow {
   workspace_id: string;
   name: string;
   display_name: string | null;
+  kind: string;
   image: string | null;
   command: string | null;
   args: string[];
+  url: string | null;
+  oauth_authorization_server: AuthorizationServerMetadataMinimal | null;
   manifest: Manifest;
   description: string;
   created_at: Date;
@@ -28,9 +35,12 @@ function rowToEntry(row: CatalogRow): CatalogEntry {
     workspaceId: row.workspace_id,
     name: CatalogName(row.name),
     displayName: row.display_name,
+    kind: (row.kind === "remote_oauth" ? "remote_oauth" : "stdio") as CatalogKind,
     image: row.image,
     command: row.command,
     args: Array.isArray(row.args) ? row.args : [],
+    url: row.url,
+    oauthAuthorizationServer: row.oauth_authorization_server,
     manifest: row.manifest,
     description: row.description,
     createdAt: row.created_at,
@@ -39,13 +49,18 @@ function rowToEntry(row: CatalogRow): CatalogEntry {
   };
 }
 
+const SELECT_COLUMNS = `id, workspace_id, name, display_name, kind, image,
+  command, args, url, oauth_authorization_server, manifest, description,
+  created_at, updated_at, created_by`;
+
 export class PostgresCatalogRepository implements CatalogRepository {
   constructor(private readonly sql: postgres.Sql<Record<string, unknown>>) {}
 
   async list(workspaceId: string): Promise<CatalogEntry[]> {
     const rows = await this.sql<CatalogRow[]>`
-      SELECT id, workspace_id, name, display_name, image, command, args,
-             manifest, description, created_at, updated_at, created_by
+      SELECT id, workspace_id, name, display_name, kind, image, command,
+             args, url, oauth_authorization_server, manifest, description,
+             created_at, updated_at, created_by
       FROM mcp_catalog_entries
       WHERE workspace_id = ${workspaceId}
       ORDER BY name ASC
@@ -58,8 +73,9 @@ export class PostgresCatalogRepository implements CatalogRepository {
     id: string,
   ): Promise<CatalogEntry | null> {
     const [row] = await this.sql<CatalogRow[]>`
-      SELECT id, workspace_id, name, display_name, image, command, args,
-             manifest, description, created_at, updated_at, created_by
+      SELECT id, workspace_id, name, display_name, kind, image, command,
+             args, url, oauth_authorization_server, manifest, description,
+             created_at, updated_at, created_by
       FROM mcp_catalog_entries
       WHERE workspace_id = ${workspaceId} AND id = ${id}
     `;
@@ -71,8 +87,9 @@ export class PostgresCatalogRepository implements CatalogRepository {
     name: CatalogName,
   ): Promise<CatalogEntry | null> {
     const [row] = await this.sql<CatalogRow[]>`
-      SELECT id, workspace_id, name, display_name, image, command, args,
-             manifest, description, created_at, updated_at, created_by
+      SELECT id, workspace_id, name, display_name, kind, image, command,
+             args, url, oauth_authorization_server, manifest, description,
+             created_at, updated_at, created_by
       FROM mcp_catalog_entries
       WHERE workspace_id = ${workspaceId} AND name = ${name as string}
     `;
@@ -80,31 +97,42 @@ export class PostgresCatalogRepository implements CatalogRepository {
   }
 
   async upsert(input: CatalogUpsertInput): Promise<CatalogEntry> {
+    const oauthMeta =
+      input.oauthAuthorizationServer === null
+        ? null
+        : this.sql.json(input.oauthAuthorizationServer as never);
     const [row] = await this.sql<CatalogRow[]>`
       INSERT INTO mcp_catalog_entries
-        (workspace_id, name, display_name, image, command, args,
-         manifest, description, created_by)
+        (workspace_id, name, display_name, kind, image, command, args,
+         url, oauth_authorization_server, manifest, description, created_by)
       VALUES (
         ${input.workspaceId},
         ${input.name as string},
         ${input.displayName},
+        ${input.kind},
         ${input.image},
         ${input.command},
         ${this.sql.json(input.args as never)},
+        ${input.url},
+        ${oauthMeta},
         ${this.sql.json(input.manifest as never)},
         ${input.description},
         ${input.createdBy}
       )
       ON CONFLICT (workspace_id, name) DO UPDATE SET
         display_name = EXCLUDED.display_name,
+        kind = EXCLUDED.kind,
         image = EXCLUDED.image,
         command = EXCLUDED.command,
         args = EXCLUDED.args,
+        url = EXCLUDED.url,
+        oauth_authorization_server = EXCLUDED.oauth_authorization_server,
         manifest = EXCLUDED.manifest,
         description = EXCLUDED.description,
         updated_at = now()
-      RETURNING id, workspace_id, name, display_name, image, command, args,
-                manifest, description, created_at, updated_at, created_by
+      RETURNING id, workspace_id, name, display_name, kind, image, command,
+                args, url, oauth_authorization_server, manifest, description,
+                created_at, updated_at, created_by
     `;
     if (!row) throw new Error("mcp_catalog_entries upsert returned no row");
     return rowToEntry(row);
@@ -118,3 +146,5 @@ export class PostgresCatalogRepository implements CatalogRepository {
     return (result.count ?? 0) > 0;
   }
 }
+
+void SELECT_COLUMNS;

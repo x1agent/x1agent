@@ -6,10 +6,15 @@ export interface CatalogUpsertInput {
   workspaceId: string;
   name: CatalogName;
   displayName: string | null;
-  /** Exactly one of image or command is non-null; DB enforces. */
+  /** "stdio" | "remote_oauth". DB CHECK enforces field combinations. */
+  kind: "stdio" | "remote_oauth";
+  /** stdio shape, mutually exclusive with command. */
   image: string | null;
   command: string | null;
   args: string[];
+  /** remote_oauth shape. */
+  url: string | null;
+  oauthAuthorizationServer: unknown | null;
   manifest: Manifest;
   description: string;
   createdBy: string | null;

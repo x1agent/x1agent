@@ -23,15 +23,18 @@ import {
  *     claude.json shape)
  */
 
-type Kind = "image" | "command";
+type Kind = "image" | "command" | "remote_oauth";
 
 interface CatalogEntry {
   id: string;
   name: string;
   display_name: string | null;
+  /** "stdio" | "remote_oauth" — server-side wire kind. */
+  kind: "stdio" | "remote_oauth";
   image: string | null;
   command: string | null;
   args: string[];
+  url: string | null;
   manifest: {
     env: Record<
       string,
@@ -74,6 +77,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   const [image, setImage] = useState("");
   const [command, setCommand] = useState("");
   const [argsText, setArgsText] = useState(""); // newline-separated for ergonomics
+  const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -104,6 +108,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
     setImage("");
     setCommand("");
     setArgsText("");
+    setUrl("");
     setDescription("");
     setManifestText("");
     setEditing(null);
@@ -113,21 +118,34 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
     setEditing(row);
     setName(row.name);
     setDisplayName(row.display_name ?? "");
-    if (row.image) {
+    if (row.kind === "remote_oauth") {
+      setKind("remote_oauth");
+      setImage("");
+      setCommand("");
+      setArgsText("");
+      setUrl(row.url ?? "");
+    } else if (row.image) {
       setKind("image");
       setImage(row.image);
       setCommand("");
       setArgsText("");
+      setUrl("");
     } else {
       setKind("command");
       setImage("");
       setCommand(row.command ?? "");
       setArgsText(row.args.join("\n"));
+      setUrl("");
     }
     setDescription(row.description);
     setManifestText(JSON.stringify(row.manifest, null, 2));
     setTimeout(() => {
-      const id = row.image ? "mcp-image" : "mcp-command";
+      const id =
+        row.kind === "remote_oauth"
+          ? "mcp-url"
+          : row.image
+            ? "mcp-image"
+            : "mcp-command";
       document.getElementById(id)?.focus();
     }, 0);
   }
@@ -150,6 +168,10 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
       setError("Command is required.");
       return;
     }
+    if (kind === "remote_oauth" && url.trim().length === 0) {
+      setError("URL is required for a remote OAuth MCP.");
+      return;
+    }
     let manifest: unknown;
     try {
       manifest = JSON.parse(manifestText || "{}");
@@ -166,13 +188,18 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
         description,
       };
       if (kind === "image") {
+        body.kind = "stdio";
         body.image = image.trim();
-      } else {
+      } else if (kind === "command") {
+        body.kind = "stdio";
         body.command = command.trim();
         body.args = argsText
           .split("\n")
           .map((a) => a.trim())
           .filter((a) => a.length > 0);
+      } else {
+        body.kind = "remote_oauth";
+        body.url = url.trim();
       }
       await apiFetch(`/api/workspaces/${slug}/mcp-catalog`, {
         method: "PUT",
@@ -244,13 +271,19 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                       )}
                     </div>
                     <div className="truncate font-mono text-xs text-zinc-500">
-                      {row.image
-                        ? row.image
-                        : `${row.command ?? ""} ${row.args.join(" ")}`.trim()}
+                      {row.kind === "remote_oauth"
+                        ? row.url
+                        : row.image
+                          ? row.image
+                          : `${row.command ?? ""} ${row.args.join(" ")}`.trim()}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
                       <Badge variant="secondary" className="text-xs">
-                        {row.image ? "image" : "command"}
+                        {row.kind === "remote_oauth"
+                          ? "remote oauth"
+                          : row.image
+                            ? "image"
+                            : "command"}
                       </Badge>
                       {Object.keys(row.manifest.env).map((k) => (
                         <Badge key={k} variant="outline" className="text-xs">
@@ -344,7 +377,23 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                   />
                   <span>Command (npx / uvx / etc.)</span>
                 </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="mcp-kind"
+                    checked={kind === "remote_oauth"}
+                    onChange={() => setKind("remote_oauth")}
+                  />
+                  <span>Remote URL + OAuth</span>
+                </label>
               </div>
+              {kind === "remote_oauth" && (
+                <p className="text-xs text-amber-400">
+                  Remote OAuth MCPs run server-side (Mercury, Notion,
+                  etc.) and the agent acts AS the user driving the
+                  session. They can only be attached to <strong>worker</strong> agents — not orchestrators or scheduled agents.
+                </p>
+              )}
             </div>
 
             {kind === "image" ? (
@@ -363,6 +412,28 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                 <p className="text-xs text-zinc-500">
                   The runtime spawns this image as a sibling container in
                   the agent's pod.
+                </p>
+              </div>
+            ) : kind === "remote_oauth" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="mcp-url">MCP server URL</Label>
+                <Input
+                  id="mcp-url"
+                  required
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://mcp.notion.com/mcp"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono"
+                  disabled={!!editing}
+                />
+                <p className="text-xs text-zinc-500">
+                  On save, the platform discovers OAuth metadata at this URL
+                  and registers a client via Dynamic Client Registration.
+                  This may take a few seconds. URL cannot be changed after
+                  registration — re-create the entry to point at a different
+                  server.
                 </p>
               </div>
             ) : (

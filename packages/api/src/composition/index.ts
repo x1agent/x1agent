@@ -59,6 +59,7 @@ import {
   AttachmentService,
   PostgresCatalogRepository,
   PostgresAttachmentRepository,
+  PostgresOAuthClientRepository,
   createMcpCatalogRoutes,
   createAgentMcpAttachmentRoutes,
 } from "@x1agent/domain-mcp-catalog";
@@ -559,11 +560,24 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
   });
 
-  // MCP catalog: workspace admin registers MCP server images here.
-  // Agents in the workspace then attach to entries in this catalog.
+  // MCP catalog: workspace admin registers MCP servers here. Three
+  // shapes: stdio image, stdio command (npx/uvx), remote_oauth.
+  // The remote_oauth path runs RFC 9728/8414 discovery + RFC 7591 DCR
+  // server-side at registration time — store the issued client_secret
+  // encrypted with the workspace_secrets master key.
   const mcpCatalogRepo = new PostgresCatalogRepository(env.sql);
   const mcpAttachmentRepo = new PostgresAttachmentRepository(env.sql);
-  const catalogService = new CatalogService(mcpCatalogRepo);
+  const mcpOAuthClientRepo = new PostgresOAuthClientRepository(env.sql);
+  const catalogService = new CatalogService(mcpCatalogRepo, {
+    workspaceSlugFor: async (workspaceId: string) => {
+      const w = await workspaces.findById(workspaceId as never);
+      return w?.slug ?? null;
+    },
+    redirectUriFor: ({ workspaceSlug, catalogName }) =>
+      `${env.apiUrl}/auth/mcp/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}/callback`,
+    cipherKey: workspaceSecretsKey,
+    oauthClients: mcpOAuthClientRepo,
+  });
   const attachmentService = new AttachmentService(
     mcpAttachmentRepo,
     mcpCatalogRepo,
@@ -605,6 +619,12 @@ export function compose(env: CompositionEnv): Composition {
     }
     c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
+    // Surface agent kind so downstream routes can apply
+    // kind-specific policy (remote_oauth MCPs require worker).
+    c.set(
+      "agentKind",
+      (agent.kind as "worker" | "orchestrator" | "scheduled") ?? "worker",
+    );
     await next();
   };
 
