@@ -22,17 +22,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
+          bun-version: latest
 
       - name: Install dependencies
-        working-directory: docs
-        run: npm ci
+        # Install at the workspace root so docs/ resolves any workspace
+        # transitive deps. --ignore-scripts skips postinstall hooks that
+        # don't apply to a docs-only build.
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build site
         working-directory: docs
-        run: npm run build
+        run: bun run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
