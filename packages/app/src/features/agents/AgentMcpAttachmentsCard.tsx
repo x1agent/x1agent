@@ -44,13 +44,15 @@ export function AgentMcpAttachmentsCard({
   agentKind,
   canManage,
 }: Props) {
-  const catalog = useMcpStore(
-    (s) => s.catalogBySlug[workspaceSlug] ?? [],
-  );
-  const attachments = useMcpStore(
-    (s) => s.attachmentsByAgentKey[mcpAgentKey(workspaceSlug, agentId)] ?? [],
-  );
+  // Select the whole record and look up outside the selector. A
+  // `?? []` inside the selector returns a NEW array every render when
+  // the key isn't in cache, which infinite-loops React and crashes
+  // the subtree (black tab). Same pattern used by useCollectionsStore.
+  const catalogBySlug = useMcpStore((s) => s.catalogBySlug);
+  const attachmentsByAgentKey = useMcpStore((s) => s.attachmentsByAgentKey);
   const userTokens = useMcpStore((s) => s.userTokens);
+  const catalog = catalogBySlug[workspaceSlug] ?? [];
+  const attachments = attachmentsByAgentKey[mcpAgentKey(workspaceSlug, agentId)] ?? [];
   const loadCatalog = useMcpStore((s) => s.loadCatalog);
   const loadAttachments = useMcpStore((s) => s.loadAttachments);
   const loadUserTokens = useMcpStore((s) => s.loadUserTokens);
@@ -58,10 +60,9 @@ export function AgentMcpAttachmentsCard({
   const detach = useMcpStore((s) => s.detach);
   const disconnectToken = useMcpStore((s) => s.disconnectToken);
 
-  const secrets = useWorkspaceSecretsStore(
-    (s) => s.byWorkspace[workspaceSlug] ?? [],
-  );
+  const secretsByWorkspace = useWorkspaceSecretsStore((s) => s.byWorkspace);
   const loadSecrets = useWorkspaceSecretsStore((s) => s.load);
+  const secrets = secretsByWorkspace[workspaceSlug] ?? [];
 
   const [error, setError] = useState<string | null>(null);
   const [pickedEntryId, setPickedEntryId] = useState("");
