@@ -76,7 +76,8 @@ export async function listAnthropicModels(): Promise<AnthropicModel[]> {
  *
  * Operators who need data residency or predictable per-region latency
  * can still set CLOUD_ML_REGION to us-east5 / europe-west1 / us / eu /
- * etc.; the URL builder handles both shapes.
+ * etc. (drives INFERENCE); the URL builder handles both shapes. The
+ * catalog LIST region is independent — see VERTEX_LIST_REGION below.
  */
 export function vertexHost(region: string): string {
   return region === "global"
@@ -85,7 +86,16 @@ export function vertexHost(region: string): string {
 }
 
 async function listVertexModels(): Promise<AnthropicModel[]> {
-  const region = process.env.CLOUD_ML_REGION || "global";
+  // Catalog enumeration is decoupled from inference region. Regional
+  // Vertex endpoints only return the 1-2 models that have rolled out
+  // there; `global` returns the full publisher catalog. Operators who
+  // need a specific list region (data-residency for the catalog read
+  // itself) can set VERTEX_LIST_REGION explicitly. Inference still
+  // uses CLOUD_ML_REGION; the per-model probe in admin-routes.ts
+  // tests servability against the actual inference region.
+  const region =
+    process.env.VERTEX_LIST_REGION ||
+    "global";
   const project =
     process.env.ANTHROPIC_VERTEX_PROJECT_ID || process.env.GCP_PROJECT_ID;
   if (!project) {
