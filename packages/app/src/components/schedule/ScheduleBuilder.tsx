@@ -57,7 +57,7 @@ const FREQUENCY_OPTIONS: {
   { id: "minutes", label: "Every N minutes" },
   { id: "hours", label: "Every N hours" },
   { id: "daily", label: "Daily" },
-  { id: "weekly", label: "Weekly" },
+  { id: "weekly", label: "On days of week" },
   { id: "monthly", label: "Monthly" },
   { id: "custom", label: "Custom cron" },
 ];
