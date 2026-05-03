@@ -134,6 +134,21 @@ export interface JobWatcherConfig {
   agentEnvBindings?: import("@x1agent/domain-agent-env").BindingRepository | null;
   workspaceSecrets?: import("@x1agent/domain-workspace-secrets").SecretService | null;
   /**
+   * Zone-3 OAuth runtime: resolves per-user access tokens for any
+   * remote_oauth MCP attachments at session-create. Halts session
+   * creation with a structured error when a token is missing/expired
+   * (UI shows "Connect <Provider> to continue").
+   */
+  mcpAttachments?: import("@x1agent/domain-mcp-catalog").AttachmentRepository | null;
+  mcpCatalog?: import("@x1agent/domain-mcp-catalog").CatalogRepository | null;
+  userTokenService?: import("@x1agent/domain-mcp-catalog").UserTokenService | null;
+  /**
+   * Image ref for the OAuth proxy sibling container. One per attached
+   * remote_oauth MCP. Helm chart sets this; pod-spec emits the
+   * containers.
+   */
+  mcpOAuthProxyImage?: string;
+  /**
    * Called when a session reaches a terminal state via the reaper
    * path (pod disappeared, Job failed without an emitted
    * session.completed event). Fires the state_change wake into
@@ -343,6 +358,39 @@ async function launchSession(
     ? `${agent.systemPrompt}\n\n${promptAppend}`
     : agent.systemPrompt;
 
+  // Zone-3 remote_oauth attachments: resolve the active user's
+  // tokens for each, mint a per-attachment K8s Secret holding the
+  // bearer, return the descriptors pod-spec needs to emit sibling
+  // proxy containers. If any token can't be resolved (no consent or
+  // refresh failed) we fail the session here so the user sees a
+  // clear "Connect <Provider>" message instead of the agent
+  // mysteriously failing on first tool call.
+  let remoteOAuthAttachments: import("./pod-spec.js").RemoteOAuthAttachmentForPod[] = [];
+  try {
+    remoteOAuthAttachments = await mintRemoteOAuthBearers(
+      cfg,
+      kc,
+      session,
+      agent.id,
+      agent.workspaceId as unknown as string,
+    );
+  } catch (err) {
+    const msg = (err as Error).message;
+    console.warn(
+      `[jobs] zone-3 token resolution failed for session ${session.id}: ${msg}`,
+    );
+    // Mark the session failed with the error message — the UI will
+    // surface it. Don't proceed to job creation.
+    await cfg.sessions
+      .updateStatus(session.id, {
+        status: "failed",
+        completedAt: new Date(),
+        errorMessage: msg,
+      })
+      .catch(() => undefined);
+    return;
+  }
+
   const job = buildSessionJob({
     sessionId: session.id,
     agentId: agent.id,
@@ -391,6 +439,8 @@ async function launchSession(
     namespace: cfg.namespace,
     sessionCredentialsSecretName: credentialsSecretName,
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,
+    mcpOAuthProxyImage: cfg.mcpOAuthProxyImage,
+    remoteOAuthAttachments,
   });
 
   // Orchestrator pods use a PVC-backed workspace so the SDK transcript
@@ -810,6 +860,120 @@ function buildPromptAppend(kinds: string[], branchName: string): string {
 
 function shortId(id: string): string {
   return id.replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * Resolve per-user OAuth bearers for all remote_oauth attachments
+ * on this agent + mint a per-attachment K8s Secret holding the
+ * bearer. Returns the descriptors pod-spec needs to emit one
+ * sibling proxy container per attachment. Throws if any token
+ * can't be resolved — the caller marks the session failed so the
+ * user gets a clear "Connect Notion to continue" message.
+ *
+ * The active user is `session.triggeredByUserId`. Worker sessions
+ * always have one set (DB CHECK enforces); other agent kinds can't
+ * have remote_oauth attachments to begin with (AttachmentService
+ * enforces).
+ */
+async function mintRemoteOAuthBearers(
+  cfg: JobWatcherConfig,
+  kc: k8s.KubeConfig,
+  session: SessionEntity,
+  agentId: string,
+  workspaceId: string,
+): Promise<import("./pod-spec.js").RemoteOAuthAttachmentForPod[]> {
+  if (!cfg.mcpAttachments || !cfg.mcpCatalog || !cfg.userTokenService) {
+    return [];
+  }
+  const all = await cfg.mcpAttachments.listByAgent(agentId);
+  if (all.length === 0) return [];
+
+  // Filter to remote_oauth-shape attachments by looking up the
+  // catalog entry. Skip stdio entries — they're handled separately
+  // (Zone-1 runtime, separate slice).
+  const remote: Array<{
+    catalogEntryId: string;
+    catalogName: string;
+    upstreamUrl: string;
+  }> = [];
+  for (const att of all) {
+    const entry = await cfg.mcpCatalog.getById(
+      workspaceId,
+      att.catalogEntryId,
+    );
+    if (!entry || entry.kind !== "remote_oauth" || !entry.url) continue;
+    remote.push({
+      catalogEntryId: att.catalogEntryId,
+      catalogName: entry.name as unknown as string,
+      upstreamUrl: entry.url,
+    });
+  }
+  if (remote.length === 0) return [];
+
+  if (!session.triggeredByUserId) {
+    throw new Error(
+      "remote_oauth MCPs require a user-triggered session — no triggered_by_user_id set",
+    );
+  }
+
+  const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+  const out: import("./pod-spec.js").RemoteOAuthAttachmentForPod[] = [];
+  // Each attachment gets a unique localhost port so the agent can
+  // talk to multiple MCPs concurrently.
+  const BASE_PORT = 9100;
+  let portCursor = 0;
+  for (const r of remote) {
+    const resolved = await cfg.userTokenService.resolveValidAccessToken({
+      userId: session.triggeredByUserId as unknown as string,
+      workspaceId,
+      catalogEntryName: r.catalogName,
+    });
+    if (!resolved) {
+      throw new Error(
+        `Connect ${r.catalogName} to continue — no valid OAuth token for the active user. Open the agent's MCP & env tab and click Connect.`,
+      );
+    }
+    const port = BASE_PORT + portCursor;
+    portCursor++;
+    const secretName =
+      `x1-mcp-bearer-${shortId(session.id as unknown as string)}-${r.catalogName}`.slice(0, 63);
+    const secretBody: k8s.V1Secret = {
+      metadata: {
+        name: secretName,
+        namespace: cfg.namespace,
+        labels: {
+          app: "x1agent",
+          component: "mcp-oauth-bearer",
+          "session-id": session.id as unknown as string,
+        },
+      },
+      type: "Opaque",
+      stringData: { MCP_PROXY_BEARER: resolved.accessToken },
+    };
+    try {
+      await coreApi.createNamespacedSecret({
+        namespace: cfg.namespace,
+        body: secretBody,
+      });
+    } catch (err) {
+      if ((err as { code?: number }).code === 409) {
+        await coreApi.replaceNamespacedSecret({
+          name: secretName,
+          namespace: cfg.namespace,
+          body: secretBody,
+        });
+      } else {
+        throw err;
+      }
+    }
+    out.push({
+      catalogName: r.catalogName,
+      upstreamUrl: r.upstreamUrl,
+      port,
+      bearerSecretName: secretName,
+    });
+  }
+  return out;
 }
 
 /**

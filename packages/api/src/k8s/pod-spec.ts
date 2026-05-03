@@ -35,6 +35,21 @@ export interface AttachedCollectionForPod {
   is_default: boolean;
 }
 
+/**
+ * One Zone-3 remote_oauth MCP attachment, after the api has resolved
+ * the active user's bearer and minted a per-MCP per-session K8s Secret.
+ */
+export interface RemoteOAuthAttachmentForPod {
+  /** Catalog name — used as the mcpServers key + tool prefix. */
+  catalogName: string;
+  /** Upstream MCP URL the proxy forwards to (e.g. https://mcp.notion.com/mcp). */
+  upstreamUrl: string;
+  /** Local port the proxy listens on. Each attachment gets a unique port. */
+  port: number;
+  /** Name of the per-MCP K8s Secret containing key MCP_PROXY_BEARER. */
+  bearerSecretName: string;
+}
+
 export interface SessionPodSpec {
   sessionId: string;
   agentId: string;
@@ -130,6 +145,20 @@ export interface SessionPodSpec {
    */
   sessionCredentialsSecretName?: string;
   /**
+   * Image ref for the per-attachment OAuth proxy sibling container.
+   * One container is added per remote_oauth attachment (Zone 3); each
+   * holds a per-user bearer in its own env (mounted via
+   * valueFrom.secretKeyRef) and forwards the agent's localhost
+   * requests to the upstream MCP URL with Authorization injected.
+   * The agent only sees a localhost URL with no headers — bearers
+   * never enter the agent container.
+   *
+   * When omitted, no proxy containers are emitted (back-compat for
+   * sessions with no remote_oauth attachments).
+   */
+  mcpOAuthProxyImage?: string;
+  remoteOAuthAttachments?: RemoteOAuthAttachmentForPod[];
+  /**
    * Name of a K8s ConfigMap carrying the rendered session-history
    * markdown for a resumed session. When set, pod-spec mounts the
    * `session_history.md` key at `/workspace/session_history.md` so
@@ -196,6 +225,22 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // come later via the agent.model column.
     ...(spec.anthropicModel
       ? [{ name: "ANTHROPIC_MODEL", value: spec.anthropicModel }]
+      : []),
+    // Zone-3 remote_oauth attachments. Agent reads this JSON and adds
+    // each entry to its mcpServers map as { type: "http", url: localhost }.
+    // No bearer here — the proxy holds it.
+    ...(spec.remoteOAuthAttachments && spec.remoteOAuthAttachments.length > 0
+      ? [
+          {
+            name: "MCP_REMOTE_ATTACHMENTS_JSON",
+            value: JSON.stringify(
+              spec.remoteOAuthAttachments.map((a) => ({
+                name: a.catalogName,
+                url: `http://127.0.0.1:${a.port}`,
+              })),
+            ),
+          },
+        ]
       : []),
   ];
 
@@ -461,6 +506,48 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 periodSeconds: 5,
               },
             },
+            // Zone-3 OAuth-proxy sibling containers. One per attached
+            // remote_oauth MCP. Each holds the user's bearer in its
+            // own env (mounted via valueFrom.secretKeyRef from a
+            // per-MCP K8s Secret minted by the job-watcher). Agent
+            // talks to localhost:<port>; agent never sees the bearer.
+            ...((spec.remoteOAuthAttachments ?? []).map((att) => ({
+              name: `mcp-${att.catalogName}`.slice(0, 63),
+              image: spec.mcpOAuthProxyImage ?? "x1agent-mcp-oauth-proxy:latest",
+              imagePullPolicy,
+              securityContext: {
+                runAsUser: 1000,
+                runAsGroup: 1000,
+                runAsNonRoot: true,
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+                readOnlyRootFilesystem: true,
+              },
+              env: [
+                { name: "MCP_PROXY_NAME", value: att.catalogName },
+                { name: "MCP_PROXY_TARGET", value: att.upstreamUrl },
+                { name: "MCP_PROXY_PORT", value: String(att.port) },
+                {
+                  name: "MCP_PROXY_BEARER",
+                  valueFrom: {
+                    secretKeyRef: {
+                      name: att.bearerSecretName,
+                      key: "MCP_PROXY_BEARER",
+                    },
+                  },
+                },
+              ],
+              ports: [{ containerPort: att.port }],
+              resources: {
+                requests: { memory: "32Mi", cpu: "10m" },
+                limits: { memory: "128Mi", cpu: "200m" },
+              },
+              readinessProbe: {
+                httpGet: { path: "/healthz", port: att.port },
+                initialDelaySeconds: 1,
+                periodSeconds: 5,
+              },
+            }))),
           ],
         },
       },

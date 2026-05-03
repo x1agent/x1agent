@@ -201,6 +201,10 @@ export interface Composition {
   agentEnvBindings: PostgresBindingRepository;
   /** Workspace-secret service — exposed for trusted decrypt at session-launch. */
   workspaceSecrets: SecretService;
+  /** Zone-3 plumbing — exposed to the job watcher for token resolution. */
+  mcpAttachments: PostgresAttachmentRepository;
+  mcpCatalog: PostgresCatalogRepository;
+  userTokenService: UserTokenService;
   /** Exposed for the Job watcher — reads directly without reconnecting. */
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
@@ -979,6 +983,9 @@ export function compose(env: CompositionEnv): Composition {
     tokenUsage,
     agentEnvBindings: bindingRepo,
     workspaceSecrets: workspaceSecretsService,
+    mcpAttachments: mcpAttachmentRepo,
+    mcpCatalog: mcpCatalogRepo,
+    userTokenService,
     sql: env.sql,
     agents,
     sessions,
