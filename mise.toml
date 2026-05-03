@@ -96,7 +96,7 @@ run = "deploy/scripts/build-push-prod.sh"
 [tasks.deploy]
 description = "Build + push images and helm-upgrade the active deployment"
 depends = ["configure:check"]
-run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=true)}}"
+run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=true, default='')}}"
 
 [tasks."install:plan"]
 description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
