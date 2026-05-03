@@ -128,6 +128,7 @@ variable "gsm_secret_names" {
     "x1agent-sentry-dsn-api",
     "x1agent-sentry-dsn-app",
     "x1agent-sentry-dsn-sidecar",
+    "x1agent-workspace-secrets-master-key",
   ]
 }
 
