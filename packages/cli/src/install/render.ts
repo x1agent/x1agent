@@ -172,6 +172,9 @@ export function render(input: RenderInput): RenderResult {
     `  sidecar:\n` +
     `    repository: ${q(arRepo + "/sidecar")}\n` +
     `    tag: ${q(tag)}\n` +
+    `  mcpOAuthProxy:\n` +
+    `    repository: ${q(arRepo + "/mcp-oauth-proxy")}\n` +
+    `    tag: ${q(tag)}\n` +
     `\n` +
     `config:\n` +
     `  PLATFORM_NAME: ${q("x1agent")}\n` +

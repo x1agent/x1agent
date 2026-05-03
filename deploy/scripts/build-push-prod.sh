@@ -90,6 +90,7 @@ build_push      api              deploy/docker/api.prod.Dockerfile
 build_push_app
 build_push      preview          deploy/docker/preview.prod.Dockerfile
 build_push      graph-surrealdb  deploy/docker/graph-surrealdb.prod.Dockerfile
+build_push      mcp-oauth-proxy  deploy/docker/mcp-oauth-proxy.prod.Dockerfile
 
 # agent + sidecar — session pod images. Build context lives in the
 # package directory (each owns its own Dockerfile) rather than the

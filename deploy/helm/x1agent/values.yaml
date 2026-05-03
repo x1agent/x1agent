@@ -98,6 +98,11 @@ images:
   sidecar:
     repository: ""
     tag: latest
+  # Zone-3 OAuth-proxy sibling. One per attached remote_oauth MCP.
+  # Tag defaults to images.api.tag at render time.
+  mcpOAuthProxy:
+    repository: ""
+    tag: latest
 
 # ============================================================================
 # api Deployment

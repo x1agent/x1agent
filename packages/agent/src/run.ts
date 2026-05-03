@@ -182,17 +182,40 @@ function resolveTsxBinary(): string {
 const tsxPath = resolveTsxBinary();
 console.log(`[agent] tsx binary: ${tsxPath}`);
 
-const mcpServers: Record<string, {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}> = {
+type StdioMcp = { command: string; args: string[]; env: Record<string, string> };
+type HttpMcp = { type: "http"; url: string };
+type RemoteAttachmentEnv = { name: string; url: string };
+
+const mcpServers: Record<string, StdioMcp | HttpMcp> = {
   x1agent: {
     command: tsxPath,
     args: [x1McpPath],
     env: { SIDECAR_URL: sidecarUrl },
   },
 };
+
+// Zone-3 remote_oauth MCPs. The api resolves the active user's
+// bearer at session-launch and mounts it inside the per-attachment
+// proxy sibling container; here we just point the SDK at the
+// localhost URL the proxy listens on. No bearer in the agent
+// process — that's the whole point of the proxy.
+const remoteMcpJson = process.env.MCP_REMOTE_ATTACHMENTS_JSON;
+if (remoteMcpJson) {
+  try {
+    const parsed = JSON.parse(remoteMcpJson) as RemoteAttachmentEnv[];
+    for (const r of parsed) {
+      if (typeof r.name !== "string" || typeof r.url !== "string") continue;
+      mcpServers[r.name] = { type: "http", url: r.url };
+      console.log(
+        `[agent] zone-3 mcp ${r.name} → ${r.url} (bearer held by sibling proxy)`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[agent] MCP_REMOTE_ATTACHMENTS_JSON parse failed: ${(err as Error).message}`,
+    );
+  }
+}
 
 const allowedTools = [
   "mcp__x1agent__emit_status",
