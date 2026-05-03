@@ -39,17 +39,18 @@ export function AgentEnvBindingsCard({
   agentId,
   canManage,
 }: Props) {
-  const bindings = useAgentEnvBindingsStore(
-    (s) => s.byAgentKey[`${workspaceSlug}:${agentId}`] ?? [],
-  );
+  // Whole-record selectors + outside lookup so the selector returns
+  // a stable reference; `?? []` in the selector creates a new array
+  // each render and infinite-loops React.
+  const byAgentKey = useAgentEnvBindingsStore((s) => s.byAgentKey);
   const loadBindings = useAgentEnvBindingsStore((s) => s.load);
   const setBinding = useAgentEnvBindingsStore((s) => s.setBinding);
   const removeBinding = useAgentEnvBindingsStore((s) => s.remove);
 
-  const secrets = useWorkspaceSecretsStore(
-    (s) => s.byWorkspace[workspaceSlug] ?? [],
-  );
+  const secretsByWorkspace = useWorkspaceSecretsStore((s) => s.byWorkspace);
   const loadSecrets = useWorkspaceSecretsStore((s) => s.load);
+  const bindings = byAgentKey[`${workspaceSlug}:${agentId}`] ?? [];
+  const secrets = secretsByWorkspace[workspaceSlug] ?? [];
 
   const [error, setError] = useState<string | null>(null);
   const [envName, setEnvName] = useState("");
