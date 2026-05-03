@@ -17,7 +17,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
@@ -376,12 +378,67 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           <SelectItem value="__default__">
                             Platform default
                           </SelectItem>
-                          {images.map((img) => (
-                            <SelectItem key={img.id} value={img.id}>
-                              {img.display_name}
-                              {img.is_preset ? " (preset)" : ""}
-                            </SelectItem>
-                          ))}
+
+                          {/* General — non-language-toolchain presets (today: just runtime-core). */}
+                          {(() => {
+                            const general = images.filter(
+                              (img) =>
+                                img.is_preset && img.name === "runtime-core",
+                            );
+                            if (general.length === 0) return null;
+                            return (
+                              <SelectGroup>
+                                <SelectLabel>General</SelectLabel>
+                                {general.map((img) => (
+                                  <SelectItem key={img.id} value={img.id}>
+                                    {/* Override the seeded display name in case
+                                        an existing deployment still has the old
+                                        "x1 runtime core" label. */}
+                                    {img.name === "runtime-core"
+                                      ? "Lightweight (no language toolchain)"
+                                      : img.display_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            );
+                          })()}
+
+                          {/* Coding — language-toolchain presets. */}
+                          {(() => {
+                            const coding = images.filter(
+                              (img) =>
+                                img.is_preset && img.name !== "runtime-core",
+                            );
+                            if (coding.length === 0) return null;
+                            return (
+                              <SelectGroup>
+                                <SelectLabel>Coding</SelectLabel>
+                                {coding.map((img) => (
+                                  <SelectItem key={img.id} value={img.id}>
+                                    {img.display_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            );
+                          })()}
+
+                          {/* Workspace-authored images — non-preset. */}
+                          {(() => {
+                            const workspace = images.filter(
+                              (img) => !img.is_preset,
+                            );
+                            if (workspace.length === 0) return null;
+                            return (
+                              <SelectGroup>
+                                <SelectLabel>Workspace</SelectLabel>
+                                {workspace.map((img) => (
+                                  <SelectItem key={img.id} value={img.id}>
+                                    {img.display_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            );
+                          })()}
                         </SelectContent>
                       </Select>
                     </div>

@@ -24,9 +24,9 @@ const REGISTRY =
 const PLATFORM_PRESETS = [
   {
     name: "runtime-core",
-    display_name: "x1 runtime core",
+    display_name: "Lightweight (no language toolchain)",
     description:
-      "Base image every preset FROMs. Ships Node 22, tsx, the agent SDK, gh CLI, git, and the non-root user at uid 1000. No other language toolchains.",
+      "Ships Node 22, tsx, the agent SDK, gh CLI, git, and the non-root user at uid 1000. No additional language toolchains. Pick this for non-coding agents (orchestration, summarization, API-only tools) — smallest image, fastest cold start.",
     built_ref: `${REGISTRY}/x1agent/runtime-core:v1`,
     dockerfile_path: "runtime-core/Dockerfile",
   },
