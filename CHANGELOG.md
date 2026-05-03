@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/x1agent/x1agent/compare/v1.2.0...v1.3.0) (2026-05-03)
+
+
+### Features
+
+* **mcp-catalog:** support 'command' shape (npx/uvx) alongside container image ([#22](https://github.com/x1agent/x1agent/issues/22)) ([aac37b4](https://github.com/x1agent/x1agent/commit/aac37b477b38fd02ddaf855b821318e86c51713d))
+
 # [1.2.0](https://github.com/x1agent/x1agent/compare/v1.1.2...v1.2.0) (2026-05-03)
 
 
