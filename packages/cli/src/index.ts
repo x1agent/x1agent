@@ -5,6 +5,7 @@ import { runConfigure } from "./configure/index.ts";
 import { runCheck } from "./configure/check.ts";
 import { runInstall, type InstallAction } from "./install/index.ts";
 import { runDeploy, parseDeployArgs } from "./deploy/index.ts";
+import { runLogs } from "./logs/index.ts";
 
 const subcommand = process.argv[2] ?? "setup";
 
@@ -70,10 +71,20 @@ async function main() {
       }
       return;
     }
+    case "logs": {
+      try {
+        const code = await runLogs(process.argv.slice(3));
+        process.exit(code);
+      } catch (err) {
+        log.error((err as Error).message);
+        process.exit(1);
+      }
+      return;
+    }
     default: {
       console.error(`Unknown command: ${subcommand}`);
       console.error(
-        "Usage: x1 (setup | configure | configure:check | install [| install:<phase>] | deploy [--yes] [--tag <sha>] [--skip-build])",
+        "Usage: x1 (setup | configure | configure:check | install [| install:<phase>] | deploy [--yes] [--tag <sha>] [--skip-build] | logs [<component>] [flags])",
       );
       process.exit(2);
     }
