@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../../lib/api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -18,33 +17,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { useAgentEnvBindingsStore } from "../../stores/agentEnvBindingsStore";
+import { useWorkspaceSecretsStore } from "../../stores/workspaceSecretsStore";
 
 /**
- * Per-agent Zone-2 env bindings. Workspace admin maps a workspace
- * secret directly to an env-var the agent container will see at
- * runtime. Anything the agent runs reads it in plaintext — this is
- * an explicit operator trust grant.
- *
- * See docs/security/agent-env.md.
+ * Per-agent Zone-2 env bindings. Reads from useAgentEnvBindingsStore
+ * + the workspace_secrets store. Local state is for UI concerns
+ * (form values, in-flight submit). Never calls apiFetch directly.
  */
-
-interface Binding {
-  id: string;
-  env_name: string;
-  secret_name: string;
-}
-
-interface SecretRow {
-  id: string;
-  name: string;
-}
 
 interface Props {
   workspaceSlug: string;
   agentId: string;
   canManage: boolean;
-  /** Notifies the parent (badge in header) when bindings transition to/from empty. */
-  onCountChange?: (n: number) => void;
 }
 
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]{0,63}$/;
@@ -53,45 +38,31 @@ export function AgentEnvBindingsCard({
   workspaceSlug,
   agentId,
   canManage,
-  onCountChange,
 }: Props) {
-  const [bindings, setBindings] = useState<Binding[]>([]);
-  const [secrets, setSecrets] = useState<SecretRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const bindings = useAgentEnvBindingsStore(
+    (s) => s.byAgentKey[`${workspaceSlug}:${agentId}`] ?? [],
+  );
+  const loadBindings = useAgentEnvBindingsStore((s) => s.load);
+  const setBinding = useAgentEnvBindingsStore((s) => s.setBinding);
+  const removeBinding = useAgentEnvBindingsStore((s) => s.remove);
 
+  const secrets = useWorkspaceSecretsStore(
+    (s) => s.byWorkspace[workspaceSlug] ?? [],
+  );
+  const loadSecrets = useWorkspaceSecretsStore((s) => s.load);
+
+  const [error, setError] = useState<string | null>(null);
   const [envName, setEnvName] = useState("");
   const [secretName, setSecretName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [b, s] = await Promise.all([
-        apiFetch<{ bindings: Binding[] }>(
-          `/api/workspaces/${workspaceSlug}/agents/${agentId}/env`,
-        ),
-        apiFetch<{ secrets: SecretRow[] }>(
-          `/api/workspaces/${workspaceSlug}/secrets`,
-        ),
-      ]);
-      setBindings(b.bindings);
-      setSecrets(s.secrets);
-      onCountChange?.(b.bindings.length);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    if (canManage) void load();
-  }, [workspaceSlug, agentId, canManage]);
+    if (!canManage) return;
+    void loadBindings(workspaceSlug, agentId);
+    void loadSecrets(workspaceSlug);
+  }, [canManage, workspaceSlug, agentId, loadBindings, loadSecrets]);
 
-  async function onAdd(e?: React.FormEvent | React.MouseEvent) {
-    if (e && "preventDefault" in e) e.preventDefault();
+  async function onAdd() {
     if (!canManage) return;
     setError(null);
     if (!ENV_NAME_RE.test(envName)) {
@@ -106,16 +77,9 @@ export function AgentEnvBindingsCard({
     }
     setSubmitting(true);
     try {
-      await apiFetch(
-        `/api/workspaces/${workspaceSlug}/agents/${agentId}/env/${envName}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ secret_name: secretName }),
-        },
-      );
+      await setBinding(workspaceSlug, agentId, { envName, secretName });
       setEnvName("");
       setSecretName("");
-      await load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -123,16 +87,17 @@ export function AgentEnvBindingsCard({
     }
   }
 
-  async function onRemove(b: Binding) {
+  async function onRemove(b: { id: string; env_name: string }) {
     if (!canManage) return;
-    if (!confirm(`Remove ${b.env_name}? The agent will lose this credential at next session start.`)) return;
+    if (
+      !confirm(
+        `Remove ${b.env_name}? The agent will lose this credential at next session start.`,
+      )
+    )
+      return;
     setError(null);
     try {
-      await apiFetch(
-        `/api/workspaces/${workspaceSlug}/agents/${agentId}/env/${b.env_name}`,
-        { method: "DELETE" },
-      );
-      await load();
+      await removeBinding(workspaceSlug, agentId, b.env_name);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -171,14 +136,13 @@ export function AgentEnvBindingsCard({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading && <div className="text-sm text-zinc-500">Loading…</div>}
-          {!loading && bindings.length === 0 && (
+          {bindings.length === 0 && (
             <div className="text-sm text-zinc-500">
               No env bindings. Add one below if the agent needs a
               workspace secret in its environment.
             </div>
           )}
-          {!loading && bindings.length > 0 && (
+          {bindings.length > 0 && (
             <ul className="divide-y divide-zinc-800">
               {bindings.map((b) => (
                 <li
@@ -217,9 +181,7 @@ export function AgentEnvBindingsCard({
         </CardHeader>
         <CardContent>
           {/* Plain div, not <form>: this card is rendered inside the
-              agent edit page's outer <form>. Nested forms would
-              un-nest and our submit would trigger the agent save
-              instead of the per-binding PUT. */}
+              agent edit page's outer <form>. */}
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -261,11 +223,7 @@ export function AgentEnvBindingsCard({
             </div>
             {error && <div className="text-sm text-red-400">{error}</div>}
             <div className="flex items-center gap-2 pt-2">
-              <Button
-                type="button"
-                disabled={submitting}
-                onClick={onAdd}
-              >
+              <Button type="button" disabled={submitting} onClick={onAdd}>
                 {submitting ? "Saving…" : "Add binding"}
               </Button>
             </div>
