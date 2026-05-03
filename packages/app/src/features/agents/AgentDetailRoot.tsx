@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -43,6 +44,14 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   const loadSpawnGrants = useGrantsStore((s) => s.loadSpawnGrants);
   const spawnByAgent = useGrantsStore((s) => s.spawnByAgent);
 
+  // MCP attachments + Zone-2 env bindings — small lists, fetched
+  // directly here. Counts only; the full editor lives on the Edit
+  // page's "MCP & env" tab.
+  const [mcpAttachmentCount, setMcpAttachmentCount] = useState<number | null>(
+    null,
+  );
+  const [envBindingCount, setEnvBindingCount] = useState<number | null>(null);
+
   useEffect(() => {
     if (status === "idle") fetchMe();
   }, [status, fetchMe]);
@@ -66,6 +75,20 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadRepos(workspaceSlug, agent.id);
     loadCollections(workspaceSlug, agent.id);
     loadSpawnGrants(workspaceSlug, agent.id);
+
+    // Direct fetches for the MCP + env summary rows. Failures are
+    // soft — the row falls back to "—" rather than blowing up the page.
+    const aid = agent.id;
+    apiFetch<{ attachments: Array<{ id: string }> }>(
+      `/api/workspaces/${workspaceSlug}/agents/${aid}/mcp-attachments`,
+    )
+      .then((r) => setMcpAttachmentCount(r.attachments.length))
+      .catch(() => setMcpAttachmentCount(null));
+    apiFetch<{ bindings: Array<{ id: string }> }>(
+      `/api/workspaces/${workspaceSlug}/agents/${aid}/env`,
+    )
+      .then((r) => setEnvBindingCount(r.bindings.length))
+      .catch(() => setEnvBindingCount(null));
   }, [
     agent,
     workspaceSlug,
@@ -175,6 +198,32 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
                   : `${collections.length} attached`
               }
               muted={collections.length === 0}
+            />
+            <SummaryRow
+              href={`${editHref}?tab=mcp`}
+              disabled={!canManage}
+              label="MCP servers"
+              value={
+                mcpAttachmentCount === null
+                  ? "—"
+                  : mcpAttachmentCount === 0
+                    ? "None attached"
+                    : `${mcpAttachmentCount} attached`
+              }
+              muted={mcpAttachmentCount === 0 || mcpAttachmentCount === null}
+            />
+            <SummaryRow
+              href={`${editHref}?tab=mcp`}
+              disabled={!canManage}
+              label="Environment variables"
+              value={
+                envBindingCount === null
+                  ? "—"
+                  : envBindingCount === 0
+                    ? "None set"
+                    : `${envBindingCount} set${envBindingCount > 0 ? " (operator-injected)" : ""}`
+              }
+              muted={envBindingCount === 0 || envBindingCount === null}
             />
             <SummaryRow
               href={`${editHref}?tab=permissions`}
