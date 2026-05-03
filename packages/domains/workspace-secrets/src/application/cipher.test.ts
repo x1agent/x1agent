@@ -30,7 +30,7 @@ describe("loadMasterKey", () => {
 describe("encrypt / decrypt round-trip", () => {
   it.each([
     "simple value",
-    "MERCURY_API_TOKEN value with mer_live_ prefix",
+    "example token value",
     "value with newlines\nand\ttabs",
     "unicode: 日本語 émojis 🔐",
     "x".repeat(10_000), // realistic upper bound for an API token
