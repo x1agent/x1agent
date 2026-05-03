@@ -68,6 +68,8 @@ A workspace admin goes to **Settings -> MCP servers -> Add** and provides:
 
 Alongside the MCP catalog, a workspace has a named secret store. Each entry has a name (uppercase letters, digits, and underscores; matches `^[A-Z_][A-Z0-9_]{0,63}$`) and a write-only value.
 
+The same secret store feeds **two attachment zones** — this page (Zone 1, MCP-mediated, agent never sees the value) and [Agent env injection](/security/agent-env) (Zone 2, plaintext lands in the agent container's env at the operator's explicit grant). When in doubt, prefer Zone 1 — only use Zone 2 when the agent itself needs to be the authenticated principal.
+
 Behind the edit screen:
 
 - Plaintext lands once at the API. It is encrypted and persisted; the API does not log the body of this route. Two storage shapes exist depending on the deployment's chart version (see *Storage* below).

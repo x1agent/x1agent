@@ -34,11 +34,16 @@ graph LR
 
 These are architectural invariants. Features that violate them are redesigned, not shipped.
 
-### 1. Credentials never enter untrusted containers
+### 1. Credentials never enter untrusted containers — by default
 
-No API keys, OAuth tokens, or database credentials in the agent container or provider containers. The sidecar fetches user tokens per-request, uses them, and drops them. The agent receives only a `SESSION_ID` and a localhost URL for the sidecar.
+No API keys, OAuth tokens, or database credentials in the agent container or provider containers as the default posture. The sidecar fetches user tokens per-request, uses them, and drops them. The agent receives only a `SESSION_ID` and a localhost URL for the sidecar.
 
-Secrets the agent container *does* need (model API keys, per-MCP credentials) are delivered as explicit environment variables sourced from Kubernetes Secrets via `secretKeyRef`. Each pod sees only the variables we chose to inject — no wildcard mounts, no access to any other secret in its namespace. See [Secrets management](/security/secrets) for the complete model, including per-MCP environment filtering.
+Two explicit exceptions exist, both operator-controlled:
+
+- **MCP-mediated secrets** land in the MCP server's container, not the agent container. The agent calls MCP tools that internally use the credential. See [MCP servers](/providers/mcp-servers).
+- **Zone-2 agent env** is an explicit operator grant — the workspace admin maps a workspace secret to an env var the agent container will see. Used when the agent itself needs to be the authenticated principal (its own API key, its own GitHub PAT). Threat model + UI signals: [Agent env injection](/security/agent-env).
+
+Each pod sees only the variables we chose to inject — no wildcard mounts, no access to any other secret in its namespace. See [Secrets management](/security/secrets) for the underlying storage model.
 
 ### 2. The sidecar is the trust boundary
 
