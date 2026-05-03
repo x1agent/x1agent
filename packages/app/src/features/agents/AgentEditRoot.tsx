@@ -63,7 +63,13 @@ interface Props {
  * the detail page and can attach repos/collections/grants from there.
  */
 
-type TabKey = "general" | "prompts" | "repos" | "collections" | "permissions";
+type TabKey =
+  | "general"
+  | "prompts"
+  | "repos"
+  | "collections"
+  | "mcp"
+  | "permissions";
 
 const DEFAULT_TAB: TabKey = "general";
 
@@ -73,6 +79,7 @@ function isTabKey(value: string): value is TabKey {
     value === "prompts" ||
     value === "repos" ||
     value === "collections" ||
+    value === "mcp" ||
     value === "permissions"
   );
 }
