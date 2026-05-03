@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/x1agent/x1agent/compare/v1.5.0...v1.6.0) (2026-05-03)
+
+
+### Features
+
+* **mcp-oauth:** pod-side proxy + session-launch token resolution (PR 3/3) ([#25](https://github.com/x1agent/x1agent/issues/25)) ([ae31f03](https://github.com/x1agent/x1agent/commit/ae31f031ead425fb744db63a26649e0bdcabc43b))
+
 # [1.5.0](https://github.com/x1agent/x1agent/compare/v1.4.0...v1.5.0) (2026-05-03)
 
 
