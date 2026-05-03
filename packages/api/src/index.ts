@@ -180,6 +180,9 @@ const {
   agentRepoStore: composedAgentRepos,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
+  mcpAttachments: composedMcpAttachments,
+  mcpCatalog: composedMcpCatalog,
+  userTokenService: composedUserTokenService,
   tickScheduler,
   quietHints: composedQuietHints,
 } = compose({
@@ -571,6 +574,11 @@ if (process.env.JOB_WATCHER !== "disabled") {
       sessionEvents,
       agentEnvBindings: composedAgentEnvBindings,
       workspaceSecrets: composedWorkspaceSecrets,
+      mcpAttachments: composedMcpAttachments,
+      mcpCatalog: composedMcpCatalog,
+      userTokenService: composedUserTokenService,
+      mcpOAuthProxyImage:
+        process.env.MCP_OAUTH_PROXY_IMAGE || "x1agent-mcp-oauth-proxy:latest",
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,

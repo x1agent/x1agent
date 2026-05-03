@@ -141,6 +141,12 @@ spec:
               value: "{{ .Values.images.agent.repository }}:{{ .Values.images.agent.tag | default .Values.images.api.tag }}"
             - name: SIDECAR_IMAGE
               value: "{{ .Values.images.sidecar.repository }}:{{ .Values.images.sidecar.tag | default .Values.images.api.tag }}"
+            # Zone-3 OAuth-proxy sibling container, one per attached
+            # remote_oauth MCP. Holds the per-user bearer; agent
+            # never sees it. Tag tracks the api so all session-pod
+            # images roll together.
+            - name: MCP_OAUTH_PROXY_IMAGE
+              value: "{{ .Values.images.mcpOAuthProxy.repository }}:{{ .Values.images.mcpOAuthProxy.tag | default .Values.images.api.tag }}"
             # Node's bundled CA store doesn't include the cluster's
             # API server CA. Without this the @kubernetes/client-node
             # library calls fail with "unable to verify the first
