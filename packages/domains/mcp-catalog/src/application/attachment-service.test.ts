@@ -12,9 +12,12 @@ const ENTRY: CatalogEntry = {
   workspaceId: "ws-1",
   name: "linear" as CatalogName,
   displayName: "Linear",
+  kind: "stdio",
   image: "ghcr.io/x/linear-mcp:1",
   command: null,
   args: [],
+  url: null,
+  oauthAuthorizationServer: null,
   manifest: {
     env: {
       LINEAR_API_KEY: { kind: "secret", required: true },

@@ -272,6 +272,7 @@
       "name": "@x1agent/domain-mcp-catalog",
       "version": "0.0.0",
       "dependencies": {
+        "@x1agent/domain-workspace-secrets": "workspace:*",
         "@x1agent/kernel": "workspace:*",
         "hono": "^4.0.0",
         "postgres": "^3.4.0",

@@ -25,9 +25,29 @@ export type { CatalogSetInput } from "./application/catalog-service.js";
 export { AttachmentService } from "./application/attachment-service.js";
 export type { AttachInput } from "./application/attachment-service.js";
 
+// OAuth helpers
+export {
+  discoverMcpServer,
+  type AuthorizationServerMetadata,
+  type ProtectedResourceMetadata,
+  type DiscoveryResult,
+} from "./application/oauth-discovery.js";
+export {
+  registerOAuthClient,
+  type RegisterClientInput,
+  type RegisteredClient,
+} from "./application/oauth-dcr.js";
+export type {
+  OAuthClientRepository,
+  OAuthClientRecord,
+  EncryptedOAuthClientBlob,
+} from "./ports/oauth-client-repository.js";
+export type { RemoteOAuthDeps } from "./application/catalog-service.js";
+
 // Adapters
 export { PostgresCatalogRepository } from "./adapters/postgres/postgres-catalog-repository.js";
 export { PostgresAttachmentRepository } from "./adapters/postgres/postgres-attachment-repository.js";
+export { PostgresOAuthClientRepository } from "./adapters/postgres/postgres-oauth-client-repository.js";
 export {
   createMcpCatalogRoutes,
   createAgentMcpAttachmentRoutes,

@@ -20,9 +20,13 @@ class FakeRepo implements CatalogRepository {
       workspaceId: input.workspaceId,
       name: input.name,
       displayName: input.displayName,
+      kind: input.kind,
       image: input.image,
       command: input.command,
       args: input.args,
+      url: input.url,
+      oauthAuthorizationServer:
+        (input.oauthAuthorizationServer as Record<string, unknown> | null) ?? null,
       manifest: input.manifest,
       description: input.description,
       createdAt: new Date(),

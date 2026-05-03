@@ -12,6 +12,13 @@ export interface AttachInput {
   envJson: Record<string, unknown>;
   toolScopesGranted?: string[];
   createdBy: string | null;
+  /**
+   * The agent's kind ('worker' | 'orchestrator' | 'scheduled'). When
+   * the catalog entry is remote_oauth, only worker is allowed —
+   * remote OAuth requires an interactive user driving the session.
+   * The route layer passes this in after looking up the agent.
+   */
+  agentKind: "worker" | "orchestrator" | "scheduled";
 }
 
 /**
@@ -40,6 +47,17 @@ export class AttachmentService {
       throw new ValidationError(
         "catalog_entry_id",
         "catalog entry not found in this workspace",
+      );
+    }
+
+    // Remote OAuth MCPs run server-side and the agent acts AS the
+    // user driving the session. They can't be attached to long-lived
+    // unattended agents — those run without a present user, so there
+    // would be no token to inject.
+    if (entry.kind === "remote_oauth" && input.agentKind !== "worker") {
+      throw new ValidationError(
+        "catalog_entry_id",
+        `remote_oauth MCPs require an interactive user — only attachable to worker agents (got ${input.agentKind})`,
       );
     }
 

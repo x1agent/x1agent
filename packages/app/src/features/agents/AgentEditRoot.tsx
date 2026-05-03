@@ -638,6 +638,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   <AgentMcpAttachmentsCard
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
+                    agentKind={existing.kind}
                     canManage={!!canManage}
                   />
                   <AgentEnvBindingsCard
