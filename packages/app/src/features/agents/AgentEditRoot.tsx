@@ -361,17 +361,18 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="worker">
-                            worker — short-lived, one session per trigger
-                          </SelectItem>
-                          <SelectItem value="orchestrator">
-                            orchestrator — long-lived singleton, platform-driven wakes
-                          </SelectItem>
-                          <SelectItem value="scheduled">
-                            scheduled — cron-triggered worker
-                          </SelectItem>
+                          <SelectItem value="worker">worker</SelectItem>
+                          <SelectItem value="orchestrator">orchestrator</SelectItem>
+                          <SelectItem value="scheduled">scheduled</SelectItem>
                         </SelectContent>
                       </Select>
+                      <p className="text-xs text-zinc-500">
+                        {kind === "worker"
+                          ? "Short-lived, one session per trigger."
+                          : kind === "orchestrator"
+                            ? "Long-lived singleton with platform-driven wakes."
+                            : "Cron-triggered worker."}
+                      </p>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="agent-image">Container image</Label>
