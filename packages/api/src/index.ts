@@ -152,6 +152,9 @@ const {
   agentRepoRoutes,
   workspaceGrantRoutes,
   workspaceSecretsRoutes,
+  mcpCatalogRoutes,
+  agentMcpAttachmentRoutes,
+  agentEnvRoutes,
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
@@ -173,6 +176,8 @@ const {
   agents: composedAgents,
   sessions: composedSessions,
   agentRepoStore: composedAgentRepos,
+  agentEnvBindings: composedAgentEnvBindings,
+  workspaceSecrets: composedWorkspaceSecrets,
   tickScheduler,
   quietHints: composedQuietHints,
 } = compose({
@@ -283,6 +288,12 @@ app.route(
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);
+app.route("/api/workspaces/:slug/mcp-catalog", mcpCatalogRoutes);
+app.route(
+  "/api/workspaces/:slug/agents/:agentId/mcp-attachments",
+  agentMcpAttachmentRoutes,
+);
+app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
 app.route(
   "/api/workspaces/:slug/agents/:agentId/collections",
@@ -553,6 +564,8 @@ if (process.env.JOB_WATCHER !== "disabled") {
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
+      agentEnvBindings: composedAgentEnvBindings,
+      workspaceSecrets: composedWorkspaceSecrets,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,

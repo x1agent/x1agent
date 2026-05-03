@@ -16,6 +16,7 @@ initOtel({ serviceName: "x1agent-provider-preview" });
  *     branch: string,
  *     commit_sha: string,
  *     installation_id: number,
+ *     secret_values?: Record<string, string>, // pre-resolved workspace secrets
  *   }
  * Reply shape (success):
  *   { ok: true, url, slug, image, job_name }
@@ -41,6 +42,13 @@ interface ProvisionRequest {
   branch?: string;
   commit_sha?: string;
   installation_id?: number;
+  /**
+   * Pre-resolved workspace secret values keyed by workspace_secrets.name,
+   * used when the spec has `from: secret:<NAME>` env vars. The api side
+   * resolves these from the workspace_secrets store before publishing
+   * (Zone 2 for previews — see docs/security/agent-env.md).
+   */
+  secret_values?: Record<string, string>;
 }
 
 type ProvisionReply =
@@ -174,6 +182,12 @@ async function main() {
         tlsSecretName,
         apiUrl,
         apiInternalToken,
+        secretValues:
+          typeof req.secret_values === "object" &&
+          req.secret_values !== null &&
+          !Array.isArray(req.secret_values)
+            ? (req.secret_values as Record<string, string>)
+            : undefined,
       });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       console.log(

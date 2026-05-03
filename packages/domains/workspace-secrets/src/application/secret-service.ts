@@ -1,7 +1,7 @@
 import type { SecretMetadata } from "../domain/secret.js";
 import { SecretName } from "../domain/secret-name.js";
 import type { SecretRepository } from "../ports/secret-repository.js";
-import { type MasterKey, encrypt } from "./cipher.js";
+import { type MasterKey, encrypt, decrypt } from "./cipher.js";
 
 /**
  * Use-case orchestrator. Composes the cipher + repository so the
@@ -48,5 +48,25 @@ export class SecretService {
   delete(workspaceId: string, rawName: string): Promise<boolean> {
     const name = SecretName(rawName);
     return this.repo.delete(workspaceId, name);
+  }
+
+  /**
+   * Decrypt and return a secret's plaintext. Used by trusted callers
+   * inside the api process at session-launch to materialize Zone-2
+   * agent-env bindings and (future) Zone-1 MCP container env. The
+   * returned string MUST NOT cross a process boundary unencrypted —
+   * write it into a K8s Secret stringData and reference by name from
+   * the pod spec.
+   *
+   * Returns null when no such secret exists in the workspace.
+   */
+  async resolve(
+    workspaceId: string,
+    rawName: string,
+  ): Promise<string | null> {
+    const name = SecretName(rawName);
+    const blob = await this.repo.getBlob(workspaceId, name);
+    if (!blob) return null;
+    return decrypt(blob, this.key);
   }
 }

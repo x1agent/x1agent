@@ -28,8 +28,24 @@ export interface PreviewRuntime {
 export interface PreviewEnvVar {
   name: string;
   value?: string;
-  /** Compact scheme: "preview.self_url" | "secret:<name>" — MVP supports the self_url form. */
+  /**
+   * Compact scheme:
+   *   "preview.self_url"  → resolved at deploy time to the preview URL
+   *   "secret:<NAME>"     → workspace secret reference, resolved at
+   *                         deploy via the secret bundle (Zone-2
+   *                         analogue for previews — see
+   *                         docs/security/agent-env.md § Preview
+   *                         environments)
+   */
   from?: string;
+}
+
+const SECRET_FROM_RE = /^secret:[A-Z_][A-Z0-9_]{0,63}$/;
+
+/** Returns the workspace-secret name when `from` matches `secret:<NAME>`, else null. */
+export function parseSecretFrom(from: string | undefined): string | null {
+  if (!from || !SECRET_FROM_RE.test(from)) return null;
+  return from.slice("secret:".length);
 }
 
 export interface PreviewResources {
@@ -150,10 +166,21 @@ export function parsePreviewSpec(yamlContent: string): PreviewSpec {
             "required, non-empty string",
           );
         }
+        const from = typeof ev.from === "string" ? ev.from : undefined;
+        if (
+          from &&
+          from !== "preview.self_url" &&
+          parseSecretFrom(from) === null
+        ) {
+          throw new PreviewSpecError(
+            `spec.env[${i}].from`,
+            "must be 'preview.self_url' or 'secret:<NAME>' where NAME matches ^[A-Z_][A-Z0-9_]{0,63}$",
+          );
+        }
         return {
           name: ev.name,
           value: typeof ev.value === "string" ? ev.value : undefined,
-          from: typeof ev.from === "string" ? ev.from : undefined,
+          from,
         };
       })
     : [];

@@ -181,6 +181,80 @@ spec:
     }
   });
 
+  it("accepts env.from='secret:NAME' as a Zone-2 reference", () => {
+    const y = `
+apiVersion: x1agent.io/v1
+kind: PreviewSpec
+metadata:
+  name: zone2
+spec:
+  entrypoint: { kind: dockerfile, path: ./Dockerfile }
+  runtime:
+    port: 3000
+    healthcheck: { path: /healthz }
+  env:
+    - name: API_KEY
+      from: secret:MY_API_KEY
+  resources:
+    requests: {}
+    limits: {}
+`;
+    const s = parsePreviewSpec(y);
+    expect(s.spec.env[0]?.from).toBe("secret:MY_API_KEY");
+  });
+
+  it("rejects env.from='secret:bad-name'", () => {
+    const y = `
+apiVersion: x1agent.io/v1
+kind: PreviewSpec
+metadata:
+  name: zone2-bad
+spec:
+  entrypoint: { kind: dockerfile, path: ./Dockerfile }
+  runtime:
+    port: 3000
+    healthcheck: { path: /healthz }
+  env:
+    - name: API_KEY
+      from: secret:lower-case
+  resources:
+    requests: {}
+    limits: {}
+`;
+    try {
+      parsePreviewSpec(y);
+      throw new Error("expected PreviewSpecError");
+    } catch (err) {
+      expect((err as PreviewSpecError).field).toBe("spec.env[0].from");
+    }
+  });
+
+  it("rejects unknown env.from form", () => {
+    const y = `
+apiVersion: x1agent.io/v1
+kind: PreviewSpec
+metadata:
+  name: zone2-bad
+spec:
+  entrypoint: { kind: dockerfile, path: ./Dockerfile }
+  runtime:
+    port: 3000
+    healthcheck: { path: /healthz }
+  env:
+    - name: API_KEY
+      from: configmap:foo
+  resources:
+    requests: {}
+    limits: {}
+`;
+    try {
+      parsePreviewSpec(y);
+      throw new Error("expected PreviewSpecError");
+    } catch (err) {
+      expect((err as PreviewSpecError).field).toBe("spec.env[0].from");
+    }
+  });
+
   it("rejects healthcheck.path without leading slash", () => {
     const y = `
 apiVersion: x1agent.io/v1

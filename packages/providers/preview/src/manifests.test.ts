@@ -97,6 +97,62 @@ describe("buildDeployment", () => {
   });
 });
 
+describe("buildDeployment — Zone-2 secret refs", () => {
+  const specWithSecret = parsePreviewSpec(`
+apiVersion: x1agent.io/v1
+kind: PreviewSpec
+metadata:
+  name: app
+spec:
+  entrypoint: { kind: dockerfile, path: ./Dockerfile, buildContext: . }
+  runtime:
+    port: 4321
+    healthcheck: { path: /, initialDelaySeconds: 5, periodSeconds: 5 }
+  env:
+    - name: API_KEY
+      from: secret:MY_API_KEY
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 1, memory: 512Mi }
+`);
+
+  it("emits valueFrom.secretKeyRef when a bundle is provided", () => {
+    const d = buildDeployment({
+      slug: "app",
+      namespace: "x1-previews",
+      image: "img",
+      spec: specWithSecret,
+      host: "app.preview.local",
+      tlsSecretName: "tls",
+      selfUrl: "https://app.preview.local",
+      secretBundleName: "preview-secrets-app",
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    const apiKey = env.find((e) => e.name === "API_KEY");
+    expect(apiKey?.valueFrom?.secretKeyRef).toEqual({
+      name: "preview-secrets-app",
+      key: "MY_API_KEY",
+    });
+    expect(apiKey?.value).toBeUndefined();
+  });
+
+  it("falls back to empty value when no bundle is provided (manifest is still valid)", () => {
+    const d = buildDeployment({
+      slug: "app",
+      namespace: "x1-previews",
+      image: "img",
+      spec: specWithSecret,
+      host: "app.preview.local",
+      tlsSecretName: "tls",
+      selfUrl: "https://app.preview.local",
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    const apiKey = env.find((e) => e.name === "API_KEY");
+    expect(apiKey?.value).toBe("");
+    expect(apiKey?.valueFrom).toBeUndefined();
+  });
+});
+
 describe("buildService", () => {
   const s = buildService(inputs);
 

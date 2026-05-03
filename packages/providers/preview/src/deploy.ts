@@ -57,6 +57,16 @@ export interface DeployInputs {
   apiUrl: string;
   /** Shared secret for `/api/internal/*`. */
   apiInternalToken: string;
+  /**
+   * Pre-resolved workspace secret values keyed by their workspace
+   * secret name. The api side resolves these (Zone 2 for previews —
+   * see docs/security/agent-env.md) and forwards plaintext over NATS;
+   * the preview provider mints a per-preview K8s Secret with stringData
+   * and the Deployment references it via valueFrom.secretKeyRef.
+   *
+   * Empty/undefined when the spec uses no `from: secret:<NAME>` env vars.
+   */
+  secretValues?: Record<string, string>;
 }
 
 export interface DeployResult {
@@ -279,6 +289,62 @@ export async function deployPreview(
     );
   }
 
+  // Step 2a: mint per-preview secret bundle when the spec uses any
+  // `from: secret:<NAME>` env vars. Values are pre-resolved by the api
+  // and shipped over NATS; we just stage them into a K8s Secret so the
+  // Deployment can reference by valueFrom.secretKeyRef.
+  let secretBundleName: string | undefined;
+  const referencedSecrets = new Set<string>();
+  for (const e of spec.spec.env) {
+    if (e.from && e.from.startsWith("secret:")) {
+      referencedSecrets.add(e.from.slice("secret:".length));
+    }
+  }
+  if (referencedSecrets.size > 0 && inputs.secretValues) {
+    secretBundleName = `preview-secrets-${slug}`.slice(0, 63);
+    const stringData: Record<string, string> = {};
+    for (const name of referencedSecrets) {
+      const value = inputs.secretValues[name];
+      if (typeof value === "string") {
+        stringData[name] = value;
+      }
+      // Missing values are skipped silently — the manifest builder
+      // emits empty string in their place, surfacing as a "missing
+      // env" error in the user's app, not as a deploy crash.
+    }
+    if (Object.keys(stringData).length > 0) {
+      const secretBody: k8s.V1Secret = {
+        metadata: {
+          name: secretBundleName,
+          namespace: inputs.previewNamespace,
+          labels: {
+            app: slug,
+            "x1-preview": "true",
+            "x1-component": "preview-secrets",
+          },
+        },
+        type: "Opaque",
+        stringData,
+      };
+      await applyOrReplace(
+        slug,
+        () =>
+          clients.core.createNamespacedSecret({
+            namespace: inputs.previewNamespace,
+            body: secretBody,
+          }),
+        () =>
+          clients.core.replaceNamespacedSecret({
+            name: secretBundleName!,
+            namespace: inputs.previewNamespace,
+            body: secretBody,
+          }),
+      );
+    } else {
+      secretBundleName = undefined;
+    }
+  }
+
   // Step 2: apply Deployment / Service / Ingress
   const deployInputs = {
     slug,
@@ -288,6 +354,7 @@ export async function deployPreview(
     host,
     tlsSecretName: inputs.tlsSecretName,
     selfUrl,
+    secretBundleName,
   };
   const deployment = buildDeployment(deployInputs);
   const service = buildService(deployInputs);
