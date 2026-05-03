@@ -46,7 +46,9 @@ An agent cannot attach an MCP the workspace hasn't registered. An agent cannot r
 A workspace admin goes to **Settings -> MCP servers -> Add** and provides:
 
 - **Name** -- unique within the workspace. Used as the MCP's key in `mcpServers` and as the tool prefix (`mcp__<name>__<tool>`).
-- **Image** -- OCI reference, e.g. `ghcr.io/org/linear-mcp:1.2.0`. Must contain an executable speaking MCP over stdio on its entrypoint.
+- **Shape** -- one of:
+  - **Container image** -- OCI reference, e.g. `ghcr.io/org/linear-mcp:1.2.0`. The runtime spawns this image directly as a sibling container in the agent's pod. Use when the MCP author publishes a container.
+  - **Command** -- executable + args, e.g. `npx -y @author/mercury-mcp`. The runtime spawns the platform's generic `mcp-runner` base image (node + python + uv preinstalled) and runs the command inside it. Matches Claude Desktop's `claude.json` shape, so you can usually paste the snippet from an MCP author's README directly.
 - **Manifest** -- the set of env vars the MCP expects. Either fetched automatically from the image (if it ships an `/mcp-manifest.json` file under the root) or pasted by the admin:
 
 ```json

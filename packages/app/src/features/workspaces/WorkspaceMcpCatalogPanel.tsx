@@ -16,19 +16,22 @@ import {
 /**
  * Workspace MCP catalog panel.
  *
- * Workspace admins register MCP server images here, paste the
- * manifest declaring env vars + tool scopes, and agents in this
- * workspace then attach to the entries via the agent edit screen.
- *
- * v1: manifest is paste-only. v2 fetches /mcp-manifest.json from the
- * image at registration time.
+ * Workspace admins register MCP servers here in one of two shapes:
+ *   * Container image — published OCI ref (vendor maintains the image)
+ *   * Command — npx / uvx / similar invocation that runs inside the
+ *     platform's mcp-runner base image (matches Claude Desktop's
+ *     claude.json shape)
  */
+
+type Kind = "image" | "command";
 
 interface CatalogEntry {
   id: string;
   name: string;
   display_name: string | null;
-  image: string;
+  image: string | null;
+  command: string | null;
+  args: string[];
   manifest: {
     env: Record<
       string,
@@ -67,7 +70,10 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
 
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [kind, setKind] = useState<Kind>("image");
   const [image, setImage] = useState("");
+  const [command, setCommand] = useState("");
+  const [argsText, setArgsText] = useState(""); // newline-separated for ergonomics
   const [description, setDescription] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -94,7 +100,10 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   function resetForm() {
     setName("");
     setDisplayName("");
+    setKind("image");
     setImage("");
+    setCommand("");
+    setArgsText("");
     setDescription("");
     setManifestText("");
     setEditing(null);
@@ -104,11 +113,22 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
     setEditing(row);
     setName(row.name);
     setDisplayName(row.display_name ?? "");
-    setImage(row.image);
+    if (row.image) {
+      setKind("image");
+      setImage(row.image);
+      setCommand("");
+      setArgsText("");
+    } else {
+      setKind("command");
+      setImage("");
+      setCommand(row.command ?? "");
+      setArgsText(row.args.join("\n"));
+    }
     setDescription(row.description);
     setManifestText(JSON.stringify(row.manifest, null, 2));
     setTimeout(() => {
-      document.getElementById("mcp-image")?.focus();
+      const id = row.image ? "mcp-image" : "mcp-command";
+      document.getElementById(id)?.focus();
     }, 0);
   }
 
@@ -122,8 +142,12 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
       );
       return;
     }
-    if (image.trim().length === 0) {
+    if (kind === "image" && image.trim().length === 0) {
       setError("Image is required.");
+      return;
+    }
+    if (kind === "command" && command.trim().length === 0) {
+      setError("Command is required.");
       return;
     }
     let manifest: unknown;
@@ -135,15 +159,24 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
     }
     setSubmitting(true);
     try {
+      const body: Record<string, unknown> = {
+        name,
+        display_name: displayName.trim() || null,
+        manifest,
+        description,
+      };
+      if (kind === "image") {
+        body.image = image.trim();
+      } else {
+        body.command = command.trim();
+        body.args = argsText
+          .split("\n")
+          .map((a) => a.trim())
+          .filter((a) => a.length > 0);
+      }
       await apiFetch(`/api/workspaces/${slug}/mcp-catalog`, {
         method: "PUT",
-        body: JSON.stringify({
-          name,
-          display_name: displayName.trim() || null,
-          image: image.trim(),
-          manifest,
-          description,
-        }),
+        body: JSON.stringify(body),
       });
       resetForm();
       await load();
@@ -184,8 +217,8 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
         <CardHeader>
           <CardTitle>MCP servers</CardTitle>
           <CardDescription>
-            Registered MCP server images. Agents in this workspace can
-            attach to any of these from their edit screen. Plaintext for
+            Registered MCP servers. Agents in this workspace can attach
+            to any of these from their edit screen. Plaintext for
             secret-kind env values stays in the MCP container — the
             agent never sees it.
           </CardDescription>
@@ -211,9 +244,14 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                       )}
                     </div>
                     <div className="truncate font-mono text-xs text-zinc-500">
-                      {row.image}
+                      {row.image
+                        ? row.image
+                        : `${row.command ?? ""} ${row.args.join(" ")}`.trim()}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
+                      <Badge variant="secondary" className="text-xs">
+                        {row.image ? "image" : "command"}
+                      </Badge>
                       {Object.keys(row.manifest.env).map((k) => (
                         <Badge key={k} variant="outline" className="text-xs">
                           {k}
@@ -252,9 +290,9 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
             {editing ? `Edit ${editing.name}` : "Register MCP server"}
           </CardTitle>
           <CardDescription>
-            Paste the manifest published by the MCP image. Names follow
-            the mcpServers convention: lowercase letters, digits,
-            hyphens, underscores; start with a letter.
+            Choose a shape, paste the manifest the MCP author publishes,
+            and save. Names follow the mcpServers convention: lowercase
+            letters, digits, hyphens, underscores; start with a letter.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -284,19 +322,85 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                 />
               </div>
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="mcp-image">Image</Label>
-              <Input
-                id="mcp-image"
-                required
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder="ghcr.io/org/linear-mcp:1.2.0"
-                autoComplete="off"
-                spellCheck={false}
-                className="font-mono"
-              />
+              <Label>Shape</Label>
+              <div className="flex gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="mcp-kind"
+                    checked={kind === "image"}
+                    onChange={() => setKind("image")}
+                  />
+                  <span>Container image</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="mcp-kind"
+                    checked={kind === "command"}
+                    onChange={() => setKind("command")}
+                  />
+                  <span>Command (npx / uvx / etc.)</span>
+                </label>
+              </div>
             </div>
+
+            {kind === "image" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="mcp-image">Image</Label>
+                <Input
+                  id="mcp-image"
+                  required
+                  value={image}
+                  onChange={(e) => setImage(e.target.value)}
+                  placeholder="ghcr.io/org/linear-mcp:1.2.0"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono"
+                />
+                <p className="text-xs text-zinc-500">
+                  The runtime spawns this image as a sibling container in
+                  the agent's pod.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="mcp-command">Command</Label>
+                  <Input
+                    id="mcp-command"
+                    required
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    placeholder="npx"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mcp-args">Args (one per line)</Label>
+                  <Textarea
+                    id="mcp-args"
+                    value={argsText}
+                    onChange={(e) => setArgsText(e.target.value)}
+                    placeholder={"-y\n@author/mercury-mcp"}
+                    rows={4}
+                    className="font-mono text-xs"
+                    spellCheck={false}
+                  />
+                  <p className="text-xs text-zinc-500">
+                    The runtime spawns the platform's mcp-runner base
+                    image (node + python + uv preinstalled) and runs
+                    <code className="mx-1">{command || "<command>"} {argsText.split("\n").filter(Boolean).join(" ")}</code>
+                    inside it.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="mcp-desc">Description (optional)</Label>
               <Input
@@ -320,7 +424,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
               />
               <p className="text-xs text-zinc-500">
                 JSON object with <code>env</code> and <code>tool_scopes</code>.
-                See your MCP image's docs for the manifest contents.
+                See your MCP source for the manifest contents.
               </p>
             </div>
             {error && <div className="text-sm text-red-400">{error}</div>}
