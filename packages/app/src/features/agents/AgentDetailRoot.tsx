@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ChevronRight } from "lucide-react";
-import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -16,6 +15,8 @@ import { useAgentsStore } from "../../stores/agentsStore";
 import { useCollectionsStore } from "../../stores/collectionsStore";
 import { useGitHubStore } from "../../stores/githubStore";
 import { useGrantsStore } from "../../stores/grantsStore";
+import { useMcpStore, mcpAgentKey } from "../../stores/mcpStore";
+import { useAgentEnvBindingsStore } from "../../stores/agentEnvBindingsStore";
 import { RecentRunsSection } from "../sessions/RecentRunsSection";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
@@ -44,13 +45,10 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   const loadSpawnGrants = useGrantsStore((s) => s.loadSpawnGrants);
   const spawnByAgent = useGrantsStore((s) => s.spawnByAgent);
 
-  // MCP attachments + Zone-2 env bindings — small lists, fetched
-  // directly here. Counts only; the full editor lives on the Edit
-  // page's "MCP & env" tab.
-  const [mcpAttachmentCount, setMcpAttachmentCount] = useState<number | null>(
-    null,
-  );
-  const [envBindingCount, setEnvBindingCount] = useState<number | null>(null);
+  const loadMcpAttachments = useMcpStore((s) => s.loadAttachments);
+  const loadEnvBindings = useAgentEnvBindingsStore((s) => s.load);
+  const mcpAttachmentsByKey = useMcpStore((s) => s.attachmentsByAgentKey);
+  const envBindingsByKey = useAgentEnvBindingsStore((s) => s.byAgentKey);
 
   useEffect(() => {
     if (status === "idle") fetchMe();
@@ -75,26 +73,16 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadRepos(workspaceSlug, agent.id);
     loadCollections(workspaceSlug, agent.id);
     loadSpawnGrants(workspaceSlug, agent.id);
-
-    // Direct fetches for the MCP + env summary rows. Failures are
-    // soft — the row falls back to "—" rather than blowing up the page.
-    const aid = agent.id;
-    apiFetch<{ attachments: Array<{ id: string }> }>(
-      `/api/workspaces/${workspaceSlug}/agents/${aid}/mcp-attachments`,
-    )
-      .then((r) => setMcpAttachmentCount(r.attachments.length))
-      .catch(() => setMcpAttachmentCount(null));
-    apiFetch<{ bindings: Array<{ id: string }> }>(
-      `/api/workspaces/${workspaceSlug}/agents/${aid}/env`,
-    )
-      .then((r) => setEnvBindingCount(r.bindings.length))
-      .catch(() => setEnvBindingCount(null));
+    void loadMcpAttachments(workspaceSlug, agent.id);
+    void loadEnvBindings(workspaceSlug, agent.id);
   }, [
     agent,
     workspaceSlug,
     loadRepos,
     loadCollections,
     loadSpawnGrants,
+    loadMcpAttachments,
+    loadEnvBindings,
   ]);
 
   const breadcrumbs = [
@@ -114,6 +102,10 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   }
 
   const repos = agentRepos[agent.id]?.repos ?? [];
+  const mcpAttachmentCount =
+    mcpAttachmentsByKey[mcpAgentKey(workspaceSlug, agent.id)]?.length ?? null;
+  const envBindingCount =
+    envBindingsByKey[`${workspaceSlug}:${agent.id}`]?.length ?? null;
   const attachmentKey = `${workspaceSlug}:${agent.id}`;
   const collections = attachmentsByKey[attachmentKey] ?? [];
   const spawnGrants = spawnByAgent[attachmentKey] ?? [];

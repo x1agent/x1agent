@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../../lib/api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -18,54 +17,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import {
+  useMcpStore,
+  mcpAgentKey,
+  type AttachmentEnvValue,
+  type CatalogEntry,
+} from "../../stores/mcpStore";
+import { useWorkspaceSecretsStore } from "../../stores/workspaceSecretsStore";
 
 /**
- * Per-agent MCP attachments. Pick a workspace catalog entry, fill
- * in the env values it needs (secret-kind: pick from workspace
- * secrets dropdown; value-kind: type literal), save.
+ * Per-agent MCP attachments. Reads from useMcpStore + the workspace
+ * secrets store; never calls apiFetch directly. Local state is for
+ * pure UI concerns (in-flight submit, picked entry, env-form values).
  */
-
-interface CatalogEntry {
-  id: string;
-  name: string;
-  display_name: string | null;
-  kind: "stdio" | "remote_oauth";
-  manifest: {
-    env: Record<
-      string,
-      { kind: "secret" | "value"; label?: string; required?: boolean; description?: string }
-    >;
-    tool_scopes: Record<string, string[]>;
-  };
-}
-
-type EnvValue =
-  | { kind: "secret"; ref: string }
-  | { kind: "value"; value: string };
-
-interface Attachment {
-  id: string;
-  catalog_entry_id: string;
-  env_json: Record<string, EnvValue>;
-  tool_scopes_granted: string[];
-}
-
-interface SecretRow {
-  id: string;
-  name: string;
-}
-
-interface UserMcpToken {
-  catalog_entry_id: string;
-  access_token_expires_at: string | null;
-  has_refresh_token: boolean;
-  updated_at: string;
-}
 
 interface Props {
   workspaceSlug: string;
   agentId: string;
-  /** Agent kind — drives whether remote_oauth catalog entries are pickable. */
   agentKind?: "worker" | "orchestrator" | "scheduled";
   canManage: boolean;
 }
@@ -76,15 +44,28 @@ export function AgentMcpAttachmentsCard({
   agentKind,
   canManage,
 }: Props) {
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [secrets, setSecrets] = useState<SecretRow[]>([]);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [userTokens, setUserTokens] = useState<UserMcpToken[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const catalog = useMcpStore(
+    (s) => s.catalogBySlug[workspaceSlug] ?? [],
+  );
+  const attachments = useMcpStore(
+    (s) => s.attachmentsByAgentKey[mcpAgentKey(workspaceSlug, agentId)] ?? [],
+  );
+  const userTokens = useMcpStore((s) => s.userTokens);
+  const loadCatalog = useMcpStore((s) => s.loadCatalog);
+  const loadAttachments = useMcpStore((s) => s.loadAttachments);
+  const loadUserTokens = useMcpStore((s) => s.loadUserTokens);
+  const attach = useMcpStore((s) => s.attach);
+  const detach = useMcpStore((s) => s.detach);
+  const disconnectToken = useMcpStore((s) => s.disconnectToken);
 
-  const [pickedEntryId, setPickedEntryId] = useState<string>("");
-  const [envInputs, setEnvInputs] = useState<Record<string, EnvValue>>({});
+  const secrets = useWorkspaceSecretsStore(
+    (s) => s.byWorkspace[workspaceSlug] ?? [],
+  );
+  const loadSecrets = useWorkspaceSecretsStore((s) => s.load);
+
+  const [error, setError] = useState<string | null>(null);
+  const [pickedEntryId, setPickedEntryId] = useState("");
+  const [envInputs, setEnvInputs] = useState<Record<string, AttachmentEnvValue>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const pickedEntry = useMemo(
@@ -92,53 +73,55 @@ export function AgentMcpAttachmentsCard({
     [catalog, pickedEntryId],
   );
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [c, s, a, t] = await Promise.all([
-        apiFetch<{ entries: CatalogEntry[] }>(
-          `/api/workspaces/${workspaceSlug}/mcp-catalog`,
-        ),
-        apiFetch<{ secrets: SecretRow[] }>(
-          `/api/workspaces/${workspaceSlug}/secrets`,
-        ),
-        apiFetch<{ attachments: Attachment[] }>(
-          `/api/workspaces/${workspaceSlug}/agents/${agentId}/mcp-attachments`,
-        ),
-        apiFetch<{ tokens: UserMcpToken[] }>(`/api/users/me/mcp-tokens`).catch(
-          () => ({ tokens: [] }),
-        ),
-      ]);
-      setCatalog(c.entries);
-      setSecrets(s.secrets);
-      setAttachments(a.attachments);
-      setUserTokens(t.tokens);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    if (canManage) void load();
-  }, [workspaceSlug, agentId, canManage]);
+    if (!canManage) return;
+    void loadCatalog(workspaceSlug);
+    void loadAttachments(workspaceSlug, agentId);
+    void loadUserTokens();
+    void loadSecrets(workspaceSlug);
+  }, [
+    canManage,
+    workspaceSlug,
+    agentId,
+    loadCatalog,
+    loadAttachments,
+    loadUserTokens,
+    loadSecrets,
+  ]);
 
-  // When the user comes back to this tab from the OAuth provider,
-  // refresh the token list so the Connect button updates to "Connected".
+  // Refresh tokens when the user returns from an OAuth provider tab.
+  // Only triggers on visibility transitions (tab background → foreground)
+  // so an in-page Select close doesn't cause a re-render storm.
   useEffect(() => {
-    function onFocus() {
-      if (canManage) void load();
+    function onVisible() {
+      if (document.visibilityState === "visible" && canManage) {
+        void loadUserTokens();
+      }
     }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [canManage]);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [canManage, loadUserTokens]);
 
-  function tokenStatusFor(catalogEntryId: string): {
-    connected: boolean;
-    expired: boolean;
-  } {
+  // Reset env-form values when the picked entry changes — but only
+  // when the actual id changes, not on every catalog re-fetch.
+  useEffect(() => {
+    if (!pickedEntry) {
+      setEnvInputs({});
+      return;
+    }
+    const init: Record<string, AttachmentEnvValue> = {};
+    for (const [name, decl] of Object.entries(pickedEntry.manifest.env)) {
+      init[name] =
+        decl.kind === "secret"
+          ? { kind: "secret", ref: "" }
+          : { kind: "value", value: "" };
+    }
+    setEnvInputs(init);
+    // Re-init only when the chosen entry id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedEntryId]);
+
+  function tokenStatusFor(catalogEntryId: string) {
     const t = userTokens.find((x) => x.catalog_entry_id === catalogEntryId);
     if (!t) return { connected: false, expired: false };
     const expiresAt = t.access_token_expires_at
@@ -150,47 +133,16 @@ export function AgentMcpAttachmentsCard({
   }
 
   function startOAuth(catalogName: string) {
-    const url = `/auth/mcp/start/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}?return_to=${encodeURIComponent(window.location.href)}`;
-    // Open in a new tab so the user can come back here easily.
+    const url =
+      `/auth/mcp/start/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}` +
+      `?return_to=${encodeURIComponent(window.location.href)}`;
     window.open(url, "_blank", "noopener");
   }
 
-  async function disconnectOAuth(catalogEntryId: string) {
-    if (!confirm("Disconnect this account? The agent will be unable to use this MCP until you reconnect.")) return;
-    try {
-      await apiFetch(`/api/users/me/mcp-tokens/${catalogEntryId}`, {
-        method: "DELETE",
-      });
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  // Reset env inputs when the picked entry changes — the field set
-  // is derived from the entry's manifest.
-  useEffect(() => {
-    if (!pickedEntry) {
-      setEnvInputs({});
-      return;
-    }
-    const init: Record<string, EnvValue> = {};
-    for (const [name, decl] of Object.entries(pickedEntry.manifest.env)) {
-      init[name] =
-        decl.kind === "secret"
-          ? { kind: "secret", ref: "" }
-          : { kind: "value", value: "" };
-    }
-    setEnvInputs(init);
-  }, [pickedEntry]);
-
-  async function onAttach(e?: React.FormEvent | React.MouseEvent) {
-    if (e && "preventDefault" in e) e.preventDefault();
+  async function onAttach() {
     if (!canManage || !pickedEntry) return;
     setError(null);
-    // Strip empty optional fields so the server's "missing required"
-    // signal is the only signal the user sees.
-    const cleaned: Record<string, EnvValue> = {};
+    const cleaned: Record<string, AttachmentEnvValue> = {};
     for (const [k, v] of Object.entries(envInputs)) {
       if (v.kind === "secret" && v.ref.trim() === "") continue;
       if (v.kind === "value" && v.value === "") continue;
@@ -198,18 +150,11 @@ export function AgentMcpAttachmentsCard({
     }
     setSubmitting(true);
     try {
-      await apiFetch(
-        `/api/workspaces/${workspaceSlug}/agents/${agentId}/mcp-attachments`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            catalog_entry_id: pickedEntry.id,
-            env_json: cleaned,
-          }),
-        },
-      );
+      await attach(workspaceSlug, agentId, {
+        catalog_entry_id: pickedEntry.id,
+        env_json: cleaned,
+      });
       setPickedEntryId("");
-      await load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -217,18 +162,23 @@ export function AgentMcpAttachmentsCard({
     }
   }
 
-  async function onDetach(att: Attachment) {
+  async function onDetach(att: { id: string; catalog_entry_id: string }) {
     if (!canManage) return;
     const entry = catalog.find((c) => c.id === att.catalog_entry_id);
     const label = entry?.name ?? "this MCP";
     if (!confirm(`Detach ${label} from this agent?`)) return;
     setError(null);
     try {
-      await apiFetch(
-        `/api/workspaces/${workspaceSlug}/agents/${agentId}/mcp-attachments/${att.id}`,
-        { method: "DELETE" },
-      );
-      await load();
+      await detach(workspaceSlug, agentId, att.id);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function onDisconnect(catalogEntryId: string) {
+    if (!confirm("Disconnect this account? The agent will be unable to use this MCP until you reconnect.")) return;
+    try {
+      await disconnectToken(catalogEntryId);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -245,6 +195,14 @@ export function AgentMcpAttachmentsCard({
   }
 
   const entryById = (id: string) => catalog.find((c) => c.id === id);
+  const pickableCatalog = catalog
+    .filter((c) => !attachments.some((a) => a.catalog_entry_id === c.id))
+    .filter((c) => {
+      // Remote OAuth requires an interactive user — only attachable
+      // to worker agents.
+      if (c.kind !== "remote_oauth") return true;
+      return agentKind === "worker" || agentKind === undefined;
+    });
 
   return (
     <div className="space-y-4">
@@ -258,13 +216,12 @@ export function AgentMcpAttachmentsCard({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading && <div className="text-sm text-zinc-500">Loading…</div>}
-          {!loading && attachments.length === 0 && (
+          {attachments.length === 0 && (
             <div className="text-sm text-zinc-500">
               No MCP servers attached. Add one below.
             </div>
           )}
-          {!loading && attachments.length > 0 && (
+          {attachments.length > 0 && (
             <ul className="divide-y divide-zinc-800">
               {attachments.map((att) => {
                 const entry = entryById(att.catalog_entry_id);
@@ -273,10 +230,7 @@ export function AgentMcpAttachmentsCard({
                   ? tokenStatusFor(att.catalog_entry_id)
                   : { connected: true, expired: false };
                 return (
-                  <li
-                    key={att.id}
-                    className="flex items-start justify-between py-3"
-                  >
+                  <li key={att.id} className="flex items-start justify-between py-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 font-mono text-sm text-zinc-100">
                         {entry?.name ?? att.catalog_entry_id}
@@ -324,7 +278,7 @@ export function AgentMcpAttachmentsCard({
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => disconnectOAuth(att.catalog_entry_id)}
+                              onClick={() => onDisconnect(att.catalog_entry_id)}
                             >
                               Disconnect
                             </Button>
@@ -368,11 +322,16 @@ export function AgentMcpAttachmentsCard({
               </a>{" "}
               first.
             </div>
+          ) : pickableCatalog.length === 0 ? (
+            <div className="text-sm text-zinc-500">
+              All registered MCP servers are already attached, or none
+              are compatible with this agent kind.
+            </div>
           ) : (
-            // Not a <form> on purpose: this card lives inside the
+            // Plain div, not <form>: this card is rendered inside the
             // agent edit page's outer <form>. Nested forms would
             // un-nest and the Attach button would trigger the agent
-            // save instead of this PUT. Plain div + onClick handler.
+            // save instead of the per-attachment PUT.
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="mcp-pick">MCP server</Label>
@@ -381,22 +340,12 @@ export function AgentMcpAttachmentsCard({
                     <SelectValue placeholder="Pick a registered MCP" />
                   </SelectTrigger>
                   <SelectContent>
-                    {catalog
-                      .filter(
-                        (c) => !attachments.some((a) => a.catalog_entry_id === c.id),
-                      )
-                      .filter((c) => {
-                        // Remote OAuth MCPs require an interactive
-                        // user — only attachable to worker agents.
-                        if (c.kind !== "remote_oauth") return true;
-                        return agentKind === "worker" || agentKind === undefined;
-                      })
-                      .map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.display_name ?? c.name}{" "}
-                          <span className="text-zinc-500">({c.name})</span>
-                        </SelectItem>
-                      ))}
+                    {pickableCatalog.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.display_name ?? c.name}{" "}
+                        <span className="text-zinc-500">({c.name})</span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -445,15 +394,10 @@ export function AgentMcpAttachmentsCard({
 
 interface EnvFieldRowProps {
   envName: string;
-  decl: {
-    kind: "secret" | "value";
-    label?: string;
-    required?: boolean;
-    description?: string;
-  };
-  value: EnvValue | undefined;
-  secrets: SecretRow[];
-  onChange: (v: EnvValue) => void;
+  decl: CatalogEntry["manifest"]["env"][string];
+  value: AttachmentEnvValue | undefined;
+  secrets: Array<{ id: string; name: string }>;
+  onChange: (v: AttachmentEnvValue) => void;
 }
 
 function EnvFieldRow({
