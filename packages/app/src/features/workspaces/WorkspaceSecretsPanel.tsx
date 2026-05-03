@@ -214,8 +214,8 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
           </CardTitle>
           <CardDescription>
             Names follow the bare-reference syntax: uppercase letters,
-            digits, and underscores. Example:{" "}
-            <code className="rounded bg-zinc-800 px-1">MERCURY_API_TOKEN</code>.
+            digits, and underscores. 1–64 characters; must start with
+            a letter or underscore.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -228,7 +228,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
                 value={name}
                 disabled={!!editingName}
                 onChange={(e) => setName(e.target.value.toUpperCase())}
-                placeholder="MERCURY_API_TOKEN"
+                placeholder="MY_API_KEY"
                 autoComplete="off"
                 spellCheck={false}
                 className="font-mono"
