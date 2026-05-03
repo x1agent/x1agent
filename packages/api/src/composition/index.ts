@@ -60,9 +60,15 @@ import {
   PostgresCatalogRepository,
   PostgresAttachmentRepository,
   PostgresOAuthClientRepository,
+  PostgresUserTokenRepository,
+  UserTokenService,
   createMcpCatalogRoutes,
   createAgentMcpAttachmentRoutes,
+  createMcpOAuthRoutes,
+  createMcpUserTokenRoutes,
+  type OAuthFlowState,
 } from "@x1agent/domain-mcp-catalog";
+import jwt from "jsonwebtoken";
 import {
   BindingService,
   PostgresBindingRepository,
@@ -166,6 +172,10 @@ export interface Composition {
   agentMcpAttachmentRoutes: Hono;
   /** /api/workspaces/:slug/agents/:agentId/env — Zone-2 agent env bindings. */
   agentEnvRoutes: Hono;
+  /** /auth/mcp/* — browser redirects for the OAuth flow. */
+  mcpOAuthRoutes: Hono;
+  /** /api/users/me/mcp-tokens — JSON status endpoints for the UI. */
+  mcpUserTokenRoutes: Hono;
   collectionRoutes: Hono;
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
@@ -634,6 +644,74 @@ export function compose(env: CompositionEnv): Composition {
     requireAgent,
   });
 
+  // Per-user OAuth flow for remote_oauth MCPs. Tokens encrypt under
+  // the same workspace_secrets master key. Flow state cookie is
+  // signed with the same JWT_SECRET used for session cookies — short
+  // TTL (5 min, set by the route) bounds replay risk.
+  const userTokenRepo = new PostgresUserTokenRepository(env.sql);
+  const userTokenService = new UserTokenService({
+    catalog: mcpCatalogRepo,
+    oauthClients: mcpOAuthClientRepo,
+    userTokens: userTokenRepo,
+    cipherKey: workspaceSecretsKey,
+    redirectUriFor: ({ workspaceSlug, catalogName }) =>
+      `${env.apiUrl}/auth/mcp/callback/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}`,
+    workspaceSlugFor: async (workspaceId: string) => {
+      const w = await workspaces.findById(workspaceId as never);
+      return w?.slug ?? null;
+    },
+  });
+
+  // Workspace-membership middleware reused by both OAuth redirect
+  // routes — ensures the caller is a member of the slug they're
+  // operating against and stashes workspaceId for the handler.
+  const requireWorkspaceMembership: import("hono").MiddlewareHandler = async (
+    c,
+    next,
+  ) => {
+    const session = c.get("session") as
+      | {
+          email: string;
+          userId: string | null;
+          memberships: readonly { slug: string; workspaceId: string; role: string }[];
+        }
+      | undefined;
+    if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
+    const slug = c.req.param("slug");
+    if (!slug) return c.json({ error: "missing slug" }, 400);
+    const m = session.memberships.find((x) => x.slug === slug);
+    if (!m) return c.json({ error: "forbidden" }, 403);
+    c.set("workspaceId", m.workspaceId);
+    c.set("userId", session.userId);
+    await next();
+  };
+
+  const FLOW_TOKEN_TTL_S = 300;
+  const mcpOAuthRoutes = createMcpOAuthRoutes({
+    service: userTokenService,
+    requireAuth,
+    requireWorkspaceMembership,
+    appUrl: env.appUrl,
+    signFlowState: (state: OAuthFlowState) =>
+      jwt.sign({ flow: state }, env.jwtSecret, {
+        expiresIn: FLOW_TOKEN_TTL_S,
+      }),
+    verifyFlowState: (token: string) => {
+      try {
+        const decoded = jwt.verify(token, env.jwtSecret) as {
+          flow?: OAuthFlowState;
+        };
+        return decoded.flow ?? null;
+      } catch {
+        return null;
+      }
+    },
+  });
+  const mcpUserTokenRoutes = createMcpUserTokenRoutes({
+    service: userTokenService,
+    requireAuth,
+  });
+
   // Zone-2 agent env bindings. The SecretExistsCheck reads through the
   // workspace_secrets repository; failing here means a binding rotation
   // tried to point at a secret that no longer exists.
@@ -880,6 +958,8 @@ export function compose(env: CompositionEnv): Composition {
     mcpCatalogRoutes,
     agentMcpAttachmentRoutes,
     agentEnvRoutes,
+    mcpOAuthRoutes,
+    mcpUserTokenRoutes,
     collectionRoutes,
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,

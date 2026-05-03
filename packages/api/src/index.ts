@@ -155,6 +155,8 @@ const {
   mcpCatalogRoutes,
   agentMcpAttachmentRoutes,
   agentEnvRoutes,
+  mcpOAuthRoutes,
+  mcpUserTokenRoutes,
   collectionRoutes,
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
@@ -294,6 +296,12 @@ app.route(
   agentMcpAttachmentRoutes,
 );
 app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
+// Browser-redirect OAuth flows for remote_oauth MCPs:
+//   /auth/mcp/start/:slug/:name      — initiate
+//   /auth/mcp/callback/:slug/:name   — provider redirects here
+// Plus JSON status endpoints under /api/users/me/mcp-tokens.
+app.route("/auth/mcp", mcpOAuthRoutes);
+app.route("/api/users", mcpUserTokenRoutes);
 app.route("/api/workspaces/:slug/collections", collectionRoutes);
 app.route(
   "/api/workspaces/:slug/agents/:agentId/collections",

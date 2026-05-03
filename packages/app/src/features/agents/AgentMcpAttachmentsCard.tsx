@@ -55,6 +55,13 @@ interface SecretRow {
   name: string;
 }
 
+interface UserMcpToken {
+  catalog_entry_id: string;
+  access_token_expires_at: string | null;
+  has_refresh_token: boolean;
+  updated_at: string;
+}
+
 interface Props {
   workspaceSlug: string;
   agentId: string;
@@ -72,6 +79,7 @@ export function AgentMcpAttachmentsCard({
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [secrets, setSecrets] = useState<SecretRow[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [userTokens, setUserTokens] = useState<UserMcpToken[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,7 +96,7 @@ export function AgentMcpAttachmentsCard({
     setLoading(true);
     setError(null);
     try {
-      const [c, s, a] = await Promise.all([
+      const [c, s, a, t] = await Promise.all([
         apiFetch<{ entries: CatalogEntry[] }>(
           `/api/workspaces/${workspaceSlug}/mcp-catalog`,
         ),
@@ -98,10 +106,14 @@ export function AgentMcpAttachmentsCard({
         apiFetch<{ attachments: Attachment[] }>(
           `/api/workspaces/${workspaceSlug}/agents/${agentId}/mcp-attachments`,
         ),
+        apiFetch<{ tokens: UserMcpToken[] }>(`/api/users/me/mcp-tokens`).catch(
+          () => ({ tokens: [] }),
+        ),
       ]);
       setCatalog(c.entries);
       setSecrets(s.secrets);
       setAttachments(a.attachments);
+      setUserTokens(t.tokens);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -112,6 +124,48 @@ export function AgentMcpAttachmentsCard({
   useEffect(() => {
     if (canManage) void load();
   }, [workspaceSlug, agentId, canManage]);
+
+  // When the user comes back to this tab from the OAuth provider,
+  // refresh the token list so the Connect button updates to "Connected".
+  useEffect(() => {
+    function onFocus() {
+      if (canManage) void load();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [canManage]);
+
+  function tokenStatusFor(catalogEntryId: string): {
+    connected: boolean;
+    expired: boolean;
+  } {
+    const t = userTokens.find((x) => x.catalog_entry_id === catalogEntryId);
+    if (!t) return { connected: false, expired: false };
+    const expiresAt = t.access_token_expires_at
+      ? Date.parse(t.access_token_expires_at)
+      : null;
+    const expired =
+      expiresAt !== null && expiresAt < Date.now() && !t.has_refresh_token;
+    return { connected: !expired, expired };
+  }
+
+  function startOAuth(catalogName: string) {
+    const url = `/auth/mcp/start/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}?return_to=${encodeURIComponent(window.location.href)}`;
+    // Open in a new tab so the user can come back here easily.
+    window.open(url, "_blank", "noopener");
+  }
+
+  async function disconnectOAuth(catalogEntryId: string) {
+    if (!confirm("Disconnect this account? The agent will be unable to use this MCP until you reconnect.")) return;
+    try {
+      await apiFetch(`/api/users/me/mcp-tokens/${catalogEntryId}`, {
+        method: "DELETE",
+      });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   // Reset env inputs when the picked entry changes — the field set
   // is derived from the entry's manifest.
@@ -214,18 +268,32 @@ export function AgentMcpAttachmentsCard({
             <ul className="divide-y divide-zinc-800">
               {attachments.map((att) => {
                 const entry = entryById(att.catalog_entry_id);
+                const isOAuth = entry?.kind === "remote_oauth";
+                const tokenStatus = isOAuth
+                  ? tokenStatusFor(att.catalog_entry_id)
+                  : { connected: true, expired: false };
                 return (
                   <li
                     key={att.id}
                     className="flex items-start justify-between py-3"
                   >
                     <div className="min-w-0">
-                      <div className="font-mono text-sm text-zinc-100">
+                      <div className="flex items-center gap-2 font-mono text-sm text-zinc-100">
                         {entry?.name ?? att.catalog_entry_id}
                         {entry?.display_name && (
-                          <span className="ml-2 font-sans text-xs text-zinc-400">
+                          <span className="ml-1 font-sans text-xs text-zinc-400">
                             {entry.display_name}
                           </span>
+                        )}
+                        {isOAuth && tokenStatus.connected && (
+                          <Badge variant="success" className="text-xs">
+                            connected
+                          </Badge>
+                        )}
+                        {isOAuth && !tokenStatus.connected && (
+                          <Badge variant="warning" className="text-xs">
+                            not connected
+                          </Badge>
                         )}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
@@ -240,14 +308,38 @@ export function AgentMcpAttachmentsCard({
                         ))}
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onDetach(att)}
-                    >
-                      Detach
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {isOAuth && entry && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => startOAuth(entry.name)}
+                          >
+                            {tokenStatus.connected ? "Reconnect" : "Connect"}
+                          </Button>
+                          {tokenStatus.connected && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => disconnectOAuth(att.catalog_entry_id)}
+                            >
+                              Disconnect
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onDetach(att)}
+                      >
+                        Detach
+                      </Button>
+                    </div>
                   </li>
                 );
               })}
