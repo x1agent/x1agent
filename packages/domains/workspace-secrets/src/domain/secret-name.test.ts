@@ -4,7 +4,7 @@ import { ValidationError } from "@x1agent/kernel";
 
 describe("SecretName", () => {
   it.each([
-    "MERCURY_API_TOKEN",
+    "MY_API_KEY",
     "X",
     "_PRIVATE",
     "API_KEY_2",
