@@ -24,6 +24,8 @@ import {
   type CatalogEntry,
 } from "../../stores/mcpStore";
 import { useWorkspaceSecretsStore } from "../../stores/workspaceSecretsStore";
+import { API_BASE, buildMcpOAuthStartUrl } from "../../lib/api";
+import { useConfirm } from "../../components/use-confirm";
 
 /**
  * Per-agent MCP attachments. Reads from useMcpStore + the workspace
@@ -68,6 +70,7 @@ export function AgentMcpAttachmentsCard({
   const [pickedEntryId, setPickedEntryId] = useState("");
   const [envInputs, setEnvInputs] = useState<Record<string, AttachmentEnvValue>>({});
   const [submitting, setSubmitting] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   const pickedEntry = useMemo(
     () => catalog.find((c) => c.id === pickedEntryId) ?? null,
@@ -134,9 +137,12 @@ export function AgentMcpAttachmentsCard({
   }
 
   function startOAuth(catalogName: string) {
-    const url =
-      `/auth/mcp/start/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}` +
-      `?return_to=${encodeURIComponent(window.location.href)}`;
+    const url = buildMcpOAuthStartUrl({
+      apiBase: API_BASE,
+      workspaceSlug,
+      catalogName,
+      returnTo: window.location.href,
+    });
     window.open(url, "_blank", "noopener");
   }
 
@@ -167,7 +173,13 @@ export function AgentMcpAttachmentsCard({
     if (!canManage) return;
     const entry = catalog.find((c) => c.id === att.catalog_entry_id);
     const label = entry?.name ?? "this MCP";
-    if (!confirm(`Detach ${label} from this agent?`)) return;
+    const ok = await confirm({
+      title: `Detach ${label} from this agent?`,
+      description:
+        "The agent will stop loading this MCP at session start. Catalog entry and any other agents stay untouched.",
+      confirmText: "Detach",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await detach(workspaceSlug, agentId, att.id);
@@ -177,7 +189,13 @@ export function AgentMcpAttachmentsCard({
   }
 
   async function onDisconnect(catalogEntryId: string) {
-    if (!confirm("Disconnect this account? The agent will be unable to use this MCP until you reconnect.")) return;
+    const ok = await confirm({
+      title: "Disconnect this account?",
+      description:
+        "Sessions of this agent will be unable to use this MCP until you reconnect.",
+      confirmText: "Disconnect",
+    });
+    if (!ok) return;
     try {
       await disconnectToken(catalogEntryId);
     } catch (e) {
@@ -218,6 +236,7 @@ export function AgentMcpAttachmentsCard({
 
   return (
     <div className="space-y-4">
+      {dialog}
       <Card>
         <CardHeader>
           <CardTitle>MCP attachments</CardTitle>
