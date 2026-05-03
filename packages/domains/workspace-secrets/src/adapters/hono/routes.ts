@@ -1,6 +1,14 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import type { SecretService } from "../../application/secret-service.js";
 
+// Extend Hono's typed Variables map for the values our middleware sets.
+declare module "hono" {
+  interface ContextVariableMap {
+    workspaceId: string;
+    userId: string | null;
+  }
+}
+
 /**
  * HTTP surface for workspace secrets.
  *
@@ -11,24 +19,16 @@ import type { SecretService } from "../../application/secret-service.js";
  * Plaintext values are accepted on PUT and never returned on any other
  * route. There is intentionally no GET /value endpoint — operators
  * rotate by setting again, matching the docs' write-only contract.
+ *
+ * Auth: workspace admin / owner only. Member-tier accounts cannot
+ * even list, because the existence and names of secrets are
+ * themselves signals we don't want below the admin tier.
  */
 
 export interface SecretsRoutesConfig {
   service: SecretService;
   /** Auth middleware that populates ctx.session. */
   requireAuth: MiddlewareHandler;
-  /**
-   * Resolves a workspace slug to (workspaceId, isMember, isAdmin) for the
-   * authenticated session, OR returns null if the session has no membership.
-   * Centralized so the routes don't reimplement workspace lookup.
-   */
-  resolveWorkspace: (
-    slug: string,
-    userEmail: string,
-  ) => Promise<
-    | { workspaceId: string; isAdmin: boolean }
-    | null
-  >;
 }
 
 export function createWorkspaceSecretsRoutes(
@@ -38,24 +38,25 @@ export function createWorkspaceSecretsRoutes(
 
   app.use("*", cfg.requireAuth);
 
+  // Workspace + admin gate. Reads the slug from the route param and
+  // matches against the session's cached memberships — no DB hop.
   app.use("*", async (c, next) => {
     const session = c.get("session") as
-      | { email: string; userId: string | null }
+      | {
+          email: string;
+          userId: string | null;
+          memberships: readonly { slug: string; workspaceId: string; role: string }[];
+        }
       | undefined;
-    if (!session?.email) {
-      return c.json({ error: "unauthenticated" }, 401);
-    }
+    if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
     const slug = c.req.param("slug");
     if (!slug) return c.json({ error: "missing workspace slug" }, 400);
-    const ws = await cfg.resolveWorkspace(slug, session.email);
-    if (!ws) return c.json({ error: "forbidden" }, 403);
-    if (!ws.isAdmin) {
-      // Workspace secrets can only be managed by workspace admins.
-      // Members cannot read or list — secret existence is itself a
-      // signal we don't want to leak below the admin tier.
+    const m = session.memberships.find((x) => x.slug === slug);
+    if (!m) return c.json({ error: "forbidden" }, 403);
+    if (m.role !== "admin" && m.role !== "owner") {
       return c.json({ error: "forbidden" }, 403);
     }
-    c.set("workspaceId", ws.workspaceId);
+    c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
     await next();
   });
@@ -104,8 +105,6 @@ export function createWorkspaceSecretsRoutes(
         updated_by: meta.updatedBy,
       });
     } catch (err) {
-      // Surface validation errors with a 400 + field-level message;
-      // anything else is a server error.
       const e = err as { field?: string; message?: string; status?: number };
       if (e.field) {
         return c.json({ error: e.message ?? "invalid", field: e.field }, 400);
