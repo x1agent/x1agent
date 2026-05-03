@@ -12,6 +12,14 @@ Open-source, Kubernetes-native agent platform. Runs LLM agents in isolated pods 
 
 3. **Test coverage for every layer.** Domain logic is 100% unit-tested with no I/O. Application services are unit-tested with mocked ports. Adapters have integration tests against the real infrastructure they adapt (Postgres, NATS, HTTP). Every port with multiple adapters has a **contract-test suite** in the port's package; every adapter runs that suite to prove it satisfies the contract. "I'll add tests later" is not acceptable for merged code.
 
+   **Frontend code in `packages/app/` follows the same rule.** Any new component that calls a store action, mutates server state, or contains non-trivial conditional rendering ships with a test in `packages/app/src/__tests__/` using React Testing Library + happy-dom. The minimum bar for a feature PR:
+   - Component test that renders the feature with a populated store and asserts the visible output.
+   - Interaction test that simulates the primary action (click Attach / Save / Connect) and asserts the right store action was called — catches nested-form bugs and event bubbling regressions.
+   - For zustand selectors that compose values (`s.byKey[k] ?? []`), a unit test asserting referential stability across renders — catches the "selector returns new `[]` each render → React error #185 / black screen" foot-gun.
+   - For form / multi-step flows, an end-to-end test against OrbStack via the chrome-devtools-tester subagent.
+
+   When the user reports a UI bug, the FIRST move is to ask for the network tab + console error + relevant pod log slice. Don't ship speculative fixes based on guesses; each cycle wastes a deploy and erodes trust. After confirming the root cause, write the regression test that would have caught it, then ship the fix.
+
 4. **Never work on main.** All work happens on feature branches. Create a branch, do the work, open a PR. Direct commits to main are only for releases (automated by semantic-release). Branch naming: `feat/short-description`, `fix/short-description`, `docs/short-description`.
 
 5. **Docs are the product.** The `docs/` directory builds into the public documentation site. Write for operators and contributors, not for ourselves. No internal jargon without definition. No "see Slack" references. Everything a reader needs is in the docs or linked from them.
