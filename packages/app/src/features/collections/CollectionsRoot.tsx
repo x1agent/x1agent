@@ -39,6 +39,7 @@ import {
   useCapabilitiesStore,
   useHasCollections,
 } from "../../stores/capabilitiesStore";
+import { useConfirm } from "../../components/use-confirm";
 
 interface Props {
   workspaceSlug: string;
@@ -112,6 +113,7 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
   const canManage = ws?.role === "admin" || ws?.role === "owner";
 
   const [showCreate, setShowCreate] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   return (
     <AppShell
@@ -128,6 +130,7 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
         ) : undefined
       }
     >
+      {dialog}
       <div className="space-y-6 p-6">
         <div className="max-w-3xl space-y-4">
           {showCreate && canManage && (
@@ -202,13 +205,14 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
                             type="button"
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Delete collection ${row.name}? This also drops its backing store.`,
-                                )
-                              )
-                                void remove(workspaceSlug, row.id);
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: `Delete collection ${row.name}?`,
+                                description:
+                                  "This also drops its backing store. Any data the agents have written to it is permanently lost.",
+                                confirmText: "Delete",
+                              });
+                              if (ok) void remove(workspaceSlug, row.id);
                             }}
                             className="text-zinc-400 hover:text-red-400"
                           >

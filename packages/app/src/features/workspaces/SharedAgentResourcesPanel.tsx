@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "../../components/ui/table";
+import { useConfirm } from "../../components/use-confirm";
 
 interface Props {
   slug: string;
@@ -63,6 +64,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
   const [storageSize, setStorageSize] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     load(slug);
@@ -104,9 +106,12 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
   };
 
   const onUninstall = async (resource: InstalledResource) => {
-    const ok = window.confirm(
-      `Uninstall ${resource.kind} ${resource.version}? This destroys every branch database; any data the agents have written is permanently lost.`,
-    );
+    const ok = await confirm({
+      title: `Uninstall ${resource.kind} ${resource.version}?`,
+      description:
+        "This destroys every branch database. Any data the agents have written is permanently lost.",
+      confirmText: "Uninstall",
+    });
     if (!ok) return;
     try {
       await uninstall(slug, resource.id);
@@ -120,7 +125,9 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
   if (!canManage) return null;
 
   return (
-    <Card>
+    <>
+      {dialog}
+      <Card>
       <CardHeader>
         <CardTitle>Shared agent resources</CardTitle>
         <CardDescription>
@@ -263,6 +270,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
             </div>
           )}
       </CardContent>
-    </Card>
+      </Card>
+    </>
   );
 }

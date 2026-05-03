@@ -19,6 +19,7 @@ import {
 } from "../../components/ui/select";
 import { useAgentEnvBindingsStore } from "../../stores/agentEnvBindingsStore";
 import { useWorkspaceSecretsStore } from "../../stores/workspaceSecretsStore";
+import { useConfirm } from "../../components/use-confirm";
 
 /**
  * Per-agent Zone-2 env bindings. Reads from useAgentEnvBindingsStore
@@ -56,6 +57,7 @@ export function AgentEnvBindingsCard({
   const [envName, setEnvName] = useState("");
   const [secretName, setSecretName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     if (!canManage) return;
@@ -90,12 +92,13 @@ export function AgentEnvBindingsCard({
 
   async function onRemove(b: { id: string; env_name: string }) {
     if (!canManage) return;
-    if (
-      !confirm(
-        `Remove ${b.env_name}? The agent will lose this credential at next session start.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Remove ${b.env_name}?`,
+      description:
+        "The agent will lose this credential at next session start.",
+      confirmText: "Remove",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await removeBinding(workspaceSlug, agentId, b.env_name);
@@ -116,6 +119,7 @@ export function AgentEnvBindingsCard({
 
   return (
     <div className="space-y-4">
+      {dialog}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

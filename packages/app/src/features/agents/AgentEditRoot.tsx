@@ -44,6 +44,7 @@ import { AgentMcpAttachmentsCard } from "./AgentMcpAttachmentsCard";
 import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
 import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
+import { useConfirm } from "../../components/use-confirm";
 
 interface Props {
   workspaceSlug: string;
@@ -119,6 +120,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const images = imagesBySlug[workspaceSlug] ?? [];
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [tabRaw, setTab] = useUrlSearchParam("tab", DEFAULT_TAB);
   const tab: TabKey = isTabKey(tabRaw) ? tabRaw : DEFAULT_TAB;
@@ -252,7 +254,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
   const onDelete = async () => {
     if (!existing) return;
-    if (!confirm(`Delete agent ${existing.name}?`)) return;
+    const ok = await confirm({
+      title: `Delete agent ${existing.name}?`,
+      description:
+        "This removes the agent and its configuration. Past sessions are kept; future runs will fail until you recreate it.",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
     await remove(workspaceSlug, existing.id);
     window.location.href = `/workspaces/${workspaceSlug}`;
   };
@@ -265,6 +273,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
   return (
     <AppShell breadcrumbs={breadcrumbs}>
+      {confirmDialog}
       <div className="max-w-3xl p-6">
         <Tabs value={tab} onValueChange={(v) => setTab(v)}>
           <TabsList className="mb-4">

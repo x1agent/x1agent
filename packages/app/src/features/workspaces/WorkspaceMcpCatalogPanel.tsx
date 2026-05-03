@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import { useConfirm } from "../../components/use-confirm";
 
 /**
  * Workspace MCP catalog panel.
@@ -81,6 +82,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   const [description, setDescription] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   async function load() {
     setLoading(true);
@@ -216,7 +218,13 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
 
   async function onDelete(row: CatalogEntry) {
     if (!canManage) return;
-    if (!confirm(`Remove ${row.name} from the catalog?`)) return;
+    const ok = await confirm({
+      title: `Remove ${row.name} from the catalog?`,
+      description:
+        "Any agent attachments to this MCP will be removed too. Connected user accounts will be disconnected.",
+      confirmText: "Remove",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await apiFetch(`/api/workspaces/${slug}/mcp-catalog/${row.id}`, {
@@ -240,6 +248,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
 
   return (
     <div className="space-y-4">
+      {dialog}
       <Card>
         <CardHeader>
           <CardTitle>MCP servers</CardTitle>
