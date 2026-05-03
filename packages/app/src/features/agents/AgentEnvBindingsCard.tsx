@@ -90,8 +90,8 @@ export function AgentEnvBindingsCard({
     if (canManage) void load();
   }, [workspaceSlug, agentId, canManage]);
 
-  async function onAdd(e: React.FormEvent) {
-    e.preventDefault();
+  async function onAdd(e?: React.FormEvent | React.MouseEvent) {
+    if (e && "preventDefault" in e) e.preventDefault();
     if (!canManage) return;
     setError(null);
     if (!ENV_NAME_RE.test(envName)) {
@@ -216,7 +216,11 @@ export function AgentEnvBindingsCard({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onAdd} className="space-y-3">
+          {/* Plain div, not <form>: this card is rendered inside the
+              agent edit page's outer <form>. Nested forms would
+              un-nest and our submit would trigger the agent save
+              instead of the per-binding PUT. */}
+          <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="env-name">Env var name</Label>
@@ -257,11 +261,15 @@ export function AgentEnvBindingsCard({
             </div>
             {error && <div className="text-sm text-red-400">{error}</div>}
             <div className="flex items-center gap-2 pt-2">
-              <Button type="submit" disabled={submitting}>
+              <Button
+                type="button"
+                disabled={submitting}
+                onClick={onAdd}
+              >
                 {submitting ? "Saving…" : "Add binding"}
               </Button>
             </div>
-          </form>
+          </div>
         </CardContent>
       </Card>
     </div>
