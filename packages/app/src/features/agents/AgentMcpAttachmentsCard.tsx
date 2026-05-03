@@ -196,14 +196,25 @@ export function AgentMcpAttachmentsCard({
   }
 
   const entryById = (id: string) => catalog.find((c) => c.id === id);
-  const pickableCatalog = catalog
-    .filter((c) => !attachments.some((a) => a.catalog_entry_id === c.id))
-    .filter((c) => {
-      // Remote OAuth requires an interactive user — only attachable
-      // to worker agents.
-      if (c.kind !== "remote_oauth") return true;
-      return agentKind === "worker" || agentKind === undefined;
-    });
+
+  // We show ALL non-attached entries in the dropdown — incompatible
+  // ones get a disabled state + suffix so the operator can see what's
+  // available but understands why they can't pick it. Earlier we
+  // filtered them out, which made registered entries silently
+  // invisible and confusing ("I added Mercury but it doesn't show
+  // up").
+  const unattached = catalog.filter(
+    (c) => !attachments.some((a) => a.catalog_entry_id === c.id),
+  );
+  const incompatibleReason = (c: (typeof catalog)[number]): string | null => {
+    if (c.kind === "remote_oauth" && agentKind && agentKind !== "worker") {
+      return `requires worker agent (this agent is ${agentKind})`;
+    }
+    return null;
+  };
+  const pickableCatalog = unattached.filter(
+    (c) => incompatibleReason(c) === null,
+  );
 
   return (
     <div className="space-y-4">
@@ -323,10 +334,9 @@ export function AgentMcpAttachmentsCard({
               </a>{" "}
               first.
             </div>
-          ) : pickableCatalog.length === 0 ? (
+          ) : unattached.length === 0 ? (
             <div className="text-sm text-zinc-500">
-              All registered MCP servers are already attached, or none
-              are compatible with this agent kind.
+              All registered MCP servers are already attached.
             </div>
           ) : (
             // Plain div, not <form>: this card is rendered inside the
@@ -341,14 +351,27 @@ export function AgentMcpAttachmentsCard({
                     <SelectValue placeholder="Pick a registered MCP" />
                   </SelectTrigger>
                   <SelectContent>
-                    {pickableCatalog.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.display_name ?? c.name}{" "}
-                        <span className="text-zinc-500">({c.name})</span>
-                      </SelectItem>
-                    ))}
+                    {unattached.map((c) => {
+                      const reason = incompatibleReason(c);
+                      return (
+                        <SelectItem key={c.id} value={c.id} disabled={!!reason}>
+                          {c.display_name ?? c.name}{" "}
+                          <span className="text-zinc-500">({c.name})</span>
+                          {reason && (
+                            <span className="ml-2 text-amber-400 text-xs">
+                              — {reason}
+                            </span>
+                          )}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+                {pickableCatalog.length === 0 && (
+                  <p className="text-xs text-amber-400">
+                    No compatible MCPs for this agent kind. Switch the agent to <strong>worker</strong> or register an stdio MCP.
+                  </p>
+                )}
               </div>
 
               {pickedEntry && (
