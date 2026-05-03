@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RuntimeType } from "@x1agent/shared";
+import { slugify } from "@x1agent/kernel";
 import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
@@ -79,6 +80,10 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
   const [name, setName] = useState("");
   const [slugInput, setSlugInput] = useState("");
+  // Tracks whether the user has manually edited the slug. While false (in
+  // create mode), the slug auto-tracks the name. Once true, manual edits
+  // win. Clearing the slug field re-enables auto-tracking.
+  const [slugDirty, setSlugDirty] = useState(false);
   const [runtimeType, setRuntimeType] = useState<RuntimeType>("claude_code");
   const [kind, setKind] = useState<"worker" | "orchestrator" | "scheduled">(
     "worker",
@@ -285,7 +290,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       id="agent-name"
                       required
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setName(v);
+                        if (isCreate && !slugDirty) {
+                          setSlugInput(slugify(v));
+                        }
+                      }}
                       placeholder="Heartbeat"
                     />
                   </div>
@@ -296,7 +307,14 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       required
                       disabled={!isCreate}
                       value={slugInput}
-                      onChange={(e) => setSlugInput(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSlugInput(v);
+                        // Manual edit takes over auto-tracking. Clearing
+                        // the field re-enables auto-tracking so the user
+                        // can recover from a mistake without retyping.
+                        setSlugDirty(v !== "" && v !== slugify(name));
+                      }}
                       placeholder="heartbeat"
                     />
                   </div>
