@@ -95,6 +95,23 @@ description = "Build + push images and helm-upgrade the active deployment"
 depends = ["configure:check"]
 run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=true, default='')}}"
 
+# Tail / dump logs from the active deployment (read from
+# installs/<base-domain>.local). The CLI fetches gcloud creds, scopes
+# KUBECONFIG to a deployment-specific file, and runs kubectl logs
+# with sane defaults — never touches OrbStack. Pass the component
+# (api/app/agent/...) as the first positional; everything after `--`
+# is forwarded verbatim to kubectl.
+#
+# Examples:
+#   mise run logs api
+#   mise run logs api --grep sentry
+#   mise run logs api -- --tail=500
+[tasks.logs]
+description = "Tail logs from the active deployment (mise run logs api -- ...)"
+depends = ["configure:check"]
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts logs {{arg(name='args', var=true, default='')}}"
+
 [tasks."install:plan"]
 description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
 depends = ["configure:check"]
