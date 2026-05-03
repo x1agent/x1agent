@@ -33,11 +33,11 @@ COPY packages/domains/vector/package.json packages/domains/vector/tsconfig.json 
 COPY packages/domains/collections/package.json packages/domains/collections/tsconfig.json ./packages/domains/collections/
 COPY packages/domains/agent-resources/package.json packages/domains/agent-resources/tsconfig.json ./packages/domains/agent-resources/
 COPY packages/domains/agent-resources-postgres/package.json packages/domains/agent-resources-postgres/tsconfig.json ./packages/domains/agent-resources-postgres/
+COPY packages/domains/workspace-secrets/package.json packages/domains/workspace-secrets/tsconfig.json ./packages/domains/workspace-secrets/
 COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-resources-redis/tsconfig.json ./packages/domains/agent-resources-redis/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
 COPY packages/providers/preview/package.json packages/providers/preview/tsconfig.json ./packages/providers/preview/
-COPY packages/web/package.json ./packages/web/
 COPY docs/package.json ./docs/
 
 RUN bun install --frozen-lockfile --ignore-scripts
