@@ -1,3 +1,10 @@
+## [1.6.7](https://github.com/x1agent/x1agent/compare/v1.6.6...v1.6.7) (2026-05-03)
+
+
+### Bug Fixes
+
+* **agents:** show incompatible MCPs as disabled with reason, not silently hidden ([#33](https://github.com/x1agent/x1agent/issues/33)) ([63076e9](https://github.com/x1agent/x1agent/commit/63076e95eefa8b5813e6efc56ae7000620c77db1))
+
 ## [1.6.6](https://github.com/x1agent/x1agent/compare/v1.6.5...v1.6.6) (2026-05-03)
 
 
