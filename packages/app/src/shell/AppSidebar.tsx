@@ -86,11 +86,22 @@ export function AppSidebar() {
   const activeMembership = memberships.find((m) => m.slug === activeSlug);
   const otherAccounts = linkedAccounts.filter((a) => !a.is_current);
 
-  // /admin/* pages are global, not workspace-scoped — hide the
-  // workspace switcher there so the chrome reads as cluster-wide.
-  const onAdminRoute =
-    typeof window !== "undefined" &&
-    window.location.pathname.startsWith("/admin");
+  // Mode the sidebar's nav is in. Workspace pages (agents, sessions,
+  // shares, etc.) get the Platform list; the cog-driven settings area
+  // and any /admin/* page get the Admin list. The two are mutually
+  // exclusive — showing both at once was confusing because the
+  // operator never wants to action both contexts in the same click.
+  const pathname =
+    typeof window !== "undefined" ? window.location.pathname : "/";
+  const onAdminRoute = pathname.startsWith("/admin");
+  const onWorkspaceSettings = /^\/workspaces\/[^/]+\/settings(\/|$)/.test(
+    pathname,
+  );
+  const inAdminContext = onAdminRoute || onWorkspaceSettings;
+
+  // The workspace chip is a workspace-scope cue. Hide it on cluster
+  // /admin/* (no workspace there); keep it on /workspaces/.../settings
+  // since the operator is editing THAT workspace.
   const showWorkspaceChip = !!activeMembership && !onAdminRoute;
 
   const navBase = activeSlug ? `/workspaces/${activeSlug}` : "";
@@ -189,7 +200,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarBody>
-        {navItems.length > 0 && (
+        {!inAdminContext && navItems.length > 0 && (
           <div>
             <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
               Platform
@@ -208,10 +219,18 @@ export function AppSidebar() {
             </nav>
           </div>
         )}
-        {isPlatformAdmin && (
+        {/*
+          Cluster admin nav only shows on /admin/* — never on
+          /workspaces/.../settings, even if the operator is also a
+          platform admin. Mixing cluster-scope items into a workspace-
+          scope settings sidebar reads as if they're scoped to that
+          workspace. Workspace settings has its own tab bar inside the
+          page; the sidebar stays empty in that mode by design.
+        */}
+        {onAdminRoute && isPlatformAdmin && (
           <div>
-            <div className="px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
-              Admin
+            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              Platform admin
             </div>
             <nav className="flex flex-col">
               {ADMIN_NAV.map((item) => (
