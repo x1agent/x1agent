@@ -582,13 +582,23 @@ export function compose(env: CompositionEnv): Composition {
   const mcpCatalogRepo = new PostgresCatalogRepository(env.sql);
   const mcpAttachmentRepo = new PostgresAttachmentRepository(env.sql);
   const mcpOAuthClientRepo = new PostgresOAuthClientRepository(env.sql);
+  // Shared so DCR-time registration and token-exchange-time redirect_uri
+  // are byte-identical. RFC 6749 §4.1.3 rejects the exchange otherwise.
+  // Path order matches the Hono route mount: /auth/mcp/callback/:slug/:name.
+  const mcpRedirectUriFor = ({
+    workspaceSlug,
+    catalogName,
+  }: {
+    workspaceSlug: string;
+    catalogName: string;
+  }) =>
+    `${env.apiUrl}/auth/mcp/callback/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}`;
   const catalogService = new CatalogService(mcpCatalogRepo, {
     workspaceSlugFor: async (workspaceId: string) => {
       const w = await workspaces.findById(workspaceId as never);
       return w?.slug ?? null;
     },
-    redirectUriFor: ({ workspaceSlug, catalogName }) =>
-      `${env.apiUrl}/auth/mcp/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}/callback`,
+    redirectUriFor: mcpRedirectUriFor,
     cipherKey: workspaceSecretsKey,
     oauthClients: mcpOAuthClientRepo,
   });
@@ -658,8 +668,7 @@ export function compose(env: CompositionEnv): Composition {
     oauthClients: mcpOAuthClientRepo,
     userTokens: userTokenRepo,
     cipherKey: workspaceSecretsKey,
-    redirectUriFor: ({ workspaceSlug, catalogName }) =>
-      `${env.apiUrl}/auth/mcp/callback/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(catalogName)}`,
+    redirectUriFor: mcpRedirectUriFor,
     workspaceSlugFor: async (workspaceId: string) => {
       const w = await workspaces.findById(workspaceId as never);
       return w?.slug ?? null;

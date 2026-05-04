@@ -5,6 +5,11 @@ import { ValidationError } from "@x1agent/kernel";
 let originalFetch: typeof fetch;
 type FetchHandler = (url: string) => Response | Promise<Response>;
 
+// Tests use mocked fetch and reserved-name hosts, so the real DNS-based
+// SSRF guard would reject them as unresolvable. Skip the host check in
+// these unit tests; production paths use the strict default.
+const noopHostCheck = async () => {};
+
 function mockFetch(handler: FetchHandler) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -45,7 +50,9 @@ describe("discoverMcpServer", () => {
       }
       return new Response("not found", { status: 404 });
     });
-    const r = await discoverMcpServer("https://mcp.example.com/mcp");
+    const r = await discoverMcpServer("https://mcp.example.com/mcp", {
+      assertHostAllowed: noopHostCheck,
+    });
     expect(r.resource.resource).toBe("https://mcp.example.com/mcp");
     expect(r.authorizationServer.registration_endpoint).toBe(
       "https://mcp.example.com/register",
@@ -55,7 +62,7 @@ describe("discoverMcpServer", () => {
   it("rejects when resource metadata is missing", async () => {
     mockFetch(async () => new Response("not found", { status: 404 }));
     await expect(
-      discoverMcpServer("https://mcp.example.com/mcp"),
+      discoverMcpServer("https://mcp.example.com/mcp", { assertHostAllowed: noopHostCheck }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -73,7 +80,7 @@ describe("discoverMcpServer", () => {
       return new Response("not found", { status: 404 });
     });
     await expect(
-      discoverMcpServer("https://mcp.example.com/mcp"),
+      discoverMcpServer("https://mcp.example.com/mcp", { assertHostAllowed: noopHostCheck }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -90,7 +97,7 @@ describe("discoverMcpServer", () => {
       return new Response("not found", { status: 404 });
     });
     await expect(
-      discoverMcpServer("https://mcp.example.com/mcp"),
+      discoverMcpServer("https://mcp.example.com/mcp", { assertHostAllowed: noopHostCheck }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -106,7 +113,7 @@ describe("discoverMcpServer", () => {
       return new Response("not found", { status: 404 });
     });
     await expect(
-      discoverMcpServer("https://mcp.example.com/mcp"),
+      discoverMcpServer("https://mcp.example.com/mcp", { assertHostAllowed: noopHostCheck }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 

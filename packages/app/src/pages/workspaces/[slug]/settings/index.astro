@@ -1,13 +1,9 @@
 ---
-import Layout from "../../../../layouts/Layout.astro";
-import { WorkspaceSettingsRoot } from "../../../../features/workspaces/WorkspaceSettingsRoot";
-
+// /workspaces/<slug>/settings → redirect to the default leaf so the
+// sidebar always has an active item. Splash-page would feel hollow
+// when every sub-route renders something concrete.
 const { slug } = Astro.params;
+return Astro.redirect(
+  `/workspaces/${slug}/settings/infrastructure/shared-resources`,
+);
 ---
-
-<Layout title={`settings · ${slug} · x1agent`}>
-  <WorkspaceSettingsRoot
-    client:only="react"
-    workspaceSlug={slug ?? ""}
-  />
-</Layout>

@@ -29,10 +29,13 @@ export interface TokenUsageRoutesConfig {
  * Returns:
  *   {
  *     range: { since, until },
- *     totals: { ... },
- *     byAgent: [...],
- *     byModel: [...],
- *     byDay:   [...]
+ *     totals:                 { input/output/cache tokens + cost_usd },
+ *     byAgent:                [...],
+ *     byModel:                [...],
+ *     byDay:                  [...],
+ *     byTriggerSource:        [{ triggered_by: "user"|"scheduler"|"agent", … }],
+ *     byUser:                 [{ user_id, name, email, … }] (user-triggered only),
+ *     byDayByTriggerSource:   [{ day, triggered_by, … }] (drives stacked chart)
  *   }
  *
  * Admin-only — token usage maps directly to spend.

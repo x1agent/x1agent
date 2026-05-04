@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import type { UserMcpToken } from "../../domain/user-token.js";
 import type {
   OAuthFlowState,
@@ -31,6 +32,49 @@ export interface OAuthRoutesConfig {
 }
 
 const FLOW_COOKIE_PREFIX = "x1_mcp_oauth_";
+
+/**
+ * Catalog names are validated by CatalogName() to `[a-z][a-z0-9_-]{0,63}`,
+ * but the Hono route reads the raw URL param. Re-check before we use it
+ * as part of a cookie key — anything outside this set risks malformed
+ * Set-Cookie headers (browser drops the cookie → flow always fails) or
+ * collision with a different MCP's flow cookie.
+ */
+const COOKIE_SAFE_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
+function flowCookieName(catalogName: string): string | null {
+  if (!COOKIE_SAFE_NAME_RE.test(catalogName)) return null;
+  return `${FLOW_COOKIE_PREFIX}${catalogName}`;
+}
+
+/**
+ * Resolve the `return_to` query param against the app origin and reject
+ * any URL that doesn't end up same-origin with appUrl. Phishing primitive
+ * if we let an attacker pick the post-callback redirect target — they
+ * could send a real x1agent OAuth link that bounces the user to evil.tld
+ * after a successful provider consent.
+ *
+ * Returns null when `raw` is unsafe; the caller falls back to the default.
+ */
+function safeReturnTo(raw: string | undefined, appUrl: string): string | null {
+  if (!raw) return null;
+  let app: URL;
+  try {
+    app = new URL(appUrl);
+  } catch {
+    return null;
+  }
+  let candidate: URL;
+  try {
+    // Resolve relatively against appUrl so a bare path ("/foo") becomes
+    // appUrl/foo. Anything absolute keeps its own origin.
+    candidate = new URL(raw, appUrl);
+  } catch {
+    return null;
+  }
+  if (candidate.origin !== app.origin) return null;
+  return candidate.toString();
+}
 
 function tokenToJson(t: UserMcpToken) {
   return {
@@ -71,9 +115,13 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
       const workspaceId = c.get("workspaceId") as string;
       const userId = c.get("userId") as string | null;
       if (!userId) return c.json({ error: "unauthenticated" }, 401);
+      const cookieName = flowCookieName(name);
+      if (!cookieName) {
+        return c.json({ error: "invalid catalog name" }, 400);
+      }
+      const defaultReturnTo = `${cfg.appUrl}/workspaces/${slug}`;
       const returnTo =
-        c.req.query("return_to") ??
-        `${cfg.appUrl}/workspaces/${slug}`;
+        safeReturnTo(c.req.query("return_to"), cfg.appUrl) ?? defaultReturnTo;
       try {
         const start = await cfg.service.start({
           workspaceId,
@@ -85,18 +133,13 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
         // Cookie is short-lived (5 min) — flow should complete inside
         // that window. SameSite=Lax so the provider redirect carries
         // the cookie back; HttpOnly so the LLM can't read it.
-        const cookieName = `${FLOW_COOKIE_PREFIX}${name}`;
-        c.header(
-          "Set-Cookie",
-          [
-            `${cookieName}=${flowToken}`,
-            "Path=/",
-            "HttpOnly",
-            "SameSite=Lax",
-            "Max-Age=300",
-            "Secure",
-          ].join("; "),
-        );
+        setCookie(c, cookieName, flowToken, {
+          path: "/",
+          httpOnly: true,
+          sameSite: "Lax",
+          maxAge: 300,
+          secure: true,
+        });
         return c.redirect(start.authorizeUrl, 302);
       } catch (err) {
         const e = err as { field?: string; message?: string };
@@ -122,25 +165,40 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
       const workspaceId = c.get("workspaceId") as string;
       const userId = c.get("userId") as string | null;
       if (!userId) return c.json({ error: "unauthenticated" }, 401);
+      const cookieName = flowCookieName(name);
+      if (!cookieName) {
+        return c.html(
+          renderErrorPage("Invalid catalog name", slug, cfg.appUrl),
+        );
+      }
+      // Wipe the flow cookie regardless of which exit path we take below.
+      // Even an invalid_grant from the provider should not leave a
+      // replayable flow JWT in the user's browser.
+      const wipeFlowCookie = () =>
+        setCookie(c, cookieName, "", {
+          path: "/",
+          httpOnly: true,
+          sameSite: "Lax",
+          maxAge: 0,
+          secure: true,
+        });
+
       const code = c.req.query("code");
       const state = c.req.query("state");
       const error = c.req.query("error");
       if (error) {
+        wipeFlowCookie();
         return c.html(
           renderErrorPage(`Provider returned: ${error}`, slug, cfg.appUrl),
         );
       }
       if (!code || !state) {
+        wipeFlowCookie();
         return c.html(
           renderErrorPage("Provider redirect missing code or state", slug, cfg.appUrl),
         );
       }
-      const cookieName = `${FLOW_COOKIE_PREFIX}${name}`;
-      const cookieHeader = c.req.header("Cookie") ?? "";
-      const match = cookieHeader.match(
-        new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
-      );
-      const flowToken = match?.[1];
+      const flowToken = getCookie(c, cookieName);
       if (!flowToken) {
         return c.html(
           renderErrorPage(
@@ -152,8 +210,22 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
       }
       const flowState = cfg.verifyFlowState(flowToken);
       if (!flowState) {
+        wipeFlowCookie();
         return c.html(
           renderErrorPage("OAuth flow state failed to verify", slug, cfg.appUrl),
+        );
+      }
+      // Bind the callback to the same workspace the start flow was in.
+      // The catalog-id check downstream catches most cross-workspace
+      // confusion, but checking here is cheaper and clearer.
+      if (flowState.workspaceId !== workspaceId) {
+        wipeFlowCookie();
+        return c.html(
+          renderErrorPage(
+            "OAuth callback workspace does not match the workspace the flow started in",
+            slug,
+            cfg.appUrl,
+          ),
         );
       }
       try {
@@ -165,24 +237,35 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
           state,
           flowState,
         });
-        // Wipe the flow cookie so it can't be replayed.
-        c.header(
-          "Set-Cookie",
-          [
-            `${cookieName}=`,
-            "Path=/",
-            "HttpOnly",
-            "SameSite=Lax",
-            "Max-Age=0",
-            "Secure",
-          ].join("; "),
-        );
-        return c.redirect(flowState.returnTo, 302);
+        wipeFlowCookie();
+        // Defense-in-depth: re-validate the persisted return_to. It was
+        // checked at /start, but we don't trust the signed state to carry
+        // forward an old policy. Fall back to the workspace home if the
+        // stored value is no longer same-origin.
+        const safeReturn =
+          safeReturnTo(flowState.returnTo, cfg.appUrl) ??
+          `${cfg.appUrl}/workspaces/${slug}`;
+        return c.redirect(safeReturn, 302);
       } catch (err) {
+        // Don't echo upstream provider response bodies to the browser —
+        // 4xx debug payloads sometimes contain submitted secrets, and
+        // stack-shaped errors leak internal detail. Log server-side,
+        // show a generic message client-side.
+        wipeFlowCookie();
         const e = err as { field?: string; message?: string };
+        console.warn(
+          "[mcp-oauth] token exchange failed",
+          {
+            slug,
+            name,
+            userId,
+            field: e.field ?? null,
+            message: e.message ?? "unknown",
+          },
+        );
         return c.html(
           renderErrorPage(
-            `Token exchange failed: ${e.message ?? "unknown"}`,
+            "Token exchange failed. Try connecting again, or contact your workspace admin if it persists.",
             slug,
             cfg.appUrl,
           ),
@@ -239,9 +322,15 @@ function renderErrorPage(
   appUrl: string,
 ): string {
   // Plain HTML — no template engine, no XSS surface beyond the message
-  // we control. Escape the slug + message defensively.
+  // we control. Escape for both element-content AND attribute-value
+  // contexts because slug/appUrl are interpolated into an href below.
   const safe = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   return `<!doctype html>
 <html><head><title>OAuth flow failed</title></head>
 <body style="font-family: system-ui; padding: 2rem; max-width: 32rem;">

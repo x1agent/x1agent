@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import { useConfirm } from "../../components/use-confirm";
 
 /**
  * Workspace environment variables / secrets panel.
@@ -50,6 +51,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   async function load() {
     setLoading(true);
@@ -103,7 +105,12 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
 
   async function onDelete(rowName: string) {
     if (!canManage) return;
-    if (!confirm(`Delete secret ${rowName}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete secret ${rowName}?`,
+      description: "This cannot be undone.",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await apiFetch(`/api/workspaces/${slug}/secrets/${rowName}`, {
@@ -144,6 +151,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
 
   return (
     <div className="space-y-4">
+      {dialog}
       <Card>
         <CardHeader>
           <CardTitle>Environment variables</CardTitle>

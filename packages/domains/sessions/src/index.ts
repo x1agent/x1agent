@@ -31,6 +31,7 @@ export type {
 export * from "./application/trigger-session.js";
 export * from "./application/list-sessions.js";
 export * from "./application/cancel-session.js";
+export * from "./application/delete-sessions.js";
 export * from "./application/schedule-due-sessions.js";
 export * from "./application/next-due.js";
 export * from "./application/append-session-event.js";
@@ -43,7 +44,11 @@ export * from "./application/manage-session-shares.js";
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";
 export { PostgresSessionEventRepository } from "./adapters/postgres/postgres-session-event-repository.js";
-export { PostgresTokenUsageRepository } from "./adapters/postgres/postgres-token-usage-repository.js";
+export {
+  PostgresTokenUsageRepository,
+  tierDefaultPrices,
+  type PriceOverride,
+} from "./adapters/postgres/postgres-token-usage-repository.js";
 export { PostgresSessionShareRepository } from "./adapters/postgres/postgres-session-share-repository.js";
 export {
   createSessionRoutes,

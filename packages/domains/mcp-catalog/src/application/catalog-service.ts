@@ -34,8 +34,10 @@ const COMMAND_RE = /^[A-Za-z0-9_./-]{1,64}$/;
  * `redirectUriFor` builds the OAuth callback URL the api will receive
  * the authorization code at. We thread this through as a function (not
  * a string) because it's per-catalog-entry: callbacks are routed as
- * `/auth/mcp/<workspace-slug>/<catalog-name>/callback`. The api root
- * URL is composition-known, so the api wires this up.
+ * `/auth/mcp/callback/<workspace-slug>/<catalog-name>`. The api root
+ * URL is composition-known, so the api wires this up. The exact same
+ * builder MUST be used at code-exchange time; RFC 6749 §4.1.3 requires
+ * the two redirect_uri values to be byte-identical.
  *
  * `cipherKey` + `oauthClients` enable encryption of the DCR-issued
  * client_secret. We import the cipher from workspace-secrets to avoid
@@ -247,6 +249,7 @@ export class CatalogService {
     await this.remoteOAuth.oauthClients.upsert({
       catalogEntryId: entry.id,
       clientId: registered.clientId,
+      tokenEndpointAuthMethod: registered.tokenEndpointAuthMethod,
       ciphertext: blob.ciphertext,
       nonce: blob.nonce,
       authTag: blob.authTag,

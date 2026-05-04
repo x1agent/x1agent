@@ -48,6 +48,10 @@ export interface RegisterClientInput {
 export interface RegisteredClient {
   clientId: string;
   clientSecret: string;
+  /** The token-endpoint auth method DCR was registered with — must be
+   * the same method used at every code-exchange/refresh. RFC 6749
+   * §2.3.1 lets the server pick which method it accepts. */
+  tokenEndpointAuthMethod: "client_secret_basic" | "client_secret_post";
 }
 
 export async function registerOAuthClient(
@@ -141,5 +145,8 @@ export async function registerOAuthClient(
   return {
     clientId: parsed.client_id,
     clientSecret: parsed.client_secret,
+    tokenEndpointAuthMethod: tokenAuth as
+      | "client_secret_basic"
+      | "client_secret_post",
   };
 }

@@ -85,10 +85,18 @@ export interface TokenResponse {
   scope?: string;
 }
 
+export type TokenEndpointAuthMethod =
+  | "client_secret_basic"
+  | "client_secret_post";
+
 export interface ExchangeCodeInput {
   authorizationServer: AuthorizationServerMetadata;
   clientId: string;
   clientSecret: string;
+  /** Method DCR registered the client with — must be honored at every
+   * token endpoint call. Servers that registered _post will reject the
+   * Basic header, and vice versa. */
+  authMethod: TokenEndpointAuthMethod;
   redirectUri: string;
   code: string;
   codeVerifier: string;
@@ -114,11 +122,42 @@ async function postForm(
   });
 }
 
+/**
+ * RFC 6749 §2.3.1 + RFC 6749 Appendix B: Basic auth credentials at the
+ * token endpoint are application/x-www-form-urlencoded-encoded *then*
+ * base64-encoded. URLSearchParams produces the right encoding (treats
+ * `!*'()` correctly, unlike encodeURIComponent).
+ */
 function basicAuth(clientId: string, clientSecret: string): string {
+  const encoded = (s: string) =>
+    new URLSearchParams({ v: s }).toString().slice(2); // strip "v="
   return (
     "Basic " +
-    Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`).toString("base64")
+    Buffer.from(`${encoded(clientId)}:${encoded(clientSecret)}`).toString(
+      "base64",
+    )
   );
+}
+
+/**
+ * Apply the negotiated token-endpoint auth method to the outgoing
+ * request. `client_secret_basic` puts credentials in the Authorization
+ * header; `client_secret_post` puts them in the form body. The two are
+ * not interchangeable — servers reject whichever one they didn't
+ * register for.
+ */
+function applyAuth(
+  authMethod: TokenEndpointAuthMethod,
+  body: URLSearchParams,
+  clientId: string,
+  clientSecret: string,
+): { authHeader: string | null } {
+  if (authMethod === "client_secret_post") {
+    body.set("client_id", clientId);
+    body.set("client_secret", clientSecret);
+    return { authHeader: null };
+  }
+  return { authHeader: basicAuth(clientId, clientSecret) };
 }
 
 export async function exchangeCodeForTokens(
@@ -130,20 +169,23 @@ export async function exchangeCodeForTokens(
     redirect_uri: input.redirectUri,
     code_verifier: input.codeVerifier,
   });
-  // We registered with token_endpoint_auth_method=client_secret_basic
-  // (or fell back to _post). Send credentials in the Authorization
-  // header per the basic method; servers that want _post will accept
-  // it as well in practice.
+  const { authHeader } = applyAuth(
+    input.authMethod,
+    body,
+    input.clientId,
+    input.clientSecret,
+  );
   const res = await postForm(
     input.authorizationServer.token_endpoint,
     body,
-    basicAuth(input.clientId, input.clientSecret),
+    authHeader,
   );
   if (!res.ok) {
-    const txt = await safeText(res);
+    // Don't surface upstream body — auth servers sometimes echo
+    // submitted secrets in 4xx debug payloads. Caller logs internally.
     throw new ValidationError(
       "token",
-      `code exchange failed: HTTP ${res.status}${txt ? `: ${txt}` : ""}`,
+      `code exchange failed: HTTP ${res.status}`,
     );
   }
   const parsed = (await res.json()) as TokenResponse;
@@ -157,6 +199,7 @@ export interface RefreshTokensInput {
   authorizationServer: AuthorizationServerMetadata;
   clientId: string;
   clientSecret: string;
+  authMethod: TokenEndpointAuthMethod;
   refreshToken: string;
 }
 
@@ -167,16 +210,21 @@ export async function refreshAccessToken(
     grant_type: "refresh_token",
     refresh_token: input.refreshToken,
   });
+  const { authHeader } = applyAuth(
+    input.authMethod,
+    body,
+    input.clientId,
+    input.clientSecret,
+  );
   const res = await postForm(
     input.authorizationServer.token_endpoint,
     body,
-    basicAuth(input.clientId, input.clientSecret),
+    authHeader,
   );
   if (!res.ok) {
-    const txt = await safeText(res);
     throw new ValidationError(
       "refresh_token",
-      `refresh failed: HTTP ${res.status}${txt ? `: ${txt}` : ""}`,
+      `refresh failed: HTTP ${res.status}`,
     );
   }
   const parsed = (await res.json()) as TokenResponse;
@@ -189,10 +237,3 @@ export async function refreshAccessToken(
   return parsed;
 }
 
-async function safeText(res: Response): Promise<string> {
-  try {
-    return (await res.text()).slice(0, 256);
-  } catch {
-    return "";
-  }
-}

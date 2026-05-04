@@ -3,12 +3,19 @@
 # to a GSA with secretmanager.secretAccessor so pods can reach GSM via
 # ESO ClusterSecretStore.
 #
-# The SA + Role + RoleBinding are pre-install/pre-upgrade hooks (weight
-# -20) so they exist before the pre-upgrade migrate Job (weight -5) gets
-# admitted — without this the Job's ReplicaSet controller fails with
-# "serviceaccount x1agent-api not found" on a fresh install.
-# `before-hook-creation` (default delete policy) safely re-creates these
-# on each upgrade — pod-mounted SA tokens survive the brief gap.
+# These are REGULAR release resources, not helm hooks. An earlier shape
+# made them pre-install/pre-upgrade with `before-hook-creation` so the
+# (then pre-upgrade) migrate Job could find the SA — that ordering bug
+# went away when migrate-job.yaml moved to post-install,post-upgrade.
+#
+# Why dropping the hooks matters: hook lifecycle DELETES the SA on
+# every helm upgrade before re-creating it. A new SA gets a new UID,
+# which silently invalidates every projected token already mounted in
+# running api pods. The next call to the kube-apiserver (e.g. minting
+# a Zone-3 OAuth bearer Secret at session-launch) returns HTTP 401
+# until the api pod restarts. Apply order on a fresh install is still
+# correct — regular manifests apply before post-install hooks, so the
+# migrate Job finds the SA when it goes to mount it.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -16,19 +23,12 @@ metadata:
   labels: {{- include "x1agent.labels" . | nindent 4 }}
   annotations:
     iam.gke.io/gcp-service-account: {{ .Values.cloud.gcp.workloadIdentityServiceAccount | quote }}
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ .Values.api.serviceAccountName }}
   labels: {{- include "x1agent.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs", "jobs/status"]
@@ -48,10 +48,6 @@ kind: RoleBinding
 metadata:
   name: {{ .Values.api.serviceAccountName }}
   labels: {{- include "x1agent.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

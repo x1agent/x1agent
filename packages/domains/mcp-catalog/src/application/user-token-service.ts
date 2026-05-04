@@ -25,6 +25,10 @@ export interface OAuthFlowState {
   codeVerifier: string;
   /** The catalog entry being authorized. */
   catalogEntryId: string;
+  /** The workspace the flow started in. Bound here so the callback
+   * route can refuse a cross-workspace replay even if the catalog id
+   * happens to collide. */
+  workspaceId: string;
   /** The user we're authorizing for. Locked at start time so the
    * callback can't be hijacked into another session. */
   userId: string;
@@ -118,6 +122,7 @@ export class UserTokenService {
       state,
       codeVerifier: pkce.codeVerifier,
       catalogEntryId: entry.id,
+      workspaceId: input.workspaceId,
       userId: input.userId,
       returnTo: input.returnTo,
     };
@@ -171,6 +176,7 @@ export class UserTokenService {
       authorizationServer: entry.oauthAuthorizationServer as never,
       clientId: oauthClient.clientId,
       clientSecret,
+      authMethod: oauthClient.tokenEndpointAuthMethod,
       redirectUri,
       code: input.code,
       codeVerifier: input.flowState.codeVerifier,
@@ -242,8 +248,15 @@ export class UserTokenService {
         authorizationServer: entry.oauthAuthorizationServer as never,
         clientId: oauthClient.clientId,
         clientSecret,
+        authMethod: oauthClient.tokenEndpointAuthMethod,
         refreshToken,
       });
+      // Some providers omit `expires_in` from refresh responses (legal
+       // per RFC 6749 §5.1). If we wrote `null` we'd treat the cached
+       // access token as never-expiring and ride it past its real death.
+       // Default to 1h — short enough that we'll re-refresh well before
+       // most providers' real TTLs (which range 1h–24h+).
+      const REFRESH_FALLBACK_EXPIRES_IN_S = 3600;
       const persisted = await this.persistTokens({
         userId: input.userId,
         catalogEntryId: entry.id,
@@ -251,7 +264,7 @@ export class UserTokenService {
         // Some providers rotate the refresh token; persist the new
         // one when present, otherwise keep the old one.
         refreshToken: refreshed.refresh_token ?? refreshToken,
-        expiresIn: refreshed.expires_in ?? null,
+        expiresIn: refreshed.expires_in ?? REFRESH_FALLBACK_EXPIRES_IN_S,
         scope: refreshed.scope ?? blob.scope,
       });
       return {

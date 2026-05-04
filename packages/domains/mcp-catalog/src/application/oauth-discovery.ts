@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { ValidationError } from "@x1agent/kernel";
 
 /**
@@ -47,36 +49,149 @@ export interface DiscoveryResult {
 }
 
 const FETCH_TIMEOUT_MS = 5_000;
+const MAX_REDIRECTS = 5;
 
-async function fetchJson<T>(url: string, label: string): Promise<T> {
+/**
+ * Block private + reserved address ranges. Operator input drives these
+ * fetches; without this, an attacker (or a confused operator) can pivot
+ * the api pod into reading the cloud metadata service or other internal
+ * hosts (`169.254.169.254` on AWS/GCP, `fd00::/8` for ULA, etc.).
+ *
+ * RFC 1918 + RFC 4193 + RFC 3927 + RFC 4291 + RFC 6890 ranges. Errs on
+ * the side of rejection — there's no legitimate MCP server reachable
+ * only at a link-local address.
+ */
+function isBlockedAddress(addr: string): boolean {
+  if (isIP(addr) === 4) {
+    const parts = addr.split(".").map((p) => Number.parseInt(p, 10));
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true;
+    const [a, b] = parts as [number, number, number, number];
+    if (a === 10) return true;                               // 10.0.0.0/8
+    if (a === 127) return true;                              // 127.0.0.0/8
+    if (a === 169 && b === 254) return true;                 // link-local + AWS/GCP metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;        // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;                 // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true;       // 100.64.0.0/10 CGNAT
+    if (a === 0) return true;                                // 0.0.0.0/8
+    if (a >= 224) return true;                               // multicast + reserved
+    return false;
+  }
+  if (isIP(addr) === 6) {
+    const lower = addr.toLowerCase();
+    if (lower === "::1") return true;                        // loopback
+    if (lower === "::") return true;                         // unspecified
+    if (lower.startsWith("fe80:")) return true;              // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA
+    if (lower.startsWith("ff")) return true;                 // multicast
+    // IPv4-mapped (::ffff:a.b.c.d)
+    const mapped = lower.match(/^::ffff:([\d.]+)$/);
+    if (mapped && mapped[1]) return isBlockedAddress(mapped[1]);
+    return false;
+  }
+  return false;
+}
+
+/** Resolve hostname and reject if any A/AAAA record is in a blocked range. */
+async function assertHostIsPublic(rawUrl: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new ValidationError("url", `invalid URL: ${rawUrl}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new ValidationError("url", "must be http or https");
+  }
+  // Strip brackets from IPv6 literals.
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "ip6-localhost") {
+    throw new ValidationError("url", "localhost is not a valid MCP server");
+  }
+  // If the host is already an IP literal, check it directly. Otherwise
+  // resolve and check every record. Reject if anything resolves into a
+  // blocked range — defense against DNS rebinding pointing at multiple
+  // addresses.
+  if (isIP(host)) {
+    if (isBlockedAddress(host)) {
+      throw new ValidationError(
+        "url",
+        "MCP server resolves to a private or reserved address",
+      );
+    }
+    return;
+  }
+  let addrs: { address: string }[];
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch (err) {
+    throw new ValidationError(
+      "url",
+      `DNS lookup failed for ${host}: ${(err as Error).message}`,
+    );
+  }
+  for (const a of addrs) {
+    if (isBlockedAddress(a.address)) {
+      throw new ValidationError(
+        "url",
+        `MCP server resolves to a private or reserved address (${a.address})`,
+      );
+    }
+  }
+}
+
+async function fetchJson<T>(
+  url: string,
+  label: string,
+  checkHost: (u: string) => Promise<void>,
+): Promise<T> {
+  // Walk redirects manually so we can re-validate the host at every hop.
+  // Default `redirect: "follow"` would let an attacker host a public URL
+  // that 302s into 169.254.169.254 — we'd never see the final hop.
+  let current = url;
   let res: Response;
-  try {
-    res = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { Accept: "application/json" },
-    });
-  } catch (err) {
-    throw new ValidationError(
-      "url",
-      `${label} fetch failed: ${(err as Error).message}`,
-    );
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await checkHost(current);
+    try {
+      res = await fetch(current, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        headers: { Accept: "application/json" },
+        redirect: "manual",
+      });
+    } catch (err) {
+      throw new ValidationError(
+        "url",
+        `${label} fetch failed: ${(err as Error).message}`,
+      );
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const next = res.headers.get("location");
+      if (!next) {
+        throw new ValidationError(
+          "url",
+          `${label} returned ${res.status} with no Location header`,
+        );
+      }
+      current = new URL(next, current).toString();
+      continue;
+    }
+    if (!res.ok) {
+      throw new ValidationError(
+        "url",
+        `${label} returned HTTP ${res.status} (expected 200)`,
+      );
+    }
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch (err) {
+      throw new ValidationError(
+        "url",
+        `${label} returned non-JSON: ${(err as Error).message}`,
+      );
+    }
+    return body as T;
   }
-  if (!res.ok) {
-    throw new ValidationError(
-      "url",
-      `${label} returned HTTP ${res.status} (expected 200)`,
-    );
-  }
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch (err) {
-    throw new ValidationError(
-      "url",
-      `${label} returned non-JSON: ${(err as Error).message}`,
-    );
-  }
-  return body as T;
+  throw new ValidationError("url", `${label} too many redirects`);
 }
 
 function trimTrailingSlash(s: string): string {
@@ -96,17 +211,36 @@ function trimTrailingSlash(s: string): string {
  * `/.well-known/...` path at the origin root rather than at the
  * resource path. We try both shapes for robustness.
  */
+/**
+ * Test seam: production calls `assertHostIsPublic`, which does a real
+ * DNS lookup and refuses RFC1918 / link-local / metadata addresses.
+ * Tests pass `assertHostAllowed: async () => {}` to skip the check
+ * since they mock `fetch` at the URL layer.
+ *
+ * Do NOT skip this in production code paths — the SSRF guard is
+ * load-bearing.
+ */
+export interface DiscoveryOptions {
+  assertHostAllowed?: (url: string) => Promise<void>;
+}
+
 export async function discoverMcpServer(
   inputUrl: string,
+  options: DiscoveryOptions = {},
 ): Promise<DiscoveryResult> {
+  const checkHost = options.assertHostAllowed ?? assertHostIsPublic;
   let parsed: URL;
   try {
     parsed = new URL(inputUrl);
   } catch {
     throw new ValidationError("url", "must be a valid URL");
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new ValidationError("url", "must be http or https");
+  // Require https for OAuth — credentials and authorize redirects must
+  // not ride over plaintext. Real MCP providers (Mercury, Notion, etc.)
+  // are all https; the only reason to allow http would be a local-dev
+  // shim, and that's better solved with a self-signed cert.
+  if (parsed.protocol !== "https:") {
+    throw new ValidationError("url", "must use https");
   }
 
   // Resource metadata: try the resource-path well-known first
@@ -125,6 +259,7 @@ export async function discoverMcpServer(
       resource = await fetchJson<ProtectedResourceMetadata>(
         candidate,
         "protected-resource metadata",
+        checkHost,
       );
       break;
     } catch (err) {
@@ -148,7 +283,26 @@ export async function discoverMcpServer(
     );
   }
 
-  const authServerUrl = trimTrailingSlash(resource.authorization_servers[0]!);
+  const rawAuthServerUrl = resource.authorization_servers[0]!;
+  // Validate the URL the resource handed us. The `assertHostIsPublic`
+  // call inside fetchJson covers SSRF for the actual fetch, but bad
+  // shape (non-https, file://, etc.) should fail fast.
+  let authServerParsed: URL;
+  try {
+    authServerParsed = new URL(rawAuthServerUrl);
+  } catch {
+    throw new ValidationError(
+      "url",
+      `protected-resource metadata authorization_servers[0] is not a valid URL: ${rawAuthServerUrl}`,
+    );
+  }
+  if (authServerParsed.protocol !== "https:") {
+    throw new ValidationError(
+      "url",
+      "authorization server URL must use https",
+    );
+  }
+  const authServerUrl = trimTrailingSlash(rawAuthServerUrl);
   const authServerCandidates = [
     `${authServerUrl}/.well-known/oauth-authorization-server`,
     // OIDC discovery fallback some servers use:
@@ -162,6 +316,7 @@ export async function discoverMcpServer(
       authServer = await fetchJson<AuthorizationServerMetadata>(
         candidate,
         "authorization-server metadata",
+        checkHost,
       );
       break;
     } catch (err) {

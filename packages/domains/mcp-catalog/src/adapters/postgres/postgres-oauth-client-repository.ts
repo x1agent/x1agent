@@ -2,6 +2,7 @@ import type postgres from "postgres";
 import type {
   EncryptedOAuthClientBlob,
   OAuthClientRepository,
+  TokenEndpointAuthMethod,
 } from "../../ports/oauth-client-repository.js";
 
 interface OAuthClientRow {
@@ -10,6 +11,15 @@ interface OAuthClientRow {
   client_secret_ciphertext: Uint8Array;
   client_secret_nonce: Uint8Array;
   client_secret_auth_tag: Uint8Array;
+  token_endpoint_auth_method: string;
+}
+
+function parseAuthMethod(raw: string): TokenEndpointAuthMethod {
+  // Migrations default to client_secret_basic; anything else we wrote
+  // ourselves matches the union exactly. Defensive cast for old rows.
+  return raw === "client_secret_post"
+    ? "client_secret_post"
+    : "client_secret_basic";
 }
 
 export class PostgresOAuthClientRepository implements OAuthClientRepository {
@@ -19,19 +29,22 @@ export class PostgresOAuthClientRepository implements OAuthClientRepository {
     await this.sql`
       INSERT INTO mcp_oauth_clients
         (catalog_entry_id, client_id,
-         client_secret_ciphertext, client_secret_nonce, client_secret_auth_tag)
+         client_secret_ciphertext, client_secret_nonce, client_secret_auth_tag,
+         token_endpoint_auth_method)
       VALUES (
         ${input.catalogEntryId},
         ${input.clientId},
         ${Buffer.from(input.ciphertext) as unknown as Uint8Array},
         ${Buffer.from(input.nonce) as unknown as Uint8Array},
-        ${Buffer.from(input.authTag) as unknown as Uint8Array}
+        ${Buffer.from(input.authTag) as unknown as Uint8Array},
+        ${input.tokenEndpointAuthMethod}
       )
       ON CONFLICT (catalog_entry_id) DO UPDATE SET
         client_id = EXCLUDED.client_id,
         client_secret_ciphertext = EXCLUDED.client_secret_ciphertext,
         client_secret_nonce = EXCLUDED.client_secret_nonce,
         client_secret_auth_tag = EXCLUDED.client_secret_auth_tag,
+        token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method,
         registered_at = now()
     `;
   }
@@ -41,7 +54,8 @@ export class PostgresOAuthClientRepository implements OAuthClientRepository {
   ): Promise<EncryptedOAuthClientBlob | null> {
     const [row] = await this.sql<OAuthClientRow[]>`
       SELECT catalog_entry_id, client_id,
-             client_secret_ciphertext, client_secret_nonce, client_secret_auth_tag
+             client_secret_ciphertext, client_secret_nonce, client_secret_auth_tag,
+             token_endpoint_auth_method
       FROM mcp_oauth_clients
       WHERE catalog_entry_id = ${catalogEntryId}
     `;
@@ -49,6 +63,7 @@ export class PostgresOAuthClientRepository implements OAuthClientRepository {
     return {
       catalogEntryId: row.catalog_entry_id,
       clientId: row.client_id,
+      tokenEndpointAuthMethod: parseAuthMethod(row.token_endpoint_auth_method),
       ciphertext: new Uint8Array(row.client_secret_ciphertext),
       nonce: new Uint8Array(row.client_secret_nonce),
       authTag: new Uint8Array(row.client_secret_auth_tag),
