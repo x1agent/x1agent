@@ -5,6 +5,7 @@ import {
   Database,
   FileText,
   LayoutDashboard,
+  LayoutGrid,
   LogOut,
   MoreVertical,
   Play,
@@ -350,11 +351,37 @@ function WorkspaceSettingsNav({
   currentPath: string;
 }) {
   const active = leafFromPathname(currentPath);
+  // Overview is the index route — match it explicitly so the active
+  // accent appears on the right item when no sub-path is in the URL.
+  const overviewHref = `/workspaces/${workspaceSlug}/settings`;
+  const isOverview =
+    currentPath === overviewHref || currentPath === `${overviewHref}/`;
+
   return (
     <div className="space-y-3">
       <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
         Workspace settings
       </div>
+      <nav className="flex flex-col">
+        <a
+          href={overviewHref}
+          className={`relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+            isOverview
+              ? "bg-zinc-900 text-zinc-50"
+              : "text-zinc-300 hover:bg-zinc-900/60 hover:text-zinc-100"
+          }`}
+          aria-current={isOverview ? "page" : undefined}
+        >
+          {isOverview && (
+            <span
+              className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-zinc-100"
+              aria-hidden="true"
+            />
+          )}
+          <LayoutGrid className="size-4" />
+          <span>Overview</span>
+        </a>
+      </nav>
       {WORKSPACE_SETTINGS_NAV.map((section) => (
         <div key={section.title} className="space-y-0.5">
           <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
