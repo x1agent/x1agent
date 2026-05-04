@@ -4,7 +4,18 @@ import type {
   TokenUsageByUser,
   TriggerSource,
 } from "../../ports/token-usage-repository.js";
-import { estimateUsdCost } from "./postgres-token-usage-repository.js";
+import {
+  estimateUsdCost,
+  type PriceOverride,
+} from "./postgres-token-usage-repository.js";
+
+/**
+ * Lookup the admin-saved price override for a model id. Empty when
+ * no overrides have been saved (e.g. fresh install) — every model
+ * lands on the tier-classifier default at cost-compute time.
+ */
+export type PriceOverrideMap = ReadonlyMap<string, PriceOverride>;
+const NO_OVERRIDES: PriceOverrideMap = new Map();
 
 /**
  * Pure collapse helpers used by the postgres token-usage adapter.
@@ -68,12 +79,13 @@ function intoCounts(r: CountRow) {
 
 export function collapseByTriggerSource(
   rows: readonly RawTriggerSourceRow[],
+  overrides: PriceOverrideMap = NO_OVERRIDES,
 ): TokenUsageByTriggerSource[] {
   const map = new Map<TriggerSource, TokenUsageByTriggerSource>();
   for (const r of rows) {
     const triggeredBy = asTriggerSource(r.triggered_by);
     const counts = intoCounts(r);
-    const cost = estimateUsdCost(counts);
+    const cost = estimateUsdCost(counts, overrides.get(counts.model));
     const existing = map.get(triggeredBy);
     if (existing) {
       existing.inputTokens += counts.input_tokens;
@@ -97,11 +109,14 @@ export function collapseByTriggerSource(
   );
 }
 
-export function collapseByUser(rows: readonly RawUserRow[]): TokenUsageByUser[] {
+export function collapseByUser(
+  rows: readonly RawUserRow[],
+  overrides: PriceOverrideMap = NO_OVERRIDES,
+): TokenUsageByUser[] {
   const map = new Map<string, TokenUsageByUser>();
   for (const r of rows) {
     const counts = intoCounts(r);
-    const cost = estimateUsdCost(counts);
+    const cost = estimateUsdCost(counts, overrides.get(counts.model));
     const existing = map.get(r.user_id);
     if (existing) {
       existing.inputTokens += counts.input_tokens;
@@ -129,13 +144,14 @@ export function collapseByUser(rows: readonly RawUserRow[]): TokenUsageByUser[] 
 
 export function collapseByDayByTriggerSource(
   rows: readonly RawDayTriggerRow[],
+  overrides: PriceOverrideMap = NO_OVERRIDES,
 ): TokenUsageByDayByTriggerSource[] {
   const map = new Map<string, TokenUsageByDayByTriggerSource>();
   for (const r of rows) {
     const triggeredBy = asTriggerSource(r.triggered_by);
     const key = `${r.day}|${triggeredBy}`;
     const counts = intoCounts(r);
-    const cost = estimateUsdCost(counts);
+    const cost = estimateUsdCost(counts, overrides.get(counts.model));
     const existing = map.get(key);
     if (existing) {
       existing.inputTokens += counts.input_tokens;

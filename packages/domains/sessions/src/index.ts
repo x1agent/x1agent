@@ -44,7 +44,11 @@ export * from "./application/manage-session-shares.js";
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";
 export { PostgresSessionEventRepository } from "./adapters/postgres/postgres-session-event-repository.js";
-export { PostgresTokenUsageRepository } from "./adapters/postgres/postgres-token-usage-repository.js";
+export {
+  PostgresTokenUsageRepository,
+  tierDefaultPrices,
+  type PriceOverride,
+} from "./adapters/postgres/postgres-token-usage-repository.js";
 export { PostgresSessionShareRepository } from "./adapters/postgres/postgres-session-share-repository.js";
 export {
   createSessionRoutes,

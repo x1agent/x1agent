@@ -75,6 +75,89 @@ describe("estimateUsdCost — tier dispatch", () => {
   });
 });
 
+describe("estimateUsdCost — admin price overrides", () => {
+  // 1M sonnet input at default = $3. With an override pinning input
+  // at $99/M, same row → $99. Use a concrete number so the test
+  // fails loudly if override plumbing breaks.
+  it("uses the override input rate when provided", () => {
+    expect(
+      estimateUsdCost(
+        {
+          model: "claude-sonnet-4-5",
+          input_tokens: 1_000_000,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+        {
+          inputPerMillion: 99,
+          outputPerMillion: null,
+          cacheReadMultiplier: null,
+          cacheWriteMultiplier: null,
+        },
+      ),
+    ).toBeCloseTo(99, 6);
+  });
+
+  it("override fields independently fall back to tier defaults when null", () => {
+    // Pin output to $100/M, leave input + cache to default sonnet.
+    // 1M input ($3) + 1M output ($100) = $103.
+    expect(
+      estimateUsdCost(
+        {
+          model: "claude-sonnet-4-5",
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+        {
+          inputPerMillion: null,
+          outputPerMillion: 100,
+          cacheReadMultiplier: null,
+          cacheWriteMultiplier: null,
+        },
+      ),
+    ).toBeCloseTo(3 + 100, 6);
+  });
+
+  it("override cache multipliers compose with override input rate", () => {
+    // input rate 10$/M, cache write multiplier 2× → write rate $20/M.
+    // 1M cache_creation → $20.
+    expect(
+      estimateUsdCost(
+        {
+          model: "claude-sonnet-4-5",
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 1_000_000,
+          cache_read_input_tokens: 0,
+        },
+        {
+          inputPerMillion: 10,
+          outputPerMillion: null,
+          cacheReadMultiplier: null,
+          cacheWriteMultiplier: 2,
+        },
+      ),
+    ).toBeCloseTo(20, 6);
+  });
+
+  it("undefined override falls back to tier defaults (matches no-override call)", () => {
+    const counts = {
+      model: "claude-sonnet-4-5",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+    expect(estimateUsdCost(counts, undefined)).toBeCloseTo(
+      estimateUsdCost(counts),
+      6,
+    );
+  });
+});
+
 describe("estimateUsdCost — cache multipliers", () => {
   // Use sonnet ($3 input) so the math is easy to read.
   const sonnet = (counts: {

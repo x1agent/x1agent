@@ -56,34 +56,72 @@ const TIER_PRICES = {
   haiku:  { input: 1.00,  output:  5.00 },
 } as const;
 
-const CACHE_READ_MULTIPLIER = 0.10;
-const CACHE_WRITE_MULTIPLIER = 1.25;
+export const DEFAULT_CACHE_READ_MULTIPLIER = 0.10;
+export const DEFAULT_CACHE_WRITE_MULTIPLIER = 1.25;
 
-function priceFor(model: string): { input: number; output: number } {
+/**
+ * Tier-classifier defaults for a given model id. Exported so the
+ * admin "Claude models" UI can seed its price input placeholders
+ * with sensible numbers — the operator only saves when they want to
+ * deviate from the default.
+ */
+export function tierDefaultPrices(model: string): {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cacheReadMultiplier: number;
+  cacheWriteMultiplier: number;
+} {
   const s = model.toLowerCase();
-  if (s.includes("opus")) return TIER_PRICES.opus;
-  if (s.includes("haiku")) return TIER_PRICES.haiku;
-  // Sonnet covers both explicit "sonnet" and any unrecognised model id
-  // (matches the prior DEFAULT_PRICE behaviour). Putting it last means
-  // the keyword check naturally degrades to "treat unknown as sonnet"
-  // rather than silently billing $0 for a new tier we haven't taught.
-  return TIER_PRICES.sonnet;
+  const tier = s.includes("opus")
+    ? TIER_PRICES.opus
+    : s.includes("haiku")
+      ? TIER_PRICES.haiku
+      : // Sonnet covers explicit "sonnet" + any unrecognised id; matches
+        // the prior DEFAULT_PRICE behaviour rather than billing $0.
+        TIER_PRICES.sonnet;
+  return {
+    inputPerMillion: tier.input,
+    outputPerMillion: tier.output,
+    cacheReadMultiplier: DEFAULT_CACHE_READ_MULTIPLIER,
+    cacheWriteMultiplier: DEFAULT_CACHE_WRITE_MULTIPLIER,
+  };
 }
 
-export function estimateUsdCost(row: {
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens: number;
-  cache_read_input_tokens: number;
-}): number {
-  const p = priceFor(row.model);
+/**
+ * Per-model price override. Each field is independently optional —
+ * an admin can pin only the input rate and let the cache multipliers
+ * follow the tier default. Stored in `anthropic_model_overrides`.
+ */
+export interface PriceOverride {
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+  cacheReadMultiplier: number | null;
+  cacheWriteMultiplier: number | null;
+}
+
+export function estimateUsdCost(
+  row: {
+    model: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+  },
+  override?: PriceOverride,
+): number {
+  const def = tierDefaultPrices(row.model);
+  const inputRate = override?.inputPerMillion ?? def.inputPerMillion;
+  const outputRate = override?.outputPerMillion ?? def.outputPerMillion;
+  const cacheReadMult =
+    override?.cacheReadMultiplier ?? def.cacheReadMultiplier;
+  const cacheWriteMult =
+    override?.cacheWriteMultiplier ?? def.cacheWriteMultiplier;
   const millions = (n: number) => n / 1_000_000;
   return (
-    millions(row.input_tokens) * p.input +
-    millions(row.output_tokens) * p.output +
-    millions(row.cache_creation_input_tokens) * (p.input * CACHE_WRITE_MULTIPLIER) +
-    millions(row.cache_read_input_tokens) * (p.input * CACHE_READ_MULTIPLIER)
+    millions(row.input_tokens) * inputRate +
+    millions(row.output_tokens) * outputRate +
+    millions(row.cache_creation_input_tokens) * (inputRate * cacheWriteMult) +
+    millions(row.cache_read_input_tokens) * (inputRate * cacheReadMult)
   );
 }
 
@@ -173,6 +211,45 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
     since: Date;
     until: Date;
   }): Promise<WorkspaceTokenUsageRollup> {
+    // Per-model price overrides from the admin "Claude models" UI.
+    // Each column is independently nullable; a null falls through to
+    // the tier-classifier default at cost-compute time. Loaded once
+    // here and threaded into each collapse so we don't hit the DB
+    // per row.
+    const overrideRows = await this.sql<
+      {
+        model_id: string;
+        input_usd_per_million: string | null;
+        output_usd_per_million: string | null;
+        cache_read_multiplier: string | null;
+        cache_write_multiplier: string | null;
+      }[]
+    >`
+      SELECT model_id,
+             input_usd_per_million,
+             output_usd_per_million,
+             cache_read_multiplier,
+             cache_write_multiplier
+      FROM anthropic_model_overrides
+      WHERE input_usd_per_million IS NOT NULL
+         OR output_usd_per_million IS NOT NULL
+         OR cache_read_multiplier  IS NOT NULL
+         OR cache_write_multiplier IS NOT NULL
+    `;
+    const overrides = new Map<string, PriceOverride>();
+    for (const r of overrideRows) {
+      overrides.set(r.model_id, {
+        inputPerMillion:
+          r.input_usd_per_million === null ? null : Number(r.input_usd_per_million),
+        outputPerMillion:
+          r.output_usd_per_million === null ? null : Number(r.output_usd_per_million),
+        cacheReadMultiplier:
+          r.cache_read_multiplier === null ? null : Number(r.cache_read_multiplier),
+        cacheWriteMultiplier:
+          r.cache_write_multiplier === null ? null : Number(r.cache_write_multiplier),
+      });
+    }
+
     // Three GROUP BY queries instead of one — Postgres planner handles
     // each cleanly via the (workspace_id, ts DESC) index, and parsing
     // back into three structures is trivial. One mega-query with
@@ -297,7 +374,7 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
         cache_creation_input_tokens: asInt(r.cache_creation_input_tokens),
         cache_read_input_tokens: asInt(r.cache_read_input_tokens),
       };
-      const cost = estimateUsdCost(counts);
+      const cost = estimateUsdCost(counts, overrides.get(counts.model));
       totals.inputTokens += counts.input_tokens;
       totals.outputTokens += counts.output_tokens;
       totals.cacheCreationInputTokens += counts.cache_creation_input_tokens;
@@ -326,7 +403,7 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
         cache_creation_input_tokens: asInt(r.cache_creation_input_tokens),
         cache_read_input_tokens: asInt(r.cache_read_input_tokens),
       };
-      const cost = estimateUsdCost(counts);
+      const cost = estimateUsdCost(counts, overrides.get(counts.model));
       const existing = agentMap.get(key);
       if (existing) {
         existing.inputTokens += counts.input_tokens;
@@ -361,7 +438,7 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
         cache_creation_input_tokens: asInt(r.cache_creation_input_tokens),
         cache_read_input_tokens: asInt(r.cache_read_input_tokens),
       };
-      const cost = estimateUsdCost(counts);
+      const cost = estimateUsdCost(counts, overrides.get(counts.model));
       const existing = dayMap.get(r.day);
       if (existing) {
         existing.inputTokens += counts.input_tokens;
@@ -387,10 +464,14 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
     // Trigger-source / user / daily-by-trigger collapses live in
     // token-usage-collapse so the row→rollup math is unit-testable
     // without standing up Postgres.
-    const byTriggerSource = collapseByTriggerSource(byTriggerSourceRows);
-    const byUser = collapseByUser(byUserRows);
+    const byTriggerSource = collapseByTriggerSource(
+      byTriggerSourceRows,
+      overrides,
+    );
+    const byUser = collapseByUser(byUserRows, overrides);
     const byDayByTriggerSource = collapseByDayByTriggerSource(
       byDayByTriggerSourceRows,
+      overrides,
     );
 
     return {

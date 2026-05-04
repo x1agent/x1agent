@@ -3,6 +3,7 @@ import type postgres from "postgres";
 import { GoogleAuth } from "google-auth-library";
 import { Email } from "@x1agent/kernel";
 import { isPlatformAdmin } from "@x1agent/domain-auth";
+import { tierDefaultPrices } from "@x1agent/domain-sessions";
 import { listAnthropicModels } from "./anthropic-models.js";
 
 /**
@@ -29,6 +30,10 @@ interface OverrideRow {
   last_probe_status: string | null;
   last_probe_error: string | null;
   last_probed_at: Date | null;
+  input_usd_per_million: string | null;
+  output_usd_per_million: string | null;
+  cache_read_multiplier: string | null;
+  cache_write_multiplier: string | null;
 }
 
 export function createAdminAnthropicModelsRoutes(
@@ -51,13 +56,18 @@ export function createAdminAnthropicModelsRoutes(
       listAnthropicModels(),
       cfg.sql<OverrideRow[]>`
         SELECT model_id, enabled, last_probe_status,
-               last_probe_error, last_probed_at
+               last_probe_error, last_probed_at,
+               input_usd_per_million, output_usd_per_million,
+               cache_read_multiplier, cache_write_multiplier
         FROM anthropic_model_overrides
       `,
     ]);
     const overrideById = new Map(overrides.map((r) => [r.model_id, r]));
     const rows = catalog.map((m) => {
       const o = overrideById.get(m.id);
+      const def = tierDefaultPrices(m.id);
+      const numOrNull = (s: string | null | undefined): number | null =>
+        s === null || s === undefined ? null : Number(s);
       return {
         id: m.id,
         label: m.label,
@@ -66,6 +76,18 @@ export function createAdminAnthropicModelsRoutes(
         last_probe_status: o?.last_probe_status ?? null,
         last_probe_error: o?.last_probe_error ?? null,
         last_probed_at: o?.last_probed_at ?? null,
+        // Each `*_saved` is the operator's explicit override (null
+        // means "not pinned, use the default"). Each `*_default` is
+        // the tier-classifier guess; the UI seeds inputs with these
+        // when no override is saved so the form is never empty.
+        input_usd_per_million_saved: numOrNull(o?.input_usd_per_million),
+        output_usd_per_million_saved: numOrNull(o?.output_usd_per_million),
+        cache_read_multiplier_saved: numOrNull(o?.cache_read_multiplier),
+        cache_write_multiplier_saved: numOrNull(o?.cache_write_multiplier),
+        input_usd_per_million_default: def.inputPerMillion,
+        output_usd_per_million_default: def.outputPerMillion,
+        cache_read_multiplier_default: def.cacheReadMultiplier,
+        cache_write_multiplier_default: def.cacheWriteMultiplier,
       };
     });
     const anyEnabled = rows.some((r) => r.enabled);
@@ -96,19 +118,129 @@ export function createAdminAnthropicModelsRoutes(
 
   app.patch("/:id", async (c) => {
     const id = decodeURIComponent(c.req.param("id"));
-    const body = await c.req
-      .json<{ enabled?: boolean }>()
-      .catch(() => ({}) as { enabled?: boolean });
-    if (typeof body.enabled !== "boolean") {
-      return c.json({ error: "enabled boolean required" }, 400);
+    interface PatchBody {
+      enabled?: boolean;
+      input_usd_per_million?: number | null;
+      output_usd_per_million?: number | null;
+      cache_read_multiplier?: number | null;
+      cache_write_multiplier?: number | null;
     }
-    const enabled = body.enabled;
+    const body: PatchBody = await c.req
+      .json<PatchBody>()
+      .catch(() => ({}) as PatchBody);
+
+    // Validate each price field independently — operators can update
+    // just one (e.g. clear an override) without re-sending the rest.
+    // Distinguish "not provided" (omitted from body) from "set to null"
+    // (explicit clear) so partial PATCH semantics work cleanly.
+    const validateOptionalNumber = (
+      v: unknown,
+      field: string,
+      min: number,
+    ): { ok: true; value: number | null | undefined } | { ok: false; err: string } => {
+      if (v === undefined) return { ok: true, value: undefined };
+      if (v === null) return { ok: true, value: null };
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        return { ok: false, err: `${field} must be a finite number or null` };
+      }
+      if (v < min) {
+        return { ok: false, err: `${field} must be ≥ ${min}` };
+      }
+      return { ok: true, value: v };
+    };
+
+    const inputRate = validateOptionalNumber(
+      body.input_usd_per_million,
+      "input_usd_per_million",
+      0,
+    );
+    const outputRate = validateOptionalNumber(
+      body.output_usd_per_million,
+      "output_usd_per_million",
+      0,
+    );
+    const cacheRead = validateOptionalNumber(
+      body.cache_read_multiplier,
+      "cache_read_multiplier",
+      0,
+    );
+    const cacheWrite = validateOptionalNumber(
+      body.cache_write_multiplier,
+      "cache_write_multiplier",
+      0,
+    );
+    if (!inputRate.ok) return c.json({ error: inputRate.err }, 400);
+    if (!outputRate.ok) return c.json({ error: outputRate.err }, 400);
+    if (!cacheRead.ok) return c.json({ error: cacheRead.err }, 400);
+    if (!cacheWrite.ok) return c.json({ error: cacheWrite.err }, 400);
+
+    const enabledProvided = typeof body.enabled === "boolean";
+    const anyPriceProvided =
+      inputRate.value !== undefined ||
+      outputRate.value !== undefined ||
+      cacheRead.value !== undefined ||
+      cacheWrite.value !== undefined;
+
+    if (!enabledProvided && !anyPriceProvided) {
+      return c.json(
+        { error: "at least one of enabled / price fields required" },
+        400,
+      );
+    }
+
+    // Build the upsert. For each field the caller didn't include in
+    // the body (value === undefined), keep whatever's already in the
+    // row on conflict; for fields they did include (including
+    // explicit null = "clear the override"), apply the new value.
+    // INSERT path uses null where the caller didn't include — first-
+    // ever rows for this model won't have anything to preserve.
+    const inputForInsert = inputRate.value === undefined ? null : inputRate.value;
+    const outputForInsert =
+      outputRate.value === undefined ? null : outputRate.value;
+    const cacheReadForInsert =
+      cacheRead.value === undefined ? null : cacheRead.value;
+    const cacheWriteForInsert =
+      cacheWrite.value === undefined ? null : cacheWrite.value;
+    const enabledForInsert = enabledProvided ? body.enabled! : false;
+
     await cfg.sql`
-      INSERT INTO anthropic_model_overrides (model_id, enabled, updated_at)
-      VALUES (${id}, ${enabled}, NOW())
+      INSERT INTO anthropic_model_overrides
+        (model_id, enabled,
+         input_usd_per_million, output_usd_per_million,
+         cache_read_multiplier, cache_write_multiplier,
+         updated_at)
+      VALUES
+        (${id}, ${enabledForInsert},
+         ${inputForInsert}, ${outputForInsert},
+         ${cacheReadForInsert}, ${cacheWriteForInsert},
+         NOW())
       ON CONFLICT (model_id) DO UPDATE SET
-        enabled    = EXCLUDED.enabled,
-        updated_at = NOW()
+        enabled                = ${
+          enabledProvided
+            ? cfg.sql`EXCLUDED.enabled`
+            : cfg.sql`anthropic_model_overrides.enabled`
+        },
+        input_usd_per_million  = ${
+          inputRate.value === undefined
+            ? cfg.sql`anthropic_model_overrides.input_usd_per_million`
+            : cfg.sql`EXCLUDED.input_usd_per_million`
+        },
+        output_usd_per_million = ${
+          outputRate.value === undefined
+            ? cfg.sql`anthropic_model_overrides.output_usd_per_million`
+            : cfg.sql`EXCLUDED.output_usd_per_million`
+        },
+        cache_read_multiplier  = ${
+          cacheRead.value === undefined
+            ? cfg.sql`anthropic_model_overrides.cache_read_multiplier`
+            : cfg.sql`EXCLUDED.cache_read_multiplier`
+        },
+        cache_write_multiplier = ${
+          cacheWrite.value === undefined
+            ? cfg.sql`anthropic_model_overrides.cache_write_multiplier`
+            : cfg.sql`EXCLUDED.cache_write_multiplier`
+        },
+        updated_at             = NOW()
     `;
     return c.json({ ok: true });
   });
