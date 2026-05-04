@@ -7,6 +7,11 @@ import type {
   TokenUsageRepository,
   WorkspaceTokenUsageRollup,
 } from "../../ports/token-usage-repository.js";
+import {
+  collapseByDayByTriggerSource,
+  collapseByTriggerSource,
+  collapseByUser,
+} from "./token-usage-collapse.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -107,6 +112,33 @@ interface RowAggByDay {
   cache_creation_input_tokens: string;
   cache_read_input_tokens: string;
 }
+interface RowAggByTriggerSource {
+  triggered_by: string;
+  model: string;
+  input_tokens: string;
+  output_tokens: string;
+  cache_creation_input_tokens: string;
+  cache_read_input_tokens: string;
+}
+interface RowAggByUser {
+  user_id: string;
+  user_name: string | null;
+  user_email: string | null;
+  model: string;
+  input_tokens: string;
+  output_tokens: string;
+  cache_creation_input_tokens: string;
+  cache_read_input_tokens: string;
+}
+interface RowAggByDayByTriggerSource {
+  day: string;
+  triggered_by: string;
+  model: string;
+  input_tokens: string;
+  output_tokens: string;
+  cache_creation_input_tokens: string;
+  cache_read_input_tokens: string;
+}
 
 function asInt(v: string | number): number {
   return typeof v === "number" ? v : parseInt(v, 10) || 0;
@@ -185,6 +217,64 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
         AND ts >= ${input.since}
         AND ts <  ${input.until}
       GROUP BY day, model
+      ORDER BY day ASC
+    `;
+    // Three trigger-source-aware queries. They all join sessions to
+    // pick up triggered_by + triggered_by_user_id; the planner uses
+    // the (workspace_id, ts DESC) index on token_usage and the PK on
+    // sessions, so this stays cheap. We don't bother with a single
+    // mega-query because the GROUP BY shapes are different and JS
+    // collation is trivial.
+    const byTriggerSourceRows = await this.sql<RowAggByTriggerSource[]>`
+      SELECT s.triggered_by                              AS triggered_by,
+             tu.model                                    AS model,
+             SUM(tu.input_tokens)::TEXT                  AS input_tokens,
+             SUM(tu.output_tokens)::TEXT                 AS output_tokens,
+             SUM(tu.cache_creation_input_tokens)::TEXT   AS cache_creation_input_tokens,
+             SUM(tu.cache_read_input_tokens)::TEXT       AS cache_read_input_tokens
+      FROM token_usage tu
+      JOIN sessions s ON s.id = tu.session_id
+      WHERE tu.workspace_id = ${input.workspaceId}
+        AND tu.ts >= ${input.since}
+        AND tu.ts <  ${input.until}
+      GROUP BY s.triggered_by, tu.model
+    `;
+    const byUserRows = await this.sql<RowAggByUser[]>`
+      SELECT s.triggered_by_user_id                      AS user_id,
+             u.name                                      AS user_name,
+             u.email                                     AS user_email,
+             tu.model                                    AS model,
+             SUM(tu.input_tokens)::TEXT                  AS input_tokens,
+             SUM(tu.output_tokens)::TEXT                 AS output_tokens,
+             SUM(tu.cache_creation_input_tokens)::TEXT   AS cache_creation_input_tokens,
+             SUM(tu.cache_read_input_tokens)::TEXT       AS cache_read_input_tokens
+      FROM token_usage tu
+      JOIN sessions s ON s.id = tu.session_id
+      LEFT JOIN users u ON u.id = s.triggered_by_user_id
+      WHERE tu.workspace_id = ${input.workspaceId}
+        AND tu.ts >= ${input.since}
+        AND tu.ts <  ${input.until}
+        AND s.triggered_by = 'user'
+        AND s.triggered_by_user_id IS NOT NULL
+      GROUP BY s.triggered_by_user_id, u.name, u.email, tu.model
+    `;
+    const byDayByTriggerSourceRows = await this.sql<
+      RowAggByDayByTriggerSource[]
+    >`
+      SELECT TO_CHAR(date_trunc('day', tu.ts AT TIME ZONE 'UTC'),
+                     'YYYY-MM-DD')                      AS day,
+             s.triggered_by                              AS triggered_by,
+             tu.model                                    AS model,
+             SUM(tu.input_tokens)::TEXT                  AS input_tokens,
+             SUM(tu.output_tokens)::TEXT                 AS output_tokens,
+             SUM(tu.cache_creation_input_tokens)::TEXT   AS cache_creation_input_tokens,
+             SUM(tu.cache_read_input_tokens)::TEXT       AS cache_read_input_tokens
+      FROM token_usage tu
+      JOIN sessions s ON s.id = tu.session_id
+      WHERE tu.workspace_id = ${input.workspaceId}
+        AND tu.ts >= ${input.since}
+        AND tu.ts <  ${input.until}
+      GROUP BY day, s.triggered_by, tu.model
       ORDER BY day ASC
     `;
 
@@ -294,6 +384,23 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
       a.day.localeCompare(b.day),
     );
 
-    return { totals, byAgent, byModel, byDay };
+    // Trigger-source / user / daily-by-trigger collapses live in
+    // token-usage-collapse so the row→rollup math is unit-testable
+    // without standing up Postgres.
+    const byTriggerSource = collapseByTriggerSource(byTriggerSourceRows);
+    const byUser = collapseByUser(byUserRows);
+    const byDayByTriggerSource = collapseByDayByTriggerSource(
+      byDayByTriggerSourceRows,
+    );
+
+    return {
+      totals,
+      byAgent,
+      byModel,
+      byDay,
+      byTriggerSource,
+      byUser,
+      byDayByTriggerSource,
+    };
   }
 }

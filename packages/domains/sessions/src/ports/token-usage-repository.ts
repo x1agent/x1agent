@@ -53,11 +53,50 @@ export interface TokenUsageByDay extends TokenUsageTotals {
   day: string;
 }
 
+/**
+ * Where the session that produced these rows came from. `user` means a
+ * human clicked New session / sent a message; `scheduler` means a cron
+ * tick fired; `agent` means an orchestrator spawned a child. Lets the
+ * dashboard separate human-driven spend from automated runs.
+ */
+export type TriggerSource = "user" | "scheduler" | "agent";
+
+export interface TokenUsageByTriggerSource extends TokenUsageTotals {
+  triggeredBy: TriggerSource;
+}
+
+/**
+ * Spend attributed to a specific human user. Only counts rows whose
+ * underlying session was `triggered_by='user'`. Scheduler / agent rows
+ * have no user attribution by design (see migrations/009 CHECK).
+ */
+export interface TokenUsageByUser extends TokenUsageTotals {
+  userId: string;
+  /** Joined from users.name; null if the user row was deleted. */
+  userName: string | null;
+  /** Joined from users.email; null if the user row was deleted. */
+  userEmail: string | null;
+}
+
+/**
+ * Daily breakdown sliced by trigger source — feeds the stacked area
+ * chart that shows the human-vs-automated spend split over time.
+ * Same day appears multiple times, once per non-zero trigger source.
+ */
+export interface TokenUsageByDayByTriggerSource extends TokenUsageTotals {
+  /** YYYY-MM-DD in UTC. */
+  day: string;
+  triggeredBy: TriggerSource;
+}
+
 export interface WorkspaceTokenUsageRollup {
   totals: TokenUsageTotals;
   byAgent: TokenUsageByAgent[];
   byModel: TokenUsageByModel[];
   byDay: TokenUsageByDay[];
+  byTriggerSource: TokenUsageByTriggerSource[];
+  byUser: TokenUsageByUser[];
+  byDayByTriggerSource: TokenUsageByDayByTriggerSource[];
 }
 
 export interface TokenUsageRepository {
