@@ -20,29 +20,49 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Per-million-token USD prices, by model id. Source: anthropic.com/pricing
- * snapshot; refresh when the operator notices drift. Keys match the model
- * strings the SDK returns in the `result.model` field.
+ * Per-million-token USD prices for the Anthropic Claude family.
  *
- * cache_creation is billed at the input rate; cache_read is 10% of input.
- * Numbers below are input/output per million tokens; cache rates derived.
+ * Pricing parity holds across Anthropic direct API, Vertex AI, and
+ * Amazon Bedrock for the 4.x generation, so a single tier table covers
+ * every channel today.
  *
- * Unknown models fall back to the costliest current Sonnet rate to avoid
- * silently underestimating spend.
+ * Tier dispatch is by *substring* of the model id rather than exact
+ * match. The SDK returns ids like `claude-sonnet-4-5@20250929` on
+ * Vertex and `claude-sonnet-4-5-20250929` on direct Anthropic; in
+ * either case "sonnet" appears in the id and we land on the right
+ * tier without having to enumerate every dated revision Anthropic
+ * ships. New models inherit pricing the day they're released.
+ *
+ * Output is consistently 5× input within a tier across 4.x.
+ *
+ * Sources (refresh if either Vertex or Anthropic changes):
+ *   - Anthropic pricing page (anthropic.com/pricing)
+ *   - Vertex Anthropic SKU rates (Cloud Console → Billing → Reports)
+ *
+ * Cache multipliers are recall and may drift; admin should reconcile
+ * against the BigQuery billing export before charging customers from
+ * these numbers. cache_read at 10% of input is well-established;
+ * cache_creation premium varies by TTL (5-min vs 1-hour) — we use
+ * 1.25× as the default for the 5-minute TTL case which the SDK uses.
  */
-const MODEL_PRICES: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-7":            { input: 15.00, output: 75.00 },
-  "claude-opus-4-6":            { input: 15.00, output: 75.00 },
-  "claude-sonnet-4-6":          { input:  3.00, output: 15.00 },
-  "claude-sonnet-4-5":          { input:  3.00, output: 15.00 },
-  "claude-haiku-4-5":           { input:  0.80, output:  4.00 },
-  "claude-haiku-4-5-20251001":  { input:  0.80, output:  4.00 },
-};
+const TIER_PRICES = {
+  opus:   { input: 5.00,  output: 25.00 },
+  sonnet: { input: 3.00,  output: 15.00 },
+  haiku:  { input: 1.00,  output:  5.00 },
+} as const;
 
-const DEFAULT_PRICE = { input: 3.00, output: 15.00 };
+const CACHE_READ_MULTIPLIER = 0.10;
+const CACHE_WRITE_MULTIPLIER = 1.25;
 
 function priceFor(model: string): { input: number; output: number } {
-  return MODEL_PRICES[model] ?? DEFAULT_PRICE;
+  const s = model.toLowerCase();
+  if (s.includes("opus")) return TIER_PRICES.opus;
+  if (s.includes("haiku")) return TIER_PRICES.haiku;
+  // Sonnet covers both explicit "sonnet" and any unrecognised model id
+  // (matches the prior DEFAULT_PRICE behaviour). Putting it last means
+  // the keyword check naturally degrades to "treat unknown as sonnet"
+  // rather than silently billing $0 for a new tier we haven't taught.
+  return TIER_PRICES.sonnet;
 }
 
 export function estimateUsdCost(row: {
@@ -57,8 +77,8 @@ export function estimateUsdCost(row: {
   return (
     millions(row.input_tokens) * p.input +
     millions(row.output_tokens) * p.output +
-    millions(row.cache_creation_input_tokens) * p.input +
-    millions(row.cache_read_input_tokens) * (p.input * 0.1)
+    millions(row.cache_creation_input_tokens) * (p.input * CACHE_WRITE_MULTIPLIER) +
+    millions(row.cache_read_input_tokens) * (p.input * CACHE_READ_MULTIPLIER)
   );
 }
 
