@@ -103,8 +103,8 @@ export function WorkspaceSharesRoot({ workspaceSlug }: Props) {
       <div className="p-6">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-100">Shares</h1>
-            <p className="mt-0.5 text-sm text-zinc-500">
+            <h1 className="text-xl font-semibold text-fg">Shares</h1>
+            <p className="mt-0.5 text-sm text-fg-faint">
               Every file an agent has published in this workspace.
             </p>
           </div>
@@ -145,9 +145,9 @@ export function WorkspaceSharesRoot({ workspaceSlug }: Props) {
         )}
 
         {loadingSlug === workspaceSlug && rows.length === 0 ? (
-          <div className="text-sm text-zinc-500">Loading shares…</div>
+          <div className="text-sm text-fg-faint">Loading shares…</div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-md border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-dashed border-border-soft p-8 text-center text-sm text-fg-faint">
             No shares yet. Shares appear here whenever an agent publishes a
             file with the share tool.
           </div>
@@ -179,19 +179,19 @@ function ShareRow({
   return (
     <a
       href={sessionHref}
-      className="group flex flex-col rounded-lg border border-zinc-800 bg-zinc-900/20 p-4 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60"
+      className="group flex flex-col rounded-lg border border-border-soft bg-bg-elevated/20 p-4 transition-colors hover:border-border-strong hover:bg-bg-elevated/60"
     >
       <div className="mb-2 flex items-center gap-2">
-        <Icon className="size-4 shrink-0 text-zinc-400" />
-        <span className="truncate text-sm font-medium text-zinc-100">
+        <Icon className="size-4 shrink-0 text-fg-muted" />
+        <span className="truncate text-sm font-medium text-fg">
           {entry.title}
         </span>
         <Badge variant="secondary" className="ml-auto shrink-0 text-[10px]">
           {entry.share_type}
         </Badge>
       </div>
-      <div className="text-xs text-zinc-500">
-        <span className="text-zinc-400">{entry.agent.name}</span>
+      <div className="text-xs text-fg-faint">
+        <span className="text-fg-muted">{entry.agent.name}</span>
         <span className="mx-1.5">·</span>
         <span>{formatSize(entry.total_size)}</span>
         {entry.files.length > 1 && (
@@ -203,7 +203,7 @@ function ShareRow({
         <span className="mx-1.5">·</span>
         <span>{formatRelative(entry.created_at)}</span>
       </div>
-      <div className="mt-2 truncate font-mono text-[10px] text-zinc-600">
+      <div className="mt-2 truncate font-mono text-[10px] text-fg-faint/70">
         {entry.path}
       </div>
     </a>

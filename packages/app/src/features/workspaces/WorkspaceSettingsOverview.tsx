@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import { useAuthStore } from "../../stores/authStore";
 import { useSharedResourcesStore } from "../../stores/sharedResourcesStore";
 import { useImagesStore } from "../../stores/imagesStore";
 import { useWorkspaceSecretsStore } from "../../stores/workspaceSecretsStore";
@@ -34,6 +35,10 @@ export function WorkspaceSettingsOverview({
   workspaceSlug,
   canManage,
 }: Props) {
+  const user = useAuthStore((s) => s.user);
+  const memberships = useAuthStore((s) => s.memberships);
+  const ws = memberships.find((m) => m.slug === workspaceSlug);
+
   // Each store loads on mount; the overview pulls a count from each
   // and renders. Skips loading when the operator can't manage — the
   // sub-pages would refuse anyway.
@@ -81,7 +86,7 @@ export function WorkspaceSettingsOverview({
   if (!canManage) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can view workspace settings.
         </CardContent>
       </Card>
@@ -123,6 +128,108 @@ export function WorkspaceSettingsOverview({
 
   return (
     <div className="space-y-4">
+      {/* Identity ─────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Signed in as</CardTitle>
+          <CardDescription>{user?.email}</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-fg-muted">
+          role: <span className="capitalize text-fg">{ws?.role ?? "—"}</span>
+        </CardContent>
+      </Card>
+
+      {/* Insights summary ───────────────────────────────────────────
+       * Headline cost stat that opens the analytics deep-dive. The
+       * existing detail tab below is kept too; this is the at-a-glance
+       * version that lives alongside identity. */}
+      <a
+        href={`${baseHref}/insights/analytics`}
+        className="group block transition"
+      >
+        <Card className="transition group-hover:bg-bg-elevated/40">
+          <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle>Insights</CardTitle>
+              <CardDescription>
+                {analyticsCost === null
+                  ? "Loading…"
+                  : analyticsCost === 0
+                    ? "No spend in the current period."
+                    : `Estimated spend this period`}
+              </CardDescription>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-fg-faint/50 group-hover:text-fg-muted" />
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-6">
+              <Stat
+                label="Estimated cost"
+                value={
+                  analyticsCost === null
+                    ? "—"
+                    : analyticsCost === 0
+                      ? "$0"
+                      : formatUsd(analyticsCost)
+                }
+                large
+              />
+              <Stat
+                label="Cache savings"
+                value={
+                  analyticsCacheSavings && analyticsCacheSavings > 0
+                    ? formatUsd(analyticsCacheSavings)
+                    : "—"
+                }
+              />
+              <Stat
+                label="Audit"
+                value="Coming soon"
+                muted
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </a>
+
+      {/* Your workspaces ────────────────────────────────────────── */}
+      {memberships.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your workspaces</CardTitle>
+            <CardDescription>
+              Switch between any workspace you're a member of.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border-soft border-t border-border-soft">
+              {memberships.map((m) => (
+                <a
+                  key={m.workspace_id}
+                  href={`/workspaces/${m.slug}/`}
+                  className={`flex items-center gap-3 px-4 py-3 transition hover:bg-bg-elevated/50 ${
+                    m.slug === workspaceSlug
+                      ? "text-fg"
+                      : "text-fg-muted hover:text-fg"
+                  }`}
+                >
+                  <span className="text-sm font-medium">{m.name}</span>
+                  <span className="ml-auto text-[11px] capitalize text-fg-faint">
+                    {m.role}
+                  </span>
+                  {m.slug === workspaceSlug && (
+                    <span className="rounded-sm bg-bg-muted/80 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-fg-faint">
+                      current
+                    </span>
+                  )}
+                </a>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Detail tabs ────────────────────────────────────────────── */}
       <SectionCard
         title="Infrastructure"
         description="Long-lived workloads agents persist into."
@@ -245,8 +352,8 @@ function SectionCard({
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="px-0">
-        <div className="divide-y divide-zinc-900">
+      <CardContent className="p-0">
+        <div className="divide-y divide-border-soft border-t border-border-soft">
           {/* sectionMeta is read for parity with the sidebar; if a
               future section ships an icon we'd render here. */}
           {sectionMeta ? children : children}
@@ -272,28 +379,28 @@ function SummaryRow({
   last?: boolean;
 }) {
   const valueClass = comingSoon
-    ? "text-zinc-600 italic"
+    ? "text-fg-faint/70 italic"
     : muted
-      ? "text-zinc-500"
-      : "text-zinc-200";
+      ? "text-fg-faint"
+      : "text-fg";
 
   const content = (
     <>
-      <span className="text-sm font-medium text-zinc-300">{label}</span>
+      <span className="text-sm font-medium text-fg-muted">{label}</span>
       <span className={`ml-auto truncate text-sm ${valueClass}`}>{value}</span>
       {href && !comingSoon && (
-        <ChevronRight className="size-4 shrink-0 text-zinc-700 group-hover:text-zinc-400" />
+        <ChevronRight className="size-4 shrink-0 text-fg-faint/40 group-hover:text-fg-muted" />
       )}
     </>
   );
 
-  const base = `group flex items-center gap-3 px-4 py-3 ${last ? "" : "border-b border-zinc-900"}`;
+  const base = `group flex items-center gap-3 px-4 py-3 ${last ? "" : "border-b border-border-soft"}`;
 
   if (!href || comingSoon) {
     return <div className={base}>{content}</div>;
   }
   return (
-    <a href={href} className={`${base} transition-colors hover:bg-zinc-900/50`}>
+    <a href={href} className={`${base} transition-colors hover:bg-bg-elevated/50`}>
       {content}
     </a>
   );
@@ -303,4 +410,31 @@ function formatUsd(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
   if (n >= 1) return `$${n.toFixed(2)}`;
   return `$${n.toFixed(3)}`;
+}
+
+function Stat({
+  label,
+  value,
+  large,
+  muted,
+}: {
+  label: string;
+  value: string;
+  large?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-fg-faint">
+        {label}
+      </div>
+      <div
+        className={`${large ? "text-2xl" : "text-base"} font-semibold ${
+          muted ? "text-fg-faint" : "text-fg"
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
 }

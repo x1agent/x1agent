@@ -239,7 +239,7 @@ describe("listSessions", () => {
 });
 
 describe("cancelSession", () => {
-  it("marks a pending session failed", async () => {
+  it("marks a pending session complete with cancelled errorMessage", async () => {
     const a = await makeAgent();
     const s = await triggerSession(
       { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
@@ -251,7 +251,10 @@ describe("cancelSession", () => {
       ACTOR,
       s.id,
     );
-    expect(cancelled.status).toBe("failed");
+    // User-initiated cancel is a clean exit (`complete`), not a crash
+    // (`failed`). The errorMessage carries the disambiguation for the
+    // audit trail.
+    expect(cancelled.status).toBe("complete");
     expect(cancelled.errorMessage).toBe("cancelled");
     expect(cancelled.completedAt?.toISOString()).toBe(
       "2026-04-18T12:01:00.000Z",

@@ -83,13 +83,13 @@ export function WorkspaceSettingsRoot({ workspaceSlug, pathSuffix }: Props) {
       <div className="space-y-1 p-6">
         <div className="mb-5 max-w-4xl space-y-1">
           {headerEyebrow && (
-            <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-fg-faint">
               {headerEyebrow}
             </div>
           )}
-          <h1 className="text-xl font-semibold text-zinc-100">{headerTitle}</h1>
+          <h1 className="text-xl font-semibold text-fg">{headerTitle}</h1>
           {headerDescription && (
-            <p className="text-sm text-zinc-400">{headerDescription}</p>
+            <p className="text-sm text-fg-muted">{headerDescription}</p>
           )}
         </div>
         <div className="max-w-4xl space-y-4">

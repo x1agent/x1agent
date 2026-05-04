@@ -117,14 +117,14 @@ export function CollectionsAttachCard({
       <CardHeader>
         <CardTitle>Collections</CardTitle>
         <CardDescription>
-          Knowledge stores <span className="text-zinc-200">{agentName}</span>{" "}
+          Knowledge stores <span className="text-fg">{agentName}</span>{" "}
           can read and write. The default is the write target for any
           graph_write / vector_upsert that doesn't name a collection.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {all.length === 0 && (
-          <div className="rounded-md border border-zinc-900 p-4 text-sm text-zinc-500">
+          <div className="rounded-md border border-border-soft p-4 text-sm text-fg-faint">
             No collections in this workspace. Create one at{" "}
             <a
               className="underline"
@@ -139,7 +139,7 @@ export function CollectionsAttachCard({
         {rows.map((r) => (
           <div
             key={r.id}
-            className="flex items-center gap-3 rounded-md border border-zinc-900 px-3 py-2"
+            className="flex items-center gap-3 rounded-md border border-border-soft px-3 py-2"
           >
             <input
               type="checkbox"
@@ -150,13 +150,13 @@ export function CollectionsAttachCard({
               aria-label={`Attach ${r.name}`}
             />
             <div className="flex-1">
-              <div className="text-sm text-zinc-100">{r.name}</div>
-              <div className="text-xs text-zinc-500">
+              <div className="text-sm text-fg">{r.name}</div>
+              <div className="text-xs text-fg-faint">
                 {r.description ?? r.slug}
               </div>
             </div>
             <Badge variant="secondary">{r.provider}</Badge>
-            <label className="flex items-center gap-1 text-xs text-zinc-400">
+            <label className="flex items-center gap-1 text-xs text-fg-muted">
               <input
                 type="radio"
                 name={`default-${agentId}`}
@@ -183,7 +183,7 @@ export function CollectionsAttachCard({
               {submitting ? "Saving…" : dirty ? "Save changes" : "Saved"}
             </Button>
             {dirty && (
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-fg-faint">
                 {selected.size}{" "}
                 {selected.size === 1 ? "collection" : "collections"} selected
                 {defaultId ? " (with a default)" : " (no default)"}

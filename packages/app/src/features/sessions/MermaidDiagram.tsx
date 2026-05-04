@@ -34,21 +34,21 @@ export function MermaidDiagram({ content }: { content: string }) {
 
   if (error) {
     return (
-      <pre className="overflow-x-auto rounded-md bg-zinc-900 p-3 text-xs text-zinc-400">
+      <pre className="overflow-x-auto rounded-md bg-bg-elevated p-3 text-xs text-fg-muted">
         {content}
       </pre>
     );
   }
   if (!svg) {
     return (
-      <div className="py-3 text-center text-xs text-zinc-500">
+      <div className="py-3 text-center text-xs text-fg-faint">
         Rendering diagram…
       </div>
     );
   }
   return (
     <div
-      className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-900 p-3 [&_svg]:max-w-full"
+      className="overflow-x-auto rounded-md border border-border-soft bg-bg-elevated p-3 [&_svg]:max-w-full"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

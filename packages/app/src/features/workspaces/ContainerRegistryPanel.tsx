@@ -57,11 +57,11 @@ export function ContainerRegistryPanel({ slug }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {loading && <div className="text-sm text-zinc-400">Loading…</div>}
+        {loading && <div className="text-sm text-fg-muted">Loading…</div>}
         {error && <div className="text-sm text-red-400">{error}</div>}
 
         {images.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
+          <div className="overflow-hidden rounded-md border border-border-soft">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -75,15 +75,15 @@ export function ContainerRegistryPanel({ slug }: Props) {
                   <TableRow
                     key={img.id}
                     onClick={() => setSelectedId(img.id)}
-                    className="cursor-pointer transition-colors hover:bg-zinc-950"
+                    className="cursor-pointer transition-colors hover:bg-bg"
                   >
-                    <TableCell className="text-zinc-200 font-medium">
+                    <TableCell className="text-fg font-medium">
                       {img.display_name}
-                      <div className="font-mono text-xs text-zinc-500">
+                      <div className="font-mono text-xs text-fg-faint">
                         {img.name}
                       </div>
                     </TableCell>
-                    <TableCell className="text-zinc-400 text-xs max-w-md">
+                    <TableCell className="text-fg-muted text-xs max-w-md">
                       {img.description ?? "—"}
                     </TableCell>
                     <TableCell>
@@ -99,7 +99,7 @@ export function ContainerRegistryPanel({ slug }: Props) {
         )}
 
         {!loading && !error && images.length === 0 && (
-          <div className="rounded-md border border-zinc-900 p-6 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
             No images available. The seed should populate platform
             presets on api boot; if you're seeing this, check the api
             logs for a <code>[seed] platform presets ready</code> line.
@@ -128,7 +128,7 @@ function ImageDetail({
                 {image.is_preset ? "preset" : "workspace"}
               </Badge>
             </div>
-            <div className="mt-1 font-mono text-xs text-zinc-500">
+            <div className="mt-1 font-mono text-xs text-fg-faint">
               {image.name}
             </div>
           </div>
@@ -137,7 +137,7 @@ function ImageDetail({
             variant="ghost"
             size="sm"
             onClick={onBack}
-            className="text-xs text-zinc-400"
+            className="text-xs text-fg-muted"
           >
             ← Back
           </Button>
@@ -147,18 +147,18 @@ function ImageDetail({
         {image.description && (
           <section>
             <SectionLabel>Description</SectionLabel>
-            <p className="text-zinc-300">{image.description}</p>
+            <p className="text-fg-muted">{image.description}</p>
           </section>
         )}
 
         <section>
           <SectionLabel>Dockerfile</SectionLabel>
           {image.dockerfile_source ? (
-            <pre className="max-h-[28rem] overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs text-zinc-200 whitespace-pre-wrap break-all border border-zinc-900">
+            <pre className="max-h-[28rem] overflow-auto rounded-md bg-bg p-3 font-mono text-xs text-fg whitespace-pre-wrap break-all border border-border-soft">
               {image.dockerfile_source}
             </pre>
           ) : (
-            <div className="rounded-md border border-zinc-900 p-3 text-xs text-zinc-500">
+            <div className="rounded-md border border-border-soft p-3 text-xs text-fg-faint">
               Dockerfile source isn't stored on this row. For seeded
               presets this should populate automatically on the next
               api restart; check the <code>[seed] platform presets
@@ -166,7 +166,7 @@ function ImageDetail({
             </div>
           )}
           {image.is_preset && (
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-fg-faint">
               Presets are code-maintained in{" "}
               <code>deploy/images/{image.name.replace(/^preset-/, "")}/Dockerfile</code>
               . Edits happen in the repo and ship with{" "}
@@ -178,7 +178,7 @@ function ImageDetail({
 
         <section>
           <SectionLabel>Registry reference</SectionLabel>
-          <div className="rounded-md bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200 break-all">
+          <div className="rounded-md bg-bg px-3 py-2 font-mono text-xs text-fg break-all">
             {image.built_ref}
           </div>
         </section>
@@ -226,7 +226,7 @@ function ImageDetail({
         {image.build_status === "failed" && image.build_log && (
           <section>
             <SectionLabel>Build log</SectionLabel>
-            <pre className="max-h-[20rem] overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs text-red-300 whitespace-pre-wrap border border-zinc-900">
+            <pre className="max-h-[20rem] overflow-auto rounded-md bg-bg p-3 font-mono text-xs text-red-300 whitespace-pre-wrap border border-border-soft">
               {image.build_log}
             </pre>
           </section>
@@ -238,7 +238,7 @@ function ImageDetail({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">
+    <div className="text-xs uppercase tracking-wide text-fg-faint mb-1">
       {children}
     </div>
   );
@@ -248,7 +248,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <SectionLabel>{label}</SectionLabel>
-      <div className="text-zinc-300">{value}</div>
+      <div className="text-fg-muted">{value}</div>
     </div>
   );
 }

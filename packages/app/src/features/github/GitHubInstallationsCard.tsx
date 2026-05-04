@@ -35,7 +35,7 @@ export function GitHubInstallationsCard() {
   if (!config) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-zinc-400">
+        <CardContent className="py-4 text-sm text-fg-muted">
           Loading GitHub…
         </CardContent>
       </Card>
@@ -49,7 +49,7 @@ export function GitHubInstallationsCard() {
           <CardTitle>GitHub</CardTitle>
           <CardDescription>
             GitHub App not configured on this server. Set the
-            <code className="mx-1 rounded bg-zinc-900 px-1 py-0.5 text-xs">
+            <code className="mx-1 rounded bg-bg-elevated px-1 py-0.5 text-xs">
               GITHUB_APP_*
             </code>
             environment variables.
@@ -77,26 +77,26 @@ export function GitHubInstallationsCard() {
       </CardHeader>
       <CardContent>
         {status === "loading" && (
-          <div className="text-sm text-zinc-400">Loading installations…</div>
+          <div className="text-sm text-fg-muted">Loading installations…</div>
         )}
         {status === "ready" && installations.length === 0 && (
-          <div className="text-sm text-zinc-500">No installations yet.</div>
+          <div className="text-sm text-fg-faint">No installations yet.</div>
         )}
         {installations.length > 0 && (
-          <ul className="divide-y divide-zinc-800 rounded-md border border-zinc-800">
+          <ul className="divide-y divide-border-soft rounded-md border border-border-soft">
             {installations.map((inst) => (
               <li
                 key={inst.installation_id}
                 className="flex items-center justify-between px-3 py-2 text-sm"
               >
                 <div>
-                  <div className="text-zinc-100">
+                  <div className="text-fg">
                     {inst.account_login}
-                    <span className="ml-2 text-xs text-zinc-500">
+                    <span className="ml-2 text-xs text-fg-faint">
                       ({inst.account_type.toLowerCase()})
                     </span>
                   </div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-fg-faint">
                     repos: {inst.repository_selection} · installation #
                     {inst.installation_id}
                   </div>

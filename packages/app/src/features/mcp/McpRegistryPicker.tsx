@@ -38,9 +38,12 @@ const KIND_LABEL: Record<McpSeedEntry["kind"], string> = {
 };
 
 const KIND_TONE: Record<McpSeedEntry["kind"], string> = {
-  remote_oauth: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
-  command: "bg-blue-500/15 text-blue-300 ring-blue-500/30",
-  image: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
+  remote_oauth:
+    "bg-violet-500/15 text-violet-300 ring-violet-500/30 light:text-violet-700 light:bg-violet-500/12 light:ring-violet-500/30",
+  command:
+    "bg-blue-500/15 text-blue-300 ring-blue-500/30 light:text-blue-700 light:bg-blue-500/12 light:ring-blue-500/30",
+  image:
+    "bg-amber-500/15 text-amber-300 ring-amber-500/30 light:text-amber-700 light:bg-amber-500/15 light:ring-amber-500/30",
 };
 
 /**
@@ -74,7 +77,7 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-faint" />
           <Input
             type="text"
             value={query}
@@ -86,7 +89,7 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
         </div>
 
         {results.length === 0 ? (
-          <div className="rounded-md border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-dashed border-border-soft px-4 py-8 text-center text-sm text-fg-faint">
             No matches in the curated list. Use Custom MCP at the bottom
             of the form to register a server by URL or command.
           </div>
@@ -99,12 +102,12 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
                   <button
                     type="button"
                     onClick={() => onPick(entry)}
-                    className="group flex w-full items-start gap-3 rounded-md border border-zinc-900 bg-zinc-950 p-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400"
+                    className="group flex w-full items-start gap-3 rounded-md border border-border-soft bg-bg p-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400"
                   >
                     <SeedLogo entry={entry} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-zinc-100">
+                        <span className="truncate text-sm font-medium text-fg">
                           {entry.display_name}
                         </span>
                         {isInstalled && (
@@ -113,7 +116,7 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
                           </Badge>
                         )}
                       </div>
-                      <div className="mt-0.5 truncate text-[11px] text-zinc-500">
+                      <div className="mt-0.5 truncate text-[11px] text-fg-faint">
                         {entry.description}
                       </div>
                       <div className="mt-1.5 flex items-center gap-1.5">
@@ -123,7 +126,7 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
                           {KIND_LABEL[entry.kind]}
                         </span>
                         {entry.kind === "remote_oauth" && !entry.mcp_url && (
-                          <span className="rounded-sm bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          <span className="rounded-sm bg-bg-muted/80 px-1.5 py-0.5 text-[10px] text-fg-muted">
                             URL needed
                           </span>
                         )}
@@ -132,7 +135,7 @@ export function McpRegistryPicker({ existingSlugs, onPick }: Props) {
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="ml-auto inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300"
+                          className="ml-auto inline-flex items-center gap-1 text-[11px] text-fg-faint hover:text-fg-muted"
                           aria-label={`Open ${entry.display_name} homepage`}
                         >
                           docs <ExternalLink className="size-3" />
@@ -171,7 +174,7 @@ function SeedLogo({ entry }: { entry: McpSeedEntry }) {
   }
   return (
     <div
-      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-sm bg-zinc-800 text-xs font-semibold text-zinc-300"
+      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-sm bg-bg-muted text-xs font-semibold text-fg-muted"
       aria-hidden="true"
     >
       {entry.display_name.charAt(0).toUpperCase()}

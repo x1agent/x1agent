@@ -166,7 +166,7 @@ describe("session routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("cancel marks a pending session failed", async () => {
+  it("cancel marks a pending session complete with cancelled errorMessage", async () => {
     const c = await login("admin@example.com");
     const id = await newAgent(c, "to-cancel", null);
 
@@ -190,7 +190,7 @@ describe("session routes", () => {
     const body = (await cancelled.json()) as {
       session: { status: string; error_message: string | null };
     };
-    expect(body.session.status).toBe("failed");
+    expect(body.session.status).toBe("complete");
     expect(body.session.error_message).toBe("cancelled");
   });
 

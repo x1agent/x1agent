@@ -93,8 +93,8 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
           { label: "Collections" },
         ]}
       >
-        <div className="mx-auto max-w-md p-8 text-sm text-zinc-400">
-          <h1 className="mb-2 text-lg font-semibold text-zinc-100">
+        <div className="mx-auto max-w-md p-8 text-sm text-fg-muted">
+          <h1 className="mb-2 text-lg font-semibold text-fg">
             Collections aren't installed
           </h1>
           <p>
@@ -151,18 +151,18 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
           )}
 
           {loadingSlug === workspaceSlug && rows.length === 0 && (
-            <div className="text-sm text-zinc-500">Loading…</div>
+            <div className="text-sm text-fg-faint">Loading…</div>
           )}
 
           {rows.length === 0 && loadingSlug !== workspaceSlug && (
-            <div className="rounded-md border border-zinc-900 p-8 text-center text-sm text-zinc-500">
+            <div className="rounded-md border border-border-soft p-8 text-center text-sm text-fg-faint">
               No collections yet.
               {canManage && " Click \"New collection\" to create one."}
             </div>
           )}
 
           {rows.length > 0 && (
-            <div className="overflow-hidden rounded-md border border-zinc-900">
+            <div className="overflow-hidden rounded-md border border-border-soft">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -175,25 +175,25 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
                 </TableHeader>
                 <TableBody>
                   {rows.map((row) => (
-                    <TableRow key={row.id} className="hover:bg-zinc-900/40">
+                    <TableRow key={row.id} className="hover:bg-bg-elevated/40">
                       <TableCell>
                         <a
-                          className="text-zinc-100 hover:underline"
+                          className="text-fg hover:underline"
                           href={`/workspaces/${workspaceSlug}/collections/${row.slug}`}
                         >
                           {row.name}
                         </a>
-                        <div className="font-mono text-[11px] text-zinc-600">
+                        <div className="font-mono text-[11px] text-fg-faint/70">
                           {row.slug}
                         </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary">{row.provider_type}</Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-zinc-400">
+                      <TableCell className="text-sm text-fg-muted">
                         {row.description ?? "—"}
                       </TableCell>
-                      <TableCell className="text-xs text-zinc-500">
+                      <TableCell className="text-xs text-fg-faint">
                         {new Date(row.created_at).toLocaleDateString(
                           undefined,
                           { month: "short", day: "numeric", year: "numeric" },
@@ -214,7 +214,7 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
                               });
                               if (ok) void remove(workspaceSlug, row.id);
                             }}
-                            className="text-zinc-400 hover:text-red-400"
+                            className="text-fg-muted hover:text-red-400"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -326,7 +326,7 @@ function CreateCollectionCard({
               }}
               placeholder="ideas"
             />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-fg-faint">
               Lowercase, kebab-case, 1-63 chars. Becomes part of the URL and
               the backing-store id.
             </p>
@@ -342,8 +342,8 @@ function CreateCollectionCard({
             />
           </div>
 
-          <div className="space-y-3 rounded-md border border-zinc-900 p-3">
-            <div className="text-xs uppercase tracking-wide text-zinc-500">
+          <div className="space-y-3 rounded-md border border-border-soft p-3">
+            <div className="text-xs uppercase tracking-wide text-fg-faint">
               Embedding model
             </div>
             <div className="space-y-1.5">
@@ -372,11 +372,11 @@ function CreateCollectionCard({
                   className="mt-1"
                 />
               ) : selectedPreset ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-fg-faint">
                   {selectedPreset.description}
                 </p>
               ) : null}
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-fg-faint">
                 All embeddings written to this collection must match this
                 dimension. Immutable after create.
               </p>

@@ -4,9 +4,8 @@ import remarkGfm from "remark-gfm";
 import { ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
-import ShareCard from "./ShareCard";
+import { SharePill } from "./SharePill";
 import { markdownComponents } from "./markdown-components";
-import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { apiFetch } from "../../lib/api";
 
@@ -42,7 +41,7 @@ const WAKE_KIND_LABELS: Record<string, { label: string; tint: string }> = {
   state_change: { label: "child finished", tint: "border-blue-700/60 bg-blue-950/40" },
   heartbeat: { label: "scheduler heartbeat", tint: "border-purple-700/60 bg-purple-950/40" },
   watchdog: { label: "watchdog — silent child", tint: "border-amber-700/60 bg-amber-950/40" },
-  checkup: { label: "platform checkup", tint: "border-zinc-700/60 bg-zinc-900/60" },
+  checkup: { label: "platform checkup", tint: "border-border-strong/60 bg-bg-elevated/60" },
   message: { label: "message from child", tint: "border-emerald-700/60 bg-emerald-950/40" },
 };
 
@@ -60,24 +59,24 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
   if (source === "platform" && kind && WAKE_KIND_LABELS[kind]) {
     const { label, tint } = WAKE_KIND_LABELS[kind];
     return (
-      <div className="px-4 py-2">
+      <div className="py-2">
         <div className={`rounded-md border ${tint} px-3 py-2 text-xs`}>
-          <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-zinc-400">
-            <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-medium text-zinc-200">
+          <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-fg-muted">
+            <span className="rounded bg-bg-muted px-1.5 py-0.5 font-medium text-fg">
               Platform wake
             </span>
             <span>{label}</span>
             {driverless && (
-              <span className="text-zinc-500">· driverless</span>
+              <span className="text-fg-faint">· driverless</span>
             )}
             {fromSessionId && (
-              <span className="text-zinc-500">
+              <span className="text-fg-faint">
                 · from {String(fromSessionId).slice(0, 8)}
                 {fromAgent ? ` (${fromAgent})` : ""}
               </span>
             )}
           </div>
-          <p className="whitespace-pre-wrap text-zinc-200">
+          <p className="whitespace-pre-wrap text-fg">
             {String(payload["text"] ?? "")}
           </p>
         </div>
@@ -85,12 +84,15 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
     );
   }
 
+  // User turns: subtle right-aligned bubble. Light tint distinguishes
+  // from the agent's flat prose without the heavy chat-app shape we
+  // used to have. Matches the Zapier reference (Image 7).
   return (
-    <div className="flex justify-end px-4 py-3">
-      <div className="max-w-[80%] rounded-2xl rounded-br-md bg-zinc-800 px-4 py-2 text-sm text-zinc-100">
+    <div className="flex justify-end py-3">
+      <div className="max-w-[80%] rounded-2xl bg-bg-elevated/70 px-4 py-2.5 text-[15px] leading-7 text-fg">
         <p className="whitespace-pre-wrap">{String(payload["text"] ?? "")}</p>
         {fromSessionId && (
-          <div className="mt-1 text-[10px] text-zinc-400">
+          <div className="mt-1 text-[10px] text-fg-faint">
             from session {String(fromSessionId).slice(0, 8)}
             {fromAgent ? ` · ${fromAgent}` : ""}
           </div>
@@ -103,7 +105,7 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
 function AgentText({ event }: { event: SessionEventDTO }) {
   const text = String(p(event)["text"] ?? "");
   return (
-    <div className="px-4 py-3 text-sm text-zinc-100">
+    <div className="py-3 text-[15px] leading-7 text-fg">
       <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {text}
       </Markdown>
@@ -113,12 +115,10 @@ function AgentText({ event }: { event: SessionEventDTO }) {
 
 function ResumedDivider() {
   return (
-    <div className="my-2 flex items-center gap-3 px-4 py-3">
-      <div className="flex-1 border-t border-dashed border-zinc-800" />
-      <span className="px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+    <div className="my-3 flex justify-center py-1">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-fg-faint">
         Session resumed
       </span>
-      <div className="flex-1 border-t border-dashed border-zinc-800" />
     </div>
   );
 }
@@ -127,20 +127,27 @@ function SessionBanner({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   const type = event.type;
   let label = "Session started";
-  let color = "text-emerald-400 bg-emerald-950/40";
+  let tone = "text-emerald-400/70";
   if (type === "session.completed") {
     label = `Session completed${typeof payload["result"] === "string" && payload["result"].includes("inactivity") ? " (idle timeout)" : ""}`;
+    tone = "text-fg-faint";
   } else if (type === "session.failed") {
     label = `Session failed${payload["error"] ? `: ${String(payload["error"])}` : ""}`;
-    color = "text-red-400 bg-red-950/40";
+    tone = "text-red-400/80";
   }
   return (
-    <div
-      className={`flex items-center justify-between px-4 py-2 text-xs font-medium ${color}`}
-    >
-      <span>{label}</span>
-      <span className="text-[10px] opacity-60">
-        {new Date(event.timestamp).toLocaleTimeString()}
+    <div className="my-3 flex justify-center py-1">
+      <span
+        className={`flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide ${tone}`}
+      >
+        <span>{label}</span>
+        <span className="text-fg-faint/70">·</span>
+        <span className="text-fg-faint">
+          {new Date(event.timestamp).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </span>
       </span>
     </div>
   );
@@ -149,11 +156,11 @@ function SessionBanner({ event }: { event: SessionEventDTO }) {
 function StatusCard({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   return (
-    <div className="flex items-center gap-2 px-4 py-1 text-xs text-zinc-500">
+    <div className="flex items-center gap-2 py-1 text-xs text-fg-faint">
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
       <span className="capitalize">{String(payload["status"] ?? "")}</span>
       {payload["detail"] && (
-        <span className="text-zinc-400">— {String(payload["detail"])}</span>
+        <span className="text-fg-muted">— {String(payload["detail"])}</span>
       )}
     </div>
   );
@@ -167,31 +174,25 @@ function ArtifactCard({ event }: { event: SessionEventDTO }) {
   const mermaid = isMermaid(content);
   const isCode = kind === "code" && !mermaid;
   return (
-    <div className="px-4 py-3">
-      <div className="rounded-lg border border-zinc-800 p-3">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300">
-            {mermaid ? "diagram" : kind}
-          </span>
-          <span className="text-sm font-medium text-zinc-100">{title}</span>
-        </div>
-        {mermaid ? (
-          <MermaidDiagram content={content} />
-        ) : isCode ? (
-          <pre className="overflow-x-auto rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
-            {content}
-          </pre>
-        ) : (
-          <div className="text-sm text-zinc-100">
-            <Markdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
-              {content}
-            </Markdown>
-          </div>
-        )}
+    <div className="py-3">
+      <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-wide text-fg-faint">
+        <span>{mermaid ? "diagram" : kind}</span>
+        <span className="text-fg-faint/40">·</span>
+        <span className="font-medium text-fg-muted">{title}</span>
       </div>
+      {mermaid ? (
+        <MermaidDiagram content={content} />
+      ) : isCode ? (
+        <pre className="overflow-x-auto rounded-md bg-bg-elevated/80 p-3 text-xs text-fg">
+          {content}
+        </pre>
+      ) : (
+        <div className="text-[15px] leading-7 text-fg">
+          <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {content}
+          </Markdown>
+        </div>
+      )}
     </div>
   );
 }
@@ -207,25 +208,26 @@ function InputRequestCard({
   const options = (payload["options"] as string[] | undefined) ?? [];
   const requestId = String(payload["request_id"] ?? "");
   return (
-    <div className="px-4 py-3">
-      <div className="rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
-        <p className="mb-2 text-sm text-amber-200">
-          {String(payload["question"] ?? "The agent has a question.")}
-        </p>
-        {options.length > 0 && onRespond && (
-          <div className="flex flex-wrap gap-2">
-            {options.map((opt) => (
-              <button
-                key={opt}
-                onClick={() => onRespond(opt, requestId)}
-                className="rounded-md border border-amber-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-amber-950/40"
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className="py-3">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-amber-400/80">
+        Agent is asking
       </div>
+      <p className="text-[15px] leading-7 text-fg">
+        {String(payload["question"] ?? "The agent has a question.")}
+      </p>
+      {options.length > 0 && onRespond && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {options.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => onRespond(opt, requestId)}
+              className="rounded-md border border-border-soft bg-surface px-3 py-1 text-sm text-fg transition hover:border-accent/60 hover:bg-accent-soft"
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -306,47 +308,45 @@ function PermissionRequestCard({
   };
 
   return (
-    <div className="px-4 py-3">
-      <div className="rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-amber-300">
-            Permission request
-          </span>
-          <Badge variant="warning">{grantType}</Badge>
-          <Badge variant="secondary">{scope}</Badge>
-        </div>
-        <p className="mb-2 text-sm text-amber-100">
-          The agent is asking for{" "}
-          <span className="font-medium">{summarize()}</span>.
-        </p>
-        {justification && (
-          <p className="mb-3 whitespace-pre-wrap text-sm text-zinc-200">
-            {justification}
-          </p>
-        )}
-        {state === "error" && error && (
-          <p className="mb-2 text-xs text-red-400">{error}</p>
-        )}
-        {state === "pending" || state === "approving" || state === "error" ? (
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={approve}
-              disabled={state === "approving" || !agentId}
-            >
-              {state === "approving" ? "Approving…" : "Approve"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={deny}>
-              Deny
-            </Button>
-          </div>
-        ) : (
-          <p className="text-xs text-zinc-500">
-            {state === "approved" ? "Approved." : "Denied."}
-          </p>
-        )}
+    <div className="py-3">
+      <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-wide text-amber-400/80">
+        <span>Permission request</span>
+        <span className="text-fg-faint/40">·</span>
+        <span className="text-fg-muted">{grantType}</span>
+        <span className="text-fg-faint/40">·</span>
+        <span className="text-fg-muted">{scope}</span>
       </div>
+      <p className="text-[15px] leading-7 text-fg">
+        The agent is asking for{" "}
+        <span className="font-medium">{summarize()}</span>.
+      </p>
+      {justification && (
+        <p className="mt-1 whitespace-pre-wrap text-[14px] leading-6 text-fg-muted">
+          {justification}
+        </p>
+      )}
+      {state === "error" && error && (
+        <p className="mt-2 text-xs text-red-400">{error}</p>
+      )}
+      {state === "pending" || state === "approving" || state === "error" ? (
+        <div className="mt-2 flex gap-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={approve}
+            disabled={state === "approving" || !agentId}
+          >
+            {state === "approving" ? "Approving…" : "Approve"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={deny}>
+            Deny
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-fg-faint">
+          {state === "approved" ? "Approved." : "Denied."}
+        </p>
+      )}
     </div>
   );
 }
@@ -354,10 +354,10 @@ function PermissionRequestCard({
 function ErrorCard({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   return (
-    <div className="px-4 py-2 text-sm text-red-400">
+    <div className="py-2 text-sm text-red-400">
       <span>{String(payload["message"] ?? "")}</span>
       {payload["recoverable"] === true && (
-        <span className="ml-2 text-xs text-zinc-500">(continuing)</span>
+        <span className="ml-2 text-xs text-fg-faint">(continuing)</span>
       )}
     </div>
   );
@@ -368,7 +368,7 @@ function VerboseThinking({ event }: { event: SessionEventDTO }) {
   const text = String(p(event)["text"] ?? "");
   if (!text) return null;
   return (
-    <div className="px-4 py-1">
+    <div className="py-1">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300"
@@ -379,7 +379,7 @@ function VerboseThinking({ event }: { event: SessionEventDTO }) {
         />
       </button>
       {open && (
-        <div className="mt-1 whitespace-pre-wrap border-l-2 border-purple-900 pl-3 text-xs text-zinc-400">
+        <div className="mt-1 whitespace-pre-wrap border-l-2 border-purple-900 pl-3 text-xs text-fg-muted">
           {text}
         </div>
       )}
@@ -411,12 +411,12 @@ function ToolCallCard({ event }: { event: SessionEventDTO }) {
   if (SUPPRESSED_RAW_TOOL_CALLS.has(name)) return null;
   const input = payload["input"] ?? {};
   return (
-    <div className="px-4 py-1.5">
+    <div className="py-1.5">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200"
+        className="flex items-center gap-2 text-xs text-fg-muted hover:text-fg"
       >
-        <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-[10px]">
+        <span className="rounded bg-bg-muted px-2 py-0.5 font-mono text-[10px]">
           {name}
         </span>
         <ChevronRight
@@ -424,7 +424,7 @@ function ToolCallCard({ event }: { event: SessionEventDTO }) {
         />
       </button>
       {open && (
-        <pre className="mt-1 overflow-x-auto rounded-md bg-zinc-900 p-2 text-[10px] text-zinc-300">
+        <pre className="mt-1 overflow-x-auto rounded-md bg-bg-elevated p-2 text-[10px] text-fg-muted">
           {JSON.stringify(input, null, 2)}
         </pre>
       )}
@@ -438,7 +438,7 @@ function ToolResultCard({ event }: { event: SessionEventDTO }) {
   const isError = event.type === "agent.tool_error" || payload["is_error"] === true;
   const content = payload["content"];
   return (
-    <div className="px-4 py-1.5">
+    <div className="py-1.5">
       <button
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1 text-[11px] ${isError ? "text-red-400" : "text-emerald-400"} hover:underline`}
@@ -449,7 +449,7 @@ function ToolResultCard({ event }: { event: SessionEventDTO }) {
         />
       </button>
       {open && (
-        <pre className="mt-1 max-h-64 overflow-x-auto rounded-md bg-zinc-900 p-2 text-[10px] text-zinc-300">
+        <pre className="mt-1 max-h-64 overflow-x-auto rounded-md bg-bg-elevated p-2 text-[10px] text-fg-muted">
           {typeof content === "string"
             ? content
             : JSON.stringify(content, null, 2)}
@@ -485,7 +485,7 @@ export function EventCard({
       return <ArtifactCard event={event} />;
     case "agent.share":
       return (
-        <ShareCard
+        <SharePill
           event={event}
           workspaceSlug={workspaceSlug}
           sessionId={sessionId}
@@ -514,13 +514,13 @@ export function EventCard({
       return verbose ? <ToolResultCard event={event} /> : null;
     case "session.init":
       return verbose ? (
-        <div className="px-4 py-1 text-[10px] text-zinc-600">
+        <div className="py-1 text-[10px] text-fg-faint/70">
           session.init ({Array.isArray(p(event)["tools"]) ? (p(event)["tools"] as unknown[]).length : 0} tools available)
         </div>
       ) : null;
     default:
       return verbose ? (
-        <div className="px-4 py-1 text-[10px] text-zinc-600">{event.type}</div>
+        <div className="py-1 text-[10px] text-fg-faint/70">{event.type}</div>
       ) : null;
   }
 }

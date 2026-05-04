@@ -29,14 +29,14 @@ export function EventStream({
 
   if (events.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-10 text-sm text-zinc-500">
+      <div className="flex flex-1 items-center justify-center p-10 text-sm text-fg-faint">
         Waiting for events…
       </div>
     );
   }
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="divide-y divide-zinc-900/50">
+      <div className="mx-auto max-w-3xl px-4 py-6">
         {events.map((e) => (
           <EventCard
             key={`${e.session_id}-${e.seq}`}

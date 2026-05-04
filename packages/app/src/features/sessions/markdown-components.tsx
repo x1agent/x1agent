@@ -31,7 +31,7 @@ export const markdownComponents = {
   // ── Headings — 18/16/14/11/11/11px down the scale.
   h1: ({ children, ...rest }: Props<"h1">) => (
     <h1
-      className="mt-6 mb-2 text-lg font-semibold tracking-tight text-zinc-100 first:mt-0"
+      className="mt-6 mb-2 text-lg font-semibold tracking-tight text-fg first:mt-0"
       {...rest}
     >
       {children}
@@ -39,7 +39,7 @@ export const markdownComponents = {
   ),
   h2: ({ children, ...rest }: Props<"h2">) => (
     <h2
-      className="mt-5 mb-1.5 text-base font-semibold tracking-tight text-zinc-100 first:mt-0"
+      className="mt-5 mb-1.5 text-base font-semibold tracking-tight text-fg first:mt-0"
       {...rest}
     >
       {children}
@@ -47,7 +47,7 @@ export const markdownComponents = {
   ),
   h3: ({ children, ...rest }: Props<"h3">) => (
     <h3
-      className="mt-4 mb-1 text-sm font-semibold tracking-tight text-zinc-200 first:mt-0"
+      className="mt-4 mb-1 text-sm font-semibold tracking-tight text-fg first:mt-0"
       {...rest}
     >
       {children}
@@ -55,7 +55,7 @@ export const markdownComponents = {
   ),
   h4: ({ children, ...rest }: Props<"h4">) => (
     <h4
-      className="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 first:mt-0"
+      className="mt-4 mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-muted first:mt-0"
       {...rest}
     >
       {children}
@@ -63,7 +63,7 @@ export const markdownComponents = {
   ),
   h5: ({ children, ...rest }: Props<"h5">) => (
     <h5
-      className="mt-3 mb-1 text-[11px] font-semibold text-zinc-400 first:mt-0"
+      className="mt-3 mb-1 text-[11px] font-semibold text-fg-muted first:mt-0"
       {...rest}
     >
       {children}
@@ -71,7 +71,7 @@ export const markdownComponents = {
   ),
   h6: ({ children, ...rest }: Props<"h6">) => (
     <h6
-      className="mt-3 mb-1 text-[11px] font-medium text-zinc-500 first:mt-0"
+      className="mt-3 mb-1 text-[11px] font-medium text-fg-faint first:mt-0"
       {...rest}
     >
       {children}
@@ -88,7 +88,7 @@ export const markdownComponents = {
   // ── Lists — 24px indent, tight item spacing, muted markers.
   ul: ({ children, ...rest }: Props<"ul">) => (
     <ul
-      className="my-2 list-outside list-disc space-y-1 pl-6 marker:text-zinc-500 first:mt-0 last:mb-0"
+      className="my-2 list-outside list-disc space-y-1 pl-6 marker:text-fg-faint first:mt-0 last:mb-0"
       {...rest}
     >
       {children}
@@ -96,7 +96,7 @@ export const markdownComponents = {
   ),
   ol: ({ children, ...rest }: Props<"ol">) => (
     <ol
-      className="my-2 list-outside list-decimal space-y-1 pl-6 marker:text-zinc-500 first:mt-0 last:mb-0"
+      className="my-2 list-outside list-decimal space-y-1 pl-6 marker:text-fg-faint first:mt-0 last:mb-0"
       {...rest}
     >
       {children}
@@ -136,7 +136,7 @@ export const markdownComponents = {
 
   blockquote: ({ children, ...rest }: Props<"blockquote">) => (
     <blockquote
-      className="my-3 border-l-2 border-zinc-800 pl-3 italic text-zinc-400 first:mt-0 last:mb-0"
+      className="my-3 border-l-2 border-border-soft pl-3 italic text-fg-muted first:mt-0 last:mb-0"
       {...rest}
     >
       {children}
@@ -158,7 +158,7 @@ export const markdownComponents = {
     if (!lang) {
       return (
         <code
-          className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-[0.85em] text-zinc-100"
+          className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[0.85em] text-fg"
           {...rest}
         >
           {children}
@@ -173,7 +173,7 @@ export const markdownComponents = {
   },
   pre: ({ children, ...rest }: Props<"pre">) => (
     <pre
-      className="my-3 overflow-x-auto rounded-md bg-zinc-900 p-3 text-xs text-zinc-100 first:mt-0 last:mb-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100"
+      className="my-3 overflow-x-auto rounded-md bg-bg-elevated p-3 text-xs text-fg first:mt-0 last:mb-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-fg"
       {...rest}
     >
       {children}
@@ -182,14 +182,14 @@ export const markdownComponents = {
 
   // ── Tables — bordered wrapper, tinted header, subtle row dividers.
   table: ({ children, ...rest }: Props<"table">) => (
-    <div className="my-4 overflow-x-auto rounded-md border border-zinc-800 first:mt-0 last:mb-0">
+    <div className="my-4 overflow-x-auto rounded-md border border-border-soft first:mt-0 last:mb-0">
       <table className="w-full border-collapse text-xs" {...rest}>
         {children}
       </table>
     </div>
   ),
   thead: ({ children, ...rest }: Props<"thead">) => (
-    <thead className="border-b border-zinc-800 bg-zinc-900/50" {...rest}>
+    <thead className="border-b border-border-soft bg-bg-elevated/50" {...rest}>
       {children}
     </thead>
   ),
@@ -197,13 +197,13 @@ export const markdownComponents = {
     <tbody {...rest}>{children}</tbody>
   ),
   tr: ({ children, ...rest }: Props<"tr">) => (
-    <tr className="border-b border-zinc-800/40 last:border-0" {...rest}>
+    <tr className="border-b border-border-soft/40 last:border-0" {...rest}>
       {children}
     </tr>
   ),
   th: ({ children, ...rest }: Props<"th">) => (
     <th
-      className="px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-zinc-400"
+      className="px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-fg-muted"
       {...rest}
     >
       {children}
@@ -218,6 +218,6 @@ export const markdownComponents = {
   // ── Horizontal rule — barely-visible line + big margin so it reads
   // as a section break without a heavy divider.
   hr: (props: Props<"hr">) => (
-    <hr className="my-4 border-0 border-t border-zinc-800/30" {...props} />
+    <hr className="my-4 border-0 border-t border-border-soft/30" {...props} />
   ),
 };

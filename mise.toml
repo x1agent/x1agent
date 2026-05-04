@@ -10,6 +10,14 @@ _.file = [".env", ".env.local"]
 # Scope kubectl/devspace/helm to OrbStack for everything run through mise
 # (or in a mise-activated shell inside this directory). Prevents accidental
 # deploys to a real cluster.
+#
+# Two-lane model:
+#   • DEV lane (dev:*)   — KUBECONFIG = OrbStack file (this default).
+#   • PROD lane (install/install:*/deploy/logs/terraform:*) — every prod
+#     task overrides this with `env = { KUBECONFIG = "" }` so the CLI
+#     writes its own deployment-specific kubeconfig instead of polluting
+#     the OrbStack file with `gcloud container clusters get-credentials`.
+# Each prod task below reasserts the override; do not remove it.
 KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 
 # Where the app finds the api in dev. The app runs in the cluster
@@ -28,13 +36,20 @@ HOST_HOME_DIR = "{{env.HOME}}"
 HOST_CLAUDE_CREDENTIALS_FILE = "{{env.HOME}}/.x1agent-dev/claude-credentials.json"
 
 # ----------------------------------------------------------------------------
-# One-time-per-cluster setup: ensure the namespace + NATS mTLS Secret exist.
-# Runs before any deployment touches the cluster. Idempotent — safe to call
-# every dev start. Without this, the NATS pod cannot mount nats-tls and the
-# whole stack stalls.
+# One-time-per-cluster setup. Each step is idempotent and OrbStack-only
+# (the bootstrap scripts source dev-preflight.sh which fails fast unless
+# KUBECONFIG points at OrbStack and the context resolves to a local
+# server). Run order:
+#   1. cert-manager + local CA + macOS keychain trust  → *.local.x1agent.dev TLS
+#   2. NATS mTLS Secret                                → providers can talk
 # ----------------------------------------------------------------------------
+[tasks."dev:cert-manager"]
+description = "Install cert-manager into OrbStack + create local CA + trust root in macOS keychain (idempotent)"
+run = "deploy/scripts/bootstrap-cert-manager.sh"
+
 [tasks."dev:setup"]
-description = "Bootstrap namespace + NATS mTLS material (idempotent)"
+description = "Bootstrap cert-manager + namespace + NATS mTLS material (idempotent)"
+depends = ["dev:cert-manager"]
 run = "deploy/scripts/bootstrap-nats-tls.sh"
 
 # ----------------------------------------------------------------------------
@@ -83,11 +98,13 @@ run = "cd packages/cli && bun run src/index.ts configure:check"
 [tasks.install]
 description = "One-shot installer — terraform → ESO + cert-manager + ingress-nginx → secrets → images → helm install x1agent"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install"
 
 [tasks."install:build-images"]
 description = "Build + push the 3 prod images (api, app, preview) to Artifact Registry"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = "deploy/scripts/build-push-prod.sh"
 
 # Subsequent ships against an already-installed deployment. Use this
@@ -96,6 +113,7 @@ run = "deploy/scripts/build-push-prod.sh"
 [tasks.deploy]
 description = "Build + push images and helm-upgrade the active deployment"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=true, default='')}}"
 
 # Tail / dump logs from the active deployment (read from
@@ -118,6 +136,7 @@ run = "cd packages/cli && bun run src/index.ts logs {{arg(name='args', var=true,
 [tasks."install:plan"]
 description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:plan"
 
 # Terraform tasks — provision the GCP-side infra (cluster, IAM, GSM
@@ -132,11 +151,13 @@ run = "cd packages/cli && bun run src/index.ts install:plan"
 #   mise run terraform:apply          # adds the ClusterSecretStore now CRDs exist
 [tasks."terraform:init"]
 description = "Initialize the GCP terraform module (one-time per machine)"
+env = { KUBECONFIG = "" }
 run = "cd deploy/terraform/gcp && terraform init"
 
 [tasks."terraform:plan"]
 description = "terraform plan against the GCP module (renders tfvars from .env.local)"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
 cd ../../deploy/terraform/gcp && terraform plan
@@ -145,6 +166,7 @@ cd ../../deploy/terraform/gcp && terraform plan
 [tasks."terraform:apply:cluster"]
 description = "First-pass apply — cluster + IAM + GSM + AR + DNS (skips ClusterSecretStore until ESO CRDs exist)"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
 cd ../../deploy/terraform/gcp && terraform apply \\
@@ -165,6 +187,7 @@ cd ../../deploy/terraform/gcp && terraform apply \\
 [tasks."terraform:apply"]
 description = "Full terraform apply — call after operator installs ESO CRDs (creates ClusterSecretStore)"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
 cd ../../deploy/terraform/gcp && terraform apply
@@ -172,19 +195,23 @@ cd ../../deploy/terraform/gcp && terraform apply
 
 [tasks."terraform:destroy"]
 description = "terraform destroy — wipes the entire install's GCP infra (with confirm)"
+env = { KUBECONFIG = "" }
 run = "cd deploy/terraform/gcp && terraform destroy"
 
 [tasks."install:apply"]
 description = "helm upgrade --install x1agent into the configured GCP cluster"
 depends = ["configure:check"]
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:apply"
 
 [tasks."install:status"]
 description = "Read-only snapshot — deployments, ingress IP, managed cert state"
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:status"
 
 [tasks."install:destroy"]
 description = "helm uninstall x1agent (double-confirm; deletes in-cluster Postgres data)"
+env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:destroy"
 
 # macOS-only: export the Claude Code Max OAuth credentials from the
@@ -263,15 +290,10 @@ depends = ["dev:setup", "dev:claude-creds"]
 run = "deploy/scripts/dev-direct-up.sh"
 
 [tasks."dev:direct:rebuild"]
-description = "Rebuild one dev image + rollout-restart its deployment (arg: component name)"
-usage = "dev:direct:rebuild <component>  e.g. api, app, provider-preview"
+description = "Rebuild one dev image + rollout-restart its deployment: mise run dev:direct:rebuild <api|app|provider-preview|provider-messaging-slack|provider-graph-surrealdb>"
 run = """
 set -euo pipefail
-COMP="${1:-}"
-if [ -z "$COMP" ]; then
-  echo "usage: mise run dev:direct:rebuild <api|app|provider-preview|provider-messaging-slack|provider-graph-surrealdb>" >&2
-  exit 2
-fi
+COMP="{{arg(name='component')}}"
 case "$COMP" in
   api)                       DF=deploy/docker/api.dev.Dockerfile; DEPLOY=api ;;
   app)                       DF=deploy/docker/app.dev.Dockerfile; DEPLOY=app ;;
@@ -283,8 +305,8 @@ esac
 echo "[dev:direct:rebuild] building x1agent-$COMP:latest"
 DOCKER_BUILDKIT=1 docker build -f "$DF" -t "x1agent-$COMP:latest" .
 echo "[dev:direct:rebuild] rolling deploy/$DEPLOY"
-kubectl -n x1agent rollout restart "deploy/$DEPLOY"
-kubectl -n x1agent rollout status "deploy/$DEPLOY" --timeout=180s
+kubectl --context=orbstack -n x1agent rollout restart "deploy/$DEPLOY"
+kubectl --context=orbstack -n x1agent rollout status "deploy/$DEPLOY" --timeout=180s
 """
 
 [tasks."dev:direct:stop"]

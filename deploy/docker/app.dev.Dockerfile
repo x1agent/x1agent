@@ -5,9 +5,16 @@
 # The app runs in the cluster (not on the host) so it can be reached
 # through ingress-nginx at https://app.local.x1agent.dev, sharing the
 # cookie domain with the api.
-FROM oven/bun:1.2.16-alpine
+#
+# Base image choice mirrors app.prod.Dockerfile's `builder` stage:
+# astro >= 6 requires Node >= 22.12. The bun:1.2.16-alpine image bundles
+# Node 22.6, so `astro dev` exits immediately. Solution: real Node base,
+# bun installed on top for `bun install`.
+FROM node:22.13-alpine
 
-RUN apk add --no-cache bash tini
+RUN apk add --no-cache bash tini curl unzip && \
+    curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v1.2.16" && \
+    ln -sf /usr/local/bin/bun /usr/local/bin/bunx
 
 WORKDIR /app
 
@@ -34,9 +41,14 @@ COPY packages/domains/collections/package.json packages/domains/collections/tsco
 COPY packages/domains/agent-resources/package.json packages/domains/agent-resources/tsconfig.json ./packages/domains/agent-resources/
 COPY packages/domains/agent-resources-postgres/package.json packages/domains/agent-resources-postgres/tsconfig.json ./packages/domains/agent-resources-postgres/
 COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-resources-redis/tsconfig.json ./packages/domains/agent-resources-redis/
+COPY packages/domains/workspace-secrets/package.json packages/domains/workspace-secrets/tsconfig.json ./packages/domains/workspace-secrets/
+COPY packages/domains/mcp-catalog/package.json packages/domains/mcp-catalog/tsconfig.json ./packages/domains/mcp-catalog/
+COPY packages/domains/agent-env/package.json packages/domains/agent-env/tsconfig.json ./packages/domains/agent-env/
+COPY packages/mcp-oauth-proxy/package.json packages/mcp-oauth-proxy/tsconfig.json ./packages/mcp-oauth-proxy/
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
+COPY packages/providers/preview/package.json packages/providers/preview/tsconfig.json ./packages/providers/preview/
 COPY packages/cli/package.json ./packages/cli/
 COPY docs/package.json ./docs/
 

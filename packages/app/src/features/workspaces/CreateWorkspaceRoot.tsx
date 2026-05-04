@@ -51,7 +51,7 @@ export function CreateWorkspaceRoot() {
   if (status === "loading" || status === "idle") {
     return (
       <AppShell chrome={false}>
-        <div className="p-8 text-sm text-zinc-400">Loading…</div>
+        <div className="p-8 text-sm text-fg-muted">Loading…</div>
       </AppShell>
     );
   }
@@ -64,7 +64,7 @@ export function CreateWorkspaceRoot() {
       <AppShell chrome={false}>
         <div className="p-8 max-w-md space-y-2">
           <h1 className="text-xl font-semibold">Not authorized</h1>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-fg-muted">
             Only platform admins can create workspaces. Ask one to invite you
             to an existing workspace instead.
           </p>
@@ -79,7 +79,7 @@ export function CreateWorkspaceRoot() {
         <form onSubmit={onSubmit} className="w-full max-w-md space-y-6">
           <div className="space-y-2 text-center">
             <h1 className="text-xl font-semibold">Create a workspace</h1>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-fg-muted">
               You can invite other members after this is created.
             </p>
           </div>
@@ -106,7 +106,7 @@ export function CreateWorkspaceRoot() {
               required
               aria-invalid={slugInvalid}
             />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-fg-faint">
               Lowercase letters, digits, hyphens. 2–32 chars, starts with a
               letter. Lives at <code>/workspaces/{slug || "<slug>"}</code>.
             </p>
