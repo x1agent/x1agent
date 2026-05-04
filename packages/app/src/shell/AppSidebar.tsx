@@ -13,6 +13,10 @@ import {
   UserPlus,
 } from "lucide-react";
 import { ADMIN_NAV } from "../features/admin/nav";
+import {
+  WORKSPACE_SETTINGS_NAV,
+  leafFromPathname,
+} from "../features/workspaces/settings-nav";
 
 // Our lucide-react build doesn't ship brand icons. Tiny inline SVG
 // component keeps the same consumer shape `<Icon className="size-4" />`.
@@ -220,12 +224,23 @@ export function AppSidebar() {
           </div>
         )}
         {/*
+          Workspace settings sidebar — grouped sections so the IA
+          scales with feature growth. Active leaf is derived from
+          the URL via leafFromPathname so direct-link refreshes
+          highlight the right item.
+        */}
+        {onWorkspaceSettings && activeSlug && (
+          <WorkspaceSettingsNav
+            workspaceSlug={activeSlug}
+            currentPath={pathname}
+          />
+        )}
+        {/*
           Cluster admin nav only shows on /admin/* — never on
           /workspaces/.../settings, even if the operator is also a
           platform admin. Mixing cluster-scope items into a workspace-
           scope settings sidebar reads as if they're scoped to that
-          workspace. Workspace settings has its own tab bar inside the
-          page; the sidebar stays empty in that mode by design.
+          workspace.
         */}
         {onAdminRoute && isPlatformAdmin && (
           <div>
@@ -320,3 +335,66 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+
+/**
+ * Sidebar nav for /workspaces/<slug>/settings/*. Renders the
+ * grouped sections from settings-nav.ts as a single panel with a
+ * "Workspace settings" header. Active leaf gets a left-border
+ * accent + brighter text; placeholder leaves dim slightly.
+ */
+function WorkspaceSettingsNav({
+  workspaceSlug,
+  currentPath,
+}: {
+  workspaceSlug: string;
+  currentPath: string;
+}) {
+  const active = leafFromPathname(currentPath);
+  return (
+    <div className="space-y-3">
+      <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+        Workspace settings
+      </div>
+      {WORKSPACE_SETTINGS_NAV.map((section) => (
+        <div key={section.title} className="space-y-0.5">
+          <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            {section.title}
+          </div>
+          <nav className="flex flex-col">
+            {section.items.map((item) => {
+              const href = `/workspaces/${workspaceSlug}/settings${item.pathSuffix}`;
+              const isActive = active?.pathSuffix === item.pathSuffix;
+              return (
+                <a
+                  key={item.pathSuffix}
+                  href={href}
+                  className={`relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                    isActive
+                      ? "bg-zinc-900 text-zinc-50"
+                      : "text-zinc-300 hover:bg-zinc-900/60 hover:text-zinc-100"
+                  } ${item.placeholder ? "text-zinc-500" : ""}`}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  {isActive && (
+                    <span
+                      className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-zinc-100"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <item.icon className="size-4" />
+                  <span className="truncate">{item.title}</span>
+                  {item.placeholder && (
+                    <span className="ml-auto rounded-sm bg-zinc-800/80 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-zinc-500">
+                      Soon
+                    </span>
+                  )}
+                </a>
+              );
+            })}
+          </nav>
+        </div>
+      ))}
+    </div>
+  );
+}
+
