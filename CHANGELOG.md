@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/x1agent/x1agent/compare/v1.6.7...v1.7.0) (2026-05-04)
+
+
+### Features
+
+* **settings:** overview screen + MCP registry picker ([#36](https://github.com/x1agent/x1agent/issues/36)) ([06c94fc](https://github.com/x1agent/x1agent/commit/06c94fc94722666b7789ea59d076c32963fc1921)), closes [hi#level](https://github.com/hi/issues/level) [#mcp-add-form](https://github.com/x1agent/x1agent/issues/mcp-add-form)
+
 ## [1.6.7](https://github.com/x1agent/x1agent/compare/v1.6.6...v1.6.7) (2026-05-03)
 
 
