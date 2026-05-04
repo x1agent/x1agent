@@ -1,0 +1,10 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { AgentsRoot } from "../../../../features/agents/AgentsRoot";
+
+const { slug } = Astro.params;
+---
+
+<Layout title={`Agents · ${slug} · x1agent`}>
+  <AgentsRoot client:only="react" workspaceSlug={slug ?? ""} />
+</Layout>
