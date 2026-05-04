@@ -213,6 +213,13 @@ export class PostgresSessionRepository implements SessionRepository {
     return rows.map(toSession);
   }
 
+  async delete(id: SessionId): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      DELETE FROM sessions WHERE id = ${id} RETURNING id
+    `;
+    return rows.length > 0;
+  }
+
   async updateStatus(
     id: SessionId,
     patch: UpdateSessionStatusInput,

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SessionStatus, WorkspaceSessionRow } from "@x1agent/shared";
+import { ChevronDown, Trash2 } from "lucide-react";
 import { AppShell } from "../../shell/AppShell";
 import { useAuthStore } from "../../stores/authStore";
 import { useWorkspaceSessionsStore } from "../../stores/workspaceSessionsStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -20,6 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
+import { useConfirm } from "../../components/use-confirm";
 import { NewSessionCard } from "./NewSessionCard";
 
 interface Props {
@@ -62,9 +71,14 @@ function fmtTime(iso: string): string {
 export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
   const { status: authStatus, fetchMe } = useAuthStore();
   const { bySlug, load, loadingSlug, errorBySlug } = useWorkspaceSessionsStore();
+  const bulkDelete = useWorkspaceSessionsStore((s) => s.bulkDelete);
+  const { confirm, dialog } = useConfirm();
 
   const [statusFilter, setStatusFilter] = useState<"all" | SessionStatus>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (authStatus === "idle") fetchMe();
@@ -99,6 +113,86 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
     return true;
   });
 
+  // Trim the selection to ids that still exist in the filtered view —
+  // a status / agent filter change shouldn't carry stale selections,
+  // and a bulk-delete shouldn't leave dangling ids in state.
+  const filteredIds = useMemo(
+    () => new Set(filtered.map((r) => r.id)),
+    [filtered],
+  );
+  useEffect(() => {
+    setSelected((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (filteredIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredIds]);
+
+  const allSelected =
+    filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+  const someSelected = selected.size > 0 && !allSelected;
+  const headerCheckedState: boolean | "indeterminate" = allSelected
+    ? true
+    : someSelected
+      ? "indeterminate"
+      : false;
+
+  function toggleAll(next: boolean) {
+    setSelected((prev) => {
+      if (!next) {
+        // Clear only ids that are visible in the current filter; leave
+        // anything outside it untouched (defensive — can't actually
+        // happen because the effect above prunes).
+        const out = new Set(prev);
+        for (const r of filtered) out.delete(r.id);
+        return out;
+      }
+      const out = new Set(prev);
+      for (const r of filtered) out.add(r.id);
+      return out;
+    });
+  }
+
+  function toggleOne(id: string, next: boolean) {
+    setSelected((prev) => {
+      const out = new Set(prev);
+      if (next) out.add(id);
+      else out.delete(id);
+      return out;
+    });
+  }
+
+  async function onDeleteSelected() {
+    if (selected.size === 0) return;
+    const ok = await confirm({
+      title:
+        selected.size === 1
+          ? "Delete this session?"
+          : `Delete ${selected.size} sessions?`,
+      description:
+        "Removes the session(s) and every event, token-usage row, share, and child session. This cannot be undone.",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
+    setActionError(null);
+    setBusy(true);
+    const ids = Array.from(selected);
+    try {
+      await bulkDelete(workspaceSlug, ids);
+      setSelected(new Set());
+    } catch (e) {
+      setActionError((e as Error).message);
+      // Reload to recover from any optimistic rollback.
+      void load(workspaceSlug);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AppShell
       breadcrumbs={[
@@ -106,6 +200,7 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
         { label: "Sessions" },
       ]}
     >
+      {dialog}
       <div className="space-y-4 p-6">
         <NewSessionCard workspaceSlug={workspaceSlug} />
 
@@ -139,14 +234,45 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
               </SelectContent>
             </Select>
           )}
+          {selected.size > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" disabled={busy}>
+                  Actions
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    void onDeleteSelected();
+                  }}
+                  className="text-red-300 focus:text-red-200"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete {selected.size}
+                  {selected.size === 1 ? " session" : " sessions"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <span className="ml-auto text-xs text-zinc-500">
-            {filtered.length} of {rows.length} sessions
+            {selected.size > 0
+              ? `${selected.size} selected · ${filtered.length} of ${rows.length} sessions`
+              : `${filtered.length} of ${rows.length} sessions`}
           </span>
         </div>
 
         {err && (
           <div className="rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
             {err}
+          </div>
+        )}
+
+        {actionError && (
+          <div className="rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
+            {actionError}
           </div>
         )}
 
@@ -165,6 +291,17 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={headerCheckedState}
+                      onCheckedChange={(v) => toggleAll(v === true)}
+                      aria-label={
+                        allSelected
+                          ? "Clear all selected sessions"
+                          : "Select all sessions in view"
+                      }
+                    />
+                  </TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Agent</TableHead>
                   <TableHead>Trigger</TableHead>
@@ -178,6 +315,8 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
                     key={row.id}
                     row={row}
                     workspaceSlug={workspaceSlug}
+                    selected={selected.has(row.id)}
+                    onToggle={(next) => toggleOne(row.id, next)}
                   />
                 ))}
               </TableBody>
@@ -192,9 +331,13 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
 function SessionRow({
   row,
   workspaceSlug,
+  selected,
+  onToggle,
 }: {
   row: WorkspaceSessionRow;
   workspaceSlug: string;
+  selected: boolean;
+  onToggle: (next: boolean) => void;
 }) {
   return (
     <TableRow
@@ -203,6 +346,21 @@ function SessionRow({
         window.location.href = `/workspaces/${workspaceSlug}/sessions/${row.id}`;
       }}
     >
+      <TableCell
+        className="w-10"
+        onClick={(e) => {
+          // Don't navigate when the user clicks anywhere in the
+          // checkbox cell; that's the affordance for selection, not
+          // drilling into the session.
+          e.stopPropagation();
+        }}
+      >
+        <Checkbox
+          checked={selected}
+          onCheckedChange={(v) => onToggle(v === true)}
+          aria-label={`Select session ${row.id}`}
+        />
+      </TableCell>
       <TableCell>
         <Badge variant={STATUS_VARIANT[row.status]}>{row.status}</Badge>
       </TableCell>

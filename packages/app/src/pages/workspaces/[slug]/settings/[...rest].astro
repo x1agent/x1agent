@@ -1,0 +1,27 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { WorkspaceSettingsRoot } from "../../../../features/workspaces/WorkspaceSettingsRoot";
+
+// Catch-all for everything under /workspaces/<slug>/settings/<sub>.
+// The React root reads `pathSuffix` and renders the matching panel.
+// Keeping every leaf addressable as its own URL means the sidebar
+// can highlight + browser back/forward feels native.
+
+const { slug, rest } = Astro.params;
+const restPath = typeof rest === "string" ? rest : "";
+const pathSuffix = restPath ? `/${restPath}` : "";
+const slugStr = typeof slug === "string" ? slug : "";
+
+// Pluck the leaf title for the page <title> so the browser tab
+// reflects which sub-page the operator is on.
+const leafTitle = pathSuffix.split("/").filter(Boolean).pop() ?? "settings";
+const niceTitle = leafTitle.replace(/-/g, " ");
+---
+
+<Layout title={`${niceTitle} · settings · ${slugStr} · x1agent`}>
+  <WorkspaceSettingsRoot
+    client:only="react"
+    workspaceSlug={slugStr}
+    pathSuffix={pathSuffix}
+  />
+</Layout>

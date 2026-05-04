@@ -141,6 +141,13 @@ export class InMemorySessionRepository implements SessionRepository {
       )
       .sort((a, b) => a.triggeredAt.getTime() - b.triggeredAt.getTime());
   }
+
+  async delete(id: SessionId): Promise<boolean> {
+    const idx = this.rows.findIndex((r) => r.id === id);
+    if (idx < 0) return false;
+    this.rows.splice(idx, 1);
+    return true;
+  }
 }
 
 class FakeAdminDeniedError extends DomainError {
