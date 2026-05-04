@@ -11,6 +11,7 @@ import { WorkspaceSecretsPanel } from "./WorkspaceSecretsPanel";
 import { WorkspaceMcpCatalogPanel } from "./WorkspaceMcpCatalogPanel";
 import { MembersPanel } from "./MembersPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
+import { WorkspaceSettingsOverview } from "./WorkspaceSettingsOverview";
 import { AnalyticsRoot } from "../analytics/AnalyticsRoot";
 
 interface Props {
@@ -42,49 +43,68 @@ export function WorkspaceSettingsRoot({ workspaceSlug, pathSuffix }: Props) {
   const ws = memberships.find((m) => m.slug === workspaceSlug);
   const canManage = ws?.role === "admin" || ws?.role === "owner";
 
+  // Empty pathSuffix → the overview screen (the /settings index).
+  // Anything else resolves to a leaf via settings-nav; unknown
+  // sub-paths fall back to the overview rather than 404 so a
+  // typo in the URL doesn't strand the operator.
+  const isOverview = pathSuffix === "";
   const leaf = useMemo(() => {
+    if (isOverview) return null;
     const all = allSettingsLeaves();
-    return (
-      all.find((l) => l.pathSuffix === pathSuffix) ??
-      all.find((l) => l.pathSuffix === "/infrastructure/shared-resources") ??
-      null
-    );
-  }, [pathSuffix]);
+    return all.find((l) => l.pathSuffix === pathSuffix) ?? null;
+  }, [pathSuffix, isOverview]);
 
   const sectionTitle =
     WORKSPACE_SETTINGS_NAV.find((s) =>
       s.items.some((i) => i.pathSuffix === pathSuffix),
-    )?.title ?? "Settings";
+    )?.title ?? null;
+
+  const headerTitle = isOverview
+    ? "Workspace settings"
+    : (leaf?.title ?? "Workspace settings");
+  const headerDescription = isOverview
+    ? "Identity, infrastructure, integrations, members, and insights for this workspace. Click any row below to drill into the underlying configuration."
+    : leaf?.description;
+  const headerEyebrow = isOverview ? "Overview" : sectionTitle;
 
   return (
     <AppShell
       breadcrumbs={[
         { label: workspaceSlug, href: `/workspaces/${workspaceSlug}` },
-        {
-          label: "Settings",
-          href: `/workspaces/${workspaceSlug}/settings`,
-        },
-        { label: leaf?.title ?? "Overview" },
+        isOverview
+          ? { label: "Settings" }
+          : {
+              label: "Settings",
+              href: `/workspaces/${workspaceSlug}/settings`,
+            },
+        ...(isOverview ? [] : [{ label: leaf?.title ?? "Overview" }]),
       ]}
     >
       <div className="space-y-1 p-6">
         <div className="mb-5 max-w-4xl space-y-1">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-            {sectionTitle}
-          </div>
-          <h1 className="text-xl font-semibold text-zinc-100">
-            {leaf?.title ?? "Workspace settings"}
-          </h1>
-          {leaf?.description && (
-            <p className="text-sm text-zinc-400">{leaf.description}</p>
+          {headerEyebrow && (
+            <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+              {headerEyebrow}
+            </div>
+          )}
+          <h1 className="text-xl font-semibold text-zinc-100">{headerTitle}</h1>
+          {headerDescription && (
+            <p className="text-sm text-zinc-400">{headerDescription}</p>
           )}
         </div>
         <div className="max-w-4xl space-y-4">
-          {renderPanel({
-            workspaceSlug,
-            pathSuffix: leaf?.pathSuffix ?? "",
-            canManage: !!canManage,
-          })}
+          {isOverview ? (
+            <WorkspaceSettingsOverview
+              workspaceSlug={workspaceSlug}
+              canManage={!!canManage}
+            />
+          ) : (
+            renderPanel({
+              workspaceSlug,
+              pathSuffix: leaf?.pathSuffix ?? "",
+              canManage: !!canManage,
+            })
+          )}
         </div>
       </div>
     </AppShell>

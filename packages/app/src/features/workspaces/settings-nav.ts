@@ -140,15 +140,11 @@ export function leafFromPathname(
   const m = pathname.match(/^\/workspaces\/[^/]+\/settings(\/.+)?$/);
   if (!m) return null;
   const sub = m[1] ?? "";
+  // No subpath → the operator is on the overview screen, not on any
+  // leaf. Caller renders the Overview entry as active.
+  if (sub === "" || sub === "/") return null;
   for (const leaf of allSettingsLeaves()) {
     if (sub === leaf.pathSuffix) return leaf;
-  }
-  // No subpath → land on the default leaf.
-  if (sub === "" || sub === "/") {
-    const fallback = allSettingsLeaves().find(
-      (l) => l.pathSuffix === DEFAULT_SETTINGS_PATH,
-    );
-    return fallback ?? null;
   }
   return null;
 }

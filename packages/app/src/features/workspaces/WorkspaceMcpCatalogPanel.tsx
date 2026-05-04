@@ -13,6 +13,11 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import { useConfirm } from "../../components/use-confirm";
+import {
+  McpRegistryPicker,
+  defaultsFromSeed,
+} from "../mcp/McpRegistryPicker";
+import { DEFAULT_MANIFEST } from "../mcp/seed";
 
 /**
  * Workspace MCP catalog panel.
@@ -83,6 +88,33 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   const [manifestText, setManifestText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  /**
+   * Apply a seed entry to the add-form. The operator gets a pre-
+   * populated form they can then verify/edit before clicking Save.
+   * Scrolls the form into view since the picker sits above the form
+   * on long pages.
+   */
+  function applySeedEntry(seed: ReturnType<typeof defaultsFromSeed>) {
+    setEditing(null);
+    setName(seed.name);
+    setDisplayName(seed.display_name);
+    setKind(seed.kind);
+    setImage(seed.image);
+    setCommand(seed.command);
+    setArgsText(seed.args);
+    setUrl(seed.url);
+    setDescription(seed.description);
+    setManifestText(DEFAULT_MANIFEST);
+    // Wait one tick so React commits state before we scroll, otherwise
+    // we sometimes scroll before the form expands to its full height.
+    setTimeout(() => {
+      document
+        .getElementById("mcp-add-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("mcp-name")?.focus();
+    }, 0);
+  }
 
   async function load() {
     setLoading(true);
@@ -249,6 +281,10 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   return (
     <div className="space-y-4">
       {dialog}
+      <McpRegistryPicker
+        existingSlugs={items.map((i) => i.name)}
+        onPick={(entry) => applySeedEntry(defaultsFromSeed(entry))}
+      />
       <Card>
         <CardHeader>
           <CardTitle>MCP servers</CardTitle>
@@ -326,7 +362,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="mcp-add-form">
         <CardHeader>
           <CardTitle>
             {editing ? `Edit ${editing.name}` : "Register MCP server"}
@@ -335,6 +371,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
             Choose a shape, paste the manifest the MCP author publishes,
             and save. Names follow the mcpServers convention: lowercase
             letters, digits, hyphens, underscores; start with a letter.
+            Picking a server above pre-fills this form — review and Save.
           </CardDescription>
         </CardHeader>
         <CardContent>

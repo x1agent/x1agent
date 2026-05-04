@@ -1,9 +1,18 @@
 ---
-// /workspaces/<slug>/settings → redirect to the default leaf so the
-// sidebar always has an active item. Splash-page would feel hollow
-// when every sub-route renders something concrete.
+import Layout from "../../../../layouts/Layout.astro";
+import { WorkspaceSettingsRoot } from "../../../../features/workspaces/WorkspaceSettingsRoot";
+
+// /workspaces/<slug>/settings → renders the overview screen, NOT a
+// redirect to the first leaf. The overview summarizes every section
+// at a glance; clicking a row drills into the corresponding leaf.
 const { slug } = Astro.params;
-return Astro.redirect(
-  `/workspaces/${slug}/settings/infrastructure/shared-resources`,
-);
+const slugStr = typeof slug === "string" ? slug : "";
 ---
+
+<Layout title={`settings · ${slugStr} · x1agent`}>
+  <WorkspaceSettingsRoot
+    client:only="react"
+    workspaceSlug={slugStr}
+    pathSuffix=""
+  />
+</Layout>
