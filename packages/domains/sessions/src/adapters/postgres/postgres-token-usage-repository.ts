@@ -125,6 +125,32 @@ export function estimateUsdCost(
   );
 }
 
+/**
+ * Dollars saved by reading from cache instead of paying full input
+ * rate for the same tokens. The per-row formula:
+ *
+ *   cache_read_tokens × inputRate × (1 − cacheReadMultiplier)
+ *
+ * cacheReadMultiplier defaults to 0.10 so the typical savings are
+ * 0.9 × what those tokens would have cost at full input rate. Surfaces
+ * to the dashboard as a single "cache savings" stat — answers the
+ * implicit "is prompt caching paying off?" question.
+ */
+export function estimateUsdCacheSavings(
+  row: {
+    model: string;
+    cache_read_input_tokens: number;
+  },
+  override?: PriceOverride,
+): number {
+  const def = tierDefaultPrices(row.model);
+  const inputRate = override?.inputPerMillion ?? def.inputPerMillion;
+  const cacheReadMult =
+    override?.cacheReadMultiplier ?? def.cacheReadMultiplier;
+  return (row.cache_read_input_tokens / 1_000_000) * inputRate *
+    (1 - cacheReadMult);
+}
+
 interface RowAggByModel {
   model: string;
   input_tokens: string;
@@ -362,6 +388,7 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 0,
       costUsdEstimate: 0,
+      cacheSavingsUsdEstimate: 0,
     };
 
     // Per-model rollup is the cleanest place to compute totals because
@@ -374,12 +401,16 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
         cache_creation_input_tokens: asInt(r.cache_creation_input_tokens),
         cache_read_input_tokens: asInt(r.cache_read_input_tokens),
       };
-      const cost = estimateUsdCost(counts, overrides.get(counts.model));
+      const override = overrides.get(counts.model);
+      const cost = estimateUsdCost(counts, override);
+      const savings = estimateUsdCacheSavings(counts, override);
       totals.inputTokens += counts.input_tokens;
       totals.outputTokens += counts.output_tokens;
       totals.cacheCreationInputTokens += counts.cache_creation_input_tokens;
       totals.cacheReadInputTokens += counts.cache_read_input_tokens;
       totals.costUsdEstimate += cost;
+      totals.cacheSavingsUsdEstimate =
+        (totals.cacheSavingsUsdEstimate ?? 0) + savings;
       return {
         model: counts.model,
         inputTokens: counts.input_tokens,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { presetToRange } from "./range.js";
+import { presetToRange, priorRange } from "./range.js";
 
 // Mid-week so "thisWeek" computation is non-trivial.
 const NOW = new Date("2026-04-15T17:30:00Z"); // Wednesday
@@ -91,5 +91,59 @@ describe("presetToRange", () => {
       since: "2026-03-03",
       until: "2026-04-02",
     });
+  });
+});
+
+describe("priorRange", () => {
+  // NOW = Wed 2026-04-15, mid-week.
+  const NOW = new Date("2026-04-15T17:30:00Z");
+
+  it("today → yesterday", () => {
+    expect(priorRange("today", NOW)).toEqual({
+      since: "2026-04-14",
+      until: "2026-04-15",
+    });
+  });
+
+  it("yesterday → day before yesterday", () => {
+    expect(priorRange("yesterday", NOW)).toEqual({
+      since: "2026-04-13",
+      until: "2026-04-14",
+    });
+  });
+
+  it("thisWeek → previous full Monday-Sunday week", () => {
+    expect(priorRange("thisWeek", NOW)).toEqual({
+      since: "2026-04-06",
+      until: "2026-04-13",
+    });
+  });
+
+  it("thisMonth → previous full month", () => {
+    expect(priorRange("thisMonth", NOW)).toEqual({
+      since: "2026-03-01",
+      until: "2026-04-01",
+    });
+  });
+
+  it("last30d → 30 days before the current window", () => {
+    expect(priorRange("last30d", NOW)).toEqual({
+      since: "2026-02-15",
+      until: "2026-03-17",
+    });
+  });
+
+  it("last90d → 90 days before the current window", () => {
+    expect(priorRange("last90d", NOW)).toEqual({
+      since: "2025-10-18",
+      until: "2026-01-16",
+    });
+  });
+
+  it("custom range mirrors equal-length window immediately before since", () => {
+    // 31-day current → 31-day prior right before it.
+    expect(
+      priorRange("custom", NOW, { since: "2026-03-01", until: "2026-04-01" }),
+    ).toEqual({ since: "2026-01-29", until: "2026-03-01" });
   });
 });

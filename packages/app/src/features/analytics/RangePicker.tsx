@@ -1,6 +1,7 @@
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { Checkbox } from "../../components/ui/checkbox";
 import { PRESETS, type RangePreset } from "./range";
 import { useAnalyticsStore } from "../../stores/analyticsStore";
 
@@ -27,22 +28,36 @@ export function RangePicker({ workspaceSlug }: Props) {
   );
   const setPreset = useAnalyticsStore((s) => s.setPreset);
   const setCustomRange = useAnalyticsStore((s) => s.setCustomRange);
+  const setCompareEnabled = useAnalyticsStore((s) => s.setCompareEnabled);
+  const compareEnabled = useAnalyticsStore(
+    (s) => s.byWorkspace[workspaceSlug]?.compareEnabled ?? false,
+  );
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-1 rounded-md border border-zinc-900 bg-zinc-950 p-1">
-        {PRESETS.map((p) => (
-          <Button
-            key={p.value}
-            type="button"
-            size="sm"
-            variant={ws.preset === p.value ? "secondary" : "ghost"}
-            onClick={() => setPreset(workspaceSlug, p.value)}
-            className="h-7 px-2 text-xs"
-          >
-            {p.label}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1 rounded-md border border-zinc-900 bg-zinc-950 p-1">
+          {PRESETS.map((p) => (
+            <Button
+              key={p.value}
+              type="button"
+              size="sm"
+              variant={ws.preset === p.value ? "secondary" : "ghost"}
+              onClick={() => setPreset(workspaceSlug, p.value)}
+              className="h-7 px-2 text-xs"
+            >
+              {p.label}
+            </Button>
+          ))}
+        </div>
+        <label className="flex h-8 cursor-pointer select-none items-center gap-2 rounded-md border border-zinc-900 bg-zinc-950 px-3 text-xs text-zinc-300">
+          <Checkbox
+            checked={compareEnabled}
+            onCheckedChange={(v) => setCompareEnabled(workspaceSlug, v === true)}
+            aria-label="Compare to prior period"
+          />
+          Compare prior period
+        </label>
       </div>
       {ws.preset === "custom" && (
         <div className="flex flex-wrap items-end gap-3 rounded-md border border-zinc-900 bg-zinc-950 px-3 py-2">

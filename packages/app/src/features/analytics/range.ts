@@ -99,6 +99,75 @@ export function presetToRange(
   }
 }
 
+/**
+ * Compute the matching prior range for "compare to previous period"
+ * overlays. Each preset gets the natural-language equivalent:
+ *   today      → yesterday
+ *   yesterday  → day before yesterday
+ *   thisWeek   → last week (Mon–Sun preceding "this week's" Monday)
+ *   thisMonth  → previous full month
+ *   last30d    → 30 days before that window (-60..-30)
+ *   last90d    → 90 days before that window (-180..-90)
+ *   custom     → equal-length window immediately before [since, until)
+ */
+export function priorRange(
+  preset: RangePreset,
+  now: Date,
+  custom?: { since: string | null; until: string | null },
+): DateRange {
+  const today = startOfUTCDay(now);
+  switch (preset) {
+    case "today": {
+      const yesterday = addDays(today, -1);
+      return { since: fmt(yesterday), until: fmt(today) };
+    }
+    case "yesterday": {
+      const dayBefore = addDays(today, -2);
+      return { since: fmt(dayBefore), until: fmt(addDays(today, -1)) };
+    }
+    case "thisWeek": {
+      const weekStart = startOfUTCWeekMonday(today);
+      const priorWeekStart = addDays(weekStart, -7);
+      return { since: fmt(priorWeekStart), until: fmt(weekStart) };
+    }
+    case "thisMonth": {
+      const thisMonthStart = startOfUTCMonth(today);
+      const priorMonthStart = new Date(
+        Date.UTC(
+          thisMonthStart.getUTCFullYear(),
+          thisMonthStart.getUTCMonth() - 1,
+          1,
+        ),
+      );
+      return { since: fmt(priorMonthStart), until: fmt(thisMonthStart) };
+    }
+    case "last30d":
+      return { since: fmt(addDays(today, -59)), until: fmt(addDays(today, -29)) };
+    case "last90d":
+      return {
+        since: fmt(addDays(today, -179)),
+        until: fmt(addDays(today, -89)),
+      };
+    case "custom": {
+      const cur = presetToRange("custom", now, custom);
+      const sinceDate = parseDay(cur.since);
+      const untilDate = parseDay(cur.until);
+      if (!sinceDate || !untilDate) return cur;
+      const ms = untilDate.getTime() - sinceDate.getTime();
+      const priorUntil = sinceDate;
+      const priorSince = new Date(sinceDate.getTime() - ms);
+      return { since: fmt(priorSince), until: fmt(priorUntil) };
+    }
+  }
+}
+
+function parseDay(s: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split("-").map((n) => parseInt(n, 10));
+  const dt = new Date(Date.UTC(y!, m! - 1, d!));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export const PRESETS: { value: RangePreset; label: string }[] = [
   { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },

@@ -34,6 +34,15 @@ export interface TokenUsageTotals {
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
   costUsdEstimate: number;
+  /**
+   * Estimate of dollars saved by serving prompt tokens from the
+   * cache instead of paying full input rate. Computed alongside
+   * costUsdEstimate from the same per-model rate table; `null` on
+   * leaf slices (byAgent / byModel / byUser / byDay etc) where
+   * we don't bother surfacing it. Only the top-level `totals`
+   * carries a real number.
+   */
+  cacheSavingsUsdEstimate?: number;
 }
 
 export interface TokenUsageByAgent extends TokenUsageTotals {
