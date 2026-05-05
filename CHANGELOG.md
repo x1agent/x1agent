@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/x1agent/x1agent/compare/v1.7.0...v1.8.0) (2026-05-05)
+
+
+### Features
+
+* **app:** visual language v2 — surface ladder, light mode, redesigne… ([#37](https://github.com/x1agent/x1agent/issues/37)) ([3a2c4c4](https://github.com/x1agent/x1agent/commit/3a2c4c422cd8bbde751e5cb09e1facb34086bd82)), closes [#c2613e](https://github.com/x1agent/x1agent/issues/c2613e)
+
 # [1.7.0](https://github.com/x1agent/x1agent/compare/v1.6.7...v1.7.0) (2026-05-04)
 
 
