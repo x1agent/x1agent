@@ -7,7 +7,7 @@ sidebar:
 
 `mise run configure:prod` is the pre-flight step that runs before any cluster work. It captures everything x1agent needs to install — cloud target, base domain, secrets — into a per-deployment file at `installs/<base-domain>.local`. It does not touch the cluster.
 
-One file per deployment. Run `mise run configure:prod` once for x1agent.com, again later for lattice.example.com, etc. — each writes its own file under `installs/`, never overwriting the others. List what's already configured with `mise run deployments`.
+One file per deployment. Run `mise run configure:prod` once for x1agent.com, again later for acme.example.com, etc. — each writes its own file under `installs/`, never overwriting the others. List what's already configured with `mise run deployments`.
 
 Run it any time you need to add or change a value. The wizard is idempotent: existing values are kept unless you change them. To edit an existing deployment, pick it from the list at the top of the wizard. To create a new one, pick "+ New deployment" and type a base domain that doesn't already have a file — the wizard refuses to silently overwrite an existing one.
 
@@ -41,7 +41,7 @@ You're prompted for each block; skip with N. Keys not configured yet aren't bloc
 
 ## Picking a target
 
-If `installs/` already has files, the wizard opens with a list of existing deployments. Picking one drops you into "edit" mode for that deployment. Picking "+ New deployment" creates a new file — the base-domain prompt refuses values that collide with an existing file, so a typo can't silently overwrite x1agent.com when you meant to create lattice.example.com.
+If `installs/` already has files, the wizard opens with a list of existing deployments. Picking one drops you into "edit" mode for that deployment. Picking "+ New deployment" creates a new file — the base-domain prompt refuses values that collide with an existing file, so a typo can't silently overwrite x1agent.com when you meant to create acme.example.com.
 
 If `installs/` is empty, the wizard goes straight to the base-domain prompt for a new deployment.
 
@@ -63,7 +63,7 @@ Inside this directory, `.claude/settings.json` sets `CLOUDSDK_ACTIVE_CONFIG_NAME
 
 If the requested account isn't logged in yet, the wizard tells you to run `gcloud auth login <email>` in another terminal — it doesn't run that for you because the browser flow is hard to integrate cleanly.
 
-**Multiple deployments on one machine**: when you have x1agent.com on one Google account and lattice.example.com on another, the gcloud configurations are managed by you, not the wizard. The pattern is `gcloud config configurations create <name>` once per deployment, then `gcloud config configurations activate <name>` before running prod tasks against that deployment. See [Picking which deployment to act on](#picking-which-deployment-to-act-on) below.
+**Multiple deployments on one machine**: when you have x1agent.com on one Google account and acme.example.com on another, the gcloud configurations are managed by you, not the wizard. The pattern is `gcloud config configurations create <name>` once per deployment, then `gcloud config configurations activate <name>` before running prod tasks against that deployment. See [Picking which deployment to act on](#picking-which-deployment-to-act-on) below.
 
 ## Picking which deployment to act on
 

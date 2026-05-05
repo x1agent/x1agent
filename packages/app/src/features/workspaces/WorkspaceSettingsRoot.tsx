@@ -9,6 +9,7 @@ import { SharedAgentResourcesPanel } from "./SharedAgentResourcesPanel";
 import { ContainerRegistryPanel } from "./ContainerRegistryPanel";
 import { WorkspaceSecretsPanel } from "./WorkspaceSecretsPanel";
 import { WorkspaceMcpCatalogPanel } from "./WorkspaceMcpCatalogPanel";
+import { WorkspaceSlackPanel } from "./WorkspaceSlackPanel";
 import { MembersPanel } from "./MembersPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { WorkspaceSettingsOverview } from "./WorkspaceSettingsOverview";
@@ -135,6 +136,8 @@ function renderPanel({
       return (
         <WorkspaceMcpCatalogPanel slug={workspaceSlug} canManage={canManage} />
       );
+    case "/integrations/slack":
+      return <WorkspaceSlackPanel slug={workspaceSlug} canManage={canManage} />;
     case "/members/people":
       return <MembersPanel workspaceSlug={workspaceSlug} canManage={canManage} />;
     case "/members/groups":

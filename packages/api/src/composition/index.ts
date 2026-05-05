@@ -21,6 +21,7 @@ import {
   PostgresWorkspaceRepository,
   createWorkspaceRoutes,
 } from "@x1agent/domain-workspaces";
+import { composeSlack } from "./slack.js";
 import {
   CryptoTokenGenerator,
   PostgresInvitationRepository,
@@ -163,6 +164,12 @@ export interface Composition {
   githubInstallRoutes: Hono;
   installationApiRoutes: Hono;
   agentRepoRoutes: Hono;
+  /** /oauth/slack/* — browser-facing Slack OAuth callback. */
+  slackOAuthRoutes: Hono;
+  /** /api/workspaces/:slug/slack/* — workspace-admin Slack bot CRUD. */
+  slackBotApiRoutes: Hono;
+  /** /api/slack/events — Slack inbound event webhook (one URL, all bots). */
+  slackEventsRoutes: Hono;
   workspaceGrantRoutes: Hono;
   /** /api/workspaces/:slug/secrets — workspace-admin-only env var store. */
   workspaceSecretsRoutes: Hono;
@@ -256,6 +263,13 @@ export interface CompositionEnv {
   workspaceSecretsMasterKey?: string;
   /** Optional: inject a fake GitHubAppClient for tests; overrides octokit. */
   githubAppClient?: GitHubAppClient;
+  /**
+   * `configured` to be true; otherwise the Slack routes 503 and the
+   * settings UI shows a "not configured" panel.
+   */
+  slackPlatformClientId?: string;
+  slackPlatformClientSecret?: string;
+  slackPlatformSigningSecret?: string;
   /**
    * NATS connection the api reuses for provider request/reply
    * (collections provision/deprovision today; more tomorrow). Optional:
@@ -573,6 +587,45 @@ export function compose(env: CompositionEnv): Composition {
     service: workspaceSecretsService,
     requireAuth,
   });
+
+  // Slack composition. Reuses workspaceSecretsKey for bot-token
+  // encryption — single key concern across the secret-bearing
+  // surfaces. Routes degrade to 503 stubs when the platform-app
+  // credentials are not configured; the frontend reads `configured`
+  // off /api/workspaces/:slug/slack/bots and shows the "operator
+  // setup needed" panel in that case.
+  const slackResolveWorkspace = async (
+    actor: ReturnType<typeof UserId>,
+    slug: string,
+  ) => {
+    const ws = await workspaces.findBySlug(WorkspaceSlug(slug));
+    if (!ws) return null;
+    const membership = await memberships.findByUserAndWorkspace(actor, ws.id);
+    if (!membership) return null;
+    return {
+      id: ws.id,
+      canManage: membership.role === "admin" || membership.role === "owner",
+    };
+  };
+  const slackComposed = composeSlack(
+    {
+      apiUrl: env.apiUrl,
+      appUrl: env.appUrl,
+      sql: env.sql,
+      workspaceSecretsKey,
+      platformClientId: env.slackPlatformClientId,
+      platformClientSecret: env.slackPlatformClientSecret,
+      platformSigningSecret: env.slackPlatformSigningSecret,
+    },
+    {
+      requireAuth,
+      getActor,
+      resolveWorkspace: slackResolveWorkspace,
+    },
+  );
+  const slackOAuthRoutes = slackComposed.oauthRoutes;
+  const slackBotApiRoutes = slackComposed.botApiRoutes;
+  const slackEventsRoutes = slackComposed.eventsRoutes;
 
   // MCP catalog: workspace admin registers MCP servers here. Three
   // shapes: stdio image, stdio command (npx/uvx), remote_oauth.
@@ -966,6 +1019,9 @@ export function compose(env: CompositionEnv): Composition {
     githubInstallRoutes,
     installationApiRoutes,
     agentRepoRoutes,
+    slackOAuthRoutes,
+    slackBotApiRoutes,
+    slackEventsRoutes,
     workspaceGrantRoutes,
     workspaceSecretsRoutes,
     mcpCatalogRoutes,

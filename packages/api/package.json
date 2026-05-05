@@ -19,6 +19,7 @@
     "@x1agent/domain-agents": "workspace:*",
     "@x1agent/domain-auth": "workspace:*",
     "@x1agent/domain-mcp-catalog": "workspace:*",
+    "@x1agent/domain-messaging": "workspace:*",
     "@x1agent/domain-collections": "workspace:*",
     "@x1agent/domain-github": "workspace:*",
     "@x1agent/domain-graph": "workspace:*",
