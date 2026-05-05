@@ -58,6 +58,19 @@
     radial-gradient(circle at 22% 72%, rgba(220, 130, 100, 0.05) 0%, transparent 60%),
     radial-gradient(circle at 92% 96%, rgba(220, 110, 160, 0.05) 0%, transparent 55%);
 
+  /* Jewel-tone blobs — match x1agent.com's hero shader 1:1. The
+   * RailCanvas reads these at runtime via getComputedStyle and feeds
+   * them as uniforms to the WebGL nebula. CSS-only fallback (.bg-blobs)
+   * uses the same tokens so a no-WebGL view still carries the palette. */
+  --blob-blue:   rgba(125, 178, 230, 0.18);
+  --blob-purple: rgba(180, 140, 220, 0.16);
+  --blob-peach:  rgba(220, 130, 100, 0.18);
+  --blob-pink:   rgba(220, 110, 160, 0.16);
+
+  /* Warm hue accent — terracotta. Used by the shader for the faint
+   * glow on bright nebula peaks. Same value as the website. */
+  --color-hue: #d97757;
+
   /* Composer border palette — mirrors rail-gradient hues but as a
    * left-to-right linear so it reads as a halo. Dark uses dimmer
    * jewel tones; light gets brighter pastels (defined in the light
@@ -108,6 +121,15 @@ html[data-theme="light"] {
     radial-gradient(circle at 90% 25%, rgba(196, 181, 253, 0.28) 0%, transparent 60%),
     radial-gradient(circle at 18% 70%, rgba(253, 186, 116, 0.26) 0%, transparent 65%),
     radial-gradient(circle at 95% 95%, rgba(249, 168, 212, 0.30) 0%, transparent 60%);
+
+  /* Light-mode jewel blobs — bolder pastels so the cream surface can
+   * carry visible atmosphere. Mirrors the website's light theme. */
+  --blob-blue:   rgba(140, 100, 220, 0.85);
+  --blob-purple: rgba(232, 100, 155, 0.85);
+  --blob-peach:  rgba(245, 140, 100, 0.85);
+  --blob-pink:   rgba(245, 195, 110, 0.80);
+
+  --color-hue: #c2613e;
 
   /* Light-mode composer border. Brighter pastels than dark — light
    * surface can take a bolder halo without looking flat. */
@@ -208,6 +230,46 @@ body {
 .rail-gradient {
   background-color: var(--color-rail);
   background-image: var(--rail-gradient);
+}
+
+/* Shader-backed rail. Sits as the absolute fill behind the sidebar's
+ * children — same construction as the marketing site's hero. The
+ * `rail-canvas` fades in once WebGL boots so a cold load lands on the
+ * calm rail color, never on a hard transition. */
+.rail-canvas {
+  display: block;
+  opacity: 0;
+  transition: opacity 600ms ease-out;
+}
+.rail-canvas-wrap[data-shader="on"] .rail-canvas {
+  opacity: 1;
+}
+/* CSS-only fallback (no WebGL2). Four soft radial blobs in the
+ * jewel-tone palette, sized big and pulled into the corners so they
+ * read as atmosphere, not spotlights. Same shape used on x1agent.com. */
+.rail-canvas-wrap[data-shader="off"] {
+  background-image:
+    radial-gradient(70% 60% at 12% 18%, var(--blob-blue), transparent 65%),
+    radial-gradient(65% 55% at 88% 25%, var(--blob-purple), transparent 65%),
+    radial-gradient(60% 55% at 78% 82%, var(--blob-peach), transparent 65%),
+    radial-gradient(70% 60% at 18% 85%, var(--blob-pink), transparent 65%);
+}
+
+/* Film-grain overlay — tones the vibrant shader down so colors read
+ * as atmosphere, not wallpaper. Render as a sibling div with this
+ * class set on it (absolute, inset-0, pointer-events-none) so the
+ * caller controls stacking. SVG turbulence ships in the document URL,
+ * no extra request. Same construction as x1agent.com's bg-noise, but
+ * without forcing `position: relative` on the parent (the sidebar is
+ * already `sticky`/`fixed`). */
+.rail-noise {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+}
+html[data-theme="light"] .rail-noise {
+  opacity: 0.04;
+  mix-blend-mode: multiply;
 }
 
 /* Composer halo border. Same palette family as the rail-gradient
