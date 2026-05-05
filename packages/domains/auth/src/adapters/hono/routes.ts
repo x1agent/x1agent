@@ -31,6 +31,13 @@ export interface AuthRoutesConfig {
   apiUrl: string;
   cookieName?: string;
   cookieMaxAgeSeconds?: number;
+  /**
+   * When true, session cookies carry the `Secure` attribute so they're
+   * only sent over HTTPS. Composition layer should set this when
+   * NODE_ENV === "production". Default false to keep dev (plain
+   * HTTP / mixed-cert) flows working.
+   */
+  cookieSecure?: boolean;
 
   allowedDomains?: readonly string[];
   platformAdmins?: readonly string[];
@@ -71,18 +78,21 @@ export interface AuthRoutesConfig {
   passwords?: PasswordCredentialStore;
 }
 
-function cookieHeader(
+function buildCookieHeader(
   name: string,
   value: string,
   maxAgeSeconds: number,
+  secure: boolean,
 ): string {
-  return [
+  const parts = [
     `${name}=${value}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${maxAgeSeconds}`,
-  ].join("; ");
+  ];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
 }
 
 function readCookie(
@@ -111,6 +121,11 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
   const app = new Hono();
   const COOKIE_NAME = cfg.cookieName ?? "x1_session";
   const COOKIE_MAX_AGE = cfg.cookieMaxAgeSeconds ?? 60 * 60 * 24;
+  const COOKIE_SECURE = cfg.cookieSecure ?? false;
+  const cookieHeader = (name: string, value: string, maxAgeSeconds: number) =>
+    buildCookieHeader(name, value, maxAgeSeconds, COOKIE_SECURE);
+  const expiredCookie = (name: string) =>
+    buildCookieHeader(name, "", 0, COOKIE_SECURE);
   const redirectUri = () => `${cfg.apiUrl}/auth/google/callback`;
 
   app.get("/config", (c) =>
@@ -245,10 +260,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
   }
 
   app.post("/logout", (c) => {
-    c.header(
-      "Set-Cookie",
-      `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
-    );
+    c.header("Set-Cookie", expiredCookie(COOKIE_NAME));
     return c.json({ ok: true });
   });
 
