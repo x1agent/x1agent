@@ -49,6 +49,7 @@ import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
 import { createPeriodicScheduler } from "./orchestration/periodic-scheduler.js";
+import { buildHostAllowlist } from "./security/host-allowlist.js";
 
 /**
  * Hot-reload cleanup registry. `bun --hot` re-evaluates this module
@@ -221,6 +222,7 @@ const {
   authBypass: process.env.AUTH_BYPASS === "true",
   testUserEmail: process.env.TEST_USER || "",
   platformName: process.env.PLATFORM_NAME || "x1agent",
+  cookieSecure: process.env.NODE_ENV === "production",
   githubAppId: process.env.GITHUB_APP_ID || "",
   githubAppSlug: process.env.GITHUB_APP_SLUG || "",
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
@@ -235,6 +237,29 @@ const {
 });
 
 const app = new Hono();
+
+// Host header allowlist — defense in depth against DNS rebinding.
+// See security/host-allowlist.ts for the rationale + behavior.
+const hostAllowlist = buildHostAllowlist({
+  urls: [PUBLIC_URL, API_PUBLIC_URL],
+  baseDomain: process.env.BASE_DOMAIN?.trim(),
+  disabled: process.env.HOST_HEADER_CHECK === "disabled",
+});
+
+app.use("*", async (c, next) => {
+  if (!hostAllowlist.isAllowed(c.req.header("Host"))) {
+    return c.json({ error: "host_not_allowed" }, 421);
+  }
+  await next();
+});
+
+console.log(
+  `[security] Host allowlist: ${
+    hostAllowlist.hosts.length === 0
+      ? "disabled"
+      : hostAllowlist.hosts.join(",")
+  }${process.env.BASE_DOMAIN ? ` (+ *.${process.env.BASE_DOMAIN})` : ""}`,
+);
 
 // Sentry sees every unhandled error before Hono's default 500 page
 // reaches the client. Reraises so any per-route .onError still fires
