@@ -71,6 +71,7 @@ type TabKey =
   | "repos"
   | "collections"
   | "mcp"
+  | "slack"
   | "permissions";
 
 const DEFAULT_TAB: TabKey = "general";
@@ -82,6 +83,7 @@ function isTabKey(value: string): value is TabKey {
     value === "repos" ||
     value === "collections" ||
     value === "mcp" ||
+    value === "slack" ||
     value === "permissions"
   );
 }

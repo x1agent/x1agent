@@ -133,6 +133,24 @@ export class SlackBotAgentNotInWorkspaceError extends DomainError {
   }
 }
 
+/**
+ * Thrown when a pair request names an agent that is already paired
+ * with a different bot in the same workspace. Enforces the inverse of
+ * SlackBotAlreadyPairedError — agent ↔ at most one bot, in addition
+ * to bot ↔ at most one agent.
+ */
+export class SlackBotAgentAlreadyPairedError extends DomainError {
+  readonly code = "slack_bot_agent_already_paired";
+  constructor(
+    public readonly agentId: string,
+    public readonly currentBotId: string,
+  ) {
+    super(
+      `agent ${agentId} is already paired with bot ${currentBotId}; unpair that bot first`,
+    );
+  }
+}
+
 export class SlackSigningSecretMissingError extends DomainError {
   readonly code = "slack_signing_secret_missing";
   constructor(public readonly slackAppId: string) {

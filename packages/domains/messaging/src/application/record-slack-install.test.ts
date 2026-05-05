@@ -96,6 +96,42 @@ describe("recordSlackInstall", () => {
     expect(deps.oauth.calls).toHaveLength(0);
   });
 
+  it("preserves the state token when OAuth exchange fails (user can retry)", async () => {
+    const created = await createSlackBotConfig(deps, {
+      workspaceId: WORKSPACE,
+      rawBotName: "triage",
+      actor: ACTOR,
+    });
+    // Slack returns an error — could be a 5xx, network blip, etc.
+    // The previous implementation consumed the state BEFORE the
+    // exchange, which left the user stranded with no way to retry.
+    deps.oauth.setNextResult(new Error("slack 5xx"));
+
+    await expect(
+      recordSlackInstall(deps, {
+        state: created.state,
+        code: "code",
+        redirectUri: "https://api.example.com/oauth/slack/callback",
+      }),
+    ).rejects.toThrow("slack 5xx");
+
+    // State must still be usable. Retrying with a valid OAuth result
+    // should now succeed because the state wasn't burned.
+    deps.oauth.setNextResult({
+      accessToken: "xoxb",
+      appId: "A1",
+      botUserId: "U1",
+      teamId: "T1",
+      teamName: null,
+    });
+    const retried = await recordSlackInstall(deps, {
+      state: created.state,
+      code: "code-fresh-from-slack",
+      redirectUri: "https://api.example.com/oauth/slack/callback",
+    });
+    expect(retried.install.botToken).toBe("xoxb");
+  });
+
   it("rejects a replayed state token", async () => {
     const created = await createSlackBotConfig(deps, {
       workspaceId: WORKSPACE,

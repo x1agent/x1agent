@@ -32,8 +32,16 @@ const DEFAULT_BOT_SCOPES = [
 export class SlackManifestUrlBuilder implements SlackManifestBuilder {
   constructor(private readonly cfg: SlackManifestUrlBuilderConfig) {}
 
-  buildManifestUrl(input: { botName: SlackBotName }): string {
-    const callback = `${this.cfg.apiPublicUrl}/oauth/slack/callback`;
+  buildManifestUrl(input: { botName: SlackBotName; state: string }): string {
+    // State is baked into the redirect URL as a query param. Slack's
+    // user-initiated "Install to Workspace" button does NOT inject a
+    // `state` into the OAuth round trip — only an OAuth flow that we
+    // initiate via api.slack.com/oauth/v2/authorize gets that. By
+    // putting state in the redirect URL itself, Slack echoes it back
+    // verbatim (and tacks `&code=...` onto the end), giving us a way
+    // to look up the bot config from the callback. See P0 #1 in the
+    // pre-push review of feat/slack-bot-onboarding.
+    const callback = `${this.cfg.apiPublicUrl}/oauth/slack/callback?state=${encodeURIComponent(input.state)}`;
     const events = `${this.cfg.apiPublicUrl}/api/slack/events`;
 
     // Quote the bot name conservatively — even though Slack handles

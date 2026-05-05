@@ -76,7 +76,13 @@ export async function createSlackBotConfig(
     returnTo: input.returnTo ?? null,
   });
 
-  const manifestUrl = deps.manifest.buildManifestUrl({ botName });
+  // State is baked into the manifest's redirect URL because Slack's
+  // user-initiated install button does not propagate state through
+  // OAuth. See `slack-manifest-builder.ts` for the full reasoning.
+  const manifestUrl = deps.manifest.buildManifestUrl({
+    botName,
+    state: stateToken,
+  });
 
   return { config, manifestUrl, state: stateToken };
 }

@@ -255,6 +255,17 @@ export class InMemorySlackInstallStateStore implements SlackInstallStateStore {
     });
   }
 
+  async peek(state: string) {
+    const row = this.rows.get(state);
+    if (!row) return null;
+    if (row.expiresAt.getTime() < this.now().getTime()) return null;
+    return {
+      botConfigId: row.botConfigId,
+      initiatingUserId: row.initiatingUserId,
+      returnTo: row.returnTo,
+    };
+  }
+
   async consume(state: string) {
     const row = this.rows.get(state);
     if (!row) return null;
@@ -288,8 +299,8 @@ export class FakeSlackOAuthClient implements SlackOAuthClient {
 }
 
 export class FakeSlackManifestBuilder implements SlackManifestBuilder {
-  buildManifestUrl(input: { botName: SlackBotName }) {
-    return `https://api.slack.com/apps?new_app=1&bot=${encodeURIComponent(input.botName)}`;
+  buildManifestUrl(input: { botName: SlackBotName; state: string }) {
+    return `https://api.slack.com/apps?new_app=1&bot=${encodeURIComponent(input.botName)}&state=${encodeURIComponent(input.state)}`;
   }
 }
 

@@ -41,6 +41,24 @@ export class PostgresSlackInstallStateStore implements SlackInstallStateStore {
     `;
   }
 
+  async peek(state: string) {
+    const rows = await this.sql<Row[]>`
+      SELECT state_token, bot_config_id, initiating_user_id,
+             return_to, expires_at, consumed_at
+      FROM slack_install_attempts
+      WHERE state_token = ${state}
+        AND consumed_at IS NULL
+        AND expires_at > now()
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      botConfigId: SlackBotConfigId(row.bot_config_id),
+      initiatingUserId: UserId(row.initiating_user_id),
+      returnTo: row.return_to,
+    };
+  }
+
   async consume(state: string) {
     // UPDATE … RETURNING with the freshness predicate inside the
     // WHERE clause makes consume atomic — a concurrent caller can't

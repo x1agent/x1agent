@@ -40,7 +40,7 @@ describe("createSlackBotConfig", () => {
     expect(result.config.agentId).toBeNull();
     expect(result.state).toBe("state-1");
     expect(result.manifestUrl).toBe(
-      "https://api.slack.com/apps?new_app=1&bot=triage",
+      "https://api.slack.com/apps?new_app=1&bot=triage&state=state-1",
     );
     expect(deps.state.rows.size).toBe(1);
     const stateRow = deps.state.rows.get("state-1");

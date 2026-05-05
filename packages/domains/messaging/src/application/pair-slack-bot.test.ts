@@ -7,6 +7,7 @@ import {
 } from "./slack-fakes.js";
 import {
   AgentId,
+  SlackBotAgentAlreadyPairedError,
   SlackBotAgentNotInWorkspaceError,
   SlackBotAlreadyPairedError,
   SlackBotConfigNotFoundError,
@@ -136,6 +137,37 @@ describe("pairSlackBot", () => {
     ).rejects.toBeInstanceOf(SlackBotAgentNotInWorkspaceError);
     // Belt-and-suspenders: verify the bot wasn't mutated.
     const after = await deps.configs.findById(bot.id);
+    expect(after?.agentId).toBeNull();
+  });
+
+  it("rejects pairing when the target agent is already paired with another bot", async () => {
+    // Two bots, both in the same workspace. First bot pairs with AGENT_1.
+    // Attempting to pair the second bot with the same agent must be
+    // rejected — otherwise both bots fire on the same app_mention.
+    const bot1 = await deps.configs.create({
+      workspaceId: WORKSPACE_A,
+      botName: SlackBotName("triage"),
+      createdBy: ACTOR,
+    });
+    const bot2 = await deps.configs.create({
+      workspaceId: WORKSPACE_A,
+      botName: SlackBotName("oncall"),
+      createdBy: ACTOR,
+    });
+    await pairSlackBot(deps, {
+      botConfigId: bot1.id,
+      workspaceId: WORKSPACE_A,
+      agentId: AGENT_1,
+    });
+    await expect(
+      pairSlackBot(deps, {
+        botConfigId: bot2.id,
+        workspaceId: WORKSPACE_A,
+        agentId: AGENT_1,
+      }),
+    ).rejects.toBeInstanceOf(SlackBotAgentAlreadyPairedError);
+    // Bot 2 stays unpaired.
+    const after = await deps.configs.findById(bot2.id);
     expect(after?.agentId).toBeNull();
   });
 

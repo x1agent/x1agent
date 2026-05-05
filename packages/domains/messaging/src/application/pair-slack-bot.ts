@@ -3,6 +3,7 @@ import type { SlackBotConfigStore } from "../ports/slack-bot-config-store.js";
 import type { AgentWorkspaceReader } from "../ports/agent-workspace-reader.js";
 import {
   type AgentId,
+  SlackBotAgentAlreadyPairedError,
   SlackBotAgentNotInWorkspaceError,
   SlackBotAlreadyPairedError,
   SlackBotConfigNotFoundError,
@@ -64,6 +65,18 @@ export async function pairSlackBot(
     throw new SlackBotAgentNotInWorkspaceError(
       input.agentId,
       input.workspaceId,
+    );
+
+  // One agent ↔ at most one bot. The forward direction (one bot
+  // can only have one agent) is enforced above. This is the inverse
+  // — if the agent is already paired with a *different* bot, refuse.
+  // Without this check, two bots could route to the same agent and
+  // both fire on the same `app_mention`, causing confused dispatch.
+  const otherPairing = await deps.configs.findByAgent(input.agentId);
+  if (otherPairing && otherPairing.id !== input.botConfigId)
+    throw new SlackBotAgentAlreadyPairedError(
+      input.agentId,
+      otherPairing.id,
     );
 
   return deps.configs.pair({

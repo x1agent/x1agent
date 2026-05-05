@@ -81,6 +81,8 @@ function errStatus(err: unknown): number {
         return 404;
       case "slack_bot_already_paired":
         return 409;
+      case "slack_bot_agent_already_paired":
+        return 409;
       case "slack_bot_config_name_taken":
         return 409;
       case "slack_install_attempt_invalid":

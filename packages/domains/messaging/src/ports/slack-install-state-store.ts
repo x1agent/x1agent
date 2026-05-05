@@ -22,6 +22,19 @@ export interface SlackInstallStateStore {
     returnTo?: string | null;
   }): Promise<void>;
 
+  /**
+   * Read the state row without consuming it. Returns the same null
+   * cases as `consume` (missing, expired, already-consumed). Used
+   * when the caller wants to validate the state token early in the
+   * flow but defer the consume until after later operations succeed
+   * — see `recordSlackInstall`.
+   */
+  peek(state: string): Promise<{
+    botConfigId: SlackBotConfigId;
+    initiatingUserId: UserId;
+    returnTo: string | null;
+  } | null>;
+
   consume(state: string): Promise<{
     botConfigId: SlackBotConfigId;
     initiatingUserId: UserId;

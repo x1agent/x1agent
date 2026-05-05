@@ -44,22 +44,37 @@ export interface RecordSlackInstallResult {
  *   - `SlackOAuthExchangeError` (from the OAuth client) if Slack rejects
  *     the code
  *
+ * State consume strategy: state is consumed AT THE END, after the
+ * install completes. If OAuth or DB writes fail mid-flight, the state
+ * stays valid and the user can retry by reloading the callback URL
+ * (Slack will issue a fresh OAuth code on the next "Install to
+ * Workspace" click). This avoids the failure mode where a transient
+ * Slack 5xx burns the state token and strands the user.
+ *
+ * Replay safety: the postgres state-store implements `consume` as an
+ * atomic UPDATE...RETURNING. Two concurrent callbacks racing on the
+ * same state token: only the first call's UPDATE matches a row; the
+ * second gets null and rejects. Slack's OAuth code is also single-use
+ * — Slack rejects code reuse — so a replay attacker who somehow got
+ * past state would still get rejected at `oauth.v2.access`. Two layers.
+ *
  * Atomicity guarantee: bot-config and install rows land in one DB
- * transaction. A mid-flight failure rolls both back, so a retry from
- * a fresh state token finds the same starting state. (The OAuth code
- * itself is single-use Slack-side, so the user has to re-initiate
- * from x1agent — but they can.)
+ * transaction inside `completer.completeInstall`. A mid-flight failure
+ * rolls both back. State.consume runs only after that transaction
+ * commits.
  */
 export async function recordSlackInstall(
   deps: RecordSlackInstallDeps,
   input: RecordSlackInstallInput,
 ): Promise<RecordSlackInstallResult> {
-  const consumed = await deps.state.consume(input.state);
-  if (!consumed)
+  // Peek the state record without consuming. The actual consume runs
+  // at the end, after every other operation succeeds.
+  const peeked = await deps.state.peek(input.state);
+  if (!peeked)
     throw new SlackInstallAttemptInvalidError("missing, expired, or replayed");
 
-  const config = await deps.configs.findById(consumed.botConfigId);
-  if (!config) throw new SlackBotConfigNotFoundError(consumed.botConfigId);
+  const config = await deps.configs.findById(peeked.botConfigId);
+  if (!config) throw new SlackBotConfigNotFoundError(peeked.botConfigId);
 
   const exchange = await deps.oauth.exchangeCodeForToken({
     code: input.code,
@@ -73,8 +88,15 @@ export async function recordSlackInstall(
     slackTeamId: SlackTeamId(exchange.teamId),
     slackTeamName: exchange.teamName,
     botToken: exchange.accessToken,
-    installedByUserId: consumed.initiatingUserId,
+    installedByUserId: peeked.initiatingUserId,
   });
 
-  return { install, returnTo: consumed.returnTo };
+  // Only after the OAuth exchange + DB writes succeed do we consume
+  // the state. A failed call earlier in the flow leaves the state
+  // valid for retry. consume() returns null if a concurrent caller
+  // already won the race; we don't error on that — the install is
+  // already persisted and idempotent on (bot_config_id, team_id).
+  await deps.state.consume(input.state);
+
+  return { install, returnTo: peeked.returnTo };
 }
