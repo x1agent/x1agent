@@ -179,6 +179,16 @@ externalSecrets:
       gsmSecretName: x1agent-github-app-webhook-secret
     - envName: SLACK_BOT_TOKEN
       gsmSecretName: x1agent-slack-bot-token
+    # Per-bot Slack onboarding — see docs/providers/slack.md.
+    # Operators register a "platform" Slack app at api.slack.com/apps;
+    # x1agent uses its credentials to mint the manifest URL each
+    # workspace bot's create-flow opens, and to verify inbound events.
+    - envName: SLACK_PLATFORM_CLIENT_ID
+      gsmSecretName: x1agent-slack-platform-client-id
+    - envName: SLACK_PLATFORM_CLIENT_SECRET
+      gsmSecretName: x1agent-slack-platform-client-secret
+    - envName: SLACK_PLATFORM_SIGNING_SECRET
+      gsmSecretName: x1agent-slack-platform-signing-secret
     # Sentry DSNs — one per runtime so error rates / releases stay
     # isolated. Optional; SDKs no-op when the env var is unset.
     - envName: SENTRY_DSN_API
