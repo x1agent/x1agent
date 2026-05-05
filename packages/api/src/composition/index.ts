@@ -249,6 +249,12 @@ export interface CompositionEnv {
   authBypass: boolean;
   testUserEmail: string;
   platformName: string;
+  /**
+   * When true, session cookies carry the `Secure` attribute. Set by
+   * the api boot from NODE_ENV === "production" so dev (which uses
+   * cleartext HTTP for some flows) keeps working.
+   */
+  cookieSecure?: boolean;
   githubAppId: string;
   githubAppSlug: string;
   githubAppPrivateKey: string;
@@ -348,6 +354,7 @@ export function compose(env: CompositionEnv): Composition {
     tokenizer,
     appUrl: env.appUrl,
     apiUrl: env.apiUrl,
+    cookieSecure: env.cookieSecure ?? false,
     allowedDomains: env.allowedDomains,
     platformAdmins: env.platformAdmins,
     // Lets emails outside the domain whitelist sign in if they have a
