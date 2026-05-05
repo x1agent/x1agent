@@ -1,6 +1,6 @@
 import type { SlackBotConfigStore } from "../ports/slack-bot-config-store.js";
 import type { SlackInstallStateStore } from "../ports/slack-install-state-store.js";
-import type { SlackInstallStore } from "../ports/slack-install-store.js";
+import type { SlackInstallCompleter } from "../ports/slack-install-completer.js";
 import type { SlackOAuthClient } from "../ports/slack-oauth-client.js";
 import {
   SlackInstallAttemptInvalidError,
@@ -12,7 +12,12 @@ import { SlackBotConfigNotFoundError } from "../domain/slack-bot-config.js";
 export interface RecordSlackInstallDeps {
   oauth: SlackOAuthClient;
   configs: SlackBotConfigStore;
-  installs: SlackInstallStore;
+  /**
+   * Single-write boundary that wraps both the bot-config app-id stamp
+   * and the install upsert in one DB transaction. See the port for
+   * the corruption mode this prevents.
+   */
+  completer: SlackInstallCompleter;
   state: SlackInstallStateStore;
 }
 
@@ -30,7 +35,7 @@ export interface RecordSlackInstallResult {
 /**
  * Called from the OAuth callback. Consumes the state token, exchanges
  * the code for a bot token via `oauth.v2.access`, and persists the
- * install row.
+ * install row + bot-config app id atomically.
  *
  * Errors:
  *   - `SlackInstallAttemptInvalidError` for missing/expired/replayed state
@@ -38,6 +43,12 @@ export interface RecordSlackInstallResult {
  *     that has since been deleted
  *   - `SlackOAuthExchangeError` (from the OAuth client) if Slack rejects
  *     the code
+ *
+ * Atomicity guarantee: bot-config and install rows land in one DB
+ * transaction. A mid-flight failure rolls both back, so a retry from
+ * a fresh state token finds the same starting state. (The OAuth code
+ * itself is single-use Slack-side, so the user has to re-initiate
+ * from x1agent — but they can.)
  */
 export async function recordSlackInstall(
   deps: RecordSlackInstallDeps,
@@ -55,20 +66,10 @@ export async function recordSlackInstall(
     redirectUri: input.redirectUri,
   });
 
-  // Record the Slack-side identifiers on the bot config the first time
-  // we see them. Subsequent installs into other Slack teams reuse the
-  // same app id — Slack guarantees one app id per app, so this is a
-  // no-op after the first install.
-  if (!config.slackAppId) {
-    await deps.configs.recordSlackAppDetails({
-      id: config.id,
-      slackAppId: exchange.appId,
-      slackBotUserId: exchange.botUserId,
-    });
-  }
-
-  const install = await deps.installs.upsert({
+  const install = await deps.completer.completeInstall({
     botConfigId: config.id,
+    slackAppId: exchange.appId,
+    slackBotUserId: exchange.botUserId,
     slackTeamId: SlackTeamId(exchange.teamId),
     slackTeamName: exchange.teamName,
     botToken: exchange.accessToken,

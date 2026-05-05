@@ -6,6 +6,7 @@ import {
   FakeSlackManifestBuilder,
   FakeSlackOAuthClient,
   InMemorySlackBotConfigStore,
+  InMemorySlackInstallCompleter,
   InMemorySlackInstallStateStore,
   InMemorySlackInstallStore,
 } from "./slack-fakes.js";
@@ -19,10 +20,13 @@ const ACTOR = UserId("22222222-2222-7222-8222-222222222222");
 function buildDeps() {
   let counter = 0;
   const now = () => new Date("2026-05-05T00:00:00Z");
+  const configs = new InMemorySlackBotConfigStore();
+  const installs = new InMemorySlackInstallStore();
   return {
-    configs: new InMemorySlackBotConfigStore(),
+    configs,
     state: new InMemorySlackInstallStateStore(now),
-    installs: new InMemorySlackInstallStore(),
+    installs,
+    completer: new InMemorySlackInstallCompleter(configs, installs),
     oauth: new FakeSlackOAuthClient(),
     manifest: new FakeSlackManifestBuilder(),
     randomState: () => `state-${++counter}`,
@@ -124,6 +128,48 @@ describe("recordSlackInstall", () => {
         redirectUri: "https://api.example.com/oauth/slack/callback",
       }),
     ).rejects.toBeInstanceOf(SlackInstallAttemptInvalidError);
+  });
+
+  it("routes both writes through the install completer (atomic boundary)", async () => {
+    // The use case must NOT call recordSlackAppDetails directly — that
+    // would re-introduce the partial-failure window between the two
+    // writes. Verify by counting completer calls vs direct config
+    // writes.
+    const created = await createSlackBotConfig(deps, {
+      workspaceId: WORKSPACE,
+      rawBotName: "triage",
+      actor: ACTOR,
+    });
+    deps.oauth.setNextResult({
+      accessToken: "xoxb",
+      appId: "A1",
+      botUserId: "U1",
+      teamId: "T1",
+      teamName: null,
+    });
+
+    let completerCalls = 0;
+    const wrapped = {
+      ...deps,
+      completer: {
+        completeInstall: async (input: any) => {
+          completerCalls += 1;
+          return deps.completer.completeInstall(input);
+        },
+      },
+    };
+
+    await recordSlackInstall(wrapped, {
+      state: created.state,
+      code: "code",
+      redirectUri: "https://api.example.com/oauth/slack/callback",
+    });
+
+    expect(completerCalls).toBe(1);
+    // Both writes (config app id + install row) landed.
+    const updatedConfig = await deps.configs.findById(created.config.id);
+    expect(updatedConfig?.slackAppId).toBe("A1");
+    expect(deps.installs.rows.size).toBe(1);
   });
 
   it("upserts on re-install into the same team", async () => {

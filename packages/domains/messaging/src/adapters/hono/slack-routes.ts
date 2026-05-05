@@ -19,6 +19,7 @@ import {
 import type { SlackBotConfigStore } from "../../ports/slack-bot-config-store.js";
 import type { SlackInstallStore } from "../../ports/slack-install-store.js";
 import type { SlackInstallStateStore } from "../../ports/slack-install-state-store.js";
+import type { SlackInstallCompleter } from "../../ports/slack-install-completer.js";
 import type { SlackOAuthClient } from "../../ports/slack-oauth-client.js";
 import type { SlackManifestBuilder } from "../../ports/slack-manifest-builder.js";
 import type { AgentWorkspaceReader } from "../../ports/agent-workspace-reader.js";
@@ -27,6 +28,8 @@ export interface SlackRoutesConfig {
   configs: SlackBotConfigStore;
   installs: SlackInstallStore;
   state: SlackInstallStateStore;
+  /** Atomic two-write boundary used by the OAuth callback. */
+  completer: SlackInstallCompleter;
   oauth: SlackOAuthClient;
   manifest: SlackManifestBuilder;
   /** Resolves agent_id → workspace_id for tenant-isolation checks. */
@@ -150,7 +153,7 @@ export function createSlackOAuthRoutes(cfg: SlackRoutesConfig): Hono {
         {
           oauth: cfg.oauth,
           configs: cfg.configs,
-          installs: cfg.installs,
+          completer: cfg.completer,
           state: cfg.state,
         },
         { state, code, redirectUri: cfg.callbackUrl },

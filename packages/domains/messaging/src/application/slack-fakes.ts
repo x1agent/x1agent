@@ -15,6 +15,7 @@ import {
 import type { SlackBotConfigStore } from "../ports/slack-bot-config-store.js";
 import type { SlackInstallStateStore } from "../ports/slack-install-state-store.js";
 import type { SlackInstallStore } from "../ports/slack-install-store.js";
+import type { SlackInstallCompleter } from "../ports/slack-install-completer.js";
 import type {
   SlackOAuthClient,
   SlackOAuthExchangeResult,
@@ -307,5 +308,45 @@ export class FakeAgentWorkspaceReader implements AgentWorkspaceReader {
 
   async findWorkspaceId(agentId: AgentId) {
     return this.map.get(agentId as string) ?? null;
+  }
+}
+
+/**
+ * In-memory SlackInstallCompleter. Real implementation wraps both
+ * writes in a SQL transaction; the fake just calls the underlying
+ * stores inline (no atomicity guarantee in the fake — tests that need
+ * to assert mid-flight failures can wrap the install store with a
+ * throwing decorator).
+ */
+export class InMemorySlackInstallCompleter implements SlackInstallCompleter {
+  constructor(
+    private readonly configs: InMemorySlackBotConfigStore,
+    private readonly installs: InMemorySlackInstallStore,
+  ) {}
+
+  async completeInstall(input: {
+    botConfigId: SlackBotConfigId;
+    slackAppId: string;
+    slackBotUserId: string;
+    slackTeamId: SlackTeamId;
+    slackTeamName: string | null;
+    botToken: string;
+    installedByUserId: UserId | null;
+  }) {
+    const existing = await this.configs.findById(input.botConfigId);
+    if (existing && !existing.slackAppId) {
+      await this.configs.recordSlackAppDetails({
+        id: input.botConfigId,
+        slackAppId: input.slackAppId,
+        slackBotUserId: input.slackBotUserId,
+      });
+    }
+    return this.installs.upsert({
+      botConfigId: input.botConfigId,
+      slackTeamId: input.slackTeamId,
+      slackTeamName: input.slackTeamName,
+      botToken: input.botToken,
+      installedByUserId: input.installedByUserId,
+    });
   }
 }

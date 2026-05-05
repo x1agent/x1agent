@@ -12,6 +12,7 @@ import {
   PostgresAgentWorkspaceReader,
   PostgresSlackBotConfigStore,
   PostgresSlackConnectedChannelStore,
+  PostgresSlackInstallCompleter,
   PostgresSlackInstallStateStore,
   PostgresSlackInstallStore,
   SlackHttpReplyClient,
@@ -105,6 +106,7 @@ export function composeSlack(
   const installs = new PostgresSlackInstallStore(env.sql, cipher);
   const state = new PostgresSlackInstallStateStore(env.sql);
   const agents = new PostgresAgentWorkspaceReader(env.sql);
+  const completer = new PostgresSlackInstallCompleter(env.sql, cipher);
 
   // Even when not configured, build the OAuth client and manifest
   // builder so the route handlers stay shaped consistently — the
@@ -121,6 +123,7 @@ export function composeSlack(
     configs,
     installs,
     state,
+    completer,
     oauth,
     manifest,
     agents,
