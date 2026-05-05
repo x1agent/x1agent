@@ -82,7 +82,7 @@ Behind the edit screen:
 #### Storage — v1 (current implementation)
 
 - Plaintext is encrypted with **AES-256-GCM**: random 96-bit nonce per call (NIST SP 800-38D), 128-bit auth tag, deployment-wide master key.
-- The master key is hex-encoded 32 bytes, loaded at api boot from the `WORKSPACE_SECRETS_MASTER_KEY` env var. The installer (`mise run install`) generates one on first run if absent and stores it in GSM as `x1agent-workspace-secrets-master-key`. The api never writes it back, never logs it.
+- The master key is hex-encoded 32 bytes, loaded at api boot from the `WORKSPACE_SECRETS_MASTER_KEY` env var. The installer (`mise run install:prod`) generates one on first run if absent and stores it in GSM as `x1agent-workspace-secrets-master-key`. The api never writes it back, never logs it.
 - The encrypted blob (`ciphertext`, `nonce`, `auth_tag`) lives in the `workspace_secrets` table alongside the metadata.
 - Rotating the master key would invalidate every existing row — there is no re-encrypt procedure built in v1, so treat the key as forever-immutable.
 

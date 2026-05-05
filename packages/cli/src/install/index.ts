@@ -7,11 +7,14 @@ import {
   note,
   outro,
   spinner,
+  text,
 } from "@clack/prompts";
 import { existsSync } from "node:fs";
 import { defaultPaths, render, renderTerraformVars } from "./render.ts";
 import { reportFailures, runInstallPreflight } from "./preflight.ts";
 import { selectDeployment } from "./select-deployment.ts";
+import { resolveActiveDeploymentInteractive } from "../configure/paths.ts";
+import { printActiveTargetHeader } from "../active-target.ts";
 
 /**
  * Install subcommand router. The shape:
@@ -300,19 +303,27 @@ async function doStatus(): Promise<boolean> {
 // ── destroy ─────────────────────────────────────────────────────────
 
 async function doDestroy(): Promise<boolean> {
-  const ok = await confirm({
-    message: `Uninstall x1agent from namespace "${NAMESPACE}"? This deletes ALL data including in-cluster Postgres.`,
-    initialValue: false,
+  // Print the active-deployment header so the operator sees which
+  // deployment they're about to uninstall. Then require typing the
+  // base domain — yes/no prompts get muscle-memory'd through.
+  const { baseDomain, path: envPath } =
+    await resolveActiveDeploymentInteractive();
+  printActiveTargetHeader({ baseDomain, envPath });
+
+  const typed = await text({
+    message:
+      `This will uninstall x1agent from "${baseDomain}" and delete in-cluster Postgres data.\n` +
+      `Type the base domain (${baseDomain}) to confirm:`,
+    placeholder: baseDomain,
+    validate: (raw) => {
+      const t = raw.trim();
+      if (!t) return "Required.";
+      if (t !== baseDomain)
+        return `Doesn't match — expected "${baseDomain}".`;
+      return undefined;
+    },
   });
-  if (isCancel(ok) || !ok) {
-    cancel("Cancelled.");
-    return false;
-  }
-  const ok2 = await confirm({
-    message: "Are you SURE? This is not reversible without GSM-backed backups.",
-    initialValue: false,
-  });
-  if (isCancel(ok2) || !ok2) {
+  if (isCancel(typed)) {
     cancel("Cancelled.");
     return false;
   }

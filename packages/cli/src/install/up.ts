@@ -14,10 +14,12 @@ import { EnvFile } from "../configure/env-file.ts";
 import {
   findRepoRoot,
   resolveActiveDeployment,
+  resolveActiveDeploymentInteractive,
 } from "../configure/paths.ts";
 import { runCheck } from "../configure/check.ts";
 import { defaultPaths, render, renderTerraformVars } from "./render.ts";
 import { runInstallPreflight, reportFailures } from "./preflight.ts";
+import { printActiveTargetHeader } from "../active-target.ts";
 
 /**
  * One-shot installer. Runs every phase needed to take a cluster from
@@ -53,11 +55,13 @@ export async function runInstallUp(): Promise<boolean> {
 
   // ── Phase 2: configure:check ────────────────────────────────────
   if (runCheck() !== 0) {
-    cancel("Run `mise run configure` to fix the values, then re-run.");
+    cancel("Run `mise run configure:prod` to fix the values, then re-run.");
     return false;
   }
 
-  const { baseDomain, path: envPath } = resolveActiveDeployment();
+  const { baseDomain, path: envPath } =
+    await resolveActiveDeploymentInteractive();
+  printActiveTargetHeader({ baseDomain, envPath });
   const env = new EnvFile(envPath);
   const projectId = env.get("GCP_PROJECT_ID")!;
   const region = env.get("GCP_REGION") || "us-central1";

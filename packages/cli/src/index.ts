@@ -6,6 +6,7 @@ import { runCheck } from "./configure/check.ts";
 import { runInstall, type InstallAction } from "./install/index.ts";
 import { runDeploy, parseDeployArgs } from "./deploy/index.ts";
 import { runLogs } from "./logs/index.ts";
+import { runDeployments } from "./deployments/index.ts";
 
 const subcommand = process.argv[2] ?? "setup";
 
@@ -81,10 +82,15 @@ async function main() {
       }
       return;
     }
+    case "deployments": {
+      // Read-only listing — no header, no resolver, just enumerate
+      // installs/. Used by `mise run deployments`.
+      process.exit(runDeployments());
+    }
     default: {
       console.error(`Unknown command: ${subcommand}`);
       console.error(
-        "Usage: x1 (setup | configure | configure:check | install [| install:<phase>] | deploy [--yes] [--tag <sha>] [--skip-build] | logs [<component>] [flags])",
+        "Usage: x1 (setup | configure | configure:check | deployments | install [| install:<phase>] | deploy [--yes] [--tag <sha>] [--skip-build] | logs [<component>] [flags])",
       );
       process.exit(2);
     }

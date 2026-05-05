@@ -12,11 +12,11 @@ _.file = [".env", ".env.local"]
 # deploys to a real cluster.
 #
 # Two-lane model:
-#   • DEV lane (dev:*)   — KUBECONFIG = OrbStack file (this default).
-#   • PROD lane (install/install:*/deploy/logs/terraform:*) — every prod
-#     task overrides this with `env = { KUBECONFIG = "" }` so the CLI
-#     writes its own deployment-specific kubeconfig instead of polluting
-#     the OrbStack file with `gcloud container clusters get-credentials`.
+#   • DEV lane (dev:*)        — KUBECONFIG = OrbStack file (this default).
+#   • PROD lane (*:prod, etc.) — every prod task overrides this with
+#     `env = { KUBECONFIG = "" }` so the CLI writes its own
+#     deployment-specific kubeconfig instead of polluting the OrbStack
+#     file with `gcloud container clusters get-credentials`.
 # Each prod task below reasserts the override; do not remove it.
 KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 
@@ -34,6 +34,20 @@ PUBLIC_API_URL = "https://api.local.x1agent.dev"
 # ANTHROPIC_API_KEY via the workspace-secrets path.
 HOST_HOME_DIR = "{{env.HOME}}"
 HOST_CLAUDE_CREDENTIALS_FILE = "{{env.HOME}}/.x1agent-dev/claude-credentials.json"
+
+# ============================================================================
+# Naming convention
+# ----------------------------------------------------------------------------
+#   dev:*       — local OrbStack development loop
+#   *:prod      — operations against a configured cloud deployment
+#                 (reads installs/<base-domain>.local; KUBECONFIG="" so the
+#                 CLI manages its own deployment-specific kubeconfig)
+#   docs:*      — docs site
+#   images:*    — agent/sidecar/preset image catalog
+# Bare `dev`, `test`, `quickstart`, etc. are convenience verbs for the
+# common dev path. Anything that touches a customer cloud has the `:prod`
+# suffix so it's unambiguous in `mise tasks` and shell history.
+# ============================================================================
 
 # ----------------------------------------------------------------------------
 # One-time-per-cluster setup. Each step is idempotent and OrbStack-only
@@ -66,51 +80,102 @@ description = "Run the x1agent CLUSTER setup wizard (creates secrets + admin)"
 run = "cd packages/cli && bun run src/index.ts setup"
 
 # ----------------------------------------------------------------------------
-# Pre-flight configuration. Captures everything needed to install x1agent
-# (cloud target, base domain, secrets) into .env.local — no cluster touch.
-# Idempotent: re-running shows existing values and only updates what you
-# change. Other tasks `depend` on `configure:check` so they fail fast with
-# a friendly message when the bare-minimum vars aren't set.
+# Configure — capture the inputs every other prod task reads.
+#
+#   configure:prod   Interactive wizard. Picks (or edits) one
+#                    installs/<base-domain>.local file. Refuses to
+#                    silently overwrite an existing file — explicit
+#                    "edit" intent required. Sets up a per-deployment
+#                    gcloud configuration and binds account/project.
+#
+#   configure:check  Non-interactive validator used as a `depends` of
+#                    every other prod task; fails fast with a friendly
+#                    message when the active deployment file is missing
+#                    or incomplete.
+#
+# Local-dev secrets live in `.env.local` and are usually edited by hand
+# (small file, ~10 keys). No wizard is needed for that — see
+# `.env.example`.
 # ----------------------------------------------------------------------------
-[tasks.configure]
-description = "Interactive wizard — pick local-dev or a deployment, write the right file"
+[tasks."configure:prod"]
+description = "Interactive wizard — set up or edit a deployment under installs/<base-domain>.local"
 run = "cd packages/cli && bun run src/index.ts configure"
 
 [tasks."configure:check"]
 description = "Verify the active deployment file (installs/<base-domain>.local) is install-ready"
 run = "cd packages/cli && bun run src/index.ts configure:check"
 
+# Read-only summary of every deployment configured under installs/.
+# Use this to remind yourself which deployments exist before running
+# anything destructive — or before adding a new one.
+[tasks.deployments]
+description = "List every configured deployment (installs/<base-domain>.local)"
+run = "cd packages/cli && bun run src/index.ts deployments"
+
 # ----------------------------------------------------------------------------
 # Cloud install — currently GCP only. ONE command does the whole thing:
 #
-#   mise run configure   # one-time, prompts for cloud + secrets
-#   mise run install     # everything else: terraform, operator helm
-#                          charts (ESO + cert-manager + ingress-nginx),
-#                          WI annotations, GSM secret population,
-#                          image build + push, helm install x1agent,
-#                          wait for cert
+#   mise run configure:prod   # one-time, prompts for cloud + secrets
+#   mise run install:prod     # everything else: terraform, operator helm
+#                               charts (ESO + cert-manager + ingress-nginx),
+#                               WI annotations, GSM secret population,
+#                               image build + push, helm install x1agent,
+#                               wait for cert
 #
-# Re-running `install` is safe — every phase is idempotent.
+# Re-running `install:prod` is safe — every phase is idempotent.
 #
-# The install:<phase> tasks below are escape hatches for re-running a
-# single phase when something goes wrong. Most operators won't use them.
+# The `install:prod:<phase>` tasks below are escape hatches for re-running
+# a single phase when something goes wrong. Most operators won't use them.
+#
+# Active-deployment resolution (every *:prod task uses the same rule):
+#
+#   1. X1AGENT_DEPLOYMENT=<base-domain> env var (CI / explicit override)
+#   2. If exactly one installs/*.local file exists, use it (common case)
+#   3. If multiple exist + interactive TTY → prompt
+#   4. If multiple exist + non-TTY → fail fast with the list
+#
+# Every prod task prints a "→ target: …" header before doing anything,
+# so you always see where the command is about to act.
 # ----------------------------------------------------------------------------
-[tasks.install]
-description = "One-shot installer — terraform → ESO + cert-manager + ingress-nginx → secrets → images → helm install x1agent"
+[tasks."install:prod"]
+description = "One-shot installer (active deployment) — terraform → operator charts → secrets → images → helm install x1agent"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install"
 
-[tasks."install:build-images"]
-description = "Build + push the 3 prod images (api, app, preview) to Artifact Registry"
+[tasks."install:prod:build-images"]
+description = "Build + push the 3 prod images (api, app, preview) to the active deployment's Artifact Registry"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = "deploy/scripts/build-push-prod.sh"
 
+[tasks."install:prod:plan"]
+description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
+depends = ["configure:check"]
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts install:plan"
+
+[tasks."install:prod:apply"]
+description = "helm upgrade --install x1agent into the active deployment's cluster"
+depends = ["configure:check"]
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts install:apply"
+
+[tasks."install:prod:status"]
+description = "Read-only snapshot of the active deployment — pods, ingress IP, managed cert state"
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts install:status"
+
+[tasks."install:prod:destroy"]
+description = "helm uninstall x1agent from the active deployment (type-to-confirm; deletes in-cluster Postgres data)"
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts install:destroy"
+
 # Subsequent ships against an already-installed deployment. Use this
-# (not `install`) once `install` has run at least once. Pass --yes for
-# unattended runs (CI), --tag <sha> to deploy a specific build.
-[tasks.deploy]
+# (not `install:prod`) once `install:prod` has run at least once.
+# Pass --yes for unattended runs (CI), --tag <sha> to deploy a specific
+# build.
+[tasks."deploy:prod"]
 description = "Build + push images and helm-upgrade the active deployment"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
@@ -124,38 +189,44 @@ run = "cd packages/cli && bun run src/index.ts deploy {{arg(name='args', var=tru
 # is forwarded verbatim to kubectl.
 #
 # Examples:
-#   mise run logs api
-#   mise run logs api --grep sentry
-#   mise run logs api -- --tail=500
-[tasks.logs]
-description = "Tail logs from the active deployment (mise run logs api -- ...)"
+#   mise run logs:prod api
+#   mise run logs:prod api --grep sentry
+#   mise run logs:prod api -- --tail=500
+[tasks."logs:prod"]
+description = "Tail logs from the active deployment (mise run logs:prod api -- ...)"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts logs {{arg(name='args', var=true, default='')}}"
 
-[tasks."install:plan"]
-description = "Render values.<deployment>.yaml + helm template — no cluster mutation"
+# Drop into an interactive psql shell against the active deployment's
+# in-cluster postgres. For ad-hoc support tasks (wiping a stale DCR
+# client when an MCP rotates registration, inspecting a session row).
+# Reads the deployment from installs/<base-domain>.local — same rule as
+# `logs:prod`. Writes a per-deployment kubeconfig at
+# ~/.kube/config.x1agent.<projectId>; never touches OrbStack.
+[tasks."psql:prod"]
+description = "Interactive psql shell against the active deployment's in-cluster postgres"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
-run = "cd packages/cli && bun run src/index.ts install:plan"
+run = "deploy/scripts/psql-prod.sh"
 
 # Terraform tasks — provision the GCP-side infra (cluster, IAM, GSM
 # placeholders, AR, DNS, static IP) before the chart goes in. Two-step
 # apply because the ESO ClusterSecretStore needs ESO's CRDs first.
 #
 # Sequence:
-#   mise run terraform:init           # one-time per machine
-#   mise run terraform:plan           # preview changes, no mutation
-#   mise run terraform:apply:cluster  # cluster + IAM + GSM + AR + DNS
+#   mise run terraform:prod:init           # one-time per machine
+#   mise run terraform:prod:plan           # preview changes, no mutation
+#   mise run terraform:prod:apply:cluster  # cluster + IAM + GSM + AR + DNS
 #   <operator: helm install external-secrets ... + annotate ESO SA>
-#   mise run terraform:apply          # adds the ClusterSecretStore now CRDs exist
-[tasks."terraform:init"]
+#   mise run terraform:prod:apply          # adds the ClusterSecretStore now CRDs exist
+[tasks."terraform:prod:init"]
 description = "Initialize the GCP terraform module (one-time per machine)"
 env = { KUBECONFIG = "" }
 run = "cd deploy/terraform/gcp && terraform init"
 
-[tasks."terraform:plan"]
-description = "terraform plan against the GCP module (renders tfvars from .env.local)"
+[tasks."terraform:prod:plan"]
+description = "terraform plan against the active deployment's GCP module"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = """
@@ -163,7 +234,7 @@ cd packages/cli && bun run src/index.ts install:render-tfvars
 cd ../../deploy/terraform/gcp && terraform plan
 """
 
-[tasks."terraform:apply:cluster"]
+[tasks."terraform:prod:apply:cluster"]
 description = "First-pass apply — cluster + IAM + GSM + AR + DNS (skips ClusterSecretStore until ESO CRDs exist)"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
@@ -184,7 +255,7 @@ cd ../../deploy/terraform/gcp && terraform apply \\
   -target=google_dns_record_set.api
 """
 
-[tasks."terraform:apply"]
+[tasks."terraform:prod:apply"]
 description = "Full terraform apply — call after operator installs ESO CRDs (creates ClusterSecretStore)"
 depends = ["configure:check"]
 env = { KUBECONFIG = "" }
@@ -193,26 +264,36 @@ cd packages/cli && bun run src/index.ts install:render-tfvars
 cd ../../deploy/terraform/gcp && terraform apply
 """
 
-[tasks."terraform:destroy"]
-description = "terraform destroy — wipes the entire install's GCP infra (with confirm)"
+[tasks."terraform:prod:destroy"]
+description = "terraform destroy — wipes the active deployment's GCP infra (type-to-confirm via terraform's own prompt)"
 env = { KUBECONFIG = "" }
 run = "cd deploy/terraform/gcp && terraform destroy"
 
-[tasks."install:apply"]
-description = "helm upgrade --install x1agent into the configured GCP cluster"
-depends = ["configure:check"]
-env = { KUBECONFIG = "" }
-run = "cd packages/cli && bun run src/index.ts install:apply"
+# ----------------------------------------------------------------------------
+# Deprecation stubs — old names that used to exist before the *:prod
+# rename. They print a redirect message and exit non-zero so any old
+# script or muscle-memory invocation surfaces immediately rather than
+# silently doing the wrong thing.
+# ----------------------------------------------------------------------------
+[tasks.configure]
+description = "(removed) renamed to configure:prod"
+hide = true
+run = "echo '`mise run configure` was renamed to `mise run configure:prod` (or use `mise run deployments` to list).' >&2 && exit 2"
 
-[tasks."install:status"]
-description = "Read-only snapshot — deployments, ingress IP, managed cert state"
-env = { KUBECONFIG = "" }
-run = "cd packages/cli && bun run src/index.ts install:status"
+[tasks.install]
+description = "(removed) renamed to install:prod"
+hide = true
+run = "echo '`mise run install` was renamed to `mise run install:prod`.' >&2 && exit 2"
 
-[tasks."install:destroy"]
-description = "helm uninstall x1agent (double-confirm; deletes in-cluster Postgres data)"
-env = { KUBECONFIG = "" }
-run = "cd packages/cli && bun run src/index.ts install:destroy"
+[tasks.deploy]
+description = "(removed) renamed to deploy:prod"
+hide = true
+run = "echo '`mise run deploy` was renamed to `mise run deploy:prod`.' >&2 && exit 2"
+
+[tasks.logs]
+description = "(removed) renamed to logs:prod"
+hide = true
+run = "echo '`mise run logs` was renamed to `mise run logs:prod`.' >&2 && exit 2"
 
 # macOS-only: export the Claude Code Max OAuth credentials from the
 # Keychain to a file so the Job watcher can mount it into agent pods

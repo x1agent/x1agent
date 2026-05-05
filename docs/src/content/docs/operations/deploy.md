@@ -28,7 +28,7 @@ column the api expects is in place before any pod that reads it starts.
 ```sh
 # from a checkout, with the active deployment selected via
 # installs/<basedomain>.local
-mise run deploy
+mise run deploy:prod
 
 # or directly
 cd packages/cli && bun run src/index.ts deploy
@@ -143,8 +143,8 @@ Two paths:
 
 ## What `deploy` does NOT do
 
-- No Terraform changes. Run `mise run terraform:apply` for those.
-- No GSM rotation. Run `mise run install:apply` (or update GSM out of band).
+- No Terraform changes. Run `mise run terraform:prod:apply` for those.
+- No GSM rotation. Run `mise run install:prod:apply` (or update GSM out of band).
 - No operator-chart upgrades (ESO, cert-manager, ingress-nginx). Those
   upgrade independently with `helm upgrade <name>` in their own namespaces.
 
