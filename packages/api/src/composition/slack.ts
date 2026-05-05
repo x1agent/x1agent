@@ -16,8 +16,10 @@ import {
   PostgresSlackInstallStateStore,
   PostgresSlackInstallStore,
   SlackHttpReplyClient,
+  SlackInstallId,
   SlackManifestUrlBuilder,
   SlackOAuthHttpClient,
+  SlackReplyError,
   type SlackTokenCipher,
 } from "@x1agent/domain-messaging";
 import type {
@@ -141,6 +143,57 @@ export function composeSlack(
   const channels = new PostgresSlackConnectedChannelStore(env.sql);
   const reply = new SlackHttpReplyClient();
 
+  // Wraps reply.postReply with the structured error handling the
+  // events handler expects: revoked tokens mark the install revoked
+  // (so we stop posting to it on subsequent events), channel-gone
+  // updates the channel registry, transient and rate_limited errors
+  // get logged but don't propagate (Slack would just retry the event,
+  // and the event handler already dropped retries above).
+  async function safePostReply(
+    installIdRaw: string,
+    channelId: string,
+    botToken: string,
+    text: string,
+    threadTs: string | null | undefined,
+  ) {
+    try {
+      await reply.postReply({
+        botToken,
+        channel: channelId,
+        text,
+        threadTs: threadTs ?? undefined,
+      });
+    } catch (err) {
+      if (err instanceof SlackReplyError) {
+        if (err.kind === "revoked") {
+          await installs.markRevoked(SlackInstallId(installIdRaw), new Date());
+          console.error(
+            `[slack/events] install ${installIdRaw} revoked: ${err.slackErrorCode}`,
+          );
+          return;
+        }
+        if (err.kind === "channel_unavailable") {
+          await channels.markRemoved(
+            SlackInstallId(installIdRaw),
+            channelId,
+          );
+          console.warn(
+            `[slack/events] channel ${channelId} unavailable: ${err.slackErrorCode}`,
+          );
+          return;
+        }
+        // rate_limited or transient — log and move on. Retrying here
+        // would just delay our 200 response to Slack and trigger
+        // Slack's own retry. Better to drop one ack than pile up.
+        console.warn(
+          `[slack/events] postReply ${err.kind}: ${err.slackErrorCode}`,
+        );
+        return;
+      }
+      console.error("[slack/events] unexpected postReply failure:", err);
+    }
+  }
+
   // v1 hooks. app_mention / message.im currently send a stub
   // acknowledgement so we can validate the round trip end-to-end on
   // production before wiring full agent invocation. The acknowledgement
@@ -150,55 +203,42 @@ export function composeSlack(
     configs,
     installs,
     onMemberJoinedChannel: async (ctx) => {
-      const install = await installs.findByBotConfigAndTeam(
-        ctx.botConfigId as never,
-        ctx.slackTeamId as never,
-      );
-      if (!install) return;
       await channels.register({
-        installId: install.id,
+        installId: SlackInstallId(ctx.installId),
         channelId: ctx.channelId,
       });
     },
     onMemberLeftChannel: async (ctx) => {
-      const install = await installs.findByBotConfigAndTeam(
-        ctx.botConfigId as never,
-        ctx.slackTeamId as never,
-      );
-      if (!install) return;
-      await channels.markRemoved(install.id, ctx.channelId);
+      await channels.markRemoved(SlackInstallId(ctx.installId), ctx.channelId);
     },
     onAppMention: async (ctx) => {
       const ackText = ctx.agentId
         ? `Got it — passing this to the paired agent.`
         : `This bot isn't paired with an agent yet. A workspace admin needs to pair it from the agent edit page.`;
       // Auto-register the channel — first @ proves delivery works.
-      const install = await installs.findByBotConfigAndTeam(
-        ctx.botConfigId as never,
-        ctx.slackTeamId as never,
-      );
-      if (install) {
-        await channels.register({
-          installId: install.id,
-          channelId: ctx.channelId,
-        });
-      }
-      await reply.postReply({
-        botToken: ctx.botToken,
-        channel: ctx.channelId,
-        text: ackText,
-        threadTs: ctx.threadTs ?? ctx.messageTs,
+      await channels.register({
+        installId: SlackInstallId(ctx.installId),
+        channelId: ctx.channelId,
       });
+      await safePostReply(
+        ctx.installId,
+        ctx.channelId,
+        ctx.botToken,
+        ackText,
+        ctx.threadTs ?? ctx.messageTs,
+      );
     },
     onDirectMessage: async (ctx) => {
       const ackText = ctx.agentId
         ? `Got your DM — passing it to the paired agent.`
         : `This bot isn't paired with an agent yet.`;
-      await reply.postReply({
-        botToken: ctx.botToken,
-        channel: ctx.channelId,
-        text: ackText,
-      });
+      await safePostReply(
+        ctx.installId,
+        ctx.channelId,
+        ctx.botToken,
+        ackText,
+        null,
+      );
     },
   });
 

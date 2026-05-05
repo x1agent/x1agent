@@ -26,6 +26,26 @@ export const AgentId = (raw: string): AgentId => {
 };
 
 /**
+ * Reject control characters, BiDi override characters, zero-width
+ * characters, line / paragraph separators, and non-breaking spaces in
+ * the bot name. Constructed via `new RegExp` with explicit unicode
+ * escapes so the source file doesn't itself contain the (potentially
+ * BiDi-altering) characters we're filtering against.
+ *
+ * Categories rejected:
+ *   - C0 controls + DEL (U+0000–U+001F, U+007F)
+ *   - C1 controls + line separators (U+0080–U+009F)
+ *   - Non-breaking and narrow no-break spaces (U+00A0, U+202F)
+ *   - Zero-width: ZWSP, ZWNJ, ZWJ (U+200B–U+200D)
+ *   - BiDi marks/overrides (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069)
+ *   - YAML 1.1 line terminators (U+2028 LS, U+2029 PS)
+ *   - Byte-order mark (U+FEFF)
+ */
+const FORBIDDEN_BOT_NAME_CHARS = new RegExp(
+  "[\\u0000-\\u001f\\u007f-\\u009f\\u00a0\\u200b-\\u200f\\u2028-\\u202f\\u2066-\\u2069\\ufeff]",
+);
+
+/**
  * The bot's display handle inside Slack. Slack itself enforces
  * per-team uniqueness on the display name; we additionally enforce
  * (workspace_id, bot_name) uniqueness so an x1agent workspace doesn't
@@ -48,6 +68,11 @@ export const SlackBotName = (raw: string): SlackBotName => {
   const normalized = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
   if (normalized.length === 0)
     throw new ValidationError("bot_name", "must not be empty");
+  if (FORBIDDEN_BOT_NAME_CHARS.test(normalized))
+    throw new ValidationError(
+      "bot_name",
+      "must not contain control, BiDi, or zero-width characters",
+    );
   return normalized as SlackBotName;
 };
 

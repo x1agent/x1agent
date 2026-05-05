@@ -49,16 +49,33 @@ export class PostgresSlackInstallCompleter implements SlackInstallCompleter {
     const blob = this.cipher.encrypt(input.botToken);
     return this.sql.begin(async (tx) => {
       // First-install stamp on the bot config row. The WHERE clause
-      // makes this idempotent across re-installs — only the first
-      // hit writes the app id.
-      await tx`
+      // makes this idempotent across re-installs into other Slack
+      // teams — same app_id, no-op. But it ALSO accepts the case
+      // where slack_app_id matches the incoming value, so an
+      // app-id mismatch (admin recreated the Slack app from scratch
+      // with a new id, or a confused install) becomes a typed rollback
+      // rather than a silent no-op that leaves bot_config + install
+      // bound to different Slack apps.
+      const stampRows = await tx<{ id: string }[]>`
         UPDATE slack_bot_configs
         SET slack_app_id = ${input.slackAppId},
             slack_bot_user_id = ${input.slackBotUserId},
             updated_at = now()
         WHERE id = ${input.botConfigId}
-          AND slack_app_id IS NULL
+          AND (slack_app_id IS NULL OR slack_app_id = ${input.slackAppId})
+        RETURNING id
       `;
+      if (stampRows.length === 0) {
+        // The UPDATE matched zero rows: either the bot config no
+        // longer exists, or its slack_app_id is set to a different
+        // value. Either way we cannot complete this install — abort
+        // the transaction. The state token isn't consumed yet
+        // (record-slack-install consumes only on success), so the
+        // user can retry from a fresh OAuth flow if needed.
+        throw new Error(
+          "slack_app_id_mismatch: bot config app id does not match incoming OAuth result",
+        );
+      }
 
       // Install upsert: per (bot_config_id, slack_team_id). Re-installs
       // refresh token + team name and clear revoked_at.

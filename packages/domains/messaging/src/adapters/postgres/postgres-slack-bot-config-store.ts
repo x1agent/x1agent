@@ -3,11 +3,22 @@ import { UserId, WorkspaceId } from "@x1agent/kernel";
 import {
   AgentId,
   SlackBotConfigId,
+  SlackBotConfigNameTakenError,
+  SlackBotConfigNotFoundError,
   SlackBotName,
   type SlackBotConfig,
 } from "../../domain/slack-bot-config.js";
 import type { SlackBotConfigStore } from "../../ports/slack-bot-config-store.js";
 import type { SlackTokenCipher } from "./postgres-slack-install-store.js";
+
+/** Postgres unique-violation error code. Surfaced to translate the
+ *  unique index on (workspace_id, bot_name) into a typed domain
+ *  error rather than a generic 500. */
+const PG_UNIQUE_VIOLATION = "23505";
+
+function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string })?.code === PG_UNIQUE_VIOLATION;
+}
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -107,12 +118,25 @@ export class PostgresSlackBotConfigStore implements SlackBotConfigStore {
     botName: SlackBotName;
     createdBy: UserId | null;
   }) {
-    const rows = await this.sql<Row[]>`
-      INSERT INTO slack_bot_configs (workspace_id, bot_name, created_by)
-      VALUES (${input.workspaceId}, ${input.botName as string}, ${input.createdBy})
-      RETURNING ${this.sql.unsafe(SELECT)}
-    `;
-    return rowToConfig(rows[0]!);
+    try {
+      const rows = await this.sql<Row[]>`
+        INSERT INTO slack_bot_configs (workspace_id, bot_name, created_by)
+        VALUES (${input.workspaceId}, ${input.botName as string}, ${input.createdBy})
+        RETURNING ${this.sql.unsafe(SELECT)}
+      `;
+      const row = rows[0];
+      if (!row) throw new Error("insert returned no rows");
+      return rowToConfig(row);
+    } catch (err) {
+      // 23505 means another concurrent insert (or a prior insert we
+      // didn't see in the application-layer pre-check) won the race
+      // for this (workspace_id, bot_name). Translate to the typed
+      // domain error so the route returns 409 instead of 500.
+      if (isUniqueViolation(err)) {
+        throw new SlackBotConfigNameTakenError(input.botName as string);
+      }
+      throw err;
+    }
   }
 
   async recordSlackAppDetails(input: {
@@ -128,7 +152,9 @@ export class PostgresSlackBotConfigStore implements SlackBotConfigStore {
       WHERE id = ${input.id}
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
-    return rowToConfig(rows[0]!);
+    if (!rows[0])
+      throw new SlackBotConfigNotFoundError(input.id as string);
+    return rowToConfig(rows[0]);
   }
 
   async pair(input: { id: SlackBotConfigId; agentId: AgentId }) {
@@ -138,7 +164,9 @@ export class PostgresSlackBotConfigStore implements SlackBotConfigStore {
       WHERE id = ${input.id}
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
-    return rowToConfig(rows[0]!);
+    if (!rows[0])
+      throw new SlackBotConfigNotFoundError(input.id as string);
+    return rowToConfig(rows[0]);
   }
 
   async unpair(id: SlackBotConfigId) {
@@ -148,7 +176,8 @@ export class PostgresSlackBotConfigStore implements SlackBotConfigStore {
       WHERE id = ${id}
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
-    return rowToConfig(rows[0]!);
+    if (!rows[0]) throw new SlackBotConfigNotFoundError(id as string);
+    return rowToConfig(rows[0]);
   }
 
   async recordSigningSecret(input: {
@@ -171,7 +200,9 @@ export class PostgresSlackBotConfigStore implements SlackBotConfigStore {
       WHERE id = ${input.id}
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
-    return rowToConfig(rows[0]!);
+    if (!rows[0])
+      throw new SlackBotConfigNotFoundError(input.id as string);
+    return rowToConfig(rows[0]);
   }
 
   async getSigningSecretByAppId(slackAppId: string) {

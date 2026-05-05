@@ -30,12 +30,19 @@ interface Props {
 export function WorkspaceSlackPanel({ slug, canManage }: Props) {
   const { configuredByWorkspace, botsByWorkspace, status, error, load } =
     useSlackStore();
+  const loadAgents = useAgentsStore((s) => s.load);
   const configured = configuredByWorkspace[slug];
   const bots = botsByWorkspace[slug] ?? [];
 
   useEffect(() => {
     load(slug);
-  }, [slug, load]);
+    // Agents store is populated lazily — without this load, a cold
+    // navigation directly to the Slack panel would show "not paired"
+    // for paired bots because `bySlug[slug]` is empty until something
+    // else triggers the agents fetch. Cheap to call multiple times;
+    // the store dedupes its own loading state.
+    loadAgents(slug);
+  }, [slug, load, loadAgents]);
 
   // Reload after Slack bounces the operator back with ?slack_installed=1.
   // The install row only appears post-callback, so the list is otherwise
@@ -306,6 +313,7 @@ function SlackBotRow({
     [agentsBySlug, slug, bot.agent_id],
   );
   const { confirm, dialog } = useConfirm();
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const installed = bot.installs.length > 0;
 
@@ -318,12 +326,22 @@ function SlackBotRow({
       variant: "destructive",
     });
     if (!ok) return;
-    await deleteBot(slug, bot.id);
+    setRowError(null);
+    try {
+      await deleteBot(slug, bot.id);
+    } catch (err) {
+      setRowError((err as Error).message);
+    }
   }
 
   async function onUnpair() {
     if (!bot.agent_id) return;
-    await unpairBot(slug, bot.id);
+    setRowError(null);
+    try {
+      await unpairBot(slug, bot.id);
+    } catch (err) {
+      setRowError((err as Error).message);
+    }
   }
 
   return (
@@ -361,15 +379,20 @@ function SlackBotRow({
         </div>
       </div>
       {canManage && (
-        <div className="flex shrink-0 gap-2">
-          {bot.agent_id && (
-            <Button size="sm" variant="ghost" onClick={onUnpair}>
-              Unpair
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex gap-2">
+            {bot.agent_id && (
+              <Button size="sm" variant="ghost" onClick={onUnpair}>
+                Unpair
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={onDelete}>
+              Delete
             </Button>
+          </div>
+          {rowError && (
+            <span className="text-xs text-danger">{rowError}</span>
           )}
-          <Button size="sm" variant="outline" onClick={onDelete}>
-            Delete
-          </Button>
         </div>
       )}
       </li>

@@ -70,8 +70,29 @@ export function AgentSlackBotCard({ workspaceSlug, agentId, canManage }: Props) 
       if (selected === NONE_VALUE) {
         if (paired) await unpairBot(workspaceSlug, paired.id);
       } else if (selected !== paired?.id) {
-        if (paired) await unpairBot(workspaceSlug, paired.id);
-        await pairBot(workspaceSlug, selected, agentId);
+        const oldPaired = paired;
+        // Re-pair is a two-step operation against the backend (the
+        // inverse-pairing rule rejects pair-without-unpair). Without
+        // a compensating step, a transient failure on the second call
+        // would leave the old bot unpaired with no rollback. We do
+        // unpair → pair → on-fail restore. Best-effort restore: if
+        // the restore itself fails, the user sees the original error
+        // and the picker re-syncs from the store on next mount.
+        if (oldPaired) await unpairBot(workspaceSlug, oldPaired.id);
+        try {
+          await pairBot(workspaceSlug, selected, agentId);
+        } catch (pairErr) {
+          if (oldPaired) {
+            try {
+              await pairBot(workspaceSlug, oldPaired.id, agentId);
+            } catch {
+              // Restore failed too — the agent ends up unpaired.
+              // Surface the original error so the user knows what
+              // happened; they can re-pair manually.
+            }
+          }
+          throw pairErr;
+        }
       }
     } catch (err) {
       setError((err as Error).message);

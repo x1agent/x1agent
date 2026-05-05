@@ -132,7 +132,7 @@ This split — bots configured at workspace level, paired at agent level — let
 | Ports | `packages/domains/messaging` | `ports/slack-*.ts` |
 | Adapters | `packages/domains/messaging` | `adapters/postgres/`, `adapters/slack/` |
 | Routes | `packages/domains/messaging` | `adapters/hono/routes.ts` |
-| Migration | `deploy/migrations` | `031_slack_bots.sql` |
+| Migration | `deploy/migrations` | `040_slack_bots.sql` |
 | App store | `packages/app/src/stores` | `slackStore.ts` |
 | App UI | `packages/app/src/features` | `workspaces/WorkspaceSlackPanel.tsx`, `agents/AgentSlackBotCard.tsx` |
 

@@ -61,10 +61,35 @@ export interface SlackRoutesConfig {
   ) => Promise<{ id: WorkspaceId; canManage: boolean } | null>;
 }
 
+/**
+ * Validate a same-origin return path. Rejects anything that could
+ * cause an open-redirect once concatenated onto the app URL:
+ *   - non-leading slash (`evil.com/...`)
+ *   - protocol-relative (`//evil.com/...`)
+ *   - backslash-prefixed (`/\\evil.com` — some browsers treat as `//`)
+ *   - percent-encoded variants of the above (`%2F%2F`, `%5C…`)
+ *   - control / whitespace prefixes
+ */
 function safeReturnTo(raw: string | undefined | null): string | null {
   if (!raw) return null;
+  if (raw.length > 512) return null;
   if (!raw.startsWith("/")) return null;
   if (raw.startsWith("//") || raw.startsWith("/\\")) return null;
+  // Decode-then-recheck: catches percent-encoded `//`, `/\\`, and any
+  // other ambiguous prefix. We intentionally only check the first
+  // few characters after decoding — we don't need to whitelist the
+  // whole string, just block injection at the prefix.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  if (decoded !== raw && (decoded.startsWith("//") || decoded.startsWith("/\\")))
+    return null;
+  // Reject any control character or whitespace anywhere in the path —
+  // belt for prefix-trick attempts that smuggle CR/LF/etc.
+  if (/[\x00-\x1f\x7f]/.test(raw)) return null;
   return raw;
 }
 
@@ -73,10 +98,11 @@ function errStatus(err: unknown): number {
     switch (err.code) {
       case "slack_bot_config_not_found":
         return 404;
+      // Tenant isolation: 404 (not 403) so the response doesn't
+      // reveal whether the bot exists in another workspace. Same
+      // treatment as the agent-not-in-workspace case below.
       case "slack_bot_config_not_in_workspace":
-        return 403;
-      // Tenant isolation: returning 404 (not 403) so the response
-      // doesn't reveal whether the agent exists in another workspace.
+        return 404;
       case "slack_bot_agent_not_in_workspace":
         return 404;
       case "slack_bot_already_paired":
@@ -99,6 +125,20 @@ function errBody(err: unknown) {
     return { error: err.code, message: err.message };
   return { error: "internal_error", message: "unexpected failure" };
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(s: string | null | undefined): boolean {
+  return !!s && UUID_RE.test(s);
+}
+
+/**
+ * Slack signing secrets are 32 hex characters per Slack's spec
+ * (Basic Information → App Credentials). Anything else is almost
+ * certainly a paste error — surface immediately rather than letting
+ * 401 retry-loops bury the issue.
+ */
+const SIGNING_SECRET_RE = /^[0-9a-f]{32}$/i;
 
 interface SlackInstallShape {
   id: string;
@@ -184,30 +224,34 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws) return c.json({ error: "forbidden" }, 403);
-    const rows = await cfg.configs.listByWorkspace(ws.id);
-    const installsByConfig = await Promise.all(
-      rows.map(async (r) => ({
-        id: r.id,
-        installs: await cfg.installs.listByBotConfig(r.id),
-      })),
-    );
-    const installMap = new Map(
-      installsByConfig.map((x) => [x.id as string, x.installs]),
-    );
-    return c.json({
-      configured: cfg.configured,
-      bots: rows.map((r) =>
-        configToDto(
-          r,
-          (installMap.get(r.id as string) ?? []).map((i) => ({
-            id: i.id as string,
-            slack_team_id: i.slackTeamId as string,
-            slack_team_name: i.slackTeamName,
-            installed_at: i.installedAt.toISOString(),
-          })),
+    try {
+      const rows = await cfg.configs.listByWorkspace(ws.id);
+      const installsByConfig = await Promise.all(
+        rows.map(async (r) => ({
+          id: r.id,
+          installs: await cfg.installs.listByBotConfig(r.id),
+        })),
+      );
+      const installMap = new Map(
+        installsByConfig.map((x) => [x.id as string, x.installs]),
+      );
+      return c.json({
+        configured: cfg.configured,
+        bots: rows.map((r) =>
+          configToDto(
+            r,
+            (installMap.get(r.id as string) ?? []).map((i) => ({
+              id: i.id as string,
+              slack_team_id: i.slackTeamId as string,
+              slack_team_name: i.slackTeamName,
+              installed_at: i.installedAt.toISOString(),
+            })),
+          ),
         ),
-      ),
-    });
+      });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 500);
+    }
   });
 
   app.post("/bots", async (c) => {
@@ -218,10 +262,12 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
 
-    const body = (await c.req.json().catch(() => ({}))) as {
-      bot_name?: string;
-      return_to?: string;
-    };
+    let body: { bot_name?: string; return_to?: string };
+    try {
+      body = (await c.req.json()) as { bot_name?: string; return_to?: string };
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
     if (!body.bot_name) return c.json({ error: "missing_fields" }, 400);
 
     try {
@@ -262,11 +308,17 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
-    const id = SlackBotConfigId(c.req.param("id")!);
+    const idRaw = c.req.param("id")!;
+    if (!isValidUuid(idRaw)) return c.json({ error: "invalid_id" }, 400);
+    const id = SlackBotConfigId(idRaw);
     const existing = await cfg.configs.findById(id);
     if (!existing || existing.workspaceId !== ws.id)
       return c.json({ error: "slack_bot_config_not_found" }, 404);
-    await cfg.configs.delete(id);
+    try {
+      await cfg.configs.delete(id);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 500);
+    }
     return c.json({ ok: true });
   });
 
@@ -275,15 +327,21 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      agent_id?: string;
-    };
-    if (!body.agent_id) return c.json({ error: "missing_fields" }, 400);
+    const idRaw = c.req.param("id")!;
+    if (!isValidUuid(idRaw)) return c.json({ error: "invalid_id" }, 400);
+    let body: { agent_id?: string };
+    try {
+      body = (await c.req.json()) as { agent_id?: string };
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
+    if (!body.agent_id || !isValidUuid(body.agent_id))
+      return c.json({ error: "missing_or_invalid_agent_id" }, 400);
     try {
       const result = await pairSlackBot(
         { configs: cfg.configs, agents: cfg.agents },
         {
-          botConfigId: SlackBotConfigId(c.req.param("id")!),
+          botConfigId: SlackBotConfigId(idRaw),
           workspaceId: ws.id,
           agentId: AgentId(body.agent_id),
         },
@@ -299,25 +357,30 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
-    const id = SlackBotConfigId(c.req.param("id")!);
+    const idRaw = c.req.param("id")!;
+    if (!isValidUuid(idRaw)) return c.json({ error: "invalid_id" }, 400);
+    const id = SlackBotConfigId(idRaw);
     const existing = await cfg.configs.findById(id);
     if (!existing || existing.workspaceId !== ws.id)
       return c.json({ error: "slack_bot_config_not_found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as {
-      signing_secret?: string;
-    };
+    let body: { signing_secret?: string };
+    try {
+      body = (await c.req.json()) as { signing_secret?: string };
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
     const plaintext = body.signing_secret?.trim() ?? "";
-    // Slack signing secrets are 32-char hex strings. The check is loose
-    // — we accept anything between 16 and 128 chars and let HMAC
-    // verification fail downstream if the value is wrong, rather than
-    // gatekeeping on a format Slack might evolve.
-    if (plaintext.length < 16 || plaintext.length > 128)
+    if (!SIGNING_SECRET_RE.test(plaintext))
       return c.json({ error: "invalid_signing_secret" }, 400);
-    const updated = await cfg.configs.recordSigningSecret({
-      id,
-      plaintext,
-    });
-    return c.json({ bot: configToDto(updated) });
+    try {
+      const updated = await cfg.configs.recordSigningSecret({
+        id,
+        plaintext,
+      });
+      return c.json({ bot: configToDto(updated) });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
   });
 
   app.delete("/bots/:id/pair", async (c) => {
@@ -325,11 +388,13 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const ws = await cfg.resolveWorkspace(actor.userId, c.req.param("slug")!);
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
+    const idRaw = c.req.param("id")!;
+    if (!isValidUuid(idRaw)) return c.json({ error: "invalid_id" }, 400);
     try {
       const result = await unpairSlackBot(
         { configs: cfg.configs, agents: cfg.agents },
         {
-          botConfigId: SlackBotConfigId(c.req.param("id")!),
+          botConfigId: SlackBotConfigId(idRaw),
           workspaceId: ws.id,
         },
       );

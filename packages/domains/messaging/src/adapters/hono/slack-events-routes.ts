@@ -34,6 +34,10 @@ export interface BotResolution {
   workspaceId: string;
   slackTeamId: string;
   slackAppId: string;
+  /** The resolved install id for this (bot, team) pair. Hooks can
+   *  use it directly for channel-registry / install-revocation
+   *  writes without a second `findByBotConfigAndTeam` lookup. */
+  installId: string;
   /** Bot's plaintext xoxb-* token. Hooks use this to post replies. */
   botToken: string;
   /** Slack-side bot user id for filtering self-messages. */
@@ -108,7 +112,19 @@ export function createSlackEventsRoutes(cfg: SlackEventsRoutesConfig): Hono {
   const now = cfg.now ?? (() => new Date());
 
   app.post("/", async (c) => {
+    // Hard cap on body size BEFORE parsing. Slack events are tiny;
+    // a 1MB ceiling is generous and keeps an unauthenticated endpoint
+    // from being used as a DoS amplifier. Without this, an attacker
+    // could send GB-scale bodies that we'd buffer in memory before
+    // rejecting at HMAC verification.
+    const contentLength = Number(c.req.header("content-length") ?? 0);
+    if (contentLength > 1_000_000)
+      return c.json({ error: "body_too_large" }, 413);
+
     const rawBody = await c.req.text();
+    if (rawBody.length > 1_000_000)
+      return c.json({ error: "body_too_large" }, 413);
+
     let envelope: SlackEventEnvelope;
     try {
       envelope = JSON.parse(rawBody) as SlackEventEnvelope;
@@ -130,6 +146,17 @@ export function createSlackEventsRoutes(cfg: SlackEventsRoutesConfig): Hono {
       return c.json({ ok: true });
     }
 
+    // Slack retries on >3s response. If we get a retry header, the
+    // earlier delivery attempt likely already triggered the hook; a
+    // second hook firing would post a duplicate ack reply. Short-
+    // circuit retries with 200 OK so Slack stops trying. Lose the
+    // event (idempotent processing for app_mention / message.im is
+    // a follow-up).
+    const retryNum = c.req.header("x-slack-retry-num");
+    if (retryNum && Number(retryNum) > 0) {
+      return c.json({ ok: true, retry_dropped: true });
+    }
+
     const slackAppId = envelope.api_app_id;
     const slackTeamIdStr = envelope.team_id;
     if (!slackAppId || !slackTeamIdStr)
@@ -145,26 +172,46 @@ export function createSlackEventsRoutes(cfg: SlackEventsRoutesConfig): Hono {
         { configs: cfg.configs, now },
         { slackAppId, rawBody, timestamp, signature },
       );
-    } catch (err) {
-      if (err instanceof DomainError) {
-        return c.json({ error: err.code, message: err.message }, 401);
-      }
-      return c.json({ error: "verify_failed" }, 401);
+    } catch {
+      // Collapse all signature-verify failure modes to one opaque
+      // response. Distinct error codes (missing_secret vs replay vs
+      // mismatch) would let an attacker enumerate bot states. Detail
+      // stays in the server logs; the wire returns one shape.
+      return c.json({ error: "unauthorized" }, 401);
     }
 
     // Past this line the body is trusted. Resolve the bot config and
     // its install for this Slack team — hooks need the bot token to
     // post replies and the agent id to route invocations.
-    const config = await cfg.configs.findBySlackAppId(slackAppId);
-    if (!config) return c.json({ error: "bot_config_not_found" }, 404);
+    //
+    // DB / decrypt errors return 200 (not 5xx) so Slack doesn't retry
+    // forever and disable the subscription. Same philosophy as the
+    // hook-failure branch at the bottom of this handler.
+    let config: Awaited<ReturnType<typeof cfg.configs.findBySlackAppId>>;
+    let install: Awaited<ReturnType<typeof cfg.installs.findByBotConfigAndTeam>>;
+    try {
+      config = await cfg.configs.findBySlackAppId(slackAppId);
+    } catch (err) {
+      console.error("[slack/events] config lookup failed:", err);
+      return c.json({ ok: true, lookup_failed: true });
+    }
+    if (!config) return c.json({ ok: true, bot_unknown: true });
+
+    // Empty-string botUserId sentinel can't filter the bot's own DM —
+    // the OAuth callback hasn't stamped slack_bot_user_id yet (brief
+    // window between Slack's app creation and the first install
+    // landing in our DB). Drop the event rather than risk an echo loop.
+    if (!config.slackBotUserId) return c.json({ ok: true, bot_not_ready: true });
 
     const slackTeamId = SlackTeamId(slackTeamIdStr);
-    const install = await cfg.installs.findByBotConfigAndTeam(
-      config.id,
-      slackTeamId,
-    );
+    try {
+      install = await cfg.installs.findByBotConfigAndTeam(config.id, slackTeamId);
+    } catch (err) {
+      console.error("[slack/events] install lookup failed:", err);
+      return c.json({ ok: true, lookup_failed: true });
+    }
     if (!install || install.revokedAt)
-      return c.json({ error: "install_not_found" }, 404);
+      return c.json({ ok: true, install_unknown: true });
 
     const resolution: BotResolution = {
       botConfigId: config.id as string,
@@ -172,6 +219,7 @@ export function createSlackEventsRoutes(cfg: SlackEventsRoutesConfig): Hono {
       workspaceId: config.workspaceId as string,
       slackTeamId: install.slackTeamId as string,
       slackAppId,
+      installId: install.id as string,
       botToken: install.botToken,
       botUserId: config.slackBotUserId ?? "",
     };
@@ -181,6 +229,11 @@ export function createSlackEventsRoutes(cfg: SlackEventsRoutesConfig): Hono {
 
     try {
       if (event.type === "app_mention") {
+        // Skip mentions from the bot itself — same echo-loop guard as
+        // the DM branch. Bots can mention themselves if a reply text
+        // contains <@botUserId>; without this, the reply triggers a
+        // mention event which triggers another reply.
+        if (event.user === resolution.botUserId) return c.json({ ok: true });
         if (!event.channel || !event.user || !event.ts) {
           return c.json({ ok: true });
         }

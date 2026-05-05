@@ -23,9 +23,14 @@ export const SlackInstallId = (raw: string): SlackInstallId => {
 declare const slackTeamIdBrand: unique symbol;
 export type SlackTeamId = string & { readonly [slackTeamIdBrand]: true };
 export const SlackTeamId = (raw: string): SlackTeamId => {
-  if (raw.trim().length === 0)
+  // Trim defensively. Stray whitespace from a manual paste or a
+  // Slack response with surrounding whitespace silently breaks
+  // event lookups otherwise (the events handler does `WHERE
+  // slack_team_id = $1` with no LIKE).
+  const trimmed = raw.trim();
+  if (trimmed.length === 0)
     throw new ValidationError("slack_team_id", "must not be empty");
-  return raw as SlackTeamId;
+  return trimmed as SlackTeamId;
 };
 
 /**

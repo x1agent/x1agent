@@ -66,10 +66,19 @@ export async function verifySlackEventSignature(
     .update(baseString)
     .digest("hex")}`;
 
-  if (computed.length !== input.signature.length)
-    throw new SlackSigningSecretInvalidError("signature length mismatch");
-  const a = Buffer.from(computed);
-  const b = Buffer.from(input.signature);
-  if (!timingSafeEqual(a, b))
+  // Always compare in constant time over the same fixed length (the
+  // SHA-256 hex prefix is 67 bytes — `v0=` + 64 hex chars). Pad or
+  // truncate the supplied signature to that exact length before
+  // comparing. Earlier-returning on length mismatch is technically a
+  // tiny side-channel (every Slack signature is exactly 67 bytes, so
+  // there's nothing to learn from it, but defense-in-depth is cheap).
+  const expected = Buffer.from(computed);
+  const padded = Buffer.alloc(expected.length);
+  Buffer.from(input.signature).copy(padded, 0, 0, expected.length);
+  const ok = timingSafeEqual(expected, padded);
+  // Also require the original length matches (without short-circuiting
+  // before timingSafeEqual). Combined check: same length AND constant-
+  // time-equal.
+  if (!ok || input.signature.length !== expected.length)
     throw new SlackSigningSecretInvalidError("signature mismatch");
 }

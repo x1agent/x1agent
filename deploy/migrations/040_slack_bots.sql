@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS slack_bot_configs (
   signing_secret_ciphertext BYTEA,
   signing_secret_nonce BYTEA,
   signing_secret_auth_tag BYTEA,
+  -- Either all three encrypted-blob columns are populated or none of
+  -- them are. Without this, a partially-written row (e.g. mid-update
+  -- crash, manual edit) could pass the application-layer
+  -- has_signing_secret check while still failing to decrypt.
+  CONSTRAINT signing_secret_all_or_none CHECK (
+    (signing_secret_ciphertext IS NULL
+      AND signing_secret_nonce IS NULL
+      AND signing_secret_auth_tag IS NULL)
+    OR
+    (signing_secret_ciphertext IS NOT NULL
+      AND signing_secret_nonce IS NOT NULL
+      AND signing_secret_auth_tag IS NOT NULL)
+  ),
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

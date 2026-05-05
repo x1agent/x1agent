@@ -78,7 +78,9 @@ export { PostgresAgentWorkspaceReader } from "./adapters/postgres/postgres-agent
 export { PostgresSlackInstallCompleter } from "./adapters/postgres/postgres-slack-install-completer.js";
 export {
   SlackHttpReplyClient,
+  SlackReplyError,
   type SlackReplyClient,
+  type SlackReplyFailureKind,
   type SlackReplyInput,
   type SlackHttpReplyClientConfig,
 } from "./adapters/slack/slack-reply-client.js";
