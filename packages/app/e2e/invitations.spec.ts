@@ -66,8 +66,10 @@ test.describe("invitations", () => {
     await page.getByRole("button", { name: "Send invite" }).click();
 
     await expect(page.getByText(email)).toBeVisible({ timeout: 5000 });
+    // InvitationsPanel renders rows in a Table (post UI-sweep), so the
+    // hasText scope is `tr`, not `li`.
     await expect(
-      page.locator("li", { hasText: email }).getByText(/pending/),
+      page.locator("tr", { hasText: email }).getByText(/pending/i),
     ).toBeVisible();
   });
 
