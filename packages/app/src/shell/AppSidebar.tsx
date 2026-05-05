@@ -4,7 +4,6 @@ import {
   ChevronsUpDown,
   Database,
   FileText,
-  LayoutDashboard,
   LayoutGrid,
   LogOut,
   MoreVertical,
@@ -18,6 +17,35 @@ import {
   WORKSPACE_SETTINGS_NAV,
   leafFromPathname,
 } from "../features/workspaces/settings-nav";
+
+// Brand mark — checkmark in a rounded square. Matches the marketing
+// site (x1agent-web Nav/Footer) so the logo is consistent across the
+// product and the public surface. Size convention is `size-6` (24px),
+// same as marketing; the sidebar previously used `size-5`.
+function X1AgentLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <rect
+        x="2"
+        y="2"
+        width="20"
+        height="20"
+        rx="5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M7 12 L11 16 L17 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 // Our lucide-react build doesn't ship brand icons. Tiny inline SVG
 // component keeps the same consumer shape `<Icon className="size-4" />`.
@@ -140,7 +168,7 @@ export function AppSidebar() {
           href={activeSlug ? `/workspaces/${activeSlug}` : "/"}
           className="flex items-center gap-2 px-1 pb-1 text-fg hover:text-white"
         >
-          <LayoutDashboard className="size-5" />
+          <X1AgentLogo className="size-6" />
           <span className="text-base font-semibold tracking-tight">x1agent</span>
         </a>
 

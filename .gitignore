@@ -22,3 +22,9 @@ deploy/helm/x1agent/values.*.yaml
 # Local Claude Code runtime state.
 .claude/scheduled_tasks.lock
 .claude/skills/
+
+# Astro generated content / type files (regenerated on `astro dev`).
+.astro/
+
+# Local-only test scripts that aren't part of the test suite.
+test-site.mjs

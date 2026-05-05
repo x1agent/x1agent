@@ -268,9 +268,9 @@ Tick each item once the doc and the code agree.
     these fields consistently; if a field is missing, either add it or
     remove it from the spec.
 
-- [ ] **No `lattice.*` subjects remain.** CLAUDE.local.md requires subjects
-      to be `x1.*`.
-  - Action: grep the code for any stray `lattice.` strings; rename.
+- [ ] **All NATS subjects use the `x1.*` namespace.** Audit for stray
+      legacy prefixes left behind in code or docs.
+  - Action: grep for non-`x1.` subject prefixes; rename or remove.
 
 ## In-cluster registry
 
