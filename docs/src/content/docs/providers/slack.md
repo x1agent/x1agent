@@ -47,6 +47,16 @@ You need three values from Slack:
 
 These live in the secret store (GSM on GCP, Secrets Manager on AWS, Vault on self-managed). They are read by the api service at startup.
 
+The api looks up these env var names. On a Helm install, External Secrets syncs them from the GSM secret names below into the `x1agent-secrets` bundle that the api consumes via `envFrom`:
+
+| Env var | GSM secret name |
+|---|---|
+| `SLACK_PLATFORM_CLIENT_ID` | `x1agent-slack-platform-client-id` |
+| `SLACK_PLATFORM_CLIENT_SECRET` | `x1agent-slack-platform-client-secret` |
+| `SLACK_PLATFORM_SIGNING_SECRET` | `x1agent-slack-platform-signing-secret` |
+
+Until all three are populated, the workspace settings UI shows the bot creation flow but the OAuth callback returns 500 — the api can't redeem the install code without the platform credentials.
+
 ### Steps
 
 1. Sign in to [api.slack.com/apps](https://api.slack.com/apps) under whichever Slack workspace you want to administer the app from. This is the **owning** Slack workspace — it is *not* a runtime constraint, it just gives an admin somewhere to edit the app definition. Most operators register under their own org's Slack.
