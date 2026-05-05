@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-The GCP install path uses the Helm chart at `deploy/helm/x1agent/`, fed by the values you captured with `mise run configure`. Secrets live in Google Secret Manager (GSM), synced into the cluster by External Secrets Operator (ESO).
+The GCP install path uses the Helm chart at `deploy/helm/x1agent/`, fed by the values you captured with `mise run configure:prod`. Secrets live in Google Secret Manager (GSM), synced into the cluster by External Secrets Operator (ESO).
 
 > **v1 scope**: the Terraform module at `deploy/terraform/gcp/` provisions the cluster, IAM, GSM secret resources, Artifact Registry, DNS zone, and global static IP. Helm-side, the chart assumes ESO is installed cluster-wide (one operator step between the two terraform applies — see Sequence below).
 
@@ -13,7 +13,7 @@ The GCP install path uses the Helm chart at `deploy/helm/x1agent/`, fed by the v
 
 - A GCP project with billing enabled (the Terraform module enables APIs but does not create projects)
 - `gcloud`, `kubectl`, `helm`, `terraform` (>= 1.3), and `bun` on PATH
-- `mise run configure` already completed with `CLOUD_PROVIDER=gcp` (writes the project ID, account, base domain, and bare-minimum secrets to `.env.local`)
+- `mise run configure:prod` already completed with `CLOUD_PROVIDER=gcp` (writes the project ID, account, base domain, and bare-minimum secrets to `.env.local`)
 
 Everything else (cluster, IAM, GSM placeholders, Artifact Registry, static IP, DNS zone) is provisioned by the Terraform module — see Sequence below.
 
@@ -21,12 +21,12 @@ Everything else (cluster, IAM, GSM placeholders, Artifact Registry, static IP, D
 
 ```bash
 # 1. Capture install values
-mise run configure
+mise run configure:prod
 
 # 2. Provision GCP-side infra in two passes (ESO CRDs need to exist
 #    before the ClusterSecretStore manifest applies)
-mise run terraform:init
-mise run terraform:apply:cluster   # cluster + IAM + GSM + AR + DNS
+mise run terraform:prod:init
+mise run terraform:prod:apply:cluster   # cluster + IAM + GSM + AR + DNS
 
 # 3. Get cluster credentials, install ESO, annotate its SA for WI
 gcloud container clusters get-credentials x1agent --region us-central1 --project <project>
@@ -38,7 +38,7 @@ kubectl -n external-secrets annotate sa external-secrets \
 kubectl -n external-secrets rollout restart deploy/external-secrets
 
 # 4. Second terraform apply — adds the ClusterSecretStore now ESO CRDs exist
-mise run terraform:apply
+mise run terraform:prod:apply
 
 # 5. Populate GSM secrets (each one created empty — values never touch
 #    Terraform state). At minimum:
@@ -48,11 +48,11 @@ echo -n "$ANTHROPIC_API_KEY" | gcloud secrets versions add x1agent-anthropic-api
 # x1agent-postgres-password, plus any optionals you actually use.
 
 # 6. Build + push images, then helm install via the installer
-mise run install:plan
-mise run install:apply
+mise run install:prod:plan
+mise run install:prod:apply
 
 # 7. Watch status until ingress IP + cert are ready
-mise run install:status
+mise run install:prod:status
 
 # 8. Set NS records at your registrar pointing at the Cloud DNS zone
 #    (terraform output: dns_nameservers)
@@ -81,12 +81,12 @@ docker push "$AR/api:$TAG"
 # as a starting point and slim down to that package's needs)
 ```
 
-Pass the tag to the installer via `INSTALL_IMAGE_TAG=$TAG mise run install:plan`. If unset, the installer uses the current git short-SHA.
+Pass the tag to the installer via `INSTALL_IMAGE_TAG=$TAG mise run install:prod:plan`. If unset, the installer uses the current git short-SHA.
 
 ## Plan
 
 ```
-mise run install:plan
+mise run install:prod:plan
 ```
 
 This:
@@ -99,7 +99,7 @@ No cluster mutation. Safe to run repeatedly. The values file is regenerated each
 ## Apply
 
 ```
-mise run install:apply
+mise run install:prod:apply
 ```
 
 Confirms once, then runs:
@@ -115,7 +115,7 @@ The Google-managed cert provisioning is async — first-time provisioning can ta
 ## Status
 
 ```
-mise run install:status
+mise run install:prod:status
 ```
 
 Prints:
@@ -128,7 +128,7 @@ Run it on a loop while waiting for first-time cert provisioning.
 ## Destroy
 
 ```
-mise run install:destroy
+mise run install:prod:destroy
 ```
 
 Double-confirms, then `helm uninstall`. The in-cluster Postgres PVC is deleted with the StatefulSet — there are no GSM-backed backups in v1, so this is a one-way operation. Take a `pg_dump` first if you care about the data.

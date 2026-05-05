@@ -144,9 +144,18 @@ async function runConfigureDeployment(): Promise<boolean> {
   }
 
   // Need the base domain BEFORE everything else so we know which file
-  // to read existing values from.
+  // to read existing values from. When the user picked an existing
+  // deployment from the menu, baseDomainHint is set and we ARE editing
+  // it — typing a different domain here would create a NEW file.
+  // When they picked "+ New deployment", baseDomainHint is undefined
+  // and the typed value must NOT collide with an existing file (else
+  // we'd silently turn a "new" wizard run into an edit of someone
+  // else's deployment).
+  const isEditing = !!baseDomainHint;
   const baseDomainAnswer = await text({
-    message: "Base domain for this deployment",
+    message: isEditing
+      ? `Base domain (editing ${baseDomainHint})`
+      : "Base domain for this new deployment",
     placeholder: "x1agent.com",
     initialValue: baseDomainHint ?? "",
     validate: (raw) => {
@@ -154,6 +163,12 @@ async function runConfigureDeployment(): Promise<boolean> {
       if (!t) return "Required. The deployment file is named after this.";
       if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(t))
         return "Looks like an invalid domain — expected something like x1agent.com.";
+      // No-clobber guard: when "+ New deployment" was picked, refuse to
+      // proceed if the typed domain already has a file. Forces explicit
+      // intent — operator must restart and pick "edit" to modify.
+      if (!isEditing && existing.includes(t)) {
+        return `installs/${t}.local already exists. Cancel and pick "${t}" from the deployment list to edit, or pick a different base domain.`;
+      }
       return undefined;
     },
   });
@@ -330,12 +345,14 @@ async function runConfigureDeployment(): Promise<boolean> {
   const next =
     listDeployments().length > 1
       ? `\nMultiple deployments exist in ${installsDir()} — set\n` +
-        `X1AGENT_DEPLOYMENT=${baseDomain} when running install/terraform tasks.`
+        `X1AGENT_DEPLOYMENT=${baseDomain} when running prod tasks (or pick from\n` +
+        `the prompt that appears when more than one is configured).`
       : "";
   outro(
     `Done. Next:\n` +
-      `  mise run terraform:init      (one-time)\n` +
-      `  mise run terraform:apply:cluster${next}`,
+      `  mise run terraform:prod:init           (one-time per machine)\n` +
+      `  mise run terraform:prod:apply:cluster  (provision GCP infra)${next}\n` +
+      `  mise run install:prod                  (full one-shot install)`,
   );
   return true;
 }

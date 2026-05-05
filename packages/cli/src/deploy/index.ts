@@ -11,10 +11,11 @@ import {
 import { resolve } from "node:path";
 import {
   findRepoRoot,
-  resolveActiveDeployment,
+  resolveActiveDeploymentInteractive,
 } from "../configure/paths.ts";
 import { defaultPaths, render } from "../install/render.ts";
 import { runInstallPreflight, reportFailures } from "../install/preflight.ts";
+import { printActiveTargetHeader } from "../active-target.ts";
 
 /**
  * Ship code to a configured deployment.
@@ -63,7 +64,9 @@ export async function runDeploy(opts: DeployOptions): Promise<boolean> {
     return false;
   }
 
-  const { baseDomain, path: envPath } = resolveActiveDeployment();
+  const { baseDomain, path: envPath } =
+    await resolveActiveDeploymentInteractive();
+  printActiveTargetHeader({ baseDomain, envPath });
   const tag =
     opts.tag ||
     process.env.INSTALL_IMAGE_TAG ||
