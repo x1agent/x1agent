@@ -150,6 +150,9 @@ const {
   githubInstallRoutes,
   installationApiRoutes,
   agentRepoRoutes,
+  slackOAuthRoutes,
+  slackBotApiRoutes,
+  slackEventsRoutes,
   workspaceGrantRoutes,
   workspaceSecretsRoutes,
   mcpCatalogRoutes,
@@ -213,6 +216,9 @@ const {
   githubAppId: process.env.GITHUB_APP_ID || "",
   githubAppSlug: process.env.GITHUB_APP_SLUG || "",
   githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY || "",
+  slackPlatformClientId: process.env.SLACK_PLATFORM_CLIENT_ID,
+  slackPlatformClientSecret: process.env.SLACK_PLATFORM_CLIENT_SECRET,
+  slackPlatformSigningSecret: process.env.SLACK_PLATFORM_SIGNING_SECRET,
   internalToken: process.env.API_INTERNAL_TOKEN || "",
   workspaceSecretsMasterKey: process.env.WORKSPACE_SECRETS_MASTER_KEY,
   natsConnection: providerNats,
@@ -274,6 +280,9 @@ app.get("/auth/github/config", (c) =>
 
 app.route("/auth", authRoutes);
 app.route("/auth/github", githubInstallRoutes);
+app.route("/oauth/slack", slackOAuthRoutes);
+app.route("/api/workspaces/:slug/slack", slackBotApiRoutes);
+app.route("/api/slack/events", slackEventsRoutes);
 app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);

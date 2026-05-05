@@ -42,6 +42,7 @@ import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
 import { AgentMcpAttachmentsCard } from "./AgentMcpAttachmentsCard";
 import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
+import { AgentSlackBotCard } from "./AgentSlackBotCard";
 import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 import { useConfirm } from "../../components/use-confirm";
@@ -286,6 +287,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   <TabsTrigger value="collections">Collections</TabsTrigger>
                 )}
                 <TabsTrigger value="mcp">MCP &amp; env</TabsTrigger>
+                <TabsTrigger value="slack">Slack</TabsTrigger>
                 <TabsTrigger value="permissions">Permissions</TabsTrigger>
               </>
             )}
@@ -652,6 +654,14 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     canManage={!!canManage}
                   />
                   <AgentEnvBindingsCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    canManage={!!canManage}
+                  />
+                </TabsContent>
+
+                <TabsContent value="slack" className="mt-0">
+                  <AgentSlackBotCard
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
                     canManage={!!canManage}
