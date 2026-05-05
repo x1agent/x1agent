@@ -5,15 +5,17 @@ sidebar:
   order: 0
 ---
 
-`mise run configure` is the pre-flight step that runs before any cluster work. It captures everything x1agent needs to install — cloud target, base domain, secrets — into `.env.local`. It does not touch the cluster.
+`mise run configure:prod` is the pre-flight step that runs before any cluster work. It captures everything x1agent needs to install — cloud target, base domain, secrets — into a per-deployment file at `installs/<base-domain>.local`. It does not touch the cluster.
 
-Run it once on a new clone, or any time you need to add or change a value. The wizard is idempotent: existing values are kept unless you change them.
+One file per deployment. Run `mise run configure:prod` once for x1agent.com, again later for lattice.example.com, etc. — each writes its own file under `installs/`, never overwriting the others. List what's already configured with `mise run deployments`.
+
+Run it any time you need to add or change a value. The wizard is idempotent: existing values are kept unless you change them. To edit an existing deployment, pick it from the list at the top of the wizard. To create a new one, pick "+ New deployment" and type a base domain that doesn't already have a file — the wizard refuses to silently overwrite an existing one.
 
 ## What it captures
 
 ### Required
 
-These four are checked by `mise run configure:check`, which is a `depends` of `dev:cold` and `dev:direct`. If they're missing, those tasks fail fast with a friendly message instead of a confusing boot error later.
+These four are checked by `mise run configure:check`, which is a `depends` of every prod task (`install:prod`, `deploy:prod`, `terraform:prod:*`, etc.). If they're missing, those tasks fail fast with a friendly message instead of a confusing boot error later.
 
 | Variable | What | How |
 |---|---|---|
@@ -37,23 +39,19 @@ You're prompted for each block; skip with N. Keys not configured yet aren't bloc
 - **GitHub App** (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) — for repo + agent integrations. The `GITHUB_APP_PRIVATE_KEY` is captured by hand-editing `.env.local` directly because multi-line paste in a terminal is unreliable.
 - **Slack** (`SLACK_BOT_TOKEN`) — for the messaging provider
 
-## Deployment targets
+## Picking a target
 
-The wizard's first question is "where are you deploying?" The answer drives everything else.
+If `installs/` already has files, the wizard opens with a list of existing deployments. Picking one drops you into "edit" mode for that deployment. Picking "+ New deployment" creates a new file — the base-domain prompt refuses values that collide with an existing file, so a typo can't silently overwrite x1agent.com when you meant to create lattice.example.com.
 
-### Local (OrbStack)
+If `installs/` is empty, the wizard goes straight to the base-domain prompt for a new deployment.
 
-The default. `BASE_DOMAIN` is hardcoded to `local.x1agent.dev` to match the manifests under `deploy/k8s/dev/`. URLs become:
+### Local development (`.env.local`)
 
-- `app.local.x1agent.dev`
-- `api.local.x1agent.dev`
-- `*.preview.local.x1agent.dev`
-
-No gcloud setup happens. After configure, run `mise run dev:cold` (or `mise run dev` for hot reload) to bring the cluster up.
+`mise run configure:prod` writes per-deployment files to `installs/`, never to `.env.local`. The local-dev path uses `.env.local` directly — small file, ~10 keys, see `.env.example`. Most operators edit it by hand. The local-dev cluster is OrbStack-only and uses hardcoded base domains (`*.local.x1agent.dev`); no wizard needed.
 
 ### Google Cloud (GKE)
 
-You enter the base domain (e.g. `x1agent.com`), the GCP project ID, and the Google account email. The wizard then sets up the `x1agent` gcloud configuration:
+You enter the base domain (e.g. `x1agent.com`), the GCP project ID, and the Google account email. The wizard then sets up an `x1agent` gcloud configuration:
 
 ```
 gcloud config configurations create x1agent
@@ -65,11 +63,24 @@ Inside this directory, `.claude/settings.json` sets `CLOUDSDK_ACTIVE_CONFIG_NAME
 
 If the requested account isn't logged in yet, the wizard tells you to run `gcloud auth login <email>` in another terminal — it doesn't run that for you because the browser flow is hard to integrate cleanly.
 
-> **Note**: the Helm chart for GCP deployment isn't built yet. Right now, the configure step captures the values; the actual `helm install` flow lands in a follow-up.
+**Multiple deployments on one machine**: when you have x1agent.com on one Google account and lattice.example.com on another, the gcloud configurations are managed by you, not the wizard. The pattern is `gcloud config configurations create <name>` once per deployment, then `gcloud config configurations activate <name>` before running prod tasks against that deployment. See [Picking which deployment to act on](#picking-which-deployment-to-act-on) below.
 
-## Multiple deployment targets later
+## Picking which deployment to act on
 
-x1agent is built so future operators can install on AWS, Azure, or other providers. The wizard's `provider` field is the single switch that abstracts this — `local` and `gcp` are the only options today. New providers add an option to the select prompt and a section in the wizard for their cloud-specific bindings (project ID, account, secret store, etc.).
+Every prod task (`install:prod`, `deploy:prod`, `logs:prod`, `psql:prod`, `terraform:prod:*`) reads one file from `installs/`. With one file present it picks that one silently. With multiple, the resolver picks in this order:
+
+1. `X1AGENT_DEPLOYMENT=<base-domain>` — explicit env var (CI / scripted)
+2. Single `installs/*.local` file → use it
+3. Multiple files + interactive TTY → prompt to pick
+4. Multiple files + non-TTY → fail fast with the list
+
+Every prod task prints a `→ target: <base-domain> (cloud · region · project)` header before doing anything, so you always see where the command is about to act. If you forget which `X1AGENT_DEPLOYMENT` is exported in the current shell, that header surfaces it.
+
+To list what's configured: `mise run deployments`.
+
+## Multiple cloud providers later
+
+x1agent is built so future operators can install on AWS, Azure, or other providers. The wizard's `provider` field is the single switch that abstracts this — `gcp` is the only option today. New providers add a section in the wizard for their cloud-specific bindings (project ID, account, secret store, etc.).
 
 The base-domain pattern is provider-agnostic: `app.<domain>`, `api.<domain>`, `*.preview.<domain>` works the same on any cloud, and the Helm chart will template ingress hostnames from `BASE_DOMAIN` regardless.
 
@@ -94,7 +105,7 @@ $ mise run configure:check
   - ANTHROPIC_API_KEY
   - PLATFORM_ADMIN_EMAILS
 
-[configure:check] run `mise run configure` to fix.
+[configure:check] run `mise run configure:prod` to fix.
 ```
 
 Exit code is 1 if anything required is missing, 0 otherwise. Optional misses surface as informational warnings on stderr but never fail the check.

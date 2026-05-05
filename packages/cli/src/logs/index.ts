@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { EnvFile } from "../configure/env-file.ts";
-import { resolveActiveDeployment } from "../configure/paths.ts";
+import { resolveActiveDeploymentInteractive } from "../configure/paths.ts";
+import { printActiveTargetHeader } from "../active-target.ts";
 
 /**
  * `mise run logs <component> [-- <kubectl-args>]`
@@ -114,20 +115,26 @@ export async function runLogs(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // Resolve the active install file → cluster context.
+  // Resolve the active install file → cluster context. Interactive
+  // resolver: prompts when multiple deployments exist + stdin is a
+  // TTY; falls back to throwing in CI.
+  let baseDomain: string;
   let envPath: string;
   try {
-    envPath = resolveActiveDeployment().path;
+    const resolved = await resolveActiveDeploymentInteractive();
+    baseDomain = resolved.baseDomain;
+    envPath = resolved.path;
   } catch (err) {
     process.stderr.write(`[logs] ${(err as Error).message}\n`);
     return 1;
   }
   if (!existsSync(envPath)) {
     process.stderr.write(
-      `[logs] ${envPath} missing. Run \`mise run configure\` first.\n`,
+      `[logs] ${envPath} missing. Run \`mise run configure:prod\` first.\n`,
     );
     return 1;
   }
+  printActiveTargetHeader({ baseDomain, envPath });
   const env = new EnvFile(envPath);
   const cloud = env.get("CLOUD_PROVIDER");
   const projectId = env.get("GCP_PROJECT_ID");
