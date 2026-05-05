@@ -95,7 +95,26 @@ function errBody(err: unknown) {
   return { error: "internal_error", message: "unexpected failure" };
 }
 
-function configToDto(c: import("../../domain/slack-bot-config.js").SlackBotConfig) {
+interface SlackInstallShape {
+  id: string;
+  slack_team_id: string;
+  slack_team_name: string | null;
+  installed_at: string;
+}
+
+/**
+ * Bot config → wire DTO. The `installs` field is always present on the
+ * wire so the frontend's required-field type stays honest. List
+ * endpoints (GET) pass the loaded installs through; mutation endpoints
+ * (POST/DELETE) pass `[]` because their response shape doesn't include
+ * a side-effect-y database join. Optimistic-update consumers in the
+ * store are then safe to spread into the cache without the field
+ * undefined-ing out.
+ */
+function configToDto(
+  c: import("../../domain/slack-bot-config.js").SlackBotConfig,
+  installs: SlackInstallShape[] = [],
+) {
   return {
     id: c.id as string,
     workspace_id: c.workspaceId as string,
@@ -106,6 +125,7 @@ function configToDto(c: import("../../domain/slack-bot-config.js").SlackBotConfi
     has_signing_secret: c.hasSigningSecret,
     created_at: c.createdAt.toISOString(),
     updated_at: c.updatedAt.toISOString(),
+    installs,
   };
 }
 
@@ -171,15 +191,17 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     );
     return c.json({
       configured: cfg.configured,
-      bots: rows.map((r) => ({
-        ...configToDto(r),
-        installs: (installMap.get(r.id as string) ?? []).map((i) => ({
-          id: i.id as string,
-          slack_team_id: i.slackTeamId as string,
-          slack_team_name: i.slackTeamName,
-          installed_at: i.installedAt.toISOString(),
-        })),
-      })),
+      bots: rows.map((r) =>
+        configToDto(
+          r,
+          (installMap.get(r.id as string) ?? []).map((i) => ({
+            id: i.id as string,
+            slack_team_id: i.slackTeamId as string,
+            slack_team_name: i.slackTeamName,
+            installed_at: i.installedAt.toISOString(),
+          })),
+        ),
+      ),
     });
   });
 
