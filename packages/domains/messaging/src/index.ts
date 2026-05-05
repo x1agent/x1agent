@@ -11,6 +11,7 @@ export type {
 export type { SlackBotConfigStore } from "./ports/slack-bot-config-store.js";
 export type { SlackInstallStore } from "./ports/slack-install-store.js";
 export type { SlackInstallStateStore } from "./ports/slack-install-state-store.js";
+export type { AgentWorkspaceReader } from "./ports/agent-workspace-reader.js";
 export type {
   SlackConnectedChannel,
   SlackConnectedChannelStore,
@@ -72,6 +73,7 @@ export {
 } from "./adapters/postgres/postgres-slack-install-store.js";
 export { PostgresSlackInstallStateStore } from "./adapters/postgres/postgres-slack-install-state-store.js";
 export { PostgresSlackConnectedChannelStore } from "./adapters/postgres/postgres-slack-connected-channel-store.js";
+export { PostgresAgentWorkspaceReader } from "./adapters/postgres/postgres-agent-workspace-reader.js";
 export {
   SlackHttpReplyClient,
   type SlackReplyClient,

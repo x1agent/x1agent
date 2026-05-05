@@ -21,6 +21,7 @@ import type { SlackInstallStore } from "../../ports/slack-install-store.js";
 import type { SlackInstallStateStore } from "../../ports/slack-install-state-store.js";
 import type { SlackOAuthClient } from "../../ports/slack-oauth-client.js";
 import type { SlackManifestBuilder } from "../../ports/slack-manifest-builder.js";
+import type { AgentWorkspaceReader } from "../../ports/agent-workspace-reader.js";
 
 export interface SlackRoutesConfig {
   configs: SlackBotConfigStore;
@@ -28,6 +29,8 @@ export interface SlackRoutesConfig {
   state: SlackInstallStateStore;
   oauth: SlackOAuthClient;
   manifest: SlackManifestBuilder;
+  /** Resolves agent_id → workspace_id for tenant-isolation checks. */
+  agents: AgentWorkspaceReader;
 
   /** Where to send the browser after a successful install (e.g. `https://app.x1agent.com`). */
   appUrl: string;
@@ -69,6 +72,10 @@ function errStatus(err: unknown): number {
         return 404;
       case "slack_bot_config_not_in_workspace":
         return 403;
+      // Tenant isolation: returning 404 (not 403) so the response
+      // doesn't reveal whether the agent exists in another workspace.
+      case "slack_bot_agent_not_in_workspace":
+        return 404;
       case "slack_bot_already_paired":
         return 409;
       case "slack_bot_config_name_taken":
@@ -247,7 +254,7 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!body.agent_id) return c.json({ error: "missing_fields" }, 400);
     try {
       const result = await pairSlackBot(
-        { configs: cfg.configs },
+        { configs: cfg.configs, agents: cfg.agents },
         {
           botConfigId: SlackBotConfigId(c.req.param("id")!),
           workspaceId: ws.id,
@@ -293,7 +300,7 @@ export function createSlackBotApiRoutes(cfg: SlackRoutesConfig): Hono {
     if (!ws || !ws.canManage) return c.json({ error: "forbidden" }, 403);
     try {
       const result = await unpairSlackBot(
-        { configs: cfg.configs },
+        { configs: cfg.configs, agents: cfg.agents },
         {
           botConfigId: SlackBotConfigId(c.req.param("id")!),
           workspaceId: ws.id,

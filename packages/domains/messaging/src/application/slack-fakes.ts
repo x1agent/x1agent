@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { UserId, WorkspaceId } from "@x1agent/kernel";
+import type { AgentWorkspaceReader } from "../ports/agent-workspace-reader.js";
 import {
   type AgentId,
   type SlackBotConfig,
@@ -288,5 +289,23 @@ export class FakeSlackOAuthClient implements SlackOAuthClient {
 export class FakeSlackManifestBuilder implements SlackManifestBuilder {
   buildManifestUrl(input: { botName: SlackBotName }) {
     return `https://api.slack.com/apps?new_app=1&bot=${encodeURIComponent(input.botName)}`;
+  }
+}
+
+/**
+ * Programmable AgentWorkspaceReader. Tests register `(agentId →
+ * workspaceId)` pairs explicitly, so a test that pairs a bot with
+ * an agent in workspace A vs B is unambiguous about which case it
+ * covers.
+ */
+export class FakeAgentWorkspaceReader implements AgentWorkspaceReader {
+  readonly map = new Map<string, WorkspaceId>();
+
+  setAgentWorkspace(agentId: AgentId, workspaceId: WorkspaceId) {
+    this.map.set(agentId as string, workspaceId);
+  }
+
+  async findWorkspaceId(agentId: AgentId) {
+    return this.map.get(agentId as string) ?? null;
   }
 }

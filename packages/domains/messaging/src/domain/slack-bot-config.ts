@@ -116,6 +116,23 @@ export class SlackBotAlreadyPairedError extends DomainError {
   }
 }
 
+/**
+ * Thrown when a pair request names an agent that doesn't belong to the
+ * caller's workspace. Treat at the same severity as "agent not found" —
+ * we don't reveal whether the agent exists in another workspace, only
+ * that it isn't usable from this one. See CLAUDE.md "Workspace tenant
+ * isolation is sacred."
+ */
+export class SlackBotAgentNotInWorkspaceError extends DomainError {
+  readonly code = "slack_bot_agent_not_in_workspace";
+  constructor(
+    public readonly agentId: string,
+    public readonly workspaceId: string,
+  ) {
+    super(`agent ${agentId} is not in workspace ${workspaceId}`);
+  }
+}
+
 export class SlackSigningSecretMissingError extends DomainError {
   readonly code = "slack_signing_secret_missing";
   constructor(public readonly slackAppId: string) {

@@ -9,6 +9,7 @@ import {
   createSlackBotApiRoutes,
   createSlackEventsRoutes,
   createSlackOAuthRoutes,
+  PostgresAgentWorkspaceReader,
   PostgresSlackBotConfigStore,
   PostgresSlackConnectedChannelStore,
   PostgresSlackInstallStateStore,
@@ -103,6 +104,7 @@ export function composeSlack(
   const configs = new PostgresSlackBotConfigStore(env.sql, cipher);
   const installs = new PostgresSlackInstallStore(env.sql, cipher);
   const state = new PostgresSlackInstallStateStore(env.sql);
+  const agents = new PostgresAgentWorkspaceReader(env.sql);
 
   // Even when not configured, build the OAuth client and manifest
   // builder so the route handlers stay shaped consistently — the
@@ -121,6 +123,7 @@ export function composeSlack(
     state,
     oauth,
     manifest,
+    agents,
     appUrl: env.appUrl,
     callbackUrl,
     configured,

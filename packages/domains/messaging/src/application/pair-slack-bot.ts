@@ -1,7 +1,9 @@
 import type { WorkspaceId } from "@x1agent/kernel";
 import type { SlackBotConfigStore } from "../ports/slack-bot-config-store.js";
+import type { AgentWorkspaceReader } from "../ports/agent-workspace-reader.js";
 import {
   type AgentId,
+  SlackBotAgentNotInWorkspaceError,
   SlackBotAlreadyPairedError,
   SlackBotConfigNotFoundError,
   SlackBotConfigNotInWorkspaceError,
@@ -11,6 +13,13 @@ import {
 
 export interface PairSlackBotDeps {
   configs: SlackBotConfigStore;
+  /**
+   * Resolves an agent id → its workspace id. Used to enforce
+   * cross-workspace isolation: we will not pair a bot in workspace A
+   * with an agent in workspace B even if a workspace-A admin requests
+   * it. See CLAUDE.md principle 7.
+   */
+  agents: AgentWorkspaceReader;
 }
 
 /**
@@ -44,6 +53,18 @@ export async function pairSlackBot(
   if (existing.agentId && existing.agentId !== input.agentId)
     throw new SlackBotAlreadyPairedError(input.botConfigId, existing.agentId);
   if (existing.agentId === input.agentId) return existing;
+
+  // Tenant isolation: even though the bot is in this workspace,
+  // we have to verify the *agent* is too. Otherwise a workspace-A
+  // admin could pair their bot with a workspace-B agent by passing
+  // the foreign agent's UUID in the request body — the FK on
+  // agents(id) accepts any uuid in the table.
+  const agentWorkspace = await deps.agents.findWorkspaceId(input.agentId);
+  if (agentWorkspace !== input.workspaceId)
+    throw new SlackBotAgentNotInWorkspaceError(
+      input.agentId,
+      input.workspaceId,
+    );
 
   return deps.configs.pair({
     id: input.botConfigId,
