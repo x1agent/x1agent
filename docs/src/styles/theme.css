@@ -1,36 +1,53 @@
-/* x1agent docs theme — overrides Starlight's defaults to match the
-   marketing site at x1agent.com. Same palette, same fonts, same
-   restraint. Forces dark mode (light mode toggle is hidden via the
-   Starlight config). */
+/* x1agent docs theme — mirrors the marketing site at x1agent.com.
+ * Same palette, same fonts, same restraint.
+ *
+ * Both light and dark modes are enabled. Starlight's built-in toggle
+ * (top-right) persists the choice to localStorage under the key
+ * `starlight-theme`, so the mode sticks across navigations.
+ *
+ * The token-source-of-truth for the marketing site lives at
+ * x1agent-web/src/styles/global.css. When you change palette there,
+ * mirror the change here.
+ */
 
+/* ── Dark (default) ─────────────────────────────────────────────── */
 :root,
-[data-theme="dark"],
-[data-theme="light"] {
-  /* Brand */
-  --color-bg: #09090b;
-  --color-surface: #111114;
-  --color-surface-2: #18181c;
-  --color-border: #232328;
-  --color-border-strong: #2a2a30;
-  --color-text: #fafafa;
-  --color-text-muted: #a1a1aa;
-  --color-text-faint: #71717a;
-  --color-accent: #c5fb45;
+[data-theme="dark"] {
+  /* Brand palette */
+  --color-bg: #0e0d0b;
+  --color-surface: #17161a;
+  --color-surface-2: #1d1c20;
+  --color-rail: #060504;
+  --color-border: #2a2724;
+  --color-border-strong: #3a3631;
+  --color-text: #f7f4ed;
+  --color-text-muted: #b3a99a;
+  --color-text-faint: #7a7268;
 
-  /* Starlight color tokens */
-  --sl-color-white: #fafafa;
-  --sl-color-gray-1: #fafafa;
-  --sl-color-gray-2: #e4e4e7;
-  --sl-color-gray-3: #a1a1aa;
-  --sl-color-gray-4: #71717a;
-  --sl-color-gray-5: #3f3f46;
-  --sl-color-gray-6: #232328;
-  --sl-color-gray-7: #18181c;
-  --sl-color-black: #09090b;
+  /* Brand accent = foreground (high-contrast neutral pill).
+   * The "warm hue" cue lives in the gradient rim, not the brand. */
+  --color-accent: #f7f4ed;
+  --color-accent-fg: #0e0d0b;
 
-  --sl-color-accent-low: rgba(197, 251, 69, 0.12);
-  --sl-color-accent: #c5fb45;
-  --sl-color-accent-high: #d6ff7a;
+  /* Hue accent — used sparingly (icons, status dots, term underlines). */
+  --color-hue: #d97757;
+  --color-hue-soft: rgba(217, 119, 87, 0.14);
+
+  /* Starlight color tokens — every Starlight default (sidebar, nav,
+   * code, callouts) reads from these. */
+  --sl-color-white: var(--color-text);
+  --sl-color-gray-1: var(--color-text);
+  --sl-color-gray-2: var(--color-text-muted);
+  --sl-color-gray-3: var(--color-text-muted);
+  --sl-color-gray-4: var(--color-text-faint);
+  --sl-color-gray-5: var(--color-border-strong);
+  --sl-color-gray-6: var(--color-border);
+  --sl-color-gray-7: var(--color-surface);
+  --sl-color-black: var(--color-bg);
+
+  --sl-color-accent-low: rgba(247, 244, 237, 0.06);
+  --sl-color-accent: var(--color-accent);
+  --sl-color-accent-high: var(--color-accent);
 
   --sl-color-bg: var(--color-bg);
   --sl-color-bg-nav: var(--color-bg);
@@ -39,21 +56,72 @@
   --sl-color-bg-accent: var(--color-accent);
 
   --sl-color-text: var(--color-text);
-  --sl-color-text-accent: var(--color-accent);
+  --sl-color-text-accent: var(--color-text);
   --sl-color-text-invert: var(--color-bg);
 
   --sl-color-hairline: var(--color-border);
   --sl-color-hairline-light: var(--color-border);
   --sl-color-hairline-shade: var(--color-border-strong);
 
-  /* Fonts — same as the marketing site */
-  --sl-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Fonts — match the marketing site */
+  --sl-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    monospace;
 
   --sl-text-h1: 2.25rem;
   --sl-text-h2: 1.5rem;
   --sl-text-h3: 1.25rem;
   --sl-line-height-headings: 1.15;
+}
+
+/* ── Light ─────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-bg: #f5f1ea;
+  --color-surface: #ffffff;
+  --color-surface-2: #faf7f1;
+  --color-rail: #ece5d6;
+  --color-border: #e7e2d9;
+  --color-border-strong: #d4cdbf;
+  --color-text: #1a1814;
+  --color-text-muted: #5d5448;
+  --color-text-faint: #8c8475;
+
+  /* Brand accent = dark pill on cream. */
+  --color-accent: #1a1814;
+  --color-accent-fg: #f5f1ea;
+
+  --color-hue: #c2613e;
+  --color-hue-soft: rgba(194, 97, 62, 0.10);
+
+  /* Starlight overrides */
+  --sl-color-white: var(--color-text);
+  --sl-color-gray-1: var(--color-text);
+  --sl-color-gray-2: var(--color-text-muted);
+  --sl-color-gray-3: var(--color-text-muted);
+  --sl-color-gray-4: var(--color-text-faint);
+  --sl-color-gray-5: var(--color-border-strong);
+  --sl-color-gray-6: var(--color-border);
+  --sl-color-gray-7: var(--color-surface-2);
+  --sl-color-black: var(--color-bg);
+
+  --sl-color-accent-low: rgba(26, 24, 20, 0.06);
+  --sl-color-accent: var(--color-accent);
+  --sl-color-accent-high: var(--color-accent);
+
+  --sl-color-bg: var(--color-bg);
+  --sl-color-bg-nav: var(--color-bg);
+  --sl-color-bg-sidebar: var(--color-bg);
+  --sl-color-bg-inline-code: var(--color-surface-2);
+  --sl-color-bg-accent: var(--color-accent);
+
+  --sl-color-text: var(--color-text);
+  --sl-color-text-accent: var(--color-text);
+  --sl-color-text-invert: var(--color-accent-fg);
+
+  --sl-color-hairline: var(--color-border);
+  --sl-color-hairline-light: var(--color-border);
+  --sl-color-hairline-shade: var(--color-border-strong);
 }
 
 html,
@@ -66,7 +134,7 @@ body {
 }
 
 ::selection {
-  background: var(--color-accent);
+  background: var(--color-text);
   color: var(--color-bg);
 }
 
@@ -76,7 +144,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-/* Body prose — use the marketing site's measured tone. */
+/* Body prose — measured marketing tone. */
 .sl-markdown-content {
   color: var(--color-text-muted);
 }
@@ -91,7 +159,7 @@ body {
   margin-top: 2.5rem;
 }
 
-/* Inline code looks better with the surface-2 chip. */
+/* Inline code — surface-2 chip. */
 .sl-markdown-content :not(pre) > code {
   background: var(--color-surface-2);
   border: 1px solid var(--color-border);
@@ -101,40 +169,40 @@ body {
   border-radius: 0.3rem;
 }
 
-/* Code blocks — Starlight's expressive-code already handles syntax,
-   but soften the frame to match the marketing palette. */
+/* Code blocks — soften expressive-code's frame to match the surface
+ * palette. The accent indicator on the active tab uses the warm hue
+ * (rather than the foreground accent) so it reads as a "live" cue
+ * even on the high-contrast pill-style brand accent. */
 .expressive-code .frame {
   --ec-frm-edBg: var(--color-surface);
   --ec-frm-edActTabBg: var(--color-surface-2);
-  --ec-frm-edActTabIndBtmCol: var(--color-accent);
+  --ec-frm-edActTabIndBtmCol: var(--color-hue);
   --ec-brdRad: 0.65rem;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
 }
 
-/* Sidebar — make active item the accent. */
+/* Sidebar — active item picks up the warm hue accent (matches the
+ * site's "this is the live link" treatment). */
 .sidebar-content a[aria-current="page"] {
-  background: var(--sl-color-accent-low);
-  color: var(--color-accent);
-  border-left: 2px solid var(--color-accent);
+  background: var(--color-hue-soft);
+  color: var(--color-text);
+  border-left: 2px solid var(--color-hue);
 }
 
-/* Top nav — subtle border like the marketing nav. */
+/* Top nav — subtle border + slight transparency for the dark-mode
+ * blur (matches the marketing nav). Light mode uses an opaque cream
+ * since transparency reads as dingy on cream. */
 .header {
   border-bottom: 1px solid var(--color-border);
-  background: rgba(9, 9, 11, 0.8);
+  background: var(--color-bg);
+}
+[data-theme="dark"] .header {
+  background: rgba(14, 13, 11, 0.85);
   backdrop-filter: blur(8px);
 }
 
-/* Hide the theme toggle — we're dark-only to keep parity with the
-   marketing site. */
-starlight-theme-select {
-  display: none !important;
-}
-
-/* Mermaid diagrams render as <pre class="mermaid">. Make their
-   container respect the surface palette so diagrams don't look pasted
-   on top of the page. */
+/* Mermaid diagrams render as <pre class="mermaid">. Match the surface. */
 pre.mermaid {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -155,13 +223,14 @@ button[data-open-modal]:hover {
   color: var(--color-text);
 }
 
-/* CTAs in cards / hero - lime pill style like the marketing site. */
+/* Primary CTA — high-contrast neutral pill (foreground on background)
+ * to match the marketing site's "Get access" button. */
 .action.primary {
   background: var(--color-accent);
-  color: var(--color-bg);
+  color: var(--color-accent-fg);
   border: 0;
 }
 .action.primary:hover {
   opacity: 0.9;
-  color: var(--color-bg);
+  color: var(--color-accent-fg);
 }
