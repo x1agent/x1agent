@@ -4,6 +4,15 @@ import Default from '@astrojs/starlight/components/Head.astro';
 
 <Default><slot /></Default>
 
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-7QDKMS8GBD"></script>
+<script is:inline>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-7QDKMS8GBD');
+</script>
+
 <script>
   import mermaid from 'mermaid';
 
