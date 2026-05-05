@@ -190,11 +190,11 @@ body {
   border-left: 2px solid var(--color-hue);
 }
 
-/* Top nav — subtle border + slight transparency for the dark-mode
- * blur (matches the marketing nav). Light mode uses an opaque cream
- * since transparency reads as dingy on cream. */
+/* Top nav — no bottom border; bg blends into the page. Dark mode
+ * keeps a translucent + blur effect (matches the marketing nav).
+ * Light mode is opaque cream since transparency reads as dingy. */
 .header {
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 0;
   background: var(--color-bg);
 }
 [data-theme="dark"] .header {
