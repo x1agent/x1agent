@@ -16,18 +16,31 @@
 
 set -euo pipefail
 
+# Hard guard: every kubectl call below must hit OrbStack and only OrbStack.
+# Without this, a previously-polluted OrbStack kubeconfig (current-context
+# flipped to a remote cluster by a stray `gcloud container clusters
+# get-credentials`) could route this script's `kubectl create namespace` /
+# `kubectl create secret` to the wrong cluster.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./dev-preflight.sh
+source "$SCRIPT_DIR/dev-preflight.sh"
+
 NAMESPACE="${NAMESPACE:-x1agent}"
 SECRET_NAME="${SECRET_NAME:-nats-tls}"
 CERT_DIR="${CERT_DIR:-.local/nats-certs}"
 DAYS="${DAYS:-3650}"
 
+# Use --context=orbstack on every kubectl call so we never inherit a
+# drifted current-context from the kubeconfig file.
+kc() { kubectl "${KCTX_ARGS[@]}" "$@"; }
+
 # Ensure the namespace exists. devspace creates it lazily on first apply,
 # but this script may run before that. apply-from-stdin is idempotent and
 # silent on "already exists".
-kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
+kc create namespace "$NAMESPACE" --dry-run=client -o yaml \
+  | kc apply -f - >/dev/null
 
-if kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" >/dev/null 2>&1; then
+if kc -n "$NAMESPACE" get secret "$SECRET_NAME" >/dev/null 2>&1; then
   echo "[nats-tls] secret $SECRET_NAME already exists in $NAMESPACE — skipping."
   echo "[nats-tls] delete it to rotate: kubectl -n $NAMESPACE delete secret $SECRET_NAME"
   exit 0
@@ -84,7 +97,7 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out client.crt -days "$DAYS" -sha256 -extfile client.ext 2>/dev/null
 
 # ── Secret ────────────────────────────────────────────────
-kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
+kc -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
   --from-file=ca.crt=ca.crt \
   --from-file=server.crt=server.crt \
   --from-file=server.key=server.key \

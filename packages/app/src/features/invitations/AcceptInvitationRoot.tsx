@@ -46,7 +46,7 @@ export function AcceptInvitationRoot({ token }: Props) {
             </Card>
           ) : !view ? (
             <Card>
-              <CardContent className="py-6 text-sm text-zinc-400">
+              <CardContent className="py-6 text-sm text-fg-muted">
                 Loading…
               </CardContent>
             </Card>
@@ -89,7 +89,7 @@ export function AcceptInvitationRoot({ token }: Props) {
             <CardTitle>Join {v.workspace.name}</CardTitle>
             <CardDescription>
               You've been invited as {v.role}. Sign in with Google as{" "}
-              <span className="text-zinc-200">{v.email}</span> to accept.
+              <span className="text-fg">{v.email}</span> to accept.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -126,7 +126,7 @@ export function AcceptInvitationRoot({ token }: Props) {
     if (accepted) {
       return (
         <Card>
-          <CardContent className="py-6 text-sm text-zinc-300">
+          <CardContent className="py-6 text-sm text-fg-muted">
             Joined. Redirecting…
           </CardContent>
         </Card>
@@ -143,9 +143,9 @@ export function AcceptInvitationRoot({ token }: Props) {
           {!emailMatches ? (
             <div className="text-sm text-red-400">
               This invite is for{" "}
-              <span className="text-zinc-200">{v.email}</span> but you're
+              <span className="text-fg">{v.email}</span> but you're
               signed in as{" "}
-              <span className="text-zinc-200">{user?.email}</span>. Sign out
+              <span className="text-fg">{user?.email}</span>. Sign out
               and sign in with the invited account.
             </div>
           ) : (

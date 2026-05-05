@@ -73,7 +73,7 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
   if (!collection) {
     return (
       <AppShell breadcrumbs={breadcrumbs}>
-        <div className="p-6 text-sm text-zinc-500">
+        <div className="p-6 text-sm text-fg-faint">
           {rows.length === 0 ? "Loading…" : "Collection not found."}
         </div>
       </AppShell>
@@ -86,7 +86,7 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
         <div className="flex items-start gap-4">
           <div className="flex-1">
             <h1 className="text-2xl font-semibold">{collection.name}</h1>
-            <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+            <div className="mt-1 flex items-center gap-2 text-xs text-fg-faint">
               <code className="font-mono">{collection.slug}</code>
               <span>·</span>
               <Badge variant="secondary">{collection.provider_type}</Badge>
@@ -99,7 +99,7 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
             <CardHeader>
               <CardTitle>Description</CardTitle>
             </CardHeader>
-            <CardContent className="whitespace-pre-wrap text-sm text-zinc-200">
+            <CardContent className="whitespace-pre-wrap text-sm text-fg">
               {collection.description}
             </CardContent>
           </Card>
@@ -148,10 +148,10 @@ function Row({
 }) {
   return (
     <div className="grid grid-cols-[8rem_1fr] items-center gap-3">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+      <div className="text-xs uppercase tracking-wide text-fg-faint">
         {label}
       </div>
-      <div className={mono ? "font-mono text-zinc-200" : "text-zinc-200"}>
+      <div className={mono ? "font-mono text-fg" : "text-fg"}>
         {value}
       </div>
     </div>
@@ -186,10 +186,10 @@ function RecordTypesCard({
           <div className="px-4 py-3 text-sm text-red-400">{error}</div>
         )}
         {loading && types.length === 0 && (
-          <div className="px-4 py-3 text-sm text-zinc-500">Loading…</div>
+          <div className="px-4 py-3 text-sm text-fg-faint">Loading…</div>
         )}
         {!loading && !error && types.length === 0 && (
-          <div className="px-4 py-3 text-sm text-zinc-500">
+          <div className="px-4 py-3 text-sm text-fg-faint">
             No record types registered.
           </div>
         )}
@@ -206,26 +206,26 @@ function RecordTypesCard({
               {types.map((t) => (
                 <TableRow
                   key={t.slug}
-                  className="cursor-pointer hover:bg-zinc-900/40"
+                  className="cursor-pointer hover:bg-bg-elevated/40"
                   onClick={() => {
                     window.location.href = `/workspaces/${workspaceSlug}/collections/${collectionSlug}/types/${t.slug}`;
                   }}
                 >
                   <TableCell>
                     <a
-                      className="text-zinc-200 hover:underline"
+                      className="text-fg hover:underline"
                       href={`/workspaces/${workspaceSlug}/collections/${collectionSlug}/types/${t.slug}`}
                     >
                       {t.name}
                     </a>
-                    <div className="font-mono text-[11px] text-zinc-600">
+                    <div className="font-mono text-[11px] text-fg-faint/70">
                       {t.slug}
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {t.fields.length === 0 && (
-                        <span className="text-xs text-zinc-600">—</span>
+                        <span className="text-xs text-fg-faint/70">—</span>
                       )}
                       {t.fields.map((f) => (
                         <Badge
@@ -241,7 +241,7 @@ function RecordTypesCard({
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {t.relationships.length === 0 && (
-                        <span className="text-xs text-zinc-600">—</span>
+                        <span className="text-xs text-fg-faint/70">—</span>
                       )}
                       {t.relationships.map((r) => (
                         <Badge

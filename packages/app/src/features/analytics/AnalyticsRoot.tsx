@@ -87,7 +87,7 @@ export function AnalyticsRoot({ workspaceSlug, canManage }: Props) {
   if (!canManage) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can view usage analytics.
         </CardContent>
       </Card>
@@ -104,7 +104,7 @@ export function AnalyticsRoot({ workspaceSlug, canManage }: Props) {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-fg-muted">
             Estimated spend, broken out by manual vs scheduled runs, agent,
             user, and model. Numbers are directional — reconcile against the
             BigQuery billing export before customer billing.
@@ -138,7 +138,7 @@ export function AnalyticsRoot({ workspaceSlug, canManage }: Props) {
       )}
 
       {loading && !data && (
-        <div className="rounded-md border border-zinc-800 bg-zinc-950 px-4 py-10 text-center text-sm text-zinc-500">
+        <div className="rounded-md border border-border-soft bg-bg px-4 py-10 text-center text-sm text-fg-faint">
           Loading…
         </div>
       )}
@@ -148,7 +148,7 @@ export function AnalyticsRoot({ workspaceSlug, canManage }: Props) {
           <KpiStrip data={data} prior={prior} preset={ws?.preset ?? null} />
           {empty ? (
             <Card>
-              <CardContent className="py-10 text-center text-sm text-zinc-500">
+              <CardContent className="py-10 text-center text-sm text-fg-faint">
                 No agent runs in this date range yet.
               </CardContent>
             </Card>
@@ -284,18 +284,18 @@ function KpiTile({
   return (
     <Card>
       <CardContent className="py-3">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-fg-faint">
           {label}
         </div>
         <div className="mt-0.5 flex items-baseline gap-2">
-          <div className="text-lg font-semibold text-zinc-100">{value}</div>
+          <div className="text-lg font-semibold text-fg">{value}</div>
           {delta !== null && delta !== undefined && (
             <DeltaBadge value={delta} inverse={!!deltaInverse} />
           )}
         </div>
-        {sub && <div className="mt-0.5 text-[11px] text-zinc-500">{sub}</div>}
+        {sub && <div className="mt-0.5 text-[11px] text-fg-faint">{sub}</div>}
         {deltaPriorValue && delta !== null && delta !== undefined && (
-          <div className="mt-0.5 text-[11px] text-zinc-500">
+          <div className="mt-0.5 text-[11px] text-fg-faint">
             vs {deltaPriorValue} prior
           </div>
         )}
@@ -578,16 +578,16 @@ function CostCompositionDonut({ data }: { data: AnalyticsRollup }) {
               key={s.source}
               className="flex items-center justify-between text-xs"
             >
-              <span className="flex items-center gap-2 text-zinc-300">
+              <span className="flex items-center gap-2 text-fg-muted">
                 <span
                   className="size-2.5 rounded-sm"
                   style={{ background: TRIGGER_COLORS[s.source] }}
                 />
                 {s.name}
               </span>
-              <span className="tabular-nums text-zinc-400">
+              <span className="tabular-nums text-fg-muted">
                 {usd(s.value)}
-                <span className="ml-2 text-zinc-600">
+                <span className="ml-2 text-fg-faint/70">
                   {total > 0 ? `${((s.value / total) * 100).toFixed(0)}%` : "—"}
                 </span>
               </span>
@@ -670,11 +670,11 @@ function MoversCard({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <div className="py-6 text-center text-sm text-zinc-500">
+          <div className="py-6 text-center text-sm text-fg-faint">
             {emptyMessage}
           </div>
         ) : (
-          <ul className="divide-y divide-zinc-900">
+          <ul className="divide-y divide-border-soft">
             {rows.map((r, i) => {
               const delta = r.prior !== null ? deltaPct(r.current, r.prior) : null;
               const max = Math.max(...rows.map((x) => x.current), 1);
@@ -682,17 +682,17 @@ function MoversCard({
                 <li key={i} className="py-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-zinc-100">
+                      <div className="truncate text-sm text-fg">
                         {r.label}
                       </div>
                       {r.sub && (
-                        <div className="truncate text-[11px] text-zinc-500">
+                        <div className="truncate text-[11px] text-fg-faint">
                           {r.sub}
                         </div>
                       )}
                     </div>
                     <div className="flex shrink-0 items-baseline gap-2">
-                      <span className="text-sm tabular-nums text-zinc-100">
+                      <span className="text-sm tabular-nums text-fg">
                         {usd(r.current)}
                       </span>
                       {delta !== null && (
@@ -700,7 +700,7 @@ function MoversCard({
                       )}
                     </div>
                   </div>
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-zinc-900">
+                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
                     <div
                       className="h-full rounded-full bg-zinc-400/70"
                       style={{ width: `${(r.current / max) * 100}%` }}
@@ -780,11 +780,11 @@ function AgentDrilldownTable({
             {rows.map(({ agent, delta }, i) => (
               <TableRow key={agent.agentId ?? `null-${i}`}>
                 <TableCell className="px-4">
-                  <div className="font-medium text-zinc-100">
+                  <div className="font-medium text-fg">
                     {agent.agentName ?? "(deleted)"}
                   </div>
                   {agent.agentSlug && (
-                    <div className="text-[11px] text-zinc-500">
+                    <div className="text-[11px] text-fg-faint">
                       {agent.agentSlug}
                     </div>
                   )}
@@ -797,20 +797,20 @@ function AgentDrilldownTable({
                     {delta !== null ? (
                       <DeltaBadge value={delta} inverse={true} />
                     ) : (
-                      <span className="text-xs text-zinc-600">—</span>
+                      <span className="text-xs text-fg-faint/70">—</span>
                     )}
                   </TableCell>
                 )}
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(agent.inputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(agent.outputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(agent.cacheCreationInputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(agent.cacheReadInputTokens)}
                 </TableCell>
               </TableRow>
@@ -836,7 +836,7 @@ function SortHead({
   const isActive = sort === k;
   return (
     <TableHead
-      className={`cursor-pointer text-right select-none ${isActive ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-200"}`}
+      className={`cursor-pointer text-right select-none ${isActive ? "text-fg" : "text-fg-muted hover:text-fg"}`}
       onClick={() => setSort(k)}
     >
       <span className="inline-flex items-center gap-1">
@@ -883,19 +883,19 @@ function ModelBreakdownTable({ data }: { data: AnalyticsRollup }) {
                 <TableCell className="text-right tabular-nums">
                   {usd(r.costUsdEstimate)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {((r.costUsdEstimate / total) * 100).toFixed(0)}%
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(r.inputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(r.outputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(r.cacheCreationInputTokens)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-400">
+                <TableCell className="text-right tabular-nums text-fg-muted">
                   {compactInt(r.cacheReadInputTokens)}
                 </TableCell>
               </TableRow>

@@ -11,13 +11,16 @@ export type BadgeVariant =
   | "info";
 
 const VARIANT_STYLES: Record<BadgeVariant, string> = {
-  default: "border-transparent bg-zinc-200 text-zinc-900",
-  secondary: "border-transparent bg-zinc-800 text-zinc-200",
-  outline: "border-zinc-800 text-zinc-300",
-  success: "border-transparent bg-emerald-500/15 text-emerald-400 ring-1 ring-inset ring-emerald-500/30",
-  warning: "border-transparent bg-amber-500/15 text-amber-400 ring-1 ring-inset ring-amber-500/30",
-  danger: "border-transparent bg-red-500/15 text-red-400 ring-1 ring-inset ring-red-500/30",
-  info: "border-transparent bg-blue-500/15 text-blue-400 ring-1 ring-inset ring-blue-500/30",
+  default: "border-transparent bg-surface-elevated text-fg",
+  secondary: "border-transparent bg-bg-muted text-fg",
+  outline: "border-border-soft text-fg-muted",
+  success:
+    "border-transparent bg-emerald-500/15 text-emerald-400 ring-1 ring-inset ring-emerald-500/30 light:text-emerald-700",
+  warning:
+    "border-transparent bg-amber-500/15 text-amber-400 ring-1 ring-inset ring-amber-500/30 light:text-amber-700",
+  danger:
+    "border-transparent bg-red-500/15 text-red-400 ring-1 ring-inset ring-red-500/30 light:text-red-700",
+  info: "border-transparent bg-blue-500/15 text-blue-400 ring-1 ring-inset ring-blue-500/30 light:text-blue-700",
 };
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {

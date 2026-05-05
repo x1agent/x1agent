@@ -44,6 +44,12 @@ interface SessionDetailState {
   appendEvent(sessionId: string, ev: SessionEventDTO): void;
   setStatus(sessionId: string, status: ConnStatus): void;
   setError(sessionId: string, msg: string | null): void;
+  /**
+   * Replace the cached session record. Used after a mutation that
+   * changes the session's status (e.g. POST /cancel) so the detail
+   * page reflects the new state without re-fetching.
+   */
+  setSession(sessionId: string, session: SessionDTO): void;
 }
 
 /**
@@ -183,6 +189,12 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   setError(sessionId, msg) {
     set((s) => ({
       errorBySession: { ...s.errorBySession, [sessionId]: msg },
+    }));
+  },
+
+  setSession(sessionId, session) {
+    set((s) => ({
+      sessionsById: { ...s.sessionsById, [sessionId]: session },
     }));
   },
 }));

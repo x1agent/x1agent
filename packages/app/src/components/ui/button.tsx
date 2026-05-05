@@ -4,17 +4,22 @@ import { forwardRef } from "react";
 import { cn } from "../../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fg-muted disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-white text-black hover:bg-zinc-200",
+        // Primary CTA — high-contrast neutral. Pairs with both light
+        // and dark canvases without depending on accent saturation.
+        default: "bg-fg text-canvas hover:opacity-90",
+        accent:
+          "bg-accent text-accent-fg hover:opacity-90",
         destructive: "bg-red-600 text-white hover:bg-red-500",
         outline:
-          "border border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-800",
-        secondary: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
-        ghost: "bg-transparent text-zinc-200 hover:bg-zinc-800",
-        link: "bg-transparent text-zinc-200 underline-offset-4 hover:underline",
+          "border border-border-strong bg-transparent text-fg hover:bg-surface-muted",
+        secondary:
+          "bg-surface-elevated text-fg hover:bg-surface-muted",
+        ghost: "bg-transparent text-fg hover:bg-surface-muted",
+        link: "bg-transparent text-fg underline-offset-4 hover:underline",
       },
       size: {
         default: "h-9 px-4 py-2",

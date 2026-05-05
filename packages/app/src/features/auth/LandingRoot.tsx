@@ -10,7 +10,7 @@ export function LandingRoot() {
             <h1 className="text-2xl font-semibold tracking-tight">
               x1agent
             </h1>
-            <p className="mt-2 text-sm text-zinc-400">
+            <p className="mt-2 text-sm text-fg-muted">
               Open-source, Kubernetes-native agent platform.
             </p>
           </div>

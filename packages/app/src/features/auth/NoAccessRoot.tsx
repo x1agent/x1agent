@@ -24,7 +24,7 @@ export function NoAccessRoot() {
     return (
       <AppShell chrome={false}>
         <div className="flex min-h-screen items-center justify-center px-6">
-          <div className="text-sm text-zinc-400">Loading…</div>
+          <div className="text-sm text-fg-muted">Loading…</div>
         </div>
       </AppShell>
     );
@@ -36,7 +36,7 @@ export function NoAccessRoot() {
         <div className="flex min-h-screen items-center justify-center px-6">
           <div className="w-full max-w-sm space-y-4 text-center">
             <h1 className="text-xl font-semibold">Welcome to x1agent</h1>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-fg-muted">
               You're signed in as a platform admin but no workspace exists
               yet. Create one to get started.
             </p>
@@ -54,7 +54,7 @@ export function NoAccessRoot() {
       <div className="flex min-h-screen items-center justify-center px-6">
         <div className="w-full max-w-sm space-y-4 text-center">
           <h1 className="text-xl font-semibold">No workspace access</h1>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-fg-muted">
             Your Google account is not a member of any workspace. Contact an
             administrator to get access.
           </p>

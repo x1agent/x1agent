@@ -137,11 +137,11 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {loading && <div className="text-sm text-zinc-400">Loading…</div>}
+        {loading && <div className="text-sm text-fg-muted">Loading…</div>}
         {error && <div className="text-sm text-red-400">{error}</div>}
 
         {installed.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
+          <div className="overflow-hidden rounded-md border border-border-soft">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -155,11 +155,11 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
               <TableBody>
                 {installed.map((r) => (
                   <TableRow key={r.id} className="hover:bg-transparent">
-                    <TableCell className="text-zinc-200">{r.kind}</TableCell>
-                    <TableCell className="text-zinc-400">
+                    <TableCell className="text-fg">{r.kind}</TableCell>
+                    <TableCell className="text-fg-muted">
                       {r.version}
                     </TableCell>
-                    <TableCell className="text-zinc-400">
+                    <TableCell className="text-fg-muted">
                       {r.provider}
                     </TableCell>
                     <TableCell>
@@ -167,7 +167,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
                         {r.status}
                       </Badge>
                       {r.status_reason && (
-                        <span className="ml-2 text-xs text-zinc-500">
+                        <span className="ml-2 text-xs text-fg-faint">
                           {r.status_reason}
                         </span>
                       )}
@@ -178,7 +178,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
                         variant="ghost"
                         size="sm"
                         onClick={() => onUninstall(r)}
-                        className="text-xs text-zinc-400 hover:text-red-400"
+                        className="text-xs text-fg-muted hover:text-red-400"
                       >
                         Uninstall
                       </Button>
@@ -191,7 +191,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
         )}
 
         {installed.length === 0 && !loading && (
-          <div className="rounded-md border border-zinc-900 p-6 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
             No resources installed. Pick one below to install.
           </div>
         )}
@@ -199,9 +199,9 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
         {installableKinds.length > 0 && (
           <form
             onSubmit={onInstall}
-            className="space-y-3 rounded-md border border-zinc-900 p-4"
+            className="space-y-3 rounded-md border border-border-soft p-4"
           >
-            <div className="text-sm font-medium text-zinc-200">
+            <div className="text-sm font-medium text-fg">
               Install from catalog
             </div>
             <div className="flex flex-wrap items-end gap-3">
@@ -264,7 +264,7 @@ export function SharedAgentResourcesPanel({ slug, canManage }: Props) {
         {catalog.length > 0 &&
           availableKinds.length === 0 &&
           installed.length === 0 && (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No installers are wired in this deployment. Ask an operator to
               check the Kubernetes config.
             </div>

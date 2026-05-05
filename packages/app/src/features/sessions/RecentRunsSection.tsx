@@ -43,11 +43,11 @@ function RunRow({
   return (
     <a
       href={`/workspaces/${workspaceSlug}/sessions/${session.id}`}
-      className="flex items-center gap-3 border-t border-zinc-900 px-4 py-2 text-sm first:border-t-0 hover:bg-zinc-900/40"
+      className="flex items-center gap-3 border-t border-border-soft px-4 py-2 text-sm first:border-t-0 hover:bg-bg-elevated/40"
     >
       <Badge variant={STATUS_VARIANT[session.status]}>{session.status}</Badge>
-      <span className="text-zinc-400">{who}</span>
-      <span className="ml-auto text-xs text-zinc-500">
+      <span className="text-fg-muted">{who}</span>
+      <span className="ml-auto text-xs text-fg-faint">
         {fmtTime(session.triggered_at)}
       </span>
       {session.error_message && (
@@ -88,11 +88,11 @@ export function RecentRunsSection({ workspaceSlug, agentId }: Props) {
       </CardHeader>
       <CardContent className="p-0">
         {rows.length === 0 ? (
-          <div className="p-4 text-sm text-zinc-500">
+          <div className="p-4 text-sm text-fg-faint">
             No runs yet. Use the Run card above to trigger one.
           </div>
         ) : (
-          <div>
+          <div className="divide-y divide-border-soft border-t border-border-soft">
             {rows.map((s) => (
               <RunRow key={s.id} session={s} workspaceSlug={workspaceSlug} />
             ))}

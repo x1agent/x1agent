@@ -41,6 +41,7 @@ beforeAll(async () => {
     authBypass: true,
     testUserEmail: "admin@example.com",
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
 
   app = new Hono();

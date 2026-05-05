@@ -142,7 +142,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
   if (!canManage) {
     return (
       <Card className="mt-4">
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can manage environment variables.
         </CardContent>
       </Card>
@@ -157,32 +157,32 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
           <CardTitle>Environment variables</CardTitle>
           <CardDescription>
             Named values that MCP servers, siblings, and runtime services
-            reference via <code className="rounded bg-zinc-800 px-1">{"${NAME}"}</code> template syntax.
+            reference via <code className="rounded bg-bg-muted px-1">{"${NAME}"}</code> template syntax.
             Values are encrypted at rest and never returned by the API —
             rotate by setting again.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading && (
-            <div className="text-sm text-zinc-500">Loading…</div>
+            <div className="text-sm text-fg-faint">Loading…</div>
           )}
           {!loading && items.length === 0 && (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No environment variables yet. Add one below.
             </div>
           )}
           {!loading && items.length > 0 && (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-border-soft">
               {items.map((row) => (
                 <li
                   key={row.id}
                   className="flex items-center justify-between py-3"
                 >
                   <div>
-                    <div className="font-mono text-sm text-zinc-100">
+                    <div className="font-mono text-sm text-fg">
                       {row.name}
                     </div>
-                    <div className="text-xs text-zinc-500">
+                    <div className="text-xs text-fg-faint">
                       Updated {new Date(row.updated_at).toLocaleString()}
                       {row.updated_by ? "" : ""}
                     </div>
@@ -254,7 +254,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
                 autoComplete="off"
                 spellCheck={false}
               />
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-fg-faint">
                 Stored encrypted at rest. The plaintext value is never
                 returned by any API endpoint.
               </p>

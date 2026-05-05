@@ -1,4 +1,14 @@
 ---
+# Target namespace for preview Kaniko builds. Created here so a fresh
+# `devspace dev` / `kubectl apply -f deploy/k8s/dev/` doesn't fail when
+# the cluster is empty. Idempotent on re-apply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: x1-previews
+  labels:
+    app.kubernetes.io/part-of: x1agent
+---
 # ServiceAccount the preview-provider pod runs as.
 apiVersion: v1
 kind: ServiceAccount

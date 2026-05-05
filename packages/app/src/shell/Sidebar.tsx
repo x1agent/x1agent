@@ -46,7 +46,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
 
   return (
     <SidebarContext.Provider value={{ open, setOpen, isMobile }}>
-      <div className="flex min-h-svh w-full bg-zinc-950 text-zinc-100">
+      <div className="flex min-h-svh w-full bg-bg text-fg">
         {children}
       </div>
     </SidebarContext.Provider>
@@ -86,7 +86,7 @@ export function Sidebar({ children }: { children: ReactNode }) {
         )}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-900 bg-zinc-950 transition-transform",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col rail-gradient transition-transform",
             open ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -97,7 +97,7 @@ export function Sidebar({ children }: { children: ReactNode }) {
   }
 
   return (
-    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col border-r border-zinc-900 bg-zinc-950">
+    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col rail-gradient">
       {children}
     </aside>
   );
@@ -124,7 +124,7 @@ export function SidebarFooter({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("border-t border-zinc-900 p-2", className)}>{children}</div>;
+  return <div className={cn("p-2", className)}>{children}</div>;
 }
 
 export function SidebarContent({ children }: { children: ReactNode }) {
@@ -145,7 +145,7 @@ export function SidebarTrigger() {
     <button
       type="button"
       onClick={() => setOpen(!open)}
-      className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+      className="rounded-md p-1.5 text-fg-muted hover:bg-bg-elevated hover:text-fg"
       aria-label="Toggle navigation"
     >
       <svg

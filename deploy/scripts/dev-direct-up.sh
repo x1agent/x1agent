@@ -25,7 +25,13 @@ set -euo pipefail
 NS="${NAMESPACE:-x1agent}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-echo "[dev:direct] context: $(kubectl config current-context)"
+# Hard guard — only run against OrbStack.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./dev-preflight.sh
+source "$SCRIPT_DIR/dev-preflight.sh"
+kc() { kubectl "${KCTX_ARGS[@]}" "$@"; }
+
+echo "[dev:direct] context: $(kc config current-context)"
 echo "[dev:direct] namespace: $NS"
 
 # 1. Build images. All 5 in parallel — bun + alpine layers cache well
@@ -85,37 +91,37 @@ for k in "${SECRET_KEYS[@]}"; do
 done
 
 echo "[dev:direct] applying Secret/x1agent-dev-secrets (${#SECRET_KEYS[@]} keys, values not printed)"
-kubectl create secret generic x1agent-dev-secrets \
+kc create secret generic x1agent-dev-secrets \
   -n "$NS" \
   --from-env-file="$TMP_ENV" \
-  --dry-run=client -o yaml | kubectl apply -n "$NS" -f -
+  --dry-run=client -o yaml | kc apply -n "$NS" -f -
 
 # 3. Apply all dev manifests. preview.yaml carries cross-namespace
 #    RBAC for x1-previews — the namespace must exist first.
-kubectl get ns x1-previews >/dev/null 2>&1 || kubectl create ns x1-previews
+kc get ns x1-previews >/dev/null 2>&1 || kc create ns x1-previews
 
 echo "[dev:direct] applying deploy/k8s/dev/"
-kubectl apply -n "$NS" -f "$ROOT/deploy/k8s/dev/"
+kc apply -n "$NS" -f "$ROOT/deploy/k8s/dev/"
 
 # 4. Force a fresh roll on app pods so they pick up the just-built
 #    images + envFrom. Infra pods (postgres/nats/registry/surrealdb)
 #    are stable; only roll them if they're not already Ready.
 ROLL_DEPLOYS=(api app preview messaging-slack graph-surrealdb)
 for d in "${ROLL_DEPLOYS[@]}"; do
-  if kubectl -n "$NS" get deploy "$d" >/dev/null 2>&1; then
-    kubectl -n "$NS" rollout restart "deploy/$d"
+  if kc -n "$NS" get deploy "$d" >/dev/null 2>&1; then
+    kc -n "$NS" rollout restart "deploy/$d"
   fi
 done
 
 # 5. Wait for everything. infra first, then apps.
 WAIT_DEPLOYS=(postgres nats surrealdb x1-registry api app preview messaging-slack graph-surrealdb)
 for d in "${WAIT_DEPLOYS[@]}"; do
-  if ! kubectl -n "$NS" get deploy "$d" >/dev/null 2>&1; then continue; fi
+  if ! kc -n "$NS" get deploy "$d" >/dev/null 2>&1; then continue; fi
   echo "[dev:direct] waiting for deploy/$d"
-  if ! kubectl -n "$NS" rollout status "deploy/$d" --timeout=300s; then
+  if ! kc -n "$NS" rollout status "deploy/$d" --timeout=300s; then
     echo "[dev:direct] $d failed to roll — recent events:" >&2
-    kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -20
-    kubectl -n "$NS" describe deploy "$d" | tail -40 >&2
+    kc -n "$NS" get events --sort-by=.lastTimestamp | tail -20
+    kc -n "$NS" describe deploy "$d" | tail -40 >&2
     exit 1
   fi
 done

@@ -118,18 +118,18 @@ export function InvitationsPanel({ slug, canManage }: Props) {
         )}
 
         {loadingSlug === slug && rows.length === 0 && (
-          <div className="text-sm text-zinc-400">Loading invitations…</div>
+          <div className="text-sm text-fg-muted">Loading invitations…</div>
         )}
         {error && <div className="text-sm text-red-400">{error}</div>}
 
         {rows.length === 0 && loadingSlug !== slug && (
-          <div className="rounded-md border border-zinc-900 p-6 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
             No invitations yet.
           </div>
         )}
 
         {rows.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
+          <div className="overflow-hidden rounded-md border border-border-soft">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -150,10 +150,10 @@ export function InvitationsPanel({ slug, canManage }: Props) {
                         : "pending";
                   return (
                     <TableRow key={inv.id} className="hover:bg-transparent">
-                      <TableCell className="text-zinc-200">
+                      <TableCell className="text-fg">
                         {inv.email}
                       </TableCell>
-                      <TableCell className="text-zinc-400">
+                      <TableCell className="text-fg-muted">
                         {inv.role}
                       </TableCell>
                       <TableCell>
@@ -166,7 +166,7 @@ export function InvitationsPanel({ slug, canManage }: Props) {
                             variant="ghost"
                             size="sm"
                             onClick={() => revoke(slug, inv.id)}
-                            className="text-xs text-zinc-400 hover:text-red-400"
+                            className="text-xs text-fg-muted hover:text-red-400"
                           >
                             Revoke
                           </Button>

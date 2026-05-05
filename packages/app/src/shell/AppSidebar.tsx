@@ -112,8 +112,10 @@ export function AppSidebar() {
   const navBase = activeSlug ? `/workspaces/${activeSlug}` : "";
   const navItems: NavItem[] = activeSlug
     ? [
-        { title: "Agents", url: `${navBase}`, icon: Bot },
-        { title: "Sessions", url: `${navBase}/sessions`, icon: Play },
+        // Sessions is reachable from the workspace home's "View all"
+        // link — keeping it out of the rail keeps the rail focused on
+        // configuration surfaces, not transient state.
+        { title: "Agents", url: `${navBase}/agents`, icon: Bot },
         { title: "Shares", url: `${navBase}/shares`, icon: FileText },
         // Collections live behind a graph provider — hide the entry
         // when the deployment ships without one (see capabilitiesStore).
@@ -136,35 +138,45 @@ export function AppSidebar() {
       <SidebarHeader className="space-y-2">
         <a
           href={activeSlug ? `/workspaces/${activeSlug}` : "/"}
-          className="flex items-center gap-2 px-1 pb-1 text-zinc-100 hover:text-white"
+          className="flex items-center gap-2 px-1 pb-1 text-fg hover:text-white"
         >
           <LayoutDashboard className="size-5" />
           <span className="text-base font-semibold tracking-tight">x1agent</span>
         </a>
 
         {showWorkspaceChip && activeMembership && (
-          <div className="flex items-stretch gap-1 rounded-md border border-zinc-800 bg-zinc-900/40">
+          <div className="flex items-stretch gap-1 rounded-md border border-border-soft bg-bg-elevated/40">
+            {/* Body: clicks to the workspace home (driver page). */}
             <a
-              href={`/workspaces/${activeSlug}/settings`}
-              className="flex flex-1 items-center gap-2 rounded-l-md px-2 py-1.5 text-left text-sm hover:bg-zinc-900"
-              title="Workspace settings"
+              href={`/workspaces/${activeSlug}/`}
+              className="flex flex-1 items-center gap-2 rounded-l-md px-2 py-1.5 text-left text-sm hover:bg-bg-elevated"
+              title="Workspace home"
             >
-              <div className="flex size-6 shrink-0 items-center justify-center rounded bg-zinc-800 text-[10px] font-semibold text-zinc-300">
+              <div className="flex size-6 shrink-0 items-center justify-center rounded bg-bg-muted text-[10px] font-semibold text-fg-muted">
                 {workspaceInitials(activeMembership.name)}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">
                   {activeMembership.name}
                 </div>
-                <div className="truncate text-[10px] capitalize text-zinc-500">
+                <div className="truncate text-[10px] capitalize text-fg-faint">
                   {activeMembership.role}
                 </div>
               </div>
-              <Settings className="ml-auto size-3.5 text-zinc-500" />
+            </a>
+            {/* Cog: clicks to workspace settings. Standalone target so
+                the body can route to the home page above. */}
+            <a
+              href={`/workspaces/${activeSlug}/settings`}
+              title="Workspace settings"
+              aria-label="Workspace settings"
+              className="flex items-center justify-center border-l border-border-soft px-2 text-fg-faint hover:bg-bg-elevated hover:text-fg"
+            >
+              <Settings className="size-3.5" />
             </a>
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="flex items-center justify-center rounded-r-md border-l border-zinc-800 px-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100"
+                className="flex items-center justify-center rounded-r-md border-l border-border-soft px-2 text-fg-faint hover:bg-bg-elevated hover:text-fg"
                 title="Switch workspace"
               >
                 <ChevronsUpDown className="size-4" />
@@ -175,7 +187,7 @@ export function AppSidebar() {
                 align="start"
                 sideOffset={4}
               >
-                <div className="px-2 py-1.5 text-xs font-medium text-zinc-500">
+                <div className="px-2 py-1.5 text-xs font-medium text-fg-faint">
                   Workspaces
                 </div>
                 {memberships.map((ws) => (
@@ -184,17 +196,17 @@ export function AppSidebar() {
                     onClick={() => switchWorkspace(ws.slug)}
                     className="gap-2"
                   >
-                    <div className="flex size-6 shrink-0 items-center justify-center rounded bg-zinc-800 text-[10px] font-semibold text-zinc-300">
+                    <div className="flex size-6 shrink-0 items-center justify-center rounded bg-bg-muted text-[10px] font-semibold text-fg-muted">
                       {workspaceInitials(ws.name)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">{ws.name}</div>
-                      <div className="truncate text-[10px] capitalize text-zinc-500">
+                      <div className="truncate text-[10px] capitalize text-fg-faint">
                         {ws.role}
                       </div>
                     </div>
                     {ws.slug === activeSlug && (
-                      <Check className="size-4 text-zinc-500" />
+                      <Check className="size-4 text-fg-faint" />
                     )}
                   </DropdownMenuItem>
                 ))}
@@ -207,15 +219,12 @@ export function AppSidebar() {
       <SidebarBody>
         {!inAdminContext && navItems.length > 0 && (
           <div>
-            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
-              Platform
-            </div>
             <nav className="flex flex-col">
               {navItems.map((item) => (
                 <a
                   key={item.title}
                   href={item.url}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-muted hover:bg-bg-elevated hover:text-fg"
                 >
                   <item.icon className="size-4" />
                   <span>{item.title}</span>
@@ -245,7 +254,7 @@ export function AppSidebar() {
         */}
         {onAdminRoute && isPlatformAdmin && (
           <div>
-            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-fg-faint/70">
               Platform admin
             </div>
             <nav className="flex flex-col">
@@ -253,7 +262,7 @@ export function AppSidebar() {
                 <a
                   key={item.href}
                   href={item.href}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-muted hover:bg-bg-elevated hover:text-fg"
                 >
                   <item.icon className="size-4" />
                   <span>{item.title}</span>
@@ -266,7 +275,7 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md p-1.5 text-left hover:bg-zinc-900">
+          <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md border border-border-soft bg-bg-elevated/40 p-1.5 text-left hover:bg-bg-elevated">
             <Avatar
               src={user?.avatar_url}
               fallback={initials(user?.name)}
@@ -274,11 +283,11 @@ export function AppSidebar() {
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm">{user?.name ?? "User"}</div>
-              <div className="truncate text-[10px] text-zinc-500">
+              <div className="truncate text-[10px] text-fg-faint">
                 {user?.email ?? ""}
               </div>
             </div>
-            <MoreVertical className="ml-auto size-4 text-zinc-500" />
+            <MoreVertical className="ml-auto size-4 text-fg-faint" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-64"
@@ -302,7 +311,7 @@ export function AppSidebar() {
                     <Avatar fallback={initials(acc.name)} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">{acc.name}</div>
-                      <div className="truncate text-xs text-zinc-500">
+                      <div className="truncate text-xs text-fg-faint">
                         {acc.email}
                       </div>
                     </div>
@@ -359,7 +368,7 @@ function WorkspaceSettingsNav({
 
   return (
     <div className="space-y-3">
-      <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+      <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-fg-faint/70">
         Workspace settings
       </div>
       <nav className="flex flex-col">
@@ -367,14 +376,14 @@ function WorkspaceSettingsNav({
           href={overviewHref}
           className={`relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
             isOverview
-              ? "bg-zinc-900 text-zinc-50"
-              : "text-zinc-300 hover:bg-zinc-900/60 hover:text-zinc-100"
+              ? "bg-bg-elevated text-fg"
+              : "text-fg-muted hover:bg-bg-elevated/60 hover:text-fg"
           }`}
           aria-current={isOverview ? "page" : undefined}
         >
           {isOverview && (
             <span
-              className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-zinc-100"
+              className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-fg"
               aria-hidden="true"
             />
           )}
@@ -384,7 +393,7 @@ function WorkspaceSettingsNav({
       </nav>
       {WORKSPACE_SETTINGS_NAV.map((section) => (
         <div key={section.title} className="space-y-0.5">
-          <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-fg-faint">
             {section.title}
           </div>
           <nav className="flex flex-col">
@@ -397,21 +406,21 @@ function WorkspaceSettingsNav({
                   href={href}
                   className={`relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
                     isActive
-                      ? "bg-zinc-900 text-zinc-50"
-                      : "text-zinc-300 hover:bg-zinc-900/60 hover:text-zinc-100"
-                  } ${item.placeholder ? "text-zinc-500" : ""}`}
+                      ? "bg-bg-elevated text-fg"
+                      : "text-fg-muted hover:bg-bg-elevated/60 hover:text-fg"
+                  } ${item.placeholder ? "text-fg-faint" : ""}`}
                   aria-current={isActive ? "page" : undefined}
                 >
                   {isActive && (
                     <span
-                      className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-zinc-100"
+                      className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-fg"
                       aria-hidden="true"
                     />
                   )}
                   <item.icon className="size-4" />
                   <span className="truncate">{item.title}</span>
                   {item.placeholder && (
-                    <span className="ml-auto rounded-sm bg-zinc-800/80 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-zinc-500">
+                    <span className="ml-auto rounded-sm bg-bg-muted/80 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-fg-faint">
                       Soon
                     </span>
                   )}

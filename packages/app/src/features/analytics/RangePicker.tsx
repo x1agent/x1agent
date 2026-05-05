@@ -36,7 +36,7 @@ export function RangePicker({ workspaceSlug }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1 rounded-md border border-zinc-900 bg-zinc-950 p-1">
+        <div className="flex flex-wrap items-center gap-1 rounded-md border border-border-soft bg-bg p-1">
           {PRESETS.map((p) => (
             <Button
               key={p.value}
@@ -50,7 +50,7 @@ export function RangePicker({ workspaceSlug }: Props) {
             </Button>
           ))}
         </div>
-        <label className="flex h-8 cursor-pointer select-none items-center gap-2 rounded-md border border-zinc-900 bg-zinc-950 px-3 text-xs text-zinc-300">
+        <label className="flex h-8 cursor-pointer select-none items-center gap-2 rounded-md border border-border-soft bg-bg px-3 text-xs text-fg-muted">
           <Checkbox
             checked={compareEnabled}
             onCheckedChange={(v) => setCompareEnabled(workspaceSlug, v === true)}
@@ -60,11 +60,11 @@ export function RangePicker({ workspaceSlug }: Props) {
         </label>
       </div>
       {ws.preset === "custom" && (
-        <div className="flex flex-wrap items-end gap-3 rounded-md border border-zinc-900 bg-zinc-950 px-3 py-2">
+        <div className="flex flex-wrap items-end gap-3 rounded-md border border-border-soft bg-bg px-3 py-2">
           <div className="flex flex-col gap-1">
             <Label
               htmlFor={`analytics-since-${workspaceSlug}`}
-              className="text-xs text-zinc-400"
+              className="text-xs text-fg-muted"
             >
               From
             </Label>
@@ -85,7 +85,7 @@ export function RangePicker({ workspaceSlug }: Props) {
           <div className="flex flex-col gap-1">
             <Label
               htmlFor={`analytics-until-${workspaceSlug}`}
-              className="text-xs text-zinc-400"
+              className="text-xs text-fg-muted"
             >
               To (exclusive)
             </Label>

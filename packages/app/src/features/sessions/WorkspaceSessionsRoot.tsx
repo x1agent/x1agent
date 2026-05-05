@@ -8,14 +8,6 @@ import { Badge, type BadgeVariant } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../components/ui/table";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -29,7 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { useConfirm } from "../../components/use-confirm";
-import { NewSessionCard } from "./NewSessionCard";
+import { NewSessionComposer } from "./NewSessionComposer";
 
 interface Props {
   workspaceSlug: string;
@@ -132,31 +124,6 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
     });
   }, [filteredIds]);
 
-  const allSelected =
-    filtered.length > 0 && filtered.every((r) => selected.has(r.id));
-  const someSelected = selected.size > 0 && !allSelected;
-  const headerCheckedState: boolean | "indeterminate" = allSelected
-    ? true
-    : someSelected
-      ? "indeterminate"
-      : false;
-
-  function toggleAll(next: boolean) {
-    setSelected((prev) => {
-      if (!next) {
-        // Clear only ids that are visible in the current filter; leave
-        // anything outside it untouched (defensive — can't actually
-        // happen because the effect above prunes).
-        const out = new Set(prev);
-        for (const r of filtered) out.delete(r.id);
-        return out;
-      }
-      const out = new Set(prev);
-      for (const r of filtered) out.add(r.id);
-      return out;
-    });
-  }
-
   function toggleOne(id: string, next: boolean) {
     setSelected((prev) => {
       const out = new Set(prev);
@@ -201,134 +168,120 @@ export function WorkspaceSessionsRoot({ workspaceSlug }: Props) {
       ]}
     >
       {dialog}
-      <div className="space-y-4 p-6">
-        <NewSessionCard workspaceSlug={workspaceSlug} />
+      <div className="mx-auto max-w-2xl px-6 pt-12 pb-12">
+        <NewSessionComposer workspaceSlug={workspaceSlug} />
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-md border border-zinc-900 bg-zinc-950 p-1">
-            {STATUS_FILTERS.map((f) => (
-              <Button
-                key={f.value}
-                type="button"
-                variant={statusFilter === f.value ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setStatusFilter(f.value)}
-                className="h-7 px-2 text-xs"
+        <div className="mt-10">
+          {/* Header row: title on the left, single status filter +
+              agent filter + bulk actions on the right. Mirrors the
+              home page's "Recent conversations" header shape. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-medium text-fg">Sessions</h2>
+            <span className="text-xs text-fg-faint">
+              {filtered.length} of {rows.length}
+              {selected.size > 0 ? ` · ${selected.size} selected` : ""}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Select
+                value={statusFilter}
+                onValueChange={(v) =>
+                  setStatusFilter(v as "all" | SessionStatus)
+                }
               >
-                {f.label}
-              </Button>
-            ))}
+                <SelectTrigger className="h-8 w-[140px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_FILTERS.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {agents.length > 0 && (
+                <Select value={agentFilter} onValueChange={setAgentFilter}>
+                  <SelectTrigger className="h-8 w-[160px] text-xs">
+                    <SelectValue placeholder="All agents" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All agents</SelectItem>
+                    {agents.map((a) => (
+                      <SelectItem key={a.slug} value={a.slug}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {selected.size > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" disabled={busy}>
+                      Actions
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        void onDeleteSelected();
+                      }}
+                      className="text-red-400 focus:text-red-300"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete {selected.size}
+                      {selected.size === 1 ? " session" : " sessions"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
-          {agents.length > 0 && (
-            <Select value={agentFilter} onValueChange={setAgentFilter}>
-              <SelectTrigger className="h-8 w-[180px] text-xs">
-                <SelectValue placeholder="All agents" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All agents</SelectItem>
-                {agents.map((a) => (
-                  <SelectItem key={a.slug} value={a.slug}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+          {err && (
+            <div className="mb-3 rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
+              {err}
+            </div>
           )}
-          {selected.size > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" disabled={busy}>
-                  Actions
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    void onDeleteSelected();
-                  }}
-                  className="text-red-300 focus:text-red-200"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete {selected.size}
-                  {selected.size === 1 ? " session" : " sessions"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {actionError && (
+            <div className="mb-3 rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
+              {actionError}
+            </div>
           )}
-          <span className="ml-auto text-xs text-zinc-500">
-            {selected.size > 0
-              ? `${selected.size} selected · ${filtered.length} of ${rows.length} sessions`
-              : `${filtered.length} of ${rows.length} sessions`}
-          </span>
+
+          {loadingSlug === workspaceSlug && rows.length === 0 && (
+            <div className="text-sm text-fg-faint">Loading…</div>
+          )}
+
+          {filtered.length === 0 &&
+            !(loadingSlug === workspaceSlug && rows.length === 0) && (
+              <div className="rounded-md border border-border-soft p-8 text-center text-sm text-fg-faint">
+                No sessions match the current filter.
+              </div>
+            )}
+
+          {filtered.length > 0 && (
+            <ul className="surface-card divide-y divide-border-soft overflow-hidden">
+              {filtered.map((row) => (
+                <SessionListItem
+                  key={row.id}
+                  row={row}
+                  workspaceSlug={workspaceSlug}
+                  selected={selected.has(row.id)}
+                  onToggle={(next) => toggleOne(row.id, next)}
+                />
+              ))}
+            </ul>
+          )}
         </div>
-
-        {err && (
-          <div className="rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
-            {err}
-          </div>
-        )}
-
-        {actionError && (
-          <div className="rounded-md border border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
-            {actionError}
-          </div>
-        )}
-
-        {loadingSlug === workspaceSlug && rows.length === 0 && (
-          <div className="text-sm text-zinc-500">Loading…</div>
-        )}
-
-        {filtered.length === 0 && !(loadingSlug === workspaceSlug && rows.length === 0) && (
-          <div className="rounded-md border border-zinc-900 p-8 text-center text-sm text-zinc-500">
-            No sessions match the current filter.
-          </div>
-        )}
-
-        {filtered.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={headerCheckedState}
-                      onCheckedChange={(v) => toggleAll(v === true)}
-                      aria-label={
-                        allSelected
-                          ? "Clear all selected sessions"
-                          : "Select all sessions in view"
-                      }
-                    />
-                  </TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Trigger</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Started</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((row) => (
-                  <SessionRow
-                    key={row.id}
-                    row={row}
-                    workspaceSlug={workspaceSlug}
-                    selected={selected.has(row.id)}
-                    onToggle={(next) => toggleOne(row.id, next)}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
       </div>
     </AppShell>
   );
 }
 
-function SessionRow({
+function SessionListItem({
   row,
   workspaceSlug,
   selected,
@@ -339,51 +292,51 @@ function SessionRow({
   selected: boolean;
   onToggle: (next: boolean) => void;
 }) {
+  // Same row shape as the workspace home's "Recent conversations":
+  // surface bg, status pill on the right, agent name + relative time
+  // on the left. Checkbox is hidden until hover (or when selected) so
+  // the default state stays clean — bulk-select is rare; quick click
+  // to drill in is the common path.
   return (
-    <TableRow
-      className="cursor-pointer"
-      onClick={() => {
-        window.location.href = `/workspaces/${workspaceSlug}/sessions/${row.id}`;
-      }}
-    >
-      <TableCell
-        className="w-10"
-        onClick={(e) => {
-          // Don't navigate when the user clicks anywhere in the
-          // checkbox cell; that's the affordance for selection, not
-          // drilling into the session.
-          e.stopPropagation();
-        }}
+    <li>
+      <a
+        href={`/workspaces/${workspaceSlug}/sessions/${row.id}`}
+        className="group flex items-center gap-3 px-4 py-3 transition hover:bg-bg-elevated/50"
       >
-        <Checkbox
-          checked={selected}
-          onCheckedChange={(v) => onToggle(v === true)}
-          aria-label={`Select session ${row.id}`}
-        />
-      </TableCell>
-      <TableCell>
+        <span
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggle(!selected);
+          }}
+          className={`flex size-5 shrink-0 items-center justify-center transition ${
+            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(v) => onToggle(v === true)}
+            aria-label={`Select session ${row.id}`}
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-fg">
+            {row.agent?.name ?? "Untitled session"}
+          </div>
+          <div className="text-[11px] text-fg-faint">
+            {row.triggered_by === "user"
+              ? "manual"
+              : row.triggered_by === "agent"
+                ? "agent"
+                : "scheduler"}
+            {" · "}
+            {fmtDuration(row.triggered_at, row.completed_at)}
+            {" · "}
+            {fmtTime(row.triggered_at)}
+          </div>
+        </div>
         <Badge variant={STATUS_VARIANT[row.status]}>{row.status}</Badge>
-      </TableCell>
-      <TableCell>
-        {row.agent ? (
-          <span className="text-zinc-200">{row.agent.name}</span>
-        ) : (
-          <span className="text-zinc-600">—</span>
-        )}
-      </TableCell>
-      <TableCell className="text-zinc-400">
-        {row.triggered_by === "user"
-          ? "manual"
-          : row.triggered_by === "agent"
-            ? "agent"
-            : "scheduler"}
-      </TableCell>
-      <TableCell className="text-zinc-400">
-        {fmtDuration(row.triggered_at, row.completed_at)}
-      </TableCell>
-      <TableCell className="text-zinc-500">
-        {fmtTime(row.triggered_at)}
-      </TableCell>
-    </TableRow>
+      </a>
+    </li>
   );
 }

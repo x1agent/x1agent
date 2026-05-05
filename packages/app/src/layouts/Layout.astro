@@ -14,6 +14,29 @@ const { title = "x1agent" } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <script is:inline>
+      // Apply persisted theme synchronously before render to avoid a
+      // dark→light flash on first paint. Keep this small; the full
+      // toggle component lives at features/theme/ThemeToggle.tsx.
+      (function () {
+        try {
+          var t = localStorage.getItem("x1agent.theme");
+          // Default to dark unless the user has explicitly opted into
+          // light. System prefers-color-scheme is intentionally NOT
+          // consulted — too easy to land in a half-swept state.
+          if (t !== "light") t = "dark";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body class="min-h-screen">
     <slot />

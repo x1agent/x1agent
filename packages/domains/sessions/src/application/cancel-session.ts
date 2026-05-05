@@ -19,9 +19,16 @@ export interface CancelSessionDeps {
 }
 
 /**
- * Cancel a pending session. Running sessions must be cancelled through the
- * executor — we do not race with a live Kubernetes Job from here. If the
- * session is already terminal the call is an error.
+ * Cancel a pending or running session. The DB row flips to a terminal
+ * `complete` status with `errorMessage: "cancelled"` for audit trail —
+ * using `complete` (not `failed`) because user-initiated stop is a
+ * clean exit, not an agent crash. If the session is already terminal
+ * the call is an error.
+ *
+ * TODO: when the session is `running`, also terminate the K8s Job
+ * driving it. Today the DB row flips but the pod keeps executing
+ * until its idle-timeout. The Job watcher should delete the Job when
+ * status crosses to terminal so the pod stops on cancel.
  */
 export async function cancelSession(
   deps: CancelSessionDeps,
@@ -40,7 +47,7 @@ export async function cancelSession(
   }
 
   return deps.sessions.updateStatus(sessionId, {
-    status: "failed",
+    status: "complete",
     completedAt: deps.clock.now(),
     errorMessage: "cancelled",
   });

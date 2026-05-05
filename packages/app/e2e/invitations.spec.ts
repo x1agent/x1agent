@@ -17,34 +17,59 @@ async function devBypassSignIn(context: BrowserContext) {
 }
 
 test.describe("sign in + workspace", () => {
-  test("dev bypass lands on the default workspace and shows the user", async ({
+  test("dev bypass lands on the workspace driver home with composer", async ({
     context,
     page,
   }) => {
     await devBypassSignIn(context);
     await page.goto("/workspaces/default");
+    // Driver home renders a time-aware greeting + the new session
+    // composer. Greeting copy varies by time-of-day so match either
+    // form. The composer's textarea has a stable placeholder.
     await expect(
-      page.getByRole("heading", { name: "Default" }),
+      page.getByRole("heading", {
+        name: /(Good (morning|afternoon|evening)|Up late),/,
+      }),
     ).toBeVisible();
-    await expect(page.getByText("role: owner")).toBeVisible();
+    await expect(
+      page.getByPlaceholder("What are you working on today?"),
+    ).toBeVisible();
+  });
+
+  test("settings page shows the signed-in user's identity", async ({
+    context,
+    page,
+  }) => {
+    await devBypassSignIn(context);
+    await page.goto("/workspaces/default/settings");
+    // Identity card was relocated from the workspace home to the
+    // settings overview when the home was rebuilt as the driver page.
+    await expect(
+      page.getByRole("heading", { name: "Signed in as" }),
+    ).toBeVisible();
+    await expect(page.getByText(/role:\s*owner/i)).toBeVisible();
   });
 });
 
 test.describe("invitations", () => {
-  test("admin can create an invitation from the workspace panel", async ({
+  test("admin can create an invitation from the members settings panel", async ({
     context,
     page,
   }) => {
     await devBypassSignIn(context);
-    await page.goto("/workspaces/default");
+    // The invitations form moved out of the workspace home into the
+    // settings IA's Members → People leaf.
+    await page.goto("/workspaces/default/settings/members/people");
 
     const email = `invitee-${Date.now()}@example.com`;
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send invite" }).click();
 
     await expect(page.getByText(email)).toBeVisible({ timeout: 5000 });
+    // InvitationsPanel renders rows in a Table (post UI-sweep), so the
+    // hasText scope is `tr`, not `li`.
     await expect(
-      page.locator("li", { hasText: email }).getByText(/pending/),
+      page.locator("tr", { hasText: email }).getByText(/pending/i),
     ).toBeVisible();
   });
 

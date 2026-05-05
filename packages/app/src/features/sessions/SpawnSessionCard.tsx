@@ -1,40 +1,32 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react";
-import { Button } from "../../components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../../components/ui/card";
-import { Textarea } from "../../components/ui/textarea";
+import { useState } from "react";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
+import { ComposerShell } from "./ComposerShell";
 
 interface Props {
   workspaceSlug: string;
   agentId: string;
+  /** Optional agent label rendered in the lower-left status slot — the
+   *  page header usually already names the agent, so default is empty. */
+  agentLabel?: string;
 }
 
 /**
- * Spawn a session for a specific agent. Lives at the top of the agent
- * detail page and the Edit page's General tab. Mirrors
- * NewSessionCard's pending-prompt handoff: stash the prompt in
- * sessionStorage keyed by the new session id, navigate, and
- * SessionRoot drains it once the pod emits `session.started`.
- *
- * The page with an agent in its route uses this; the workspace-level
- * sessions page uses NewSessionCard (same flow, plus an agent
- * picker).
+ * Compose-and-spawn for a specific agent. Drops onto the agent detail
+ * page and the Edit page's General tab. No picker chip — the page's
+ * route already pins the agent. Mirrors NewSessionComposer's pending-
+ * prompt handoff: queue the prompt in sessionStorage by new session id,
+ * navigate, SessionRoot drains it once the pod emits `session.started`.
  */
-export function SpawnSessionCard({ workspaceSlug, agentId }: Props) {
+export function SpawnSessionCard({ workspaceSlug, agentId, agentLabel }: Props) {
   const trigger = useSessionsStore((s) => s.trigger);
   const queuePendingPrompt = usePendingPromptStore((s) => s.set);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onRun = async (e?: FormEvent) => {
-    e?.preventDefault();
+  const onSubmit = async () => {
+    if (busy) return;
     setError(null);
     setBusy(true);
     try {
@@ -47,39 +39,27 @@ export function SpawnSessionCard({ workspaceSlug, agentId }: Props) {
     }
   };
 
-  const onPromptKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      void onRun();
-    }
-  };
+  // We allow Run with no prompt (matches old behavior — the agent
+  // boots and idles waiting for a turn). canSend is therefore !busy.
+  const canSend = !busy;
+
+  const leftSlot = agentLabel ? (
+    <span className="inline-flex items-center gap-1.5 px-2 py-1 text-[13px] text-fg-muted">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      <span className="truncate max-w-[240px]">{agentLabel}</span>
+    </span>
+  ) : null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Run</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onRun} className="flex flex-col gap-2">
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={onPromptKeyDown}
-            placeholder="User prompt"
-            rows={2}
-            className="resize-y"
-          />
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[11px] text-zinc-600">
-              ⌘/Ctrl+Enter to run
-            </span>
-            <Button type="submit" disabled={busy}>
-              {busy ? "Starting…" : prompt.trim() ? "Run with prompt" : "Run"}
-            </Button>
-          </div>
-          {error && <div className="text-sm text-red-400">{error}</div>}
-        </form>
-      </CardContent>
-    </Card>
+    <ComposerShell
+      value={prompt}
+      onChange={setPrompt}
+      onSubmit={onSubmit}
+      leftSlot={leftSlot}
+      busy={busy}
+      canSend={canSend}
+      placeholder={busy ? "Starting…" : "Start something new..."}
+      error={error}
+    />
   );
 }

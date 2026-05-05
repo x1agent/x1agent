@@ -8,7 +8,7 @@ export const Card = forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-lg border border-zinc-800 bg-transparent",
+      "rounded-lg border border-border-soft bg-transparent",
       className,
     )}
     {...props}
@@ -46,7 +46,7 @@ export const CardDescription = forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn("text-sm text-zinc-400", className)}
+    className={cn("text-sm text-fg-muted", className)}
     {...props}
   />
 ));
