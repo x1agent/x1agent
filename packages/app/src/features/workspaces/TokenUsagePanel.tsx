@@ -101,7 +101,7 @@ export function TokenUsagePanel({ workspaceSlug, canManage }: Props) {
       </CardHeader>
       <CardContent className="space-y-6">
         {loading && (
-          <div className="text-sm text-zinc-400">Loading…</div>
+          <div className="text-sm text-fg-muted">Loading…</div>
         )}
         {error && (
           <div className="text-sm text-red-400">Failed to load: {error}</div>
@@ -119,12 +119,12 @@ export function TokenUsagePanel({ workspaceSlug, canManage }: Props) {
             </div>
 
             {data.byAgent.length === 0 ? (
-              <div className="text-sm text-zinc-400">
+              <div className="text-sm text-fg-muted">
                 No agent activity yet this month.
               </div>
             ) : (
               <div>
-                <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+                <div className="text-xs uppercase tracking-wide text-fg-faint mb-2">
                   By agent
                 </div>
                 <Table>
@@ -143,21 +143,21 @@ export function TokenUsagePanel({ workspaceSlug, canManage }: Props) {
                           {a.agentSlug ? (
                             <a
                               href={`/workspaces/${workspaceSlug}/agents/${a.agentSlug}`}
-                              className="text-zinc-100 hover:underline"
+                              className="text-fg hover:underline"
                             >
                               {a.agentName ?? a.agentSlug}
                             </a>
                           ) : (
-                            <span className="text-zinc-500">(deleted agent)</span>
+                            <span className="text-fg-faint">(deleted agent)</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right font-mono">
                           {USD.format(a.costUsdEstimate)}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-zinc-400">
+                        <TableCell className="text-right font-mono text-fg-muted">
                           {NUMBER.format(a.inputTokens)}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-zinc-400">
+                        <TableCell className="text-right font-mono text-fg-muted">
                           {NUMBER.format(a.outputTokens)}
                         </TableCell>
                       </TableRow>
@@ -169,7 +169,7 @@ export function TokenUsagePanel({ workspaceSlug, canManage }: Props) {
 
             {data.byModel.length > 0 && (
               <div>
-                <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+                <div className="text-xs uppercase tracking-wide text-fg-faint mb-2">
                   By model
                 </div>
                 <Table>
@@ -188,10 +188,10 @@ export function TokenUsagePanel({ workspaceSlug, canManage }: Props) {
                         <TableCell className="text-right font-mono">
                           {USD.format(m.costUsdEstimate)}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-zinc-400">
+                        <TableCell className="text-right font-mono text-fg-muted">
                           {NUMBER.format(m.inputTokens)}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-zinc-400">
+                        <TableCell className="text-right font-mono text-fg-muted">
                           {NUMBER.format(m.outputTokens)}
                         </TableCell>
                       </TableRow>
@@ -218,14 +218,14 @@ function Stat({
 }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+      <div className="text-xs uppercase tracking-wide text-fg-faint">
         {label}
       </div>
       <div
         className={
           highlight
-            ? "mt-1 text-lg font-semibold text-zinc-100"
-            : "mt-1 text-base font-mono text-zinc-200"
+            ? "mt-1 text-lg font-semibold text-fg"
+            : "mt-1 text-base font-mono text-fg"
         }
       >
         {value}

@@ -33,10 +33,10 @@ export function SignInButton() {
       </Button>
       {config.password_auth && (
         <>
-          <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-zinc-600">
-            <span className="h-px flex-1 bg-zinc-800" />
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-fg-faint/70">
+            <span className="h-px flex-1 bg-bg-muted" />
             <span>or</span>
-            <span className="h-px flex-1 bg-zinc-800" />
+            <span className="h-px flex-1 bg-bg-muted" />
           </div>
           <PasswordSignInForm />
         </>

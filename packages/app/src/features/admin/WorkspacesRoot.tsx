@@ -57,7 +57,7 @@ export function WorkspacesRoot() {
       <AppShell
         breadcrumbs={[{ label: "Admin", href: "/admin" }, { label: "Workspaces" }]}
       >
-        <div className="p-8 text-sm text-zinc-400">Platform admin only.</div>
+        <div className="p-8 text-sm text-fg-muted">Platform admin only.</div>
       </AppShell>
     );
   }
@@ -78,10 +78,10 @@ export function WorkspacesRoot() {
           <CardContent>
             {error && <div className="mb-4 text-sm text-red-400">{error}</div>}
             {!data && !error && (
-              <div className="text-sm text-zinc-500">Loading…</div>
+              <div className="text-sm text-fg-faint">Loading…</div>
             )}
             {data && data.workspaces.length === 0 && (
-              <div className="text-sm text-zinc-500">No workspaces yet.</div>
+              <div className="text-sm text-fg-faint">No workspaces yet.</div>
             )}
             {data && data.workspaces.length > 0 && (
               <Table>
@@ -99,10 +99,10 @@ export function WorkspacesRoot() {
                       <TableCell>
                         <a
                           href={`/workspaces/${w.slug}`}
-                          className="text-zinc-100 hover:underline"
+                          className="text-fg hover:underline"
                         >
                           <div className="font-medium">{w.name}</div>
-                          <div className="font-mono text-[11px] text-zinc-500">
+                          <div className="font-mono text-[11px] text-fg-faint">
                             {w.slug}
                           </div>
                         </a>
@@ -113,7 +113,7 @@ export function WorkspacesRoot() {
                       <TableCell className="text-right tabular-nums">
                         {w.agent_count}
                       </TableCell>
-                      <TableCell className="text-xs text-zinc-500">
+                      <TableCell className="text-xs text-fg-faint">
                         {new Date(w.created_at).toLocaleString()}
                       </TableCell>
                     </TableRow>

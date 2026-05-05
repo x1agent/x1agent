@@ -144,7 +144,7 @@ export function RecordTypeRoot({
   if (!collection) {
     return (
       <AppShell breadcrumbs={breadcrumbs}>
-        <div className="p-6 text-sm text-zinc-500">
+        <div className="p-6 text-sm text-fg-faint">
           {rows.length === 0 ? "Loading…" : "Collection not found."}
         </div>
       </AppShell>
@@ -162,11 +162,11 @@ export function RecordTypeRoot({
             {records.length}{" "}
             {records.length === 1 ? "record" : "records"}
           </Badge>
-          <code className="font-mono text-xs text-zinc-500">{typeSlug}</code>
+          <code className="font-mono text-xs text-fg-faint">{typeSlug}</code>
         </div>
 
         {typeInfo?.description && (
-          <p className="max-w-3xl text-sm text-zinc-400">
+          <p className="max-w-3xl text-sm text-fg-muted">
             {typeInfo.description}
           </p>
         )}
@@ -176,7 +176,7 @@ export function RecordTypeRoot({
             <CardContent className="space-y-3 p-4 text-sm">
               {typeInfo.fields.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs uppercase tracking-wide text-zinc-500">
+                  <span className="text-xs uppercase tracking-wide text-fg-faint">
                     Fields
                   </span>
                   {typeInfo.fields.map((f) => (
@@ -192,7 +192,7 @@ export function RecordTypeRoot({
               )}
               {typeInfo.relationships.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs uppercase tracking-wide text-zinc-500">
+                  <span className="text-xs uppercase tracking-wide text-fg-faint">
                     Relationships
                   </span>
                   {typeInfo.relationships.map((r) => (
@@ -212,7 +212,7 @@ export function RecordTypeRoot({
 
         {records.length > 0 && (
           <div className="relative max-w-md">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-fg-faint" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -231,18 +231,18 @@ export function RecordTypeRoot({
         )}
 
         {loading && records.length === 0 && (
-          <div className="text-sm text-zinc-500">Loading…</div>
+          <div className="text-sm text-fg-faint">Loading…</div>
         )}
 
         {!loading && !error && records.length === 0 && (
-          <div className="rounded-md border border-dashed border-zinc-900 p-8 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-dashed border-border-soft p-8 text-center text-sm text-fg-faint">
             No {typeInfo?.name ?? typeSlug} records yet. Use an agent session
             to create them.
           </div>
         )}
 
         {records.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
+          <div className="overflow-hidden rounded-md border border-border-soft">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -269,13 +269,13 @@ export function RecordTypeRoot({
                       >
                         <TableCell className="w-8">
                           {expanded ? (
-                            <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                            <ChevronDown className="h-3.5 w-3.5 text-fg-faint" />
                           ) : (
-                            <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                            <ChevronRight className="h-3.5 w-3.5 text-fg-faint" />
                           )}
                         </TableCell>
                         {columns.map((col) => (
-                          <TableCell key={col} className="text-sm text-zinc-200">
+                          <TableCell key={col} className="text-sm text-fg">
                             {renderValue(r.data[col])}
                           </TableCell>
                         ))}
@@ -290,7 +290,7 @@ export function RecordTypeRoot({
                             {Math.round(r.provenance.confidence * 100)}%
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right text-xs text-zinc-500">
+                        <TableCell className="text-right text-xs text-fg-faint">
                           {r.provenance.createdAt
                             ? new Date(
                                 r.provenance.createdAt,
@@ -302,7 +302,7 @@ export function RecordTypeRoot({
                         <TableRow className="hover:bg-transparent">
                           <TableCell
                             colSpan={columns.length + 3}
-                            className="bg-zinc-950 p-4"
+                            className="bg-bg p-4"
                           >
                             <RecordDetail
                               record={r}
@@ -318,7 +318,7 @@ export function RecordTypeRoot({
                   <TableRow>
                     <TableCell
                       colSpan={columns.length + 3}
-                      className="text-center text-sm text-zinc-500"
+                      className="text-center text-sm text-fg-faint"
                     >
                       No matches for &ldquo;{search}&rdquo;
                     </TableCell>
@@ -334,15 +334,15 @@ export function RecordTypeRoot({
 }
 
 function renderValue(v: unknown): React.ReactNode {
-  if (v === null || v === undefined) return <span className="text-zinc-600">—</span>;
+  if (v === null || v === undefined) return <span className="text-fg-faint/70">—</span>;
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   if (Array.isArray(v))
     return (
-      <span className="text-zinc-400">[{v.length} item{v.length === 1 ? "" : "s"}]</span>
+      <span className="text-fg-muted">[{v.length} item{v.length === 1 ? "" : "s"}]</span>
     );
   return (
-    <span className="font-mono text-[11px] text-zinc-500">
+    <span className="font-mono text-[11px] text-fg-faint">
       {JSON.stringify(v).slice(0, 40)}
       {JSON.stringify(v).length > 40 ? "…" : ""}
     </span>
@@ -361,19 +361,19 @@ function RecordDetail({
   return (
     <div className="grid gap-4 md:grid-cols-3">
       <div>
-        <h4 className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        <h4 className="mb-2 text-xs uppercase tracking-wide text-fg-faint">
           Fields
         </h4>
-        <div className="space-y-1.5 rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
+        <div className="space-y-1.5 rounded-md border border-border-soft bg-bg p-3 text-xs">
           {fieldEntries.length === 0 && (
-            <span className="text-zinc-600">No fields</span>
+            <span className="text-fg-faint/70">No fields</span>
           )}
           {fieldEntries.map(([k, v]) => (
             <div key={k} className="flex justify-between gap-4">
-              <span className="capitalize text-zinc-500">
+              <span className="capitalize text-fg-faint">
                 {k.replace(/_/g, " ")}
               </span>
-              <span className="truncate text-right text-zinc-200">
+              <span className="truncate text-right text-fg">
                 {typeof v === "string" || typeof v === "number" || typeof v === "boolean"
                   ? String(v)
                   : JSON.stringify(v)}
@@ -381,33 +381,33 @@ function RecordDetail({
             </div>
           ))}
         </div>
-        <div className="mt-1 text-[11px] text-zinc-600">
+        <div className="mt-1 text-[11px] text-fg-faint/70">
           id: <code className="font-mono">{record.id}</code>
         </div>
       </div>
 
       <div>
-        <h4 className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        <h4 className="mb-2 text-xs uppercase tracking-wide text-fg-faint">
           Relationships
         </h4>
-        <div className="rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs text-zinc-500">
+        <div className="rounded-md border border-border-soft bg-bg p-3 text-xs text-fg-faint">
           Walking outgoing + incoming edges lands in a follow-up slice.
         </div>
       </div>
 
       <div>
-        <h4 className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        <h4 className="mb-2 text-xs uppercase tracking-wide text-fg-faint">
           Provenance
         </h4>
-        <div className="space-y-1.5 rounded-md border border-zinc-900 bg-zinc-950 p-3 text-xs">
+        <div className="space-y-1.5 rounded-md border border-border-soft bg-bg p-3 text-xs">
           <div className="flex justify-between gap-4">
-            <span className="text-zinc-500">Source</span>
-            <span className="text-zinc-200">
+            <span className="text-fg-faint">Source</span>
+            <span className="text-fg">
               {record.provenance.source ?? "—"}
             </span>
           </div>
           <div className="flex justify-between gap-4">
-            <span className="text-zinc-500">Confidence</span>
+            <span className="text-fg-faint">Confidence</span>
             <Badge
               variant={
                 record.provenance.confidence >= 0.9 ? "success" : "secondary"
@@ -417,21 +417,21 @@ function RecordDetail({
             </Badge>
           </div>
           <div className="flex justify-between gap-4">
-            <span className="text-zinc-500">Session</span>
+            <span className="text-fg-faint">Session</span>
             {sessionId && sessionId !== record.provenance.createdBy ? (
               <a
                 href={`/workspaces/${workspaceSlug}/sessions/${sessionId}`}
-                className="font-mono text-[11px] text-zinc-200 hover:underline"
+                className="font-mono text-[11px] text-fg hover:underline"
               >
                 {sessionId.slice(0, 8)}
               </a>
             ) : (
-              <span className="font-mono text-[11px] text-zinc-500">—</span>
+              <span className="font-mono text-[11px] text-fg-faint">—</span>
             )}
           </div>
           <div className="flex justify-between gap-4">
-            <span className="text-zinc-500">Created</span>
-            <span className="text-zinc-200">
+            <span className="text-fg-faint">Created</span>
+            <span className="text-fg">
               {record.provenance.createdAt
                 ? new Date(record.provenance.createdAt).toLocaleString()
                 : "—"}
@@ -439,8 +439,8 @@ function RecordDetail({
           </div>
           {record.provenance.derivedFrom.length > 0 && (
             <div className="flex justify-between gap-4">
-              <span className="text-zinc-500">Derived from</span>
-              <span className="font-mono text-[11px] text-zinc-300">
+              <span className="text-fg-faint">Derived from</span>
+              <span className="font-mono text-[11px] text-fg-muted">
                 {record.provenance.derivedFrom.join(", ")}
               </span>
             </div>

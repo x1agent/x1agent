@@ -206,7 +206,7 @@ export function AgentMcpAttachmentsCard({
   if (!canManage) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can manage MCP attachments.
         </CardContent>
       </Card>
@@ -248,12 +248,12 @@ export function AgentMcpAttachmentsCard({
         </CardHeader>
         <CardContent>
           {attachments.length === 0 && (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No MCP servers attached. Add one below.
             </div>
           )}
           {attachments.length > 0 && (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-border-soft">
               {attachments.map((att) => {
                 const entry = entryById(att.catalog_entry_id);
                 const isOAuth = entry?.kind === "remote_oauth";
@@ -263,10 +263,10 @@ export function AgentMcpAttachmentsCard({
                 return (
                   <li key={att.id} className="flex items-start justify-between py-3">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 font-mono text-sm text-zinc-100">
+                      <div className="flex items-center gap-2 font-mono text-sm text-fg">
                         {entry?.name ?? att.catalog_entry_id}
                         {entry?.display_name && (
-                          <span className="ml-1 font-sans text-xs text-zinc-400">
+                          <span className="ml-1 font-sans text-xs text-fg-muted">
                             {entry.display_name}
                           </span>
                         )}
@@ -343,7 +343,7 @@ export function AgentMcpAttachmentsCard({
         </CardHeader>
         <CardContent>
           {catalog.length === 0 ? (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No MCP servers registered in this workspace.{" "}
               <a
                 className="underline"
@@ -354,7 +354,7 @@ export function AgentMcpAttachmentsCard({
               first.
             </div>
           ) : unattached.length === 0 ? (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               All registered MCP servers are already attached.
             </div>
           ) : (
@@ -375,7 +375,7 @@ export function AgentMcpAttachmentsCard({
                       return (
                         <SelectItem key={c.id} value={c.id} disabled={!!reason}>
                           {c.display_name ?? c.name}{" "}
-                          <span className="text-zinc-500">({c.name})</span>
+                          <span className="text-fg-faint">({c.name})</span>
                           {reason && (
                             <span className="ml-2 text-amber-400 text-xs">
                               — {reason}
@@ -394,7 +394,7 @@ export function AgentMcpAttachmentsCard({
               </div>
 
               {pickedEntry && (
-                <div className="space-y-3 rounded border border-zinc-800 p-3">
+                <div className="space-y-3 rounded border border-border-soft p-3">
                   {Object.entries(pickedEntry.manifest.env).map(
                     ([envName, decl]) => (
                       <EnvFieldRow
@@ -410,7 +410,7 @@ export function AgentMcpAttachmentsCard({
                     ),
                   )}
                   {Object.keys(pickedEntry.manifest.env).length === 0 && (
-                    <div className="text-xs text-zinc-500">
+                    <div className="text-xs text-fg-faint">
                       This MCP requires no env configuration.
                     </div>
                   )}
@@ -458,7 +458,7 @@ function EnvFieldRow({
       <Label htmlFor={`env-${envName}`} className="font-mono text-xs">
         {envName}
         {required && <span className="ml-1 text-red-400">*</span>}
-        <span className="ml-2 font-sans text-zinc-500">{label}</span>
+        <span className="ml-2 font-sans text-fg-faint">{label}</span>
       </Label>
       {decl.kind === "secret" ? (
         <Select
@@ -494,7 +494,7 @@ function EnvFieldRow({
         />
       )}
       {decl.description && (
-        <p className="text-xs text-zinc-500">{decl.description}</p>
+        <p className="text-xs text-fg-faint">{decl.description}</p>
       )}
     </div>
   );

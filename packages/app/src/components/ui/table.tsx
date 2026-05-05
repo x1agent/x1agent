@@ -21,7 +21,7 @@ export const TableHeader = forwardRef<
 >(({ className, ...props }, ref) => (
   <thead
     ref={ref}
-    className={cn("[&_tr]:border-b [&_tr]:border-zinc-900", className)}
+    className={cn("[&_tr]:border-b [&_tr]:border-border-soft", className)}
     {...props}
   />
 ));
@@ -46,7 +46,7 @@ export const TableFooter = forwardRef<
   <tfoot
     ref={ref}
     className={cn(
-      "border-t border-zinc-900 bg-zinc-950/40 font-medium [&>tr]:last:border-b-0",
+      "border-t border-border-soft bg-bg/40 font-medium [&>tr]:last:border-b-0",
       className,
     )}
     {...props}
@@ -61,7 +61,7 @@ export const TableRow = forwardRef<
   <tr
     ref={ref}
     className={cn(
-      "border-b border-zinc-900 transition-colors hover:bg-zinc-900/40 data-[state=selected]:bg-zinc-900",
+      "border-b border-border-soft transition-colors hover:bg-bg-elevated/40 data-[state=selected]:bg-bg-elevated",
       className,
     )}
     {...props}
@@ -76,7 +76,7 @@ export const TableHead = forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-10 px-3 text-left align-middle text-[11px] font-medium uppercase tracking-wide text-zinc-500 [&:has([role=checkbox])]:pr-0",
+      "h-10 px-3 text-left align-middle text-[11px] font-medium uppercase tracking-wide text-fg-faint [&:has([role=checkbox])]:pr-0",
       className,
     )}
     {...props}
@@ -105,7 +105,7 @@ export const TableCaption = forwardRef<
 >(({ className, ...props }, ref) => (
   <caption
     ref={ref}
-    className={cn("mt-4 text-sm text-zinc-500", className)}
+    className={cn("mt-4 text-sm text-fg-faint", className)}
     {...props}
   />
 ));

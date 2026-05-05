@@ -123,7 +123,7 @@ export function CanSpawnCard({
       <CardHeader>
         <CardTitle>Can spawn</CardTitle>
         <CardDescription>
-          Child agents that <span className="text-zinc-200">{parentAgentName}</span>{" "}
+          Child agents that <span className="text-fg">{parentAgentName}</span>{" "}
           is allowed to spawn. Persistent grants only — revoke
           individually below.
         </CardDescription>
@@ -171,17 +171,17 @@ export function CanSpawnCard({
         )}
 
         {loadingKey === key && grants.length === 0 && (
-          <div className="text-sm text-zinc-500">Loading grants…</div>
+          <div className="text-sm text-fg-faint">Loading grants…</div>
         )}
 
         {grants.length === 0 && loadingKey !== key && (
-          <div className="rounded-md border border-zinc-900 p-6 text-center text-sm text-zinc-500">
+          <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
             No spawn permissions yet.
           </div>
         )}
 
         {grants.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-zinc-900">
+          <div className="overflow-hidden rounded-md border border-border-soft">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -202,13 +202,13 @@ export function CanSpawnCard({
                       <TableCell>
                         {child ? (
                           <a
-                            className="text-zinc-200 hover:underline"
+                            className="text-fg hover:underline"
                             href={`/workspaces/${workspaceSlug}/agents/${child.slug}`}
                           >
                             {child.name}
                           </a>
                         ) : (
-                          <span className="font-mono text-xs text-zinc-500">
+                          <span className="font-mono text-xs text-fg-faint">
                             {childId ?? "—"}
                           </span>
                         )}
@@ -216,7 +216,7 @@ export function CanSpawnCard({
                       <TableCell>
                         <Badge variant="secondary">{g.scope}</Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-zinc-500">
+                      <TableCell className="text-xs text-fg-faint">
                         {new Date(g.granted_at).toLocaleString(undefined, {
                           month: "short",
                           day: "numeric",
@@ -231,7 +231,7 @@ export function CanSpawnCard({
                             variant="ghost"
                             size="sm"
                             onClick={() => revokeGrant(workspaceSlug, g.id)}
-                            className="text-zinc-400 hover:text-red-400"
+                            className="text-fg-muted hover:text-red-400"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>

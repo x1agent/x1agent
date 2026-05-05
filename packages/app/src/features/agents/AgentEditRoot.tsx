@@ -188,7 +188,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   if (ws && !canManage) {
     return (
       <AppShell>
-        <div className="p-8 text-sm text-zinc-400">
+        <div className="p-8 text-sm text-fg-muted">
           You need admin role to manage agents.
         </div>
       </AppShell>
@@ -375,7 +375,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           <SelectItem value="scheduled">scheduled</SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-fg-faint">
                         {kind === "worker"
                           ? "Short-lived, one session per trigger."
                           : kind === "orchestrator"
@@ -463,7 +463,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       </Select>
                     </div>
                   </div>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-fg-faint">
                     "Platform default" uses the deployment-wide AGENT_IMAGE;
                     pick a preset or a workspace image to override per agent.
                   </p>
@@ -529,7 +529,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           className="mt-2"
                         />
                       )}
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-fg-faint">
                       The list shows only models a platform admin has
                       enabled at /admin/anthropic-models. The full
                       Agent Platform (formerly Vertex AI) catalog is

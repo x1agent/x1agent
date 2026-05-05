@@ -271,7 +271,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
   if (!canManage) {
     return (
       <Card className="mt-4">
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can manage the MCP catalog.
         </CardContent>
       </Card>
@@ -296,26 +296,26 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading && <div className="text-sm text-zinc-500">Loading…</div>}
+          {loading && <div className="text-sm text-fg-faint">Loading…</div>}
           {!loading && items.length === 0 && (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No MCP servers registered yet. Add one below.
             </div>
           )}
           {!loading && items.length > 0 && (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-border-soft">
               {items.map((row) => (
                 <li key={row.id} className="flex items-start justify-between py-3">
                   <div className="min-w-0">
-                    <div className="font-mono text-sm text-zinc-100">
+                    <div className="font-mono text-sm text-fg">
                       {row.name}
                       {row.display_name && (
-                        <span className="ml-2 font-sans text-xs text-zinc-400">
+                        <span className="ml-2 font-sans text-xs text-fg-muted">
                           {row.display_name}
                         </span>
                       )}
                     </div>
-                    <div className="truncate font-mono text-xs text-zinc-500">
+                    <div className="truncate font-mono text-xs text-fg-faint">
                       {row.kind === "remote_oauth"
                         ? row.url
                         : row.image
@@ -455,7 +455,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                   spellCheck={false}
                   className="font-mono"
                 />
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-fg-faint">
                   The runtime spawns this image as a sibling container in
                   the agent's pod.
                 </p>
@@ -474,7 +474,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                   className="font-mono"
                   disabled={!!editing}
                 />
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-fg-faint">
                   On save, the platform discovers OAuth metadata at this URL
                   and registers a client via Dynamic Client Registration.
                   This may take a few seconds. URL cannot be changed after
@@ -508,7 +508,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                     className="font-mono text-xs"
                     spellCheck={false}
                   />
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-fg-faint">
                     The runtime spawns the platform's mcp-runner base
                     image (node + python + uv preinstalled) and runs
                     <code className="mx-1">{command || "<command>"} {argsText.split("\n").filter(Boolean).join(" ")}</code>
@@ -539,7 +539,7 @@ export function WorkspaceMcpCatalogPanel({ slug, canManage }: Props) {
                 className="font-mono text-xs"
                 spellCheck={false}
               />
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-fg-faint">
                 JSON object with <code>env</code> and <code>tool_scopes</code>.
                 See your MCP source for the manifest contents.
               </p>

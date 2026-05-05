@@ -110,19 +110,19 @@ export function AgentsPanel({ workspaceSlug, canManage }: Props) {
       </CardHeader>
       <CardContent className="space-y-2">
         {loadingSlug === workspaceSlug && (
-          <div className="text-sm text-zinc-400">Loading…</div>
+          <div className="text-sm text-fg-muted">Loading…</div>
         )}
         {error && <div className="text-sm text-red-400">{error}</div>}
         {actionError && (
           <div className="text-sm text-red-400">{actionError}</div>
         )}
         {rows.length === 0 && loadingSlug !== workspaceSlug && (
-          <div className="text-sm text-zinc-500">
+          <div className="text-sm text-fg-faint">
             No agents yet. Create one to get started.
           </div>
         )}
         {rows.length > 0 && (
-          <ul className="divide-y divide-zinc-800 rounded-md border border-zinc-800">
+          <ul className="divide-y divide-border-soft rounded-md border border-border-soft">
             {rows.map((a) => (
               <AgentRow
                 key={a.id}
@@ -160,11 +160,11 @@ function AgentRow({
       <div className="min-w-0 flex-1">
         <a
           href={`/workspaces/${workspaceSlug}/agents/${agent.slug}`}
-          className="text-zinc-100 hover:underline"
+          className="text-fg hover:underline"
         >
           {agent.name}
         </a>
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-fg-faint">
           {agent.runtime_type}
           {agent.schedule
             ? ` · ${describeSchedule(agent.schedule)}`
@@ -172,7 +172,7 @@ function AgentRow({
         </div>
       </div>
       <StatusPill status={status} />
-      <div className="hidden text-xs text-zinc-500 sm:block">{agent.slug}</div>
+      <div className="hidden text-xs text-fg-faint sm:block">{agent.slug}</div>
       {canManage && agent.schedule && (
         <Button
           type="button"
@@ -185,7 +185,7 @@ function AgentRow({
               ? `Resume ${agent.name}`
               : `Pause ${agent.name}`
           }
-          className="text-zinc-300 hover:text-zinc-100"
+          className="text-fg-muted hover:text-fg"
         >
           {status === "scheduled-paused" ? (
             <>
@@ -229,7 +229,7 @@ function StatusPill({ status }: { status: StatusKind }) {
             dot: "bg-transparent",
             ring: "ring-1 ring-zinc-600",
             label: "Manual",
-            color: "text-zinc-400",
+            color: "text-fg-muted",
           };
   return (
     <span

@@ -54,6 +54,7 @@ beforeAll(async () => {
     authBypass: true,
     testUserEmail: "alice@example.com",
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
   app = new Hono();
   app.route("/auth", composed.authRoutes);

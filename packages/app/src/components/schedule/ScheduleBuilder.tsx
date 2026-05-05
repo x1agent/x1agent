@@ -375,7 +375,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
 
       {state.kind !== "manual" && (
         <p
-          className={`text-xs ${preview ? "text-zinc-500" : "text-amber-400"}`}
+          className={`text-xs ${preview ? "text-fg-faint" : "text-amber-400"}`}
         >
           {preview ??
             "Unrecognized cron — the server may still accept it if the syntax is valid."}
@@ -403,7 +403,7 @@ function IntervalRow({
   onChange: (next: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-zinc-300">
+    <div className="flex items-center gap-2 text-sm text-fg-muted">
       <span>{label}</span>
       <Input
         type="number"
@@ -434,7 +434,7 @@ function TimeRow({
     "0",
   )}`;
   return (
-    <div className="flex items-center gap-2 text-sm text-zinc-300">
+    <div className="flex items-center gap-2 text-sm text-fg-muted">
       <span>{label}</span>
       <Input
         type="time"
@@ -471,7 +471,7 @@ function DayPicker({
               className={
                 active
                   ? "size-9 rounded-md border border-zinc-200 bg-zinc-100 text-sm font-medium text-zinc-900 transition-colors"
-                  : "size-9 rounded-md border border-zinc-800 bg-zinc-950 text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100"
+                  : "size-9 rounded-md border border-border-soft bg-bg text-sm text-fg-muted transition-colors hover:border-border-strong hover:text-fg"
               }
             >
               {label}

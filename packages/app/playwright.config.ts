@@ -39,6 +39,13 @@ export default defineConfig({
       timeout: 30_000,
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        // Ephemeral 32-byte hex master key so the api boots; e2e
+        // doesn't need a stable key — every run gets fresh state.
+        WORKSPACE_SECRETS_MASTER_KEY:
+          process.env.WORKSPACE_SECRETS_MASTER_KEY ||
+          "0".repeat(64),
+      },
     },
     {
       command: "astro dev --port 4322 --host 0.0.0.0",

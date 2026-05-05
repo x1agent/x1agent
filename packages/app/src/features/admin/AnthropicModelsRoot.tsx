@@ -168,7 +168,7 @@ function PriceInput({
     <label className="flex flex-col gap-0.5">
       <span
         className={`text-[10px] font-medium uppercase tracking-wider ${
-          isCustom ? "text-amber-300" : "text-zinc-500"
+          isCustom ? "text-amber-300" : "text-fg-faint"
         }`}
         title={
           isCustom
@@ -250,7 +250,7 @@ export function AnthropicModelsRoot() {
   if (status === "authenticated" && !isPlatformAdmin) {
     return (
       <AppShell>
-        <div className="p-8 text-sm text-zinc-400">
+        <div className="p-8 text-sm text-fg-muted">
           Platform admin only.
         </div>
       </AppShell>
@@ -384,10 +384,10 @@ export function AnthropicModelsRoot() {
               <div className="mb-4 text-sm text-red-400">{error}</div>
             )}
             {!data && !error && (
-              <div className="text-sm text-zinc-500">Loading…</div>
+              <div className="text-sm text-fg-faint">Loading…</div>
             )}
             {data && data.models.length === 0 && (
-              <div className="text-sm text-zinc-500">
+              <div className="text-sm text-fg-faint">
                 Provider catalog is empty. Check ANTHROPIC_PROVIDER and
                 credentials.
               </div>
@@ -408,7 +408,7 @@ export function AnthropicModelsRoot() {
                     <TableRow key={m.id}>
                       <TableCell>
                         <div className="font-medium">{m.label}</div>
-                        <div className="font-mono text-[11px] text-zinc-500">
+                        <div className="font-mono text-[11px] text-fg-faint">
                           {m.id}
                         </div>
                       </TableCell>
@@ -422,7 +422,7 @@ export function AnthropicModelsRoot() {
                             </Badge>
                             {m.last_probe_error && (
                               <div
-                                className="max-w-md truncate font-mono text-[11px] text-zinc-500"
+                                className="max-w-md truncate font-mono text-[11px] text-fg-faint"
                                 title={m.last_probe_error}
                               >
                                 {m.last_probe_error}
@@ -430,7 +430,7 @@ export function AnthropicModelsRoot() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-zinc-600">
+                          <span className="text-xs text-fg-faint/70">
                             not probed
                           </span>
                         )}

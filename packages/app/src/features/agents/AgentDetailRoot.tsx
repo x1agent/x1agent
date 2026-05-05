@@ -94,7 +94,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   if (!agent) {
     return (
       <AppShell breadcrumbs={breadcrumbs}>
-        <div className="p-6 text-sm text-zinc-500">
+        <div className="p-6 text-sm text-fg-faint">
           {bySlug[workspaceSlug] ? "Agent not found." : "Loading…"}
         </div>
       </AppShell>
@@ -125,8 +125,8 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     >
       <div className="max-w-3xl space-y-6 p-6">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">{agent.name}</h1>
-          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+          <h1 className="text-2xl font-semibold text-fg">{agent.name}</h1>
+          <div className="mt-1 flex items-center gap-2 text-xs text-fg-faint">
             <code className="font-mono">{agent.slug}</code>
             <span>·</span>
             <span>{agent.runtime_type}</span>
@@ -255,28 +255,28 @@ function SummaryRow({
 }) {
   const content = (
     <>
-      <span className="text-sm text-zinc-400">{label}</span>
+      <span className="text-sm text-fg-muted">{label}</span>
       <span
         className={`ml-auto truncate text-sm ${
-          muted ? "text-zinc-600" : "text-zinc-200"
+          muted ? "text-fg-faint/70" : "text-fg"
         }`}
       >
         {value}
       </span>
       {!disabled && (
-        <ChevronRight className="size-4 shrink-0 text-zinc-700 group-hover:text-zinc-400" />
+        <ChevronRight className="size-4 shrink-0 text-fg-faint/40 group-hover:text-fg-muted" />
       )}
     </>
   );
 
   const base = `group flex items-center gap-3 px-4 py-3 ${
-    last ? "" : "border-b border-zinc-900"
+    last ? "" : "border-b border-border-soft"
   }`;
   if (disabled) {
     return <div className={base}>{content}</div>;
   }
   return (
-    <a href={href} className={`${base} hover:bg-zinc-900/40`}>
+    <a href={href} className={`${base} hover:bg-bg-elevated/40`}>
       {content}
     </a>
   );

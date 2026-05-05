@@ -110,7 +110,7 @@ export function AgentEnvBindingsCard({
   if (!canManage) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-zinc-500">
+        <CardContent className="py-4 text-sm text-fg-faint">
           Only workspace admins and owners can manage agent env bindings.
         </CardContent>
       </Card>
@@ -142,22 +142,22 @@ export function AgentEnvBindingsCard({
         </CardHeader>
         <CardContent>
           {bindings.length === 0 && (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-fg-faint">
               No env bindings. Add one below if the agent needs a
               workspace secret in its environment.
             </div>
           )}
           {bindings.length > 0 && (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-border-soft">
               {bindings.map((b) => (
                 <li
                   key={b.id}
                   className="flex items-center justify-between py-3"
                 >
                   <div className="font-mono text-sm">
-                    <span className="text-zinc-100">{b.env_name}</span>
-                    <span className="mx-2 text-zinc-500">←</span>
-                    <span className="text-zinc-400">${"{"}{b.secret_name}{"}"}</span>
+                    <span className="text-fg">{b.env_name}</span>
+                    <span className="mx-2 text-fg-faint">←</span>
+                    <span className="text-fg-muted">${"{"}{b.secret_name}{"}"}</span>
                   </div>
                   <Button
                     type="button"

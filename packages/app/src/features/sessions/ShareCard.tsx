@@ -34,7 +34,7 @@ import { API_BASE } from "../../lib/api";
  * viewport. Everything else is shown inline.
  */
 
-type ShareType =
+export type ShareType =
   | "image"
   | "svg"
   | "site"
@@ -45,13 +45,13 @@ type ShareType =
   | "document"
   | "file";
 
-interface ShareFileEntry {
+export interface ShareFileEntry {
   path: string;
   size: number;
   content_type: string;
 }
 
-interface AgentSharePayload {
+export interface AgentSharePayload {
   share_id: string;
   share_type: ShareType;
   title: string;
@@ -61,7 +61,7 @@ interface AgentSharePayload {
   entry_point?: string | null;
 }
 
-function shareUrl(
+export function shareUrl(
   workspaceSlug: string,
   sessionId: string,
   shareId: string,
@@ -77,13 +77,13 @@ function shareUrl(
   return `${API_BASE}/api/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${shareId}/${path}`;
 }
 
-function formatSize(bytes: number): string {
+export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const TYPE_ICONS: Record<ShareType, typeof FileText> = {
+export const TYPE_ICONS: Record<ShareType, typeof FileText> = {
   image: ImageIcon,
   svg: ImageIcon,
   site: Globe,
@@ -115,9 +115,9 @@ function MaximizeOverlay({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950/95">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
-        <span className="text-sm font-medium text-zinc-100">{title}</span>
+    <div className="fixed inset-0 z-50 flex flex-col bg-bg/95">
+      <div className="flex items-center justify-between border-b border-border-soft px-4 py-2">
+        <span className="text-sm font-medium text-fg">{title}</span>
         <Button
           variant="ghost"
           size="sm"
@@ -134,7 +134,7 @@ function MaximizeOverlay({
 
 // ── Header ───────────────────────────────────────────────────────
 
-interface SubProps {
+export interface SubProps {
   payload: AgentSharePayload;
   workspaceSlug: string;
   sessionId: string;
@@ -164,14 +164,14 @@ function ShareHeader({
   return (
     <div className="mb-3 flex items-center justify-between">
       <div className="flex min-w-0 items-center gap-2">
-        <Icon className="size-4 shrink-0 text-zinc-400" />
-        <span className="truncate text-sm font-medium text-zinc-100">
+        <Icon className="size-4 shrink-0 text-fg-muted" />
+        <span className="truncate text-sm font-medium text-fg">
           {payload.title}
         </span>
         <Badge variant="secondary" className="shrink-0 text-[10px]">
           {payload.share_type}
         </Badge>
-        <span className="shrink-0 text-[10px] text-zinc-500">
+        <span className="shrink-0 text-[10px] text-fg-faint">
           {formatSize(payload.total_size)}
           {payload.files.length > 1 && ` · ${payload.files.length} files`}
         </span>
@@ -215,7 +215,7 @@ function ImageShare({ payload, workspaceSlug, sessionId }: SubProps) {
       src={src}
       alt={payload.title}
       crossOrigin="use-credentials"
-      className="max-w-full rounded-md border border-zinc-800"
+      className="max-w-full rounded-md border border-border-soft"
       style={{ maxHeight: "500px", objectFit: "contain" }}
     />
   );
@@ -249,10 +249,10 @@ function SvgShare({ payload, workspaceSlug, sessionId }: SubProps) {
   }, [src]);
 
   if (svg === null)
-    return <div className="text-xs text-zinc-500">Loading SVG…</div>;
+    return <div className="text-xs text-fg-faint">Loading SVG…</div>;
   return (
     <div
-      className="max-w-full overflow-auto rounded-md border border-zinc-800 bg-white p-2"
+      className="max-w-full overflow-auto rounded-md border border-border-soft bg-white p-2"
       style={{ maxHeight: "500px" }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
@@ -276,7 +276,7 @@ function SiteShare({
   return (
     <iframe
       src={src}
-      className="w-full rounded-md border border-zinc-800 bg-white"
+      className="w-full rounded-md border border-border-soft bg-white"
       style={{ height: maximized ? "calc(100vh - 50px)" : "500px" }}
       sandbox="allow-scripts allow-same-origin"
       title={payload.title}
@@ -342,21 +342,21 @@ function CsvShare({
   }, [src]);
 
   if (rows.length === 0)
-    return <div className="text-xs text-zinc-500">Loading CSV…</div>;
+    return <div className="text-xs text-fg-faint">Loading CSV…</div>;
 
   const [headers, ...data] = rows;
   return (
     <div
-      className="overflow-auto rounded-md border border-zinc-800"
+      className="overflow-auto rounded-md border border-border-soft"
       style={{ maxHeight: maximized ? "calc(100vh - 50px)" : "400px" }}
     >
-      <table className="w-full text-xs text-zinc-100">
-        <thead className="sticky top-0 bg-zinc-900">
+      <table className="w-full text-xs text-fg">
+        <thead className="sticky top-0 bg-bg-elevated">
           <tr>
             {(headers ?? []).map((h, i) => (
               <th
                 key={i}
-                className="whitespace-nowrap border-b border-zinc-800 px-3 py-2 text-left font-medium text-zinc-400"
+                className="whitespace-nowrap border-b border-border-soft px-3 py-2 text-left font-medium text-fg-muted"
               >
                 {h}
               </th>
@@ -367,7 +367,7 @@ function CsvShare({
           {data.map((row, ri) => (
             <tr
               key={ri}
-              className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900/40"
+              className="border-b border-border-soft last:border-0 hover:bg-bg-elevated/40"
             >
               {row.map((cell, ci) => (
                 <td key={ci} className="whitespace-nowrap px-3 py-1.5">
@@ -423,11 +423,11 @@ function JsonShare({
   }, [src, isJsonl]);
 
   if (data === null)
-    return <div className="text-xs text-zinc-500">Loading JSON…</div>;
+    return <div className="text-xs text-fg-faint">Loading JSON…</div>;
 
   return (
     <div
-      className="overflow-auto rounded-md border border-zinc-800 bg-[#1e1e1e] p-3"
+      className="overflow-auto rounded-md border border-border-soft bg-[#1e1e1e] p-3"
       style={{ maxHeight: maximized ? "calc(100vh - 50px)" : "400px" }}
     >
       <JsonView data={data as object} style={darkStyles} />
@@ -454,9 +454,9 @@ function CodeShare({ payload, workspaceSlug, sessionId }: SubProps) {
   }, [src]);
 
   if (content === null)
-    return <div className="text-xs text-zinc-500">Loading…</div>;
+    return <div className="text-xs text-fg-faint">Loading…</div>;
   return (
-    <pre className="max-h-96 overflow-auto rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">
+    <pre className="max-h-96 overflow-auto rounded-md bg-bg-elevated p-3 text-xs text-fg">
       {content}
     </pre>
   );
@@ -481,9 +481,9 @@ function DocumentShare({ payload, workspaceSlug, sessionId }: SubProps) {
   }, [src]);
 
   if (content === null)
-    return <div className="text-xs text-zinc-500">Loading…</div>;
+    return <div className="text-xs text-fg-faint">Loading…</div>;
   return (
-    <div className="max-h-96 overflow-auto text-sm text-zinc-100">
+    <div className="max-h-96 overflow-auto text-sm text-fg">
       <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {content}
       </Markdown>
@@ -506,14 +506,14 @@ function ArchiveShare({ payload, workspaceSlug, sessionId }: SubProps) {
       download
       target="_blank"
       rel="noopener"
-      className="flex items-center gap-3 rounded-md border border-zinc-800 p-4 transition-colors hover:bg-zinc-900/50"
+      className="flex items-center gap-3 rounded-md border border-border-soft p-4 transition-colors hover:bg-bg-elevated/50"
     >
-      <FileArchive className="size-8 text-zinc-400" />
+      <FileArchive className="size-8 text-fg-muted" />
       <div>
-        <div className="text-sm font-medium text-zinc-100">
+        <div className="text-sm font-medium text-fg">
           {payload.files[0]?.path || "archive"}
         </div>
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-fg-faint">
           {formatSize(payload.total_size)} — Click to download
         </div>
       </div>
@@ -536,14 +536,14 @@ function GenericFileShare({ payload, workspaceSlug, sessionId }: SubProps) {
       download
       target="_blank"
       rel="noopener"
-      className="flex items-center gap-3 rounded-md border border-zinc-800 p-4 transition-colors hover:bg-zinc-900/50"
+      className="flex items-center gap-3 rounded-md border border-border-soft p-4 transition-colors hover:bg-bg-elevated/50"
     >
-      <FileText className="size-8 text-zinc-400" />
+      <FileText className="size-8 text-fg-muted" />
       <div>
-        <div className="text-sm font-medium text-zinc-100">
+        <div className="text-sm font-medium text-fg">
           {payload.files[0]?.path || "file"}
         </div>
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-fg-faint">
           {formatSize(payload.total_size)} — Click to download
         </div>
       </div>
@@ -553,7 +553,7 @@ function GenericFileShare({ payload, workspaceSlug, sessionId }: SubProps) {
 
 // ── Main ─────────────────────────────────────────────────────────
 
-function renderBody(props: SubProps) {
+export function renderShareBody(props: SubProps) {
   const { payload } = props;
   switch (payload.share_type) {
     case "image":
@@ -610,7 +610,7 @@ export default function ShareCard({
             maximized
             onToggleMaximize={() => setMaximized(false)}
           />
-          {renderBody({ ...sub, maximized: true })}
+          {renderShareBody({ ...sub, maximized: true })}
         </div>
       </MaximizeOverlay>
     );
@@ -618,7 +618,7 @@ export default function ShareCard({
 
   return (
     <div className="px-4 py-3">
-      <div className="rounded-lg border border-zinc-800 p-4">
+      <div className="rounded-lg border border-border-soft p-4">
         <ShareHeader
           payload={payload}
           workspaceSlug={workspaceSlug}
@@ -627,7 +627,7 @@ export default function ShareCard({
           maximized={maximized}
           onToggleMaximize={() => setMaximized(!maximized)}
         />
-        {renderBody(sub)}
+        {renderShareBody(sub)}
       </div>
     </div>
   );

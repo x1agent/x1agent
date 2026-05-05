@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { SidebarContent, SidebarProvider, SidebarTrigger } from "./Sidebar";
 import { AppSidebar } from "./AppSidebar";
+import { ThemeToggle } from "../features/theme/ThemeToggle";
 
 interface AppShellProps {
   children: ReactNode;
@@ -36,7 +37,7 @@ export function AppShell({
 
   if (!chrome) {
     return (
-      <div className="min-h-svh bg-zinc-950 text-zinc-100">{children}</div>
+      <div className="min-h-svh bg-bg text-fg">{children}</div>
     );
   }
 
@@ -44,32 +45,35 @@ export function AppShell({
     <SidebarProvider>
       <AppSidebar />
       <SidebarContent>
-        <header className="flex items-center gap-3 border-b border-zinc-900 px-4 py-2.5">
+        <header className="sticky top-0 z-30 flex items-center gap-3 bg-canvas px-4 py-2.5">
           <SidebarTrigger />
           {breadcrumbs && breadcrumbs.length > 0 && (
-            <nav className="flex items-center gap-1.5 text-sm text-zinc-500">
+            <nav className="flex items-center gap-1.5 text-sm text-fg-faint">
               {breadcrumbs.map((crumb, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {crumb.href ? (
-                    <a href={crumb.href} className="hover:text-zinc-200">
+                    <a href={crumb.href} className="hover:text-fg">
                       {crumb.label}
                     </a>
                   ) : (
-                    <span className="text-zinc-400">{crumb.label}</span>
+                    <span className="text-fg-muted">{crumb.label}</span>
                   )}
                   {i < breadcrumbs.length - 1 && (
-                    <span className="text-zinc-700">/</span>
+                    <span className="text-fg-faint/50">/</span>
                   )}
                 </span>
               ))}
             </nav>
           )}
           {title && (
-            <h1 className="text-sm font-medium text-zinc-100">{title}</h1>
+            <h1 className="text-sm font-medium text-fg">{title}</h1>
           )}
-          <div className="ml-auto flex items-center gap-2">{actions}</div>
+          <div className="ml-auto flex items-center gap-2">
+            {actions}
+            <ThemeToggle />
+          </div>
         </header>
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <main className="flex-1 overflow-y-auto bg-canvas">{children}</main>
       </SidebarContent>
     </SidebarProvider>
   );

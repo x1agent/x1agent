@@ -96,20 +96,20 @@ export function ShareSessionPanel({
   };
 
   return (
-    <div className="border-b border-zinc-900 bg-zinc-950/50 px-4 py-3">
+    <div className="border-b border-border-soft bg-bg/50 px-4 py-3">
       <div className="mx-auto max-w-2xl space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">Share this session</h3>
           <button
             onClick={onClose}
-            className="text-xs text-zinc-500 hover:text-zinc-300"
+            className="text-xs text-fg-faint hover:text-fg-muted"
           >
             close
           </button>
         </div>
         <form onSubmit={grant} className="flex flex-wrap items-end gap-2">
           <div className="flex-1 min-w-[200px] space-y-1">
-            <Label htmlFor="share-email" className="text-xs text-zinc-400">
+            <Label htmlFor="share-email" className="text-xs text-fg-muted">
               Email
             </Label>
             <Input
@@ -123,7 +123,7 @@ export function ShareSessionPanel({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="share-role" className="text-xs text-zinc-400">
+            <Label htmlFor="share-role" className="text-xs text-fg-muted">
               Role
             </Label>
             <Select
@@ -155,21 +155,21 @@ export function ShareSessionPanel({
 
         {shares.length > 0 && (
           <div className="space-y-1">
-            <div className="text-xs uppercase tracking-wider text-zinc-500">
+            <div className="text-xs uppercase tracking-wider text-fg-faint">
               Current grants
             </div>
-            <ul className="divide-y divide-zinc-900 rounded border border-zinc-900">
+            <ul className="divide-y divide-border-soft rounded border border-border-soft">
               {shares.map((s) => (
                 <li
                   key={s.id}
                   className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
                 >
                   <div className="min-w-0 flex-1 truncate">
-                    <span className="font-mono text-xs text-zinc-400">
+                    <span className="font-mono text-xs text-fg-muted">
                       {s.user_id.slice(0, 8)}
                     </span>
-                    <span className="ml-2 text-zinc-500">·</span>
-                    <span className="ml-2 capitalize text-zinc-300">
+                    <span className="ml-2 text-fg-faint">·</span>
+                    <span className="ml-2 capitalize text-fg-muted">
                       {s.role}
                     </span>
                   </div>
@@ -177,7 +177,7 @@ export function ShareSessionPanel({
                     type="button"
                     onClick={() => revoke(s.user_id)}
                     disabled={busy}
-                    className="text-zinc-500 hover:text-red-400 disabled:opacity-50"
+                    className="text-fg-faint hover:text-red-400 disabled:opacity-50"
                     title="Revoke"
                   >
                     <Trash2 className="size-3.5" />

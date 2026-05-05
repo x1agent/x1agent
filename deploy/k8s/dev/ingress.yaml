@@ -1,0 +1,72 @@
+---
+# Ingress for local dev — routes the *.local.x1agent.dev hostnames
+# the api/app/preview manifests embed in their env vars.
+#
+# DNS: *.local.x1agent.dev resolves to 127.0.0.1 (public DNS). OrbStack
+# binds ingress-nginx's LoadBalancer Service to localhost ports 80/443,
+# so the browser hits the controller directly.
+#
+# TLS: cert-manager (see cert-manager.yaml) auto-creates the secret
+# `x1agent-wildcard` from the local CA Issuer. The CA root is added to
+# leaf chain validates.
+#
+# Per-preview Ingresses live elsewhere (created dynamically by the
+# preview provider in the x1-previews namespace). They reuse the same
+# cert via the wildcard SAN baked in here.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: x1agent-wildcard
+  namespace: x1agent
+spec:
+  secretName: x1agent-wildcard
+  duration: 2160h     # 90 days — cert-manager auto-renews.
+  renewBefore: 360h
+  commonName: app.local.x1agent.dev
+  dnsNames:
+    - local.x1agent.dev
+    - "*.local.x1agent.dev"
+    - "*.preview.local.x1agent.dev"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: x1agent-local-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x1agent-dev
+  namespace: x1agent
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.local.x1agent.dev
+        - api.local.x1agent.dev
+      secretName: x1agent-wildcard
+  rules:
+    - host: app.local.x1agent.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 4322
+    - host: api.local.x1agent.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001

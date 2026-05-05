@@ -45,7 +45,7 @@ export function AccountRoot() {
       <div className="p-8 space-y-6 max-w-2xl">
         <div>
           <h1 className="text-2xl font-semibold">Linked accounts</h1>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-fg-muted">
             Google accounts attached to this person. Switch between them
             without signing out.
           </p>
@@ -73,7 +73,7 @@ export function AccountRoot() {
               {accounts.length} linked to this person
             </CardDescription>
           </CardHeader>
-          <CardContent className="divide-y divide-zinc-800 border-t border-zinc-800">
+          <CardContent className="divide-y divide-border-soft border-t border-border-soft">
             {accounts.map((a) => (
               <div
                 key={a.user_id}
@@ -81,7 +81,7 @@ export function AccountRoot() {
               >
                 <div>
                   <div className="text-sm">{a.name}</div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-fg-faint">
                     {a.email}
                     {a.is_current ? " · current" : ""}
                   </div>

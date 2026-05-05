@@ -1,0 +1,66 @@
+---
+# Local-dev cert-manager setup. Mirrors what prod does in
+# deploy/helm/x1agent/templates/ingress.yaml, but with a self-signed
+# root CA instead of Let's Encrypt — the dev domains
+# (*.local.x1agent.dev) aren't internet-resolvable so DNS-01 doesn't
+# apply.
+#
+# This file is APPLIED by deploy/scripts/bootstrap-cert-manager.sh,
+# AFTER `helm upgrade --install cert-manager`. It is dev-only —
+# not read by the prod helm chart, not loaded by any prod task.
+#
+# Trust chain:
+#   SelfSigned Issuer ──signs──▶ root Certificate (x1agent-local-ca)
+#                                        │
+#                                        └─> Secret x1agent-local-ca-tls
+#                                                  │
+#                                CA Issuer (x1agent-local-ca) uses it
+#                                                  │
+#                       Ingress.cert-manager.io/issuer references it
+#                                                  │
+#                                Secret x1agent-wildcard (leaf cert)
+#
+# bootstrap-cert-manager.sh extracts the root cert from
+# Chrome / Safari trust *.local.x1agent.dev.
+
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-bootstrap
+  namespace: x1agent
+spec:
+  selfSigned: {}
+---
+# The root CA Certificate. cert-manager generates the keypair, signs
+# the cert with selfsigned-bootstrap, and stores both in the secret
+# named below. We pull the .crt out of the secret to add to the
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: x1agent-local-ca
+  namespace: x1agent
+spec:
+  isCA: true
+  commonName: x1agent local dev CA
+  subject:
+    organizations: ["x1agent local dev"]
+  secretName: x1agent-local-ca-tls
+  duration: 87600h    # 10 years; this is local dev, not prod.
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: Issuer
+    group: cert-manager.io
+---
+# CA Issuer — every Ingress in the x1agent namespace that wants a
+# trusted leaf cert annotates `cert-manager.io/issuer: x1agent-local-ca`.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: x1agent-local-ca
+  namespace: x1agent
+spec:
+  ca:
+    secretName: x1agent-local-ca-tls

@@ -7,8 +7,9 @@ import { useSessionDetailStore } from "../../stores/sessionDetailStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
-import { MessageInput } from "./MessageInput";
+import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
+import { ArtifactPanel } from "./ArtifactPanel";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
@@ -25,7 +26,7 @@ const NATS_WS_URL =
     : "ws://localhost:8080";
 
 const STATUS_COLOR: Record<SessionStatus, string> = {
-  pending: "text-zinc-400",
+  pending: "text-fg-muted",
   running: "text-blue-400",
   complete: "text-emerald-400",
   failed: "text-red-400",
@@ -50,6 +51,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     loadInitial,
     appendEvent,
     setError,
+    setSession,
   } = useSessionDetailStore();
 
   const [verbose, setVerbose] = useState(false);
@@ -60,6 +62,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const takePendingPrompt = usePendingPromptStore((s) => s.take);
   const pendingPromptSentRef = useRef(false);
   const resumeAction = useSessionsStore((s) => s.resume);
+  const cancelAction = useSessionsStore((s) => s.cancel);
 
   const onResume = async () => {
     setResuming(true);
@@ -69,6 +72,20 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     } catch (err) {
       setError(sessionId, (err as Error).message);
       setResuming(false);
+    }
+  };
+
+  const onPause = async () => {
+    if (!agent) return;
+    try {
+      const cancelled = await cancelAction(workspaceSlug, agent.id, sessionId);
+      // Reflect the new status in the detail store so the composer
+      // disables, the status pill flips, and the Resume affordance
+      // appears without waiting for a NATS event the pod may not get
+      // around to publishing before the user looks.
+      setSession(sessionId, cancelled);
+    } catch (err) {
+      setError(sessionId, (err as Error).message);
     }
   };
 
@@ -273,32 +290,33 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />
-      <div className="flex h-full min-h-[calc(100svh-56px)] flex-col">
-        <div className="flex flex-wrap items-center gap-3 border-b border-zinc-900 px-4 py-2 text-xs">
+      <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
+        <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs">
           {parent && (
             <a
               href={`/workspaces/${workspaceSlug}/sessions/${parent.session_id}`}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+              className="inline-flex items-center gap-1 rounded-md border border-border-soft px-2 py-0.5 text-[11px] text-fg-muted hover:border-border-strong hover:text-fg"
               title={`spawned by session ${parent.session_id.slice(0, 8)}`}
             >
-              <span className="text-zinc-500">from</span>
+              <span className="text-fg-faint">from</span>
               <span>{parent.agent.name}</span>
             </a>
           )}
           {session?.resumed_from && (
             <a
               href={`/workspaces/${workspaceSlug}/sessions/${session.resumed_from}`}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+              className="inline-flex items-center gap-1 rounded-md border border-border-soft px-2 py-0.5 text-[11px] text-fg-muted hover:border-border-strong hover:text-fg"
               title={`continues session ${session.resumed_from.slice(0, 8)}`}
             >
-              <span className="text-zinc-500">resumed from</span>
+              <span className="text-fg-faint">resumed from</span>
               <span className="font-mono">
                 {session.resumed_from.slice(0, 8)}
               </span>
             </a>
           )}
           {children.length > 0 && (
-            <span className="text-zinc-500">
+            <span className="text-fg-faint">
               {children.length}{" "}
               {children.length === 1 ? "child" : "children"}
             </span>
@@ -309,7 +327,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 {session.status}
               </span>
             )}
-            <span className="text-zinc-600">{events.length} events</span>
+            <span className="text-fg-faint/70">{events.length} events</span>
             {session &&
               (session.status === "complete" ||
                 session.status === "failed") && (
@@ -327,7 +345,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               variant="ghost"
               size="sm"
               onClick={() => setVerbose((v) => !v)}
-              className="h-7 text-[11px] text-zinc-400"
+              className="h-7 text-[11px] text-fg-muted"
             >
               {verbose ? "Compact" : "Verbose"}
             </Button>
@@ -335,8 +353,8 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         </div>
 
         {children.length > 0 && (
-          <div className="border-b border-zinc-900 bg-zinc-950 px-4 py-2">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+          <div className="border-b border-border-soft bg-bg px-4 py-2">
+            <div className="mb-1 text-[11px] uppercase tracking-wide text-fg-faint">
               Children
             </div>
             <div className="flex flex-wrap gap-2">
@@ -344,13 +362,13 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 <a
                   key={ch.id}
                   href={`/workspaces/${workspaceSlug}/sessions/${ch.id}`}
-                  className="inline-flex items-center gap-2 rounded-md border border-zinc-800 px-2 py-1 text-xs hover:border-zinc-700 hover:bg-zinc-900/60"
+                  className="inline-flex items-center gap-2 rounded-md border border-border-soft px-2 py-1 text-xs hover:border-border-strong hover:bg-bg-elevated/60"
                 >
                   <Badge variant={STATUS_VARIANT[ch.status]}>
                     {ch.status}
                   </Badge>
-                  <span className="text-zinc-200">{ch.agent.name}</span>
-                  <span className="text-zinc-600">
+                  <span className="text-fg">{ch.agent.name}</span>
+                  <span className="text-fg-faint/70">
                     {new Date(ch.triggered_at).toLocaleTimeString(undefined, {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -377,19 +395,36 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           sessionId={sessionId}
         />
 
-        <MessageInput
-          onSend={sendMessage}
-          disabled={disabled}
-          placeholder={
-            disabled
-              ? session?.status === "complete"
-                ? "Session ended."
-                : session?.status === "failed"
-                  ? "Session failed."
-                  : "Connecting…"
-              : "Send a message to the agent…"
-          }
-        />
+        <div className="px-4 pt-3 pb-[60px]">
+          <div className="mx-auto max-w-3xl">
+            <TurnComposer
+              onSend={sendMessage}
+              disabled={disabled}
+              running={session?.status === "running"}
+              onStop={onPause}
+              statusLabel={
+                disabled
+                  ? session?.status === "complete"
+                    ? "Session ended"
+                    : session?.status === "failed"
+                      ? "Session failed"
+                      : "Connecting…"
+                  : null
+              }
+              placeholder={
+                disabled
+                  ? session?.status === "complete"
+                    ? "Session ended."
+                    : session?.status === "failed"
+                      ? "Session failed."
+                      : "Connecting…"
+                  : "Send a message to the agent…"
+              }
+            />
+          </div>
+        </div>
+        </div>
+        <ArtifactPanel />
       </div>
     </AppShell>
   );

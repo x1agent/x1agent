@@ -50,6 +50,13 @@ vars:
   ANTHROPIC_API_KEY:
     source: env
     default: ""
+  # AES-256-GCM key for the workspace-secrets domain. Generate with
+  # `openssl rand -hex 32`. Used by the api at boot to decrypt secrets
+  # the operator pastes into workspace settings (e.g. Stripe key for
+  # MCP attachments). Loss of this key = loss of every encrypted
+  # workspace secret in postgres.
+  WORKSPACE_SECRETS_MASTER_KEY:
+    source: env
   API_INTERNAL_TOKEN:
     source: env
     default: "dev-internal-token-change-me"
@@ -166,6 +173,21 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/app.yaml
+  # cert-manager Issuer + root CA Certificate for *.local.x1agent.dev.
+  # Applied by deploy/scripts/bootstrap-cert-manager.sh first (mise
+  # dev:cert-manager runs before dev:setup); re-applying here is a no-op.
+  # Keeping it in the deployments list means `devspace deploy --dependent`
+  # / fresh-cluster runs don't drift.
+  cert-manager-issuer:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/cert-manager.yaml
+  # Ingress + leaf Certificate (cert-manager auto-creates secret
+  # x1agent-wildcard from the local CA Issuer above).
+  ingress:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/ingress.yaml
 
 dev:
   # Port-forward Postgres to the host so integration tests + migration
@@ -240,6 +262,8 @@ dev:
         value: ${GITHUB_APP_WEBHOOK_SECRET}
       - name: ANTHROPIC_API_KEY
         value: ${ANTHROPIC_API_KEY}
+      - name: WORKSPACE_SECRETS_MASTER_KEY
+        value: ${WORKSPACE_SECRETS_MASTER_KEY}
       - name: NATS_URL
         value: nats://nats:4222
       - name: NATS_CA_FILE

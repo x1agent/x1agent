@@ -27,15 +27,15 @@ export function AccountSwitcher() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="gap-2">
-          <span className="text-sm text-zinc-300">{user.email}</span>
+          <span className="text-sm text-fg-muted">{user.email}</span>
           <ChevronsUpDown className="h-3 w-3 opacity-70" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
         <DropdownMenuItem disabled className="flex flex-col items-start">
-          <span className="text-sm text-zinc-100">{user.name}</span>
-          <span className="text-xs text-zinc-500">{user.email}</span>
+          <span className="text-sm text-fg">{user.name}</span>
+          <span className="text-xs text-fg-faint">{user.email}</span>
         </DropdownMenuItem>
 
         {accounts.filter((a) => !a.is_current).length > 0 && (

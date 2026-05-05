@@ -25,7 +25,7 @@ export function AdminHomeRoot() {
   if (status === "authenticated" && !isPlatformAdmin) {
     return (
       <AppShell breadcrumbs={[{ label: "Admin" }]}>
-        <div className="p-8 text-sm text-zinc-400">Platform admin only.</div>
+        <div className="p-8 text-sm text-fg-muted">Platform admin only.</div>
       </AppShell>
     );
   }
@@ -37,7 +37,7 @@ export function AdminHomeRoot() {
       <div className="max-w-5xl space-y-6 p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-fg-muted">
             Cluster-wide settings that cut across workspaces. Everything
             here is platform-admin only.
           </p>
@@ -48,10 +48,10 @@ export function AdminHomeRoot() {
             const Icon = item.icon;
             return (
               <a key={item.href} href={item.href} className="block">
-                <Card className="h-full transition-colors hover:border-zinc-700">
+                <Card className="h-full transition-colors hover:border-border-strong">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
-                      <Icon className="size-4 text-zinc-400" />
+                      <Icon className="size-4 text-fg-muted" />
                       {item.title}
                     </CardTitle>
                     <CardDescription>{item.description}</CardDescription>

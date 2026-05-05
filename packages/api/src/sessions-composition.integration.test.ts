@@ -48,6 +48,7 @@ beforeAll(async () => {
     authBypass: true,
     testUserEmail: "admin@example.com",
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
 
   app = new Hono();
@@ -89,6 +90,7 @@ async function login(email: string): Promise<string> {
     authBypass: true,
     testUserEmail: email,
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
   const app2 = new Hono();
   app2.route("/auth", fresh.authRoutes);
@@ -166,7 +168,7 @@ describe("session routes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("cancel marks a pending session failed", async () => {
+  it("cancel marks a pending session complete with cancelled errorMessage", async () => {
     const c = await login("admin@example.com");
     const id = await newAgent(c, "to-cancel", null);
 
@@ -190,7 +192,7 @@ describe("session routes", () => {
     const body = (await cancelled.json()) as {
       session: { status: string; error_message: string | null };
     };
-    expect(body.session.status).toBe("failed");
+    expect(body.session.status).toBe("complete");
     expect(body.session.error_message).toBe("cancelled");
   });
 

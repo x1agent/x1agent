@@ -47,6 +47,7 @@ beforeAll(async () => {
     authBypass: true,
     testUserEmail: "admin@example.com",
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
 
   app = new Hono();
@@ -85,6 +86,7 @@ async function login(email: string): Promise<string> {
     authBypass: true,
     testUserEmail: email,
     platformName: "x1agent",
+    workspaceSecretsMasterKey: "0".repeat(64),
   });
   // replace the app's auth routes with the fresh composition for this login
   const fresh = new Hono();
