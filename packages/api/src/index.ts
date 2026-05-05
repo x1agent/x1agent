@@ -48,6 +48,7 @@ async function resolveDefaultAnthropicModel(): Promise<string | undefined> {
 import { startJobWatcher } from "./k8s/job-watcher.js";
 import { reapStaleBranches } from "./shared-agent-resources/reap-branches.js";
 import { reconcileSharedResourceStatuses } from "./shared-agent-resources/reconcile-status.js";
+import { createPeriodicScheduler } from "./orchestration/periodic-scheduler.js";
 
 /**
  * Hot-reload cleanup registry. `bun --hot` re-evaluates this module
@@ -95,6 +96,13 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
     })();
   });
 }
+
+// One scheduler per process. Owns every in-process periodic tick.
+// Tasks register before start(); start() fires runOnStart kicks and
+// schedules the recurring timers. registerCleanup wires stop() into
+// SIGTERM + hot-reload teardown.
+const scheduler = createPeriodicScheduler();
+registerCleanup(() => scheduler.stop());
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:4321";
 const API_PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:30001";
@@ -345,34 +353,22 @@ const SCHEDULER_INTERVAL_MS = Number(
 const schedulerDisabled = process.env.SCHEDULER_DISABLED === "true";
 
 if (!schedulerDisabled) {
-  let ticking = false;
-  const tick = async () => {
-    if (ticking) return;
-    ticking = true;
-    try {
+  scheduler.register({
+    name: "session-scheduler",
+    intervalMs: SCHEDULER_INTERVAL_MS,
+    jitterMs: Math.floor(SCHEDULER_INTERVAL_MS * 0.1),
+    runOnStart: true,
+    fn: async () => {
       const r = await tickScheduler();
       if (r.created > 0 || r.errors > 0) {
         console.log(
-          `[scheduler] considered=${r.considered} created=${r.created} skipped=${r.skippedDuplicate} errors=${r.errors}`,
+          `[session-scheduler] considered=${r.considered} created=${r.created} skipped=${r.skippedDuplicate} errors=${r.errors}`,
         );
       }
-    } catch (err) {
-      console.warn("[scheduler] tick crashed:", (err as Error).message);
-    } finally {
-      ticking = false;
-    }
-  };
-
-  const handle = setInterval(() => {
-    void tick();
-  }, SCHEDULER_INTERVAL_MS);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
-    (handle as unknown as { unref: () => void }).unref();
-  }
-  registerCleanup(() => clearInterval(handle));
-  void tick();
+    },
+  });
   console.log(
-    `[scheduler] scan loop started (every ${SCHEDULER_INTERVAL_MS}ms — this is the DB-scan cadence, NOT per-agent run cadence; each agent runs on its own schedule)`,
+    `[session-scheduler] registered (every ${SCHEDULER_INTERVAL_MS}ms — this is the DB-scan cadence, NOT per-agent run cadence; each agent runs on its own schedule)`,
   );
 }
 
@@ -386,28 +382,17 @@ const REAPER_INTERVAL_MS = Number(
 );
 const reaperDisabled = process.env.GRANT_REAPER_DISABLED === "true";
 if (!reaperDisabled) {
-  let reaping = false;
-  const reap = async () => {
-    if (reaping) return;
-    reaping = true;
-    try {
+  scheduler.register({
+    name: "grants-reaper",
+    intervalMs: REAPER_INTERVAL_MS,
+    jitterMs: Math.floor(REAPER_INTERVAL_MS * 0.1),
+    runOnStart: true,
+    fn: async () => {
       const n = await permissionGrants.reapDanglingSessionGrants();
-      if (n > 0) console.log(`[grants] reaped ${n} dangling session grants`);
-    } catch (err) {
-      console.warn("[grants] reaper crashed:", (err as Error).message);
-    } finally {
-      reaping = false;
-    }
-  };
-  const handle = setInterval(() => {
-    void reap();
-  }, REAPER_INTERVAL_MS);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
-    (handle as unknown as { unref: () => void }).unref();
-  }
-  registerCleanup(() => clearInterval(handle));
-  void reap();
-  console.log(`[grants] reaper started (interval=${REAPER_INTERVAL_MS}ms)`);
+      if (n > 0) console.log(`[grants-reaper] reaped ${n} dangling session grants`);
+    },
+  });
+  console.log(`[grants-reaper] registered (interval=${REAPER_INTERVAL_MS}ms)`);
 }
 
 const natsUrl = process.env.NATS_URL || "";
@@ -447,11 +432,14 @@ const BRANCH_REAPER_STALE_AFTER_MS = Number(
   process.env.BRANCH_REAPER_STALE_AFTER_MS || 30 * 24 * 60 * 60 * 1000,
 );
 if (process.env.BRANCH_REAPER_DISABLED !== "true") {
-  let reaping = false;
-  const reap = async () => {
-    if (reaping) return;
-    reaping = true;
-    try {
+  scheduler.register({
+    name: "branch-reaper",
+    intervalMs: BRANCH_REAPER_INTERVAL_MS,
+    // Daily-ish cadence; jitter by an hour so multi-replica deploys
+    // don't all hammer the cluster on the stroke of midnight.
+    jitterMs: 60 * 60 * 1000,
+    runOnStart: true,
+    fn: async () => {
       const r = await reapStaleBranches({
         sql: composedSql,
         sharedResources: composedSharedResources,
@@ -467,27 +455,10 @@ if (process.env.BRANCH_REAPER_DISABLED !== "true") {
           `[branch-reaper] pg=${r.postgresReaped} redis=${r.redisReaped} errors=${r.errors}`,
         );
       }
-    } catch (err) {
-      console.warn(
-        "[branch-reaper] tick crashed:",
-        (err as Error).message,
-      );
-    } finally {
-      reaping = false;
-    }
-  };
-  const handle = setInterval(() => {
-    void reap();
-  }, BRANCH_REAPER_INTERVAL_MS);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
-    (handle as unknown as { unref: () => void }).unref();
-  }
-  registerCleanup(() => clearInterval(handle));
-  // Initial kick is fire-and-forget — reaping on boot is cheap; the
-  // API doesn't block startup on it.
-  void reap();
+    },
+  });
   console.log(
-    `[branch-reaper] started (interval=${BRANCH_REAPER_INTERVAL_MS}ms stale_after=${BRANCH_REAPER_STALE_AFTER_MS}ms)`,
+    `[branch-reaper] registered (interval=${BRANCH_REAPER_INTERVAL_MS}ms stale_after=${BRANCH_REAPER_STALE_AFTER_MS}ms)`,
   );
 }
 
@@ -501,11 +472,12 @@ const RESOURCE_RECONCILE_INTERVAL_MS = Number(
   process.env.RESOURCE_RECONCILE_INTERVAL_MS || 15_000,
 );
 if (process.env.RESOURCE_RECONCILE_DISABLED !== "true") {
-  let reconciling = false;
-  const reconcile = async () => {
-    if (reconciling) return;
-    reconciling = true;
-    try {
+  scheduler.register({
+    name: "shared-resources-reconciler",
+    intervalMs: RESOURCE_RECONCILE_INTERVAL_MS,
+    jitterMs: Math.floor(RESOURCE_RECONCILE_INTERVAL_MS * 0.1),
+    runOnStart: true,
+    fn: async () => {
       const r = await reconcileSharedResourceStatuses({
         sharedResources: composedSharedResources,
         postgresProvisioner: composedPostgresProvisioner ?? null,
@@ -514,28 +486,13 @@ if (process.env.RESOURCE_RECONCILE_DISABLED !== "true") {
       });
       if (r.flipped > 0) {
         console.log(
-          `[resources] reconciled ${r.flipped}/${r.checked} to running`,
+          `[shared-resources-reconciler] reconciled ${r.flipped}/${r.checked} to running`,
         );
       }
-    } catch (err) {
-      console.warn(
-        "[resources] reconcile tick crashed:",
-        (err as Error).message,
-      );
-    } finally {
-      reconciling = false;
-    }
-  };
-  const handle = setInterval(() => {
-    void reconcile();
-  }, RESOURCE_RECONCILE_INTERVAL_MS);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
-    (handle as unknown as { unref: () => void }).unref();
-  }
-  registerCleanup(() => clearInterval(handle));
-  void reconcile();
+    },
+  });
   console.log(
-    `[resources] status reconciler started (interval=${RESOURCE_RECONCILE_INTERVAL_MS}ms)`,
+    `[shared-resources-reconciler] registered (interval=${RESOURCE_RECONCILE_INTERVAL_MS}ms)`,
   );
 }
 
@@ -638,11 +595,12 @@ if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
   const { systemClock } = await import("@x1agent/kernel");
   const batchApi = sharedKubeConfig.makeApiClient(k8s.BatchV1Api);
   const namespace = process.env.K8S_NAMESPACE || "x1agent";
-  let reconciling = false;
-  const reconcile = async () => {
-    if (reconciling) return;
-    reconciling = true;
-    try {
+  scheduler.register({
+    name: "session-reconciler",
+    intervalMs: SESSION_RECONCILE_INTERVAL_MS,
+    jitterMs: Math.floor(SESSION_RECONCILE_INTERVAL_MS * 0.1),
+    runOnStart: true,
+    fn: async () => {
       const r = await reconcileSessionStatuses({
         sessions: composedSessions,
         clock: systemClock,
@@ -683,28 +641,13 @@ if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
       });
       if (r.flipped > 0 || r.errors > 0) {
         console.log(
-          `[sessions] reconciled ${r.flipped}/${r.checked} ghost sessions (errors=${r.errors})`,
+          `[session-reconciler] reconciled ${r.flipped}/${r.checked} ghost sessions (errors=${r.errors})`,
         );
       }
-    } catch (err) {
-      console.warn(
-        "[sessions] reconcile tick crashed:",
-        (err as Error).message,
-      );
-    } finally {
-      reconciling = false;
-    }
-  };
-  const handle = setInterval(() => {
-    void reconcile();
-  }, SESSION_RECONCILE_INTERVAL_MS);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
-    (handle as unknown as { unref: () => void }).unref();
-  }
-  registerCleanup(() => clearInterval(handle));
-  void reconcile();
+    },
+  });
   console.log(
-    `[sessions] reconciler started (interval=${SESSION_RECONCILE_INTERVAL_MS}ms grace=${SESSION_RECONCILE_GRACE_MS}ms)`,
+    `[session-reconciler] registered (interval=${SESSION_RECONCILE_INTERVAL_MS}ms grace=${SESSION_RECONCILE_GRACE_MS}ms)`,
   );
 }
 
@@ -751,6 +694,9 @@ if (providerNats && process.env.CHECKUP_TIMER !== "disabled") {
   });
   registerCleanup(() => checkup.stop());
 }
+
+// All periodic tasks were registered above; kick the timers now.
+scheduler.start();
 
 console.log(`[api] listening on :${PORT}`);
 
