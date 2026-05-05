@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "../lib/utils";
+import { RailCanvas } from "./RailCanvas";
 
 interface SidebarCtx {
   open: boolean;
@@ -86,19 +87,29 @@ export function Sidebar({ children }: { children: ReactNode }) {
         )}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col rail-gradient transition-transform",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col rail-gradient overflow-hidden transition-transform",
             open ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          {children}
+          <RailCanvas />
+          <div
+            aria-hidden
+            className="rail-noise pointer-events-none absolute inset-0"
+          />
+          <div className="relative z-10 flex flex-1 flex-col min-h-0">{children}</div>
         </aside>
       </>
     );
   }
 
   return (
-    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col rail-gradient">
-      {children}
+    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col rail-gradient overflow-hidden">
+      <RailCanvas />
+      <div
+        aria-hidden
+        className="rail-noise pointer-events-none absolute inset-0"
+      />
+      <div className="relative z-10 flex flex-1 flex-col min-h-0">{children}</div>
     </aside>
   );
 }
