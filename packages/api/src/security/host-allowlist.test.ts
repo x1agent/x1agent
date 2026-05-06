@@ -111,4 +111,41 @@ describe("buildHostAllowlist", () => {
     expect(isAllowed("evil-rebind.com")).toBe(false);
     expect(isAllowed("attacker-x1agent.dev")).toBe(false); // doesn't end with .local.x1agent.dev
   });
+
+  // In-cluster Kubernetes Service traffic. Sidecars / workers dial
+  // the api at `http://api:30001/...`; the resulting Host header is
+  // `api:30001` (or just the bare shortname after port-strip). Same
+  // for .svc / .svc.cluster.local FQDN variants.
+  test("accepts bare Kubernetes Service shortnames", () => {
+    const { isAllowed } = buildHostAllowlist({
+      urls: ["https://app.example.com"],
+      baseDomain: "example.com",
+    });
+    expect(isAllowed("api")).toBe(true);
+    expect(isAllowed("api:30001")).toBe(true);
+    expect(isAllowed("postgres")).toBe(true);
+    expect(isAllowed("nats")).toBe(true);
+    expect(isAllowed("messaging-slack")).toBe(true);
+  });
+
+  test("accepts FQDN .svc / .svc.cluster.local Service hostnames", () => {
+    const { isAllowed } = buildHostAllowlist({
+      urls: ["https://app.example.com"],
+      baseDomain: "example.com",
+    });
+    expect(isAllowed("api.x1agent.svc.cluster.local")).toBe(true);
+    expect(isAllowed("api.x1agent.svc")).toBe(true);
+    expect(isAllowed("postgres.x1agent.svc.cluster.local:5432")).toBe(true);
+  });
+
+  test("rejects non-Service-shaped hostnames with dots not in allowlist", () => {
+    const { isAllowed } = buildHostAllowlist({
+      urls: ["https://app.example.com"],
+      baseDomain: "example.com",
+    });
+    // Two-label external host (no allowlist match, not .svc): rejected.
+    expect(isAllowed("evil.io")).toBe(false);
+    // .com TLD with random subdomain: rejected.
+    expect(isAllowed("attacker.com")).toBe(false);
+  });
 });
