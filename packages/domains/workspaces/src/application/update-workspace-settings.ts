@@ -1,4 +1,9 @@
-import { DomainError, type UserId, type WorkspaceSlug } from "@x1agent/kernel";
+import {
+  DomainError,
+  ValidationError,
+  type UserId,
+  type WorkspaceSlug,
+} from "@x1agent/kernel";
 import type { WorkspaceRepository } from "../ports/workspace-repository.js";
 import type { MembershipRepository } from "../ports/membership-repository.js";
 import {
@@ -25,6 +30,10 @@ export interface UpdateWorkspaceSettingsDeps {
  * domain layer (`parseWorkspaceSettingsPatch`) so a malicious or
  * stale client can't write keys that the domain doesn't know about.
  * Returns the post-merge workspace so the route can echo it back.
+ *
+ * Empty / fully-stripped patch is rejected with a ValidationError so
+ * the client never sees a 200 + "saved" response that didn't change
+ * anything (would be misleading on a typoed key or a stale UI).
  */
 export async function updateWorkspaceSettings(
   deps: UpdateWorkspaceSettingsDeps,
@@ -39,12 +48,15 @@ export async function updateWorkspaceSettings(
 
   const patch: Partial<WorkspaceSettings> = parseWorkspaceSettingsPatch(rawPatch);
 
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError(
+      "settings",
+      "no recognized settings keys in patch — body must include at least one valid setting",
+    );
+  }
+
   const ws = await deps.workspaces.findBySlug(slug);
   if (!ws) throw new WorkspaceNotFoundError(slug);
-
-  // Empty patch = no-op. Return current state so callers don't
-  // accidentally trigger a write on every save.
-  if (Object.keys(patch).length === 0) return ws;
 
   const updated = await deps.workspaces.updateSettings(ws.id, patch);
   if (!updated) throw new WorkspaceNotFoundError(slug);

@@ -34,13 +34,13 @@ const MODE_OPTIONS: readonly ModeOption[] = [
     value: "on_attended",
     title: "On — interactive runs only",
     blurb:
-      "Allow attaching OAuth MCPs to orchestrator agents. The runtime injects the triggering user's token only for sessions started manually from the UI. Cron- and parent-spawned runs that hit an OAuth MCP receive `permission_required` cleanly so the agent can react.",
+      "Allow attaching OAuth MCPs to orchestrator agents. Today this means the agent edit UI accepts the attachment and the existing per-tool runtime checks decide whether a token is available — sessions without a driving user (cron, parent-spawned) receive `permission_required` on the first OAuth tool call. The intent of this mode is also documented for the future runtime work that distinguishes attended vs unattended dispatch.",
   },
   {
     value: "on",
     title: "On — all runs",
     blurb:
-      "Reserved. Behaves like `On — interactive runs only` today; later releases will fall back to a workspace-designated user's tokens for unattended runs. Pick this if you want that behavior the moment it lands without re-configuring.",
+      "Reserved for a future release. Today behaves the same as `On — interactive runs only` (the unattended-token fallback isn't wired yet). Picking this declares the intent so a workspace admin doesn't need to re-configure when that backing work lands.",
   },
 ];
 
@@ -81,6 +81,36 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
       <Card>
         <CardContent className="py-8 text-sm text-fg-muted">
           Loading workspace settings…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Don't show the radio cards in an error state — rendering "Off"
+  // when we couldn't actually read the policy is a security-relevant
+  // lie. Surface the failure and let the operator retry.
+  if (status === "error" || !ws) {
+    return (
+      <Card>
+        <CardContent className="space-y-3 py-6 text-sm">
+          <p className="text-rose-500">
+            Could not load workspace settings. The displayed state of
+            this policy would be a guess, so the form is hidden until
+            the read succeeds.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Force a refetch by clearing this slug's status.
+              useWorkspaceSettingsStore.setState((prev) => ({
+                statusBySlug: { ...prev.statusBySlug, [slug]: "idle" },
+              }));
+              void load(slug);
+            }}
+          >
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );
