@@ -1,3 +1,10 @@
+## [1.10.4](https://github.com/x1agent/x1agent/compare/v1.10.3...v1.10.4) (2026-05-06)
+
+
+### Bug Fixes
+
+* **mcp:** RFC 9728 suffix-on-origin variant in OAuth discovery ([#51](https://github.com/x1agent/x1agent/issues/51)) ([3199737](https://github.com/x1agent/x1agent/commit/3199737fb6422fc86ec65552225a56849852fbdf))
+
 ## [1.10.3](https://github.com/x1agent/x1agent/compare/v1.10.2...v1.10.3) (2026-05-06)
 
 
