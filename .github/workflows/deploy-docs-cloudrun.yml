@@ -1,26 +1,26 @@
 name: Deploy docs to Cloud Run
 
-# Builds the docs site on every push to main that touches docs/, then
-# deploys it to the `x1agent-docs` Cloud Run service backing
-# docs.x1agent.com. (Was previously GitHub Pages — that workflow has
-# been removed; Cloud Run is the only path now.)
+# Builds the docs site on every push to main and deploys it to the
+# `x1agent-docs` Cloud Run service backing docs.x1agent.com. Runs on
+# every main commit (no `paths:` filter) so the docs site can never
+# fall behind main HEAD — the workflow is fast enough that the cost
+# of running it for non-docs commits is negligible compared to the
+# cost of a stale docs site that doesn't reflect what shipped.
+#
+# No PR previews. They created a class of bug where image-hash-cached
+# revisions tagged from a prior PR (`--no-traffic --tag pr-N`) would
+# silently hijack the production deploy and pin live traffic to an
+# older revision. Removed entirely; if a doc preview is wanted on a
+# PR, it's a separate dedicated workflow.
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'docs/**'
-      - '.github/workflows/deploy-docs-cloudrun.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'docs/**'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
-  pull-requests: write
 
 concurrency:
   group: deploy-docs-${{ github.ref }}
@@ -71,8 +71,7 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy production (push to main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Deploy production
         working-directory: docs
         run: |
           gcloud run deploy "$SERVICE" \
@@ -82,52 +81,17 @@ jobs:
             --allow-unauthenticated \
             --quiet
 
-      - name: Deploy PR preview (no-traffic, tagged)
-        if: github.event_name == 'pull_request'
-        id: preview
-        working-directory: docs
+      # Belt-and-suspenders: explicitly roll 100% traffic to the
+      # latest revision. Without this, `gcloud run deploy --source .`
+      # can silently no-op when its built image hashes the same as a
+      # revision that already exists in the service — which leaves
+      # traffic pinned to whatever was previously serving 100%, even
+      # though the workflow reports success. Cheap, idempotent, makes
+      # the deploy actually visible.
+      - name: Roll traffic to latest revision
         run: |
-          TAG="pr-${{ github.event.pull_request.number }}"
-          gcloud run deploy "$SERVICE" \
-            --source . \
+          gcloud run services update-traffic "$SERVICE" \
             --region "$GCP_REGION" \
             --project "$GCP_PROJECT_ID" \
-            --allow-unauthenticated \
-            --tag "$TAG" \
-            --no-traffic \
+            --to-latest \
             --quiet
-          URL=$(gcloud run services describe "$SERVICE" \
-            --region "$GCP_REGION" \
-            --project "$GCP_PROJECT_ID" \
-            --format="json" | \
-            jq -r ".status.traffic[] | select(.tag==\"$TAG\") | .url")
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Comment preview URL on PR
-        if: github.event_name == 'pull_request' && steps.preview.outputs.url != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const url = '${{ steps.preview.outputs.url }}';
-            const body = `Docs preview: ${url}`;
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.user.type === 'Bot' && c.body.startsWith('Docs preview:'));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
