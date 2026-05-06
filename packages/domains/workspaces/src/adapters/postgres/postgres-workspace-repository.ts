@@ -58,14 +58,30 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
     id: WorkspaceId,
     patch: Partial<WorkspaceSettings>,
   ) {
-    // jsonb || does shallow merge. The application layer already
-    // pre-validates the patch via parseWorkspaceSettingsPatch so any
-    // keys that land here are typed and known. JSON.stringify gives
-    // us a primitive that bypasses postgres-js's `JSONValue` type
-    // narrowing — we cast the resulting string to jsonb in SQL.
+    // Read-merge-write so the merge happens in TypeScript and the
+    // patch lands in postgres as a single, fully-formed jsonb object.
+    //
+    // The previous `settings || ${JSON.stringify(patch)}::jsonb`
+    // approach ran afoul of postgres-js's parameter encoding: the
+    // stringified JSON came through the wire as a JSON *string* (not
+    // an object), so the `||` operator concatenated into a jsonb
+    // ARRAY instead of merging. Resulting rows looked like
+    // `[{}, "{...}", "{...}"]` and the parser fell back to defaults
+    // on read — i.e. user clicks Save, UI shows "Saved", then snaps
+    // back to the default.
+    //
+    // Two round-trips here is fine; this method is admin-only and
+    // runs at human-toggle frequency. Atomic write of the post-merge
+    // object also avoids the subtlety of having two callers race
+    // through partial merges on different keys.
+    const current = await this.findById(id);
+    if (!current) return null;
+    const merged: WorkspaceSettings = { ...current.settings, ...patch };
     const rows = await this.sql<Row[]>`
       UPDATE workspaces
-      SET settings = settings || ${JSON.stringify(patch)}::jsonb
+      SET settings = ${this.sql.json(
+        merged as unknown as Parameters<typeof this.sql.json>[0],
+      )}
       WHERE id = ${id}
       RETURNING id, slug, name, created_at, settings
     `;
