@@ -1,3 +1,10 @@
+## [1.10.2](https://github.com/x1agent/x1agent/compare/v1.10.1...v1.10.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* **workspaces:** correct JSONB merge in updateSettings ([#50](https://github.com/x1agent/x1agent/issues/50)) ([2e68ad3](https://github.com/x1agent/x1agent/commit/2e68ad350c5b3dd501635d47adba64878e31268d))
+
 ## [1.10.1](https://github.com/x1agent/x1agent/compare/v1.10.0...v1.10.1) (2026-05-06)
 
 
