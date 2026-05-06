@@ -1,3 +1,17 @@
+# [1.9.0](https://github.com/x1agent/x1agent/compare/v1.8.2...v1.9.0) (2026-05-06)
+
+
+### Bug Fixes
+
+* **api:** cookie Secure attribute + Host header allowlist ([#45](https://github.com/x1agent/x1agent/issues/45)) ([1fa1379](https://github.com/x1agent/x1agent/commit/1fa1379336ad20dabe4e6806565d979a3a2fe27c))
+
+
+### Features
+
+* **app:** port marketing shader nebula to sidebar background ([#46](https://github.com/x1agent/x1agent/issues/46)) ([00c2af9](https://github.com/x1agent/x1agent/commit/00c2af9b3889633701f2bb7df0a9ae433edf2509))
+* **messaging:** per-bot Slack onboarding + BSL 1.1 license ([#42](https://github.com/x1agent/x1agent/issues/42)) ([03e0ffc](https://github.com/x1agent/x1agent/commit/03e0ffc57843a3c440e41d7ade1b45720df5e826)), closes [#7](https://github.com/x1agent/x1agent/issues/7) [#3](https://github.com/x1agent/x1agent/issues/3) [#2](https://github.com/x1agent/x1agent/issues/2) [#2](https://github.com/x1agent/x1agent/issues/2) [#3](https://github.com/x1agent/x1agent/issues/3) [#1](https://github.com/x1agent/x1agent/issues/1) [#2](https://github.com/x1agent/x1agent/issues/2) [#5](https://github.com/x1agent/x1agent/issues/5) [#7](https://github.com/x1agent/x1agent/issues/7) [#2](https://github.com/x1agent/x1agent/issues/2) [#5](https://github.com/x1agent/x1agent/issues/5) [#1](https://github.com/x1agent/x1agent/issues/1) [#13](https://github.com/x1agent/x1agent/issues/13) [#27](https://github.com/x1agent/x1agent/issues/27) [#3](https://github.com/x1agent/x1agent/issues/3) [#12](https://github.com/x1agent/x1agent/issues/12) [#20](https://github.com/x1agent/x1agent/issues/20) [#31](https://github.com/x1agent/x1agent/issues/31) [#9](https://github.com/x1agent/x1agent/issues/9) [#4](https://github.com/x1agent/x1agent/issues/4) [#16](https://github.com/x1agent/x1agent/issues/16) [#25](https://github.com/x1agent/x1agent/issues/25) [#21](https://github.com/x1agent/x1agent/issues/21) [#10](https://github.com/x1agent/x1agent/issues/10) [#11](https://github.com/x1agent/x1agent/issues/11) [#9](https://github.com/x1agent/x1agent/issues/9)
+* **messaging:** wire Slack platform credentials through Helm + ESO ([#44](https://github.com/x1agent/x1agent/issues/44)) ([7fe4b9c](https://github.com/x1agent/x1agent/commit/7fe4b9cb754456a3cae36ca8c808d7e2172dddef))
+
 ## [1.8.2](https://github.com/x1agent/x1agent/compare/v1.8.1...v1.8.2) (2026-05-05)
 
 ## [1.8.1](https://github.com/x1agent/x1agent/compare/v1.8.0...v1.8.1) (2026-05-05)
