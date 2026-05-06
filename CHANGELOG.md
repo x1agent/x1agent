@@ -1,3 +1,10 @@
+## [1.10.1](https://github.com/x1agent/x1agent/compare/v1.10.0...v1.10.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **install:** rotate-surrealdb-password script + render wiring ([#49](https://github.com/x1agent/x1agent/issues/49)) ([5fb9ca4](https://github.com/x1agent/x1agent/commit/5fb9ca44de298deb3392a2eac41119586c699ba9))
+
 # [1.10.0](https://github.com/x1agent/x1agent/compare/v1.9.0...v1.10.0) (2026-05-06)
 
 
