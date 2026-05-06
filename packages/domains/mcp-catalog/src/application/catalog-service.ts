@@ -229,6 +229,16 @@ export class CatalogService {
     // 3. Persist the catalog entry first so we have an id for the
     // oauth_clients FK. Encrypt the DCR client_secret with the same
     // master key the workspace_secrets store uses.
+    // Persist the operator-supplied MCP endpoint URL — that's what the
+    // pod-side proxy POSTs requests to. Do NOT substitute
+    // discovery.resource.resource here: per RFC 9728 that field is the
+    // OAuth audience identifier (used in `resource=` on token requests),
+    // and several real MCPs (Linear, …) declare it as the origin while
+    // their actual MCP endpoint sits at a sub-path like `/mcp` or
+    // `/sse`. Storing the audience as the endpoint URL meant the proxy
+    // hit the origin and 404'd. If audience-bound tokens (RFC 8707)
+    // become a requirement, track that as its own column rather than
+    // overloading `url`.
     const entry = await this.repo.upsert({
       workspaceId: input.workspaceId,
       name: input.name,
@@ -237,7 +247,7 @@ export class CatalogService {
       image: null,
       command: null,
       args: [],
-      url: discovery.resource.resource ?? rawUrl,
+      url: rawUrl,
       oauthAuthorizationServer:
         discovery.authorizationServer as unknown,
       manifest: input.manifest,

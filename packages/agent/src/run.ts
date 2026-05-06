@@ -67,6 +67,28 @@ async function postToSidecar(type: string, payload: unknown): Promise<void> {
   }
 }
 
+// Poll the sidecar's /health until it answers or we hit the timeout.
+// The sidecar performs git clones + NATS connect before binding :9090,
+// so it routinely takes 1-3s longer than the agent to be ready. Without
+// this gate the early POSTs (session.started + the gh-credential
+// bootstrap) race the sidecar's HTTP listener and silently no-op,
+// leaving `gh` unauthenticated and the session.started event lost.
+async function waitForSidecar(timeoutMs = 30_000): Promise<boolean> {
+  const start = Date.now();
+  let delay = 100;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${sidecarUrl}/health`);
+      if (res.ok) return true;
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(delay * 2, 1000);
+  }
+  return false;
+}
+
 // ── SSE stream on :3100 ─────────────────────────────────
 
 const eventBuffer: unknown[] = [];
@@ -143,6 +165,19 @@ if (prompt) {
   inputChannel.push(prompt);
 }
 
+// ── Wait for the sidecar before any POST/GET to it ─────
+
+// Both the credential bootstrap below and `session.started` immediately
+// after the system-prompt block need the sidecar's :9090 to be listening.
+// The sidecar's startup includes git clones + NATS connect before the
+// HTTP listener binds, so it lands later than the agent on most starts.
+const sidecarReady = await waitForSidecar();
+if (!sidecarReady) {
+  console.warn(
+    "[agent] sidecar did not become ready within 30s — gh CLI will be unauthenticated and session.started may be lost",
+  );
+}
+
 // ── Sidecar credential bootstrap for gh CLI ────────────
 
 // The sidecar exposes /git/credential — pull a token once at startup so
@@ -156,9 +191,15 @@ try {
       process.env.GH_TOKEN = body.token;
       console.log("[agent] gh CLI configured via sidecar credential");
     }
+  } else {
+    console.warn(
+      `[agent] gh credential bootstrap got HTTP ${credResp.status} — gh CLI will be unauthenticated`,
+    );
   }
-} catch {
-  // No credential configured — gh still works for public repos.
+} catch (err) {
+  console.warn(
+    `[agent] gh credential bootstrap failed: ${(err as Error).message}`,
+  );
 }
 
 // ── MCP servers ─────────────────────────────────────────

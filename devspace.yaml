@@ -117,6 +117,20 @@ images:
     dockerfile: ./deploy/docker/preview.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  # Sibling-container proxy that holds per-user OAuth bearers for
+  # remote_oauth MCP attachments (Linear, Sentry, Notion, …). The
+  # job-watcher injects this image into the session pod spec; if the
+  # tag isn't present in the local docker daemon, every session that
+  # attaches a remote_oauth MCP gets stuck in ImagePullBackOff and the
+  # MCP appears dead to the agent. Has to be built alongside agent
+  # and sidecar for any local session that uses Zone-3 MCPs.
+  mcp-oauth-proxy:
+    image: x1agent-mcp-oauth-proxy
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/mcp-oauth-proxy.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
   app:
     image: x1agent-app
     tags:
