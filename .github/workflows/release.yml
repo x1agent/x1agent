@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# The default secrets.GITHUB_TOKEN can't push to main because the
+# branch ruleset rejects pushes that don't go through a PR. We mint
+# a short-lived installation token from a dedicated GitHub App
+# (x1agent-release-bot) which IS in the ruleset's bypass list, and
+# use that for both the initial checkout (so subsequent git pushes
+# inherit the credentials) and the semantic-release run.
 permissions:
   contents: write
   issues: write
@@ -13,9 +19,20 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Mint release-bot token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Persist the App token as the git remote credential so
+          # @semantic-release/git's `git push --tags HEAD:main` rides
+          # in as the App, which has bypass.
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -25,5 +42,5 @@ jobs:
 
       - name: Semantic Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: bunx semantic-release
