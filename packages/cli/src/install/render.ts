@@ -194,7 +194,14 @@ export function render(input: RenderInput): RenderResult {
     `  graphSurrealdb:\n` +
     `    image:\n` +
     `      repository: ${q(arRepo + "/graph-surrealdb")}\n` +
-    `      tag: ${q(tag)}\n`;
+    `      tag: ${q(tag)}\n` +
+    // Override the chart's literal default with the install-config value.
+    // Generated + rotated via deploy/scripts/rotate-surrealdb-password.sh.
+    // When unset we omit the key so the chart's `| default ...` runs —
+    // keeps fresh installs working before the rotation script is run.
+    (env.get("SURREALDB_ROOT_PASSWORD")
+      ? `    rootPassword: ${q(env.get("SURREALDB_ROOT_PASSWORD")!)}\n`
+      : "");
 
   const valuesPath = resolve(
     input.chartDir,
