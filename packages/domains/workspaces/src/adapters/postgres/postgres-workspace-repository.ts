@@ -60,12 +60,12 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
   ) {
     // jsonb || does shallow merge. The application layer already
     // pre-validates the patch via parseWorkspaceSettingsPatch so any
-    // keys that land here are typed and known.
+    // keys that land here are typed and known. JSON.stringify gives
+    // us a primitive that bypasses postgres-js's `JSONValue` type
+    // narrowing — we cast the resulting string to jsonb in SQL.
     const rows = await this.sql<Row[]>`
       UPDATE workspaces
-      SET settings = settings || ${this.sql.json(
-        patch as Record<string, unknown>,
-      )}::jsonb
+      SET settings = settings || ${JSON.stringify(patch)}::jsonb
       WHERE id = ${id}
       RETURNING id, slug, name, created_at, settings
     `;

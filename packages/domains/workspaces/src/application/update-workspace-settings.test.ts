@@ -12,6 +12,7 @@ import {
   updateWorkspaceSettings,
   WorkspaceNotFoundError,
 } from "./update-workspace-settings.js";
+import { ValidationError } from "@x1agent/kernel";
 import {
   InsufficientRoleError,
   NotAMemberError,
@@ -106,19 +107,21 @@ describe("updateWorkspaceSettings", () => {
     ).rejects.toBeInstanceOf(NotAMemberError);
   });
 
-  test("invalid mode is silently dropped (no-op patch)", async () => {
-    const ws = await updateWorkspaceSettings(
-      { workspaces, memberships },
-      admin,
-      slugA,
-      { oauthMcpsOnOrchestrators: "yolo" },
-    );
-    // The unknown value got stripped by the parser; the underlying
-    // setting stays at its prior value (still the default).
-    expect(ws.settings.oauthMcpsOnOrchestrators).toBe("off");
+  test("invalid mode value rejected (no silent no-op)", async () => {
+    await expect(
+      updateWorkspaceSettings(
+        { workspaces, memberships },
+        admin,
+        slugA,
+        { oauthMcpsOnOrchestrators: "yolo" },
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // Confirm the underlying setting wasn't touched.
+    const reloaded = await workspaces.findBySlug(slugA);
+    expect(reloaded?.settings.oauthMcpsOnOrchestrators).toBe("off");
   });
 
-  test("unknown keys in patch are stripped", async () => {
+  test("unknown keys are stripped, but a recognized key still wins", async () => {
     const ws = await updateWorkspaceSettings(
       { workspaces, memberships },
       admin,
@@ -127,36 +130,50 @@ describe("updateWorkspaceSettings", () => {
     );
     // Mode applied, foo not present in settings.
     expect(ws.settings.oauthMcpsOnOrchestrators).toBe("on");
-    expect((ws.settings as Record<string, unknown>).foo).toBeUndefined();
+    expect(
+      (ws.settings as unknown as Record<string, unknown>).foo,
+    ).toBeUndefined();
   });
 
-  test("empty patch is a no-op (no write)", async () => {
-    const before = await workspaces.findBySlug(slugA);
-    const after = await updateWorkspaceSettings(
-      { workspaces, memberships },
-      admin,
-      slugA,
-      {},
-    );
-    expect(after.settings).toEqual(before!.settings);
+  test("empty patch rejected with ValidationError (no silent ok)", async () => {
+    await expect(
+      updateWorkspaceSettings(
+        { workspaces, memberships },
+        admin,
+        slugA,
+        {},
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("patch with only unknown keys → rejected (no silent ok)", async () => {
+    await expect(
+      updateWorkspaceSettings(
+        { workspaces, memberships },
+        admin,
+        slugA,
+        { someFutureKey: true } as unknown,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   test("patches do not affect other settings (shallow merge)", async () => {
-    // Pre-set a non-default value so we can confirm a follow-up
-    // patch on a *different* (future) key wouldn't blow it away.
+    // Set a non-default value first.
     await updateWorkspaceSettings(
       { workspaces, memberships },
       admin,
       slugA,
       { oauthMcpsOnOrchestrators: "on" },
     );
-    // No-op patch (unknown future key), should preserve the policy.
+    // Apply a patch carrying a recognized key + an unknown one. The
+    // recognized key updates; the unknown is silently dropped (we
+    // reject only when *every* key is unrecognized).
     const ws = await updateWorkspaceSettings(
       { workspaces, memberships },
       admin,
       slugA,
-      { someFutureKey: true } as unknown,
+      { oauthMcpsOnOrchestrators: "on_attended", futureKey: true } as unknown,
     );
-    expect(ws.settings.oauthMcpsOnOrchestrators).toBe("on");
+    expect(ws.settings.oauthMcpsOnOrchestrators).toBe("on_attended");
   });
 });
