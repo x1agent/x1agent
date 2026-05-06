@@ -144,11 +144,15 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
       <CardContent className="space-y-4">
         {installations.length === 0 && (
           <div className="text-sm text-fg-faint">
-            No installations. Visit{" "}
-            <a className="underline" href="/account">
-              /account
+            No GitHub installations yet. Visit{" "}
+            <a
+              className="underline"
+              href={`/workspaces/${workspaceSlug}/github`}
+            >
+              workspace → GitHub
             </a>{" "}
-            to install the GitHub App first.
+            to install the x1agent GitHub App on a user or org first;
+            then come back here to link a repo.
           </div>
         )}
 

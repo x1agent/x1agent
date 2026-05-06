@@ -62,7 +62,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "linear",
     homepage: "https://linear.app/",
     kind: "remote_oauth",
-    mcp_url: "https://mcp.linear.app/sse",
+    mcp_url: "https://mcp.linear.app/mcp",
     tags: ["issues", "tickets", "project-management"],
   },
   {
@@ -82,7 +82,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "sentry",
     homepage: "https://sentry.io/",
     kind: "remote_oauth",
-    mcp_url: "https://mcp.sentry.dev/sse",
+    mcp_url: "https://mcp.sentry.dev/mcp",
     tags: ["errors", "observability", "monitoring"],
   },
   {
@@ -122,7 +122,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "asana",
     homepage: "https://asana.com/",
     kind: "remote_oauth",
-    mcp_url: null,
+    mcp_url: "https://mcp.asana.com/sse",
     tags: ["tasks", "project-management"],
   },
   {
@@ -152,7 +152,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "cloudflare",
     homepage: "https://www.cloudflare.com/",
     kind: "remote_oauth",
-    mcp_url: null,
+    mcp_url: "https://mcp.cloudflare.com/mcp",
     tags: ["dns", "edge", "infrastructure"],
   },
   {
@@ -192,7 +192,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "intercom",
     homepage: "https://www.intercom.com/",
     kind: "remote_oauth",
-    mcp_url: null,
+    mcp_url: "https://mcp.intercom.com/sse",
     tags: ["support", "customer", "messaging"],
   },
   {
@@ -202,7 +202,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "zapier",
     homepage: "https://zapier.com/",
     kind: "remote_oauth",
-    mcp_url: null,
+    mcp_url: "https://mcp.zapier.com/mcp",
     tags: ["automation", "integrations"],
   },
 
