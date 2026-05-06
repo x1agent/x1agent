@@ -14,11 +14,18 @@ export interface AttachInput {
   createdBy: string | null;
   /**
    * The agent's kind ('worker' | 'orchestrator' | 'scheduled'). When
-   * the catalog entry is remote_oauth, only worker is allowed —
-   * remote OAuth requires an interactive user driving the session.
-   * The route layer passes this in after looking up the agent.
+   * the catalog entry is remote_oauth, the gate runs only for
+   * non-worker kinds — workers always have a driving user, so token
+   * availability isn't in question.
    */
   agentKind: "worker" | "orchestrator" | "scheduled";
+  /**
+   * Resolved from the workspace's `oauthMcpsOnOrchestrators` setting:
+   * `true` when the policy is `on_attended` or `on`, `false` when
+   * `off`. The route layer fetches the workspace and converts; the
+   * service stays free of workspace-domain dependencies.
+   */
+  workspaceAllowsOauthOnNonWorkers: boolean;
 }
 
 /**
@@ -50,14 +57,20 @@ export class AttachmentService {
       );
     }
 
-    // Remote OAuth MCPs run server-side and the agent acts AS the
-    // user driving the session. They can't be attached to long-lived
-    // unattended agents — those run without a present user, so there
-    // would be no token to inject.
-    if (entry.kind === "remote_oauth" && input.agentKind !== "worker") {
+    // Remote OAuth MCPs use the driving user's OAuth token. Workers
+    // always have a triggering user; orchestrator/scheduled runs
+    // sometimes don't (cron, parent_spawn). The workspace setting
+    // `oauthMcpsOnOrchestrators` decides whether to allow the
+    // attachment up-front; the runtime returns `permission_required`
+    // cleanly for sessions that turn out to lack a driving user.
+    if (
+      entry.kind === "remote_oauth" &&
+      input.agentKind !== "worker" &&
+      !input.workspaceAllowsOauthOnNonWorkers
+    ) {
       throw new ValidationError(
         "catalog_entry_id",
-        `remote_oauth MCPs require an interactive user — only attachable to worker agents (got ${input.agentKind})`,
+        `this workspace does not allow attaching OAuth MCPs to ${input.agentKind} agents — a workspace admin can change the policy under workspace settings → security`,
       );
     }
 

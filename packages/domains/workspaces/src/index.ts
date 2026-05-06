@@ -1,5 +1,6 @@
 // Domain
 export * from "./domain/workspace.js";
+export * from "./domain/workspace-settings.js";
 export * from "./domain/membership.js";
 export * from "./domain/group.js";
 
@@ -14,6 +15,7 @@ export type {
 // Application
 export * from "./application/assert-role-for-slug.js";
 export * from "./application/create-workspace.js";
+export * from "./application/update-workspace-settings.js";
 
 // Adapters
 export { PostgresWorkspaceRepository } from "./adapters/postgres/postgres-workspace-repository.js";
