@@ -704,11 +704,30 @@ export function compose(env: CompositionEnv): Composition {
     c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
     // Surface agent kind so downstream routes can apply
-    // kind-specific policy (remote_oauth MCPs require worker).
+    // kind-specific policy (remote_oauth MCPs require worker, unless
+    // the workspace policy below relaxes that).
     c.set(
       "agentKind",
       (agent.kind as "worker" | "orchestrator" | "scheduled") ?? "worker",
     );
+    // Resolve the workspace's OAuth-on-orchestrator policy here so
+    // each downstream route doesn't need its own workspace lookup.
+    // `off` blocks attach; `on_attended` and `on` allow it. Fail
+    // closed (= deny attach) if the lookup throws — a transient
+    // postgres blip on this side route shouldn't take out every
+    // agent-page mutation, just the OAuth-MCP attach surface.
+    let workspaceAllowsOauthOnNonWorkers = false;
+    try {
+      const ws = await workspaces.findById(m.workspaceId as never);
+      workspaceAllowsOauthOnNonWorkers = ws
+        ? ws.settings.oauthMcpsOnOrchestrators !== "off"
+        : false;
+    } catch (err) {
+      console.warn(
+        `[requireAgent] workspace settings lookup failed for ${m.workspaceId}: ${(err as Error).message} — treating as policy-off`,
+      );
+    }
+    c.set("workspaceAllowsOauthOnNonWorkers", workspaceAllowsOauthOnNonWorkers);
     await next();
   };
 
