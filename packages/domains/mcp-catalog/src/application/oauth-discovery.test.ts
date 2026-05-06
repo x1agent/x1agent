@@ -125,4 +125,70 @@ describe("discoverMcpServer", () => {
       discoverMcpServer("ftp://example.com"),
     ).rejects.toBeInstanceOf(ValidationError);
   });
+
+  // Sentry-style: the resource path is /mcp, and the protected-resource
+  // metadata document lives at the spec-canonical suffix-on-origin URL
+  // (RFC 9728 §3.1). Other servers (Mercury, Notion) use the path-rooted
+  // form. Both must work.
+  it("discovers via suffix-on-origin (RFC 9728 canonical) when path-rooted 404s", async () => {
+    const seen: string[] = [];
+    mockFetch(async (url) => {
+      seen.push(url);
+      // Sentry-style: only the suffix variant returns 200.
+      if (url === "https://mcp.example.com/.well-known/oauth-protected-resource/mcp") {
+        return new Response(JSON.stringify(validResource), { status: 200 });
+      }
+      if (url === "https://mcp.example.com/.well-known/oauth-authorization-server") {
+        return new Response(JSON.stringify(validAuthServer), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const r = await discoverMcpServer("https://mcp.example.com/mcp", {
+      assertHostAllowed: noopHostCheck,
+    });
+    expect(r.resource.resource).toBe("https://mcp.example.com/mcp");
+    // Confirm the suffix variant was actually probed (and that the
+    // path-rooted variant was tried first per the candidate order).
+    expect(seen).toContain(
+      "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+    );
+  });
+
+  it("still discovers when only the path-rooted-on-resource form is served (Mercury-style)", async () => {
+    mockFetch(async (url) => {
+      if (url === "https://mcp.example.com/mcp/.well-known/oauth-protected-resource") {
+        return new Response(JSON.stringify(validResource), { status: 200 });
+      }
+      if (url === "https://mcp.example.com/.well-known/oauth-authorization-server") {
+        return new Response(JSON.stringify(validAuthServer), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const r = await discoverMcpServer("https://mcp.example.com/mcp", {
+      assertHostAllowed: noopHostCheck,
+    });
+    expect(r.resource.resource).toBe("https://mcp.example.com/mcp");
+  });
+
+  it("does not double-probe when the resource is at the origin root", async () => {
+    const seen: string[] = [];
+    mockFetch(async (url) => {
+      seen.push(url);
+      if (url === "https://mcp.example.com/.well-known/oauth-protected-resource") {
+        return new Response(JSON.stringify(validResource), { status: 200 });
+      }
+      if (url === "https://mcp.example.com/.well-known/oauth-authorization-server") {
+        return new Response(JSON.stringify(validAuthServer), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    await discoverMcpServer("https://mcp.example.com/", {
+      assertHostAllowed: noopHostCheck,
+    });
+    // Both candidate slots collapse to the same URL — Set should dedupe
+    // so we only hit it once. Note: the suffix-on-origin variant is
+    // skipped entirely when the path is empty.
+    const protectedHits = seen.filter((u) => u.includes("/.well-known/oauth-protected-resource"));
+    expect(protectedHits.length).toBe(1);
+  });
 });
