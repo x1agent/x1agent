@@ -82,7 +82,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "sentry",
     homepage: "https://sentry.io/",
     kind: "remote_oauth",
-    mcp_url: "https://mcp.sentry.dev/sse",
+    mcp_url: "https://mcp.sentry.dev/mcp",
     tags: ["errors", "observability", "monitoring"],
   },
   {
