@@ -7,6 +7,10 @@ import {
 import type { WorkspaceRepository } from "../ports/workspace-repository.js";
 import type { MembershipRepository } from "../ports/membership-repository.js";
 import type { Workspace } from "../domain/workspace.js";
+import {
+  WORKSPACE_SETTINGS_DEFAULTS,
+  type WorkspaceSettings,
+} from "../domain/workspace-settings.js";
 import type { Membership } from "../domain/membership.js";
 
 let idCounter = 1;
@@ -32,8 +36,15 @@ export class InMemoryWorkspaceRepository implements WorkspaceRepository {
       slug: input.slug,
       name: input.name,
       createdAt: new Date(),
+      settings: { ...WORKSPACE_SETTINGS_DEFAULTS },
     };
     this.byId.set(id, w);
+    return w;
+  }
+  async updateSettings(id: WorkspaceId, patch: Partial<WorkspaceSettings>) {
+    const w = this.byId.get(id);
+    if (!w) return null;
+    w.settings = { ...w.settings, ...patch };
     return w;
   }
 }
