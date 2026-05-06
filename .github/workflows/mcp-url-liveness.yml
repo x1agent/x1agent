@@ -1,0 +1,100 @@
+name: MCP curated URL liveness
+
+# Probes every `mcp_url` in packages/app/src/features/mcp/seed.ts to
+# catch cases where a third-party MCP provider has moved or
+# deprecated their endpoint (e.g., Sentry's /sse → /mcp at HTTP 410
+# Gone). Runs nightly + manually; deliberately NOT on every PR so a
+# transient outage on someone else's infrastructure can't block our
+# own work.
+#
+# Failure mode: opens an issue with the dead URLs. The seed list is
+# updated by hand; no automatic PR.
+
+on:
+  schedule:
+    # 14:30 UTC (06:30 PT). After most providers' weekly maintenance
+    # windows, before US/EU operators start their day.
+    - cron: "30 14 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe each seeded MCP URL
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Extract every non-null mcp_url string from seed.ts.
+          urls=$(grep -E '^\s+mcp_url:\s*"https?://' packages/app/src/features/mcp/seed.ts \
+            | sed -E 's/.*mcp_url:\s*"([^"]+)".*/\1/')
+          dead=""
+          for u in $urls; do
+            code=$(curl -sIL --max-time 10 -o /dev/null -w "%{http_code}" "$u" || echo "000")
+            echo "  $u -> HTTP $code"
+            # Alive: 200, 401 (unauth), 403 (forbidden but reachable),
+            # 405 (method-not-allowed but reachable). Anything else =
+            # broken: dead DNS, 404, 410 Gone, 5xx persistent, etc.
+            case "$code" in
+              200|401|403|405) ;;
+              *) dead="$dead\n  - $u (HTTP $code)" ;;
+            esac
+          done
+          if [ -n "$dead" ]; then
+            {
+              echo "dead<<EOF"
+              echo -e "$dead"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "::warning::One or more curated MCP URLs are dead. See job output."
+            exit 1
+          fi
+          echo "All curated MCP URLs alive."
+
+      - name: Open / update tracking issue on failure
+        if: failure() && steps.probe.outputs.dead != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const dead = `${{ steps.probe.outputs.dead }}`;
+            const title = "Curated MCP URL liveness failure";
+            const body = [
+              "Nightly liveness probe found dead URLs in",
+              "`packages/app/src/features/mcp/seed.ts`:",
+              "",
+              dead,
+              "",
+              "Update the seed entries (or set `mcp_url: null` if the",
+              "provider has no public MCP today) and close this issue.",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n");
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "mcp-liveness",
+            });
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["mcp-liveness"],
+              });
+            }

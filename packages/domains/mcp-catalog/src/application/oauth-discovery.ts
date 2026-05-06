@@ -243,11 +243,29 @@ export async function discoverMcpServer(
     throw new ValidationError("url", "must use https");
   }
 
-  // Resource metadata: try the resource-path well-known first
-  // (RFC 9728 default), then fall back to origin-rooted.
+  // Resource metadata candidates. Per RFC 9728 §3.1, when the resource
+  // has a path component the well-known URI is constructed by appending
+  // that path *after* the well-known suffix on the origin (the
+  // "suffix-on-origin" form). For resources at the origin root, the
+  // well-known is just `<origin>/.well-known/oauth-protected-resource`.
+  //
+  // Real MCP servers don't all do the same thing:
+  //   - Sentry uses suffix-on-origin           (https://mcp.sentry.dev/.well-known/oauth-protected-resource/mcp)
+  //   - Some servers use path-rooted-on-resource (the resource serves the doc itself)
+  //   - Some servers expose only the origin root form
+  //
+  // Try in order: the spec-canonical suffix form first, then the
+  // resource-path-rooted form, then origin-root. We dedupe so a
+  // root-resource ("/" path) doesn't probe the same URL twice.
   const base = trimTrailingSlash(parsed.toString());
   const origin = parsed.origin;
+  const path = parsed.pathname.replace(/\/$/, ""); // strip trailing slash; "" for root
   const resourceCandidates = [
+    // RFC 9728 canonical when the resource has a path. Skip when path
+    // is empty — that case collapses into the origin-root form below.
+    ...(path !== ""
+      ? [`${origin}/.well-known/oauth-protected-resource${path}`]
+      : []),
     `${base}/.well-known/oauth-protected-resource`,
     `${origin}/.well-known/oauth-protected-resource`,
   ];
