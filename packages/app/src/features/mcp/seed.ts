@@ -62,7 +62,7 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     simple_icon: "linear",
     homepage: "https://linear.app/",
     kind: "remote_oauth",
-    mcp_url: "https://mcp.linear.app/sse",
+    mcp_url: "https://mcp.linear.app/mcp",
     tags: ["issues", "tickets", "project-management"],
   },
   {
