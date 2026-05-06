@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/x1agent/x1agent/compare/v1.9.0...v1.10.0) (2026-05-06)
+
+
+### Features
+
+* **workspaces:** per-workspace policy for OAuth MCPs on orchestrators ([#47](https://github.com/x1agent/x1agent/issues/47)) ([724a802](https://github.com/x1agent/x1agent/commit/724a8021d44d1228dacea1245fe7dcb7a727a4c5))
+
 # [1.9.0](https://github.com/x1agent/x1agent/compare/v1.8.2...v1.9.0) (2026-05-06)
 
 
