@@ -1,3 +1,10 @@
+## [1.10.5](https://github.com/x1agent/x1agent/compare/v1.10.4...v1.10.5) (2026-05-06)
+
+
+### Bug Fixes
+
+* **api:** host-allowlist rejects in-cluster Service hostnames (regression) ([#52](https://github.com/x1agent/x1agent/issues/52)) ([88809d9](https://github.com/x1agent/x1agent/commit/88809d970357b8b0d1cb21bab6416b8513d895a5)), closes [#45](https://github.com/x1agent/x1agent/issues/45)
+
 ## [1.10.4](https://github.com/x1agent/x1agent/compare/v1.10.3...v1.10.4) (2026-05-06)
 
 
