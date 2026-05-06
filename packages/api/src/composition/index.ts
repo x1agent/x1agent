@@ -705,10 +705,19 @@ export function compose(env: CompositionEnv): Composition {
     c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
     // Surface agent kind so downstream routes can apply
-    // kind-specific policy (remote_oauth MCPs require worker).
+    // kind-specific policy (remote_oauth MCPs require worker, unless
+    // the workspace policy below relaxes that).
     c.set(
       "agentKind",
       (agent.kind as "worker" | "orchestrator" | "scheduled") ?? "worker",
+    );
+    // Resolve the workspace's OAuth-on-orchestrator policy here so
+    // each downstream route doesn't need its own workspace lookup.
+    // `off` blocks attach; `on_attended` and `on` allow it.
+    const ws = await workspaces.findById(m.workspaceId as never);
+    c.set(
+      "workspaceAllowsOauthOnNonWorkers",
+      ws ? ws.settings.oauthMcpsOnOrchestrators !== "off" : false,
     );
     await next();
   };
