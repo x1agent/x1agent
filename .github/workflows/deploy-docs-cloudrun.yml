@@ -1,9 +1,9 @@
 name: Deploy docs to Cloud Run
 
-# Replaces docs.yml (GitHub Pages) once the cutover is complete.
-# Until then, both run in parallel — Pages serves docs.x1agent.com
-# while this workflow proves the Cloud Run path. Switch DNS, then
-# delete docs.yml.
+# Builds the docs site on every push to main that touches docs/, then
+# deploys it to the `x1agent-docs` Cloud Run service backing
+# docs.x1agent.com. (Was previously GitHub Pages — that workflow has
+# been removed; Cloud Run is the only path now.)
 
 on:
   push:
