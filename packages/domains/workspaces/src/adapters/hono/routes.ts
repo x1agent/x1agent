@@ -1,11 +1,21 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
-import { DomainError, ValidationError, type Email, type UserId } from "@x1agent/kernel";
+import {
+  DomainError,
+  ValidationError,
+  WorkspaceSlug,
+  type Email,
+  type UserId,
+} from "@x1agent/kernel";
 import {
   createWorkspace,
   NotPlatformAdminError,
   WorkspaceSlugTakenError,
   type CreateWorkspaceDeps,
 } from "../../application/create-workspace.js";
+import {
+  updateWorkspaceSettings,
+  WorkspaceNotFoundError,
+} from "../../application/update-workspace-settings.js";
 
 export interface WorkspaceRoutesConfig {
   workspaces: CreateWorkspaceDeps["workspaces"];
@@ -95,6 +105,71 @@ export function createWorkspaceRoutes(cfg: WorkspaceRoutesConfig): Hono {
       }
       if (err instanceof DomainError) {
         return c.json({ error: "domain", message: err.message }, 400);
+      }
+      throw err;
+    }
+  });
+
+  // Workspace detail (any member). Echoes the full entity including
+  // current settings so the workspace settings UI can render without a
+  // separate request.
+  app.get("/:slug", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const slug = WorkspaceSlug(c.req.param("slug") ?? "");
+    const ws = await cfg.workspaces.findBySlug(slug);
+    if (!ws) return c.json({ error: "not_found" }, 404);
+    const m = await cfg.memberships.findByUserAndSlug(actor.userId, slug);
+    if (!m) return c.json({ error: "forbidden" }, 403);
+    return c.json({
+      id: ws.id,
+      slug: ws.slug,
+      name: ws.name,
+      created_at: ws.createdAt.toISOString(),
+      settings: ws.settings,
+    });
+  });
+
+  // Update workspace settings (admin / owner only). Patch is
+  // whitelisted at the domain layer so the route stays thin.
+  app.patch("/:slug/settings", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const slug = WorkspaceSlug(c.req.param("slug") ?? "");
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
+    try {
+      const ws = await updateWorkspaceSettings(
+        { workspaces: cfg.workspaces, memberships: cfg.memberships },
+        actor.userId,
+        slug,
+        body,
+      );
+      return c.json({
+        id: ws.id,
+        slug: ws.slug,
+        name: ws.name,
+        created_at: ws.createdAt.toISOString(),
+        settings: ws.settings,
+      });
+    } catch (err) {
+      if (err instanceof WorkspaceNotFoundError) {
+        return c.json({ error: "not_found" }, 404);
+      }
+      if (err instanceof ValidationError) {
+        return c.json(
+          { error: "validation", field: err.field, message: err.message },
+          400,
+        );
+      }
+      if (err instanceof DomainError) {
+        // assertRoleAtLeast throws a DomainError for forbidden/not-member.
+        // Map all of those to 403; the message identifies the cause.
+        return c.json({ error: "forbidden", message: err.message }, 403);
       }
       throw err;
     }

@@ -172,3 +172,124 @@ describe("AttachmentService.attach", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 });
+
+// Orchestrator + remote_oauth gating. The block is conditional on the
+// workspace's `oauthMcpsOnOrchestrators` setting (decoded by the route
+// layer into a boolean). These tests exercise the four corners.
+const OAUTH_ENTRY: CatalogEntry = {
+  ...ENTRY,
+  id: "entry-oauth",
+  name: "mercury" as CatalogName,
+  displayName: "Mercury",
+  kind: "remote_oauth",
+  url: "https://mcp.mercury.example",
+  manifest: {
+    env: {},
+    tool_scopes: { send_payment: ["mercury.write"] },
+  },
+};
+
+class FakeCatalogWithOauth implements CatalogRepository {
+  private byId: Record<string, CatalogEntry> = {
+    [ENTRY.id]: ENTRY,
+    [OAUTH_ENTRY.id]: OAUTH_ENTRY,
+  };
+  list = async (_: string) => Object.values(this.byId);
+  getById = async (ws: string, id: string) =>
+    this.byId[id] && this.byId[id].workspaceId === ws ? this.byId[id] : null;
+  getByName = async (_ws: string, _name: CatalogName) => null;
+  upsert = async (_: never) => OAUTH_ENTRY;
+  delete = async (_: string, _id: string) => true;
+}
+
+describe("AttachmentService.attach — remote_oauth + orchestrator gate", () => {
+  let svc: AttachmentService;
+
+  beforeEach(() => {
+    svc = new AttachmentService(new FakeAttachments(), new FakeCatalogWithOauth());
+  });
+
+  it("worker agent always allowed (workspace policy doesn't apply)", async () => {
+    const a = await svc.attach({
+      agentId: "agent-1",
+      workspaceId: "ws-1",
+      agentKind: "worker",
+      workspaceAllowsOauthOnNonWorkers: false,
+      catalogEntryId: "entry-oauth",
+      envJson: {},
+      createdBy: null,
+    });
+    expect(a.id).toBe("att-1");
+  });
+
+  it("orchestrator + workspace policy 'off' → blocked", async () => {
+    await expect(
+      svc.attach({
+        agentId: "agent-1",
+        workspaceId: "ws-1",
+        agentKind: "orchestrator",
+        workspaceAllowsOauthOnNonWorkers: false,
+        catalogEntryId: "entry-oauth",
+        envJson: {},
+        createdBy: null,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("orchestrator + workspace policy 'on_attended/on' → allowed", async () => {
+    const a = await svc.attach({
+      agentId: "agent-1",
+      workspaceId: "ws-1",
+      agentKind: "orchestrator",
+      workspaceAllowsOauthOnNonWorkers: true,
+      catalogEntryId: "entry-oauth",
+      envJson: {},
+      createdBy: null,
+    });
+    expect(a.id).toBe("att-1");
+  });
+
+  it("scheduled agent treated like orchestrator (still gated)", async () => {
+    await expect(
+      svc.attach({
+        agentId: "agent-1",
+        workspaceId: "ws-1",
+        agentKind: "scheduled",
+        workspaceAllowsOauthOnNonWorkers: false,
+        catalogEntryId: "entry-oauth",
+        envJson: {},
+        createdBy: null,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("scheduled + workspace allows → attaches", async () => {
+    const a = await svc.attach({
+      agentId: "agent-1",
+      workspaceId: "ws-1",
+      agentKind: "scheduled",
+      workspaceAllowsOauthOnNonWorkers: true,
+      catalogEntryId: "entry-oauth",
+      envJson: {},
+      createdBy: null,
+    });
+    expect(a.id).toBe("att-1");
+  });
+
+  it("error message points at workspace settings → security", async () => {
+    try {
+      await svc.attach({
+        agentId: "agent-1",
+        workspaceId: "ws-1",
+        agentKind: "orchestrator",
+        workspaceAllowsOauthOnNonWorkers: false,
+        catalogEntryId: "entry-oauth",
+        envJson: {},
+        createdBy: null,
+      });
+      throw new Error("expected reject");
+    } catch (e) {
+      expect((e as ValidationError).message).toMatch(/workspace settings/);
+    }
+  });
+});

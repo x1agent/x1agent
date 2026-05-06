@@ -7,6 +7,7 @@ import {
   KeyRound,
   Plug,
   ScrollText,
+  ShieldCheck,
   UserCog,
   Users,
 } from "lucide-react";
@@ -82,6 +83,18 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
         icon: Hash,
         description:
           "Configure Slack bots. Each bot gets its own name, OAuth installs into a Slack workspace, and pairs with one agent.",
+      },
+    ],
+  },
+  {
+    title: "Security",
+    items: [
+      {
+        title: "Policies",
+        pathSuffix: "/security/policies",
+        icon: ShieldCheck,
+        description:
+          "Workspace-level toggles that decide which capabilities agents are allowed to use.",
       },
     ],
   },

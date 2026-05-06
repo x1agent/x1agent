@@ -224,15 +224,17 @@ export function AgentMcpAttachmentsCard({
   const unattached = catalog.filter(
     (c) => !attachments.some((a) => a.catalog_entry_id === c.id),
   );
-  const incompatibleReason = (c: (typeof catalog)[number]): string | null => {
-    if (c.kind === "remote_oauth" && agentKind && agentKind !== "worker") {
-      return `requires worker agent (this agent is ${agentKind})`;
-    }
-    return null;
-  };
-  const pickableCatalog = unattached.filter(
-    (c) => incompatibleReason(c) === null,
-  );
+  // Whether `remote_oauth` MCPs are attachable to non-worker agents
+  // is now a server-side decision driven by the workspace's
+  // `oauthMcpsOnOrchestrators` setting. We don't replicate the
+  // policy in the client because the workspace setting isn't loaded
+  // here and replication would just go stale. Instead the dropdown
+  // shows everything; the server returns a clear error if attach
+  // isn't allowed, which we render below the picker.
+  const incompatibleReason = (
+    _c: (typeof catalog)[number],
+  ): string | null => null;
+  const pickableCatalog = unattached;
 
   return (
     <div className="space-y-4">
@@ -387,8 +389,10 @@ export function AgentMcpAttachmentsCard({
                   </SelectContent>
                 </Select>
                 {pickableCatalog.length === 0 && (
-                  <p className="text-xs text-amber-400">
-                    No compatible MCPs for this agent kind. Switch the agent to <strong>worker</strong> or register an stdio MCP.
+                  <p className="text-xs text-fg-muted">
+                    No MCPs left to attach — register one in workspace
+                    settings → MCP servers, or detach an existing
+                    attachment to free up a slot.
                   </p>
                 )}
               </div>

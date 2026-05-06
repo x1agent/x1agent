@@ -9,6 +9,14 @@ declare module "hono" {
     workspaceId: string;
     userId: string | null;
     agentKind: "worker" | "orchestrator" | "scheduled";
+    /**
+     * Resolved by the composition layer's requireAgent middleware
+     * from the workspace's `oauthMcpsOnOrchestrators` setting.
+     * `true` when the policy is `on_attended` or `on`, `false` when
+     * `off`. Routes use it to decide whether attaching a remote_oauth
+     * MCP to a non-worker agent is allowed.
+     */
+    workspaceAllowsOauthOnNonWorkers: boolean;
   }
 }
 
@@ -199,11 +207,14 @@ export function createAgentMcpAttachmentRoutes(
       | "orchestrator"
       | "scheduled"
       | undefined) ?? "worker";
+    const workspaceAllowsOauthOnNonWorkers =
+      c.get("workspaceAllowsOauthOnNonWorkers") ?? false;
     try {
       const att = await cfg.attachments.attach({
         agentId,
         workspaceId,
         agentKind,
+        workspaceAllowsOauthOnNonWorkers,
         catalogEntryId: body.catalog_entry_id,
         envJson:
           typeof body.env_json === "object" &&

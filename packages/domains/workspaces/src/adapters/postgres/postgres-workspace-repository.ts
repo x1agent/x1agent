@@ -1,6 +1,10 @@
 import type postgres from "postgres";
 import { WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import type { Workspace } from "../../domain/workspace.js";
+import {
+  parseWorkspaceSettings,
+  type WorkspaceSettings,
+} from "../../domain/workspace-settings.js";
 import type { WorkspaceRepository } from "../../ports/workspace-repository.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
@@ -10,6 +14,7 @@ interface Row {
   slug: string;
   name: string;
   created_at: Date | string;
+  settings: unknown;
 }
 
 function toWorkspace(r: Row): Workspace {
@@ -18,6 +23,7 @@ function toWorkspace(r: Row): Workspace {
     slug: WorkspaceSlug(r.slug),
     name: r.name,
     createdAt: new Date(r.created_at),
+    settings: parseWorkspaceSettings(r.settings),
   };
 }
 
@@ -26,14 +32,16 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
 
   async findById(id: WorkspaceId) {
     const rows = await this.sql<Row[]>`
-      SELECT id, slug, name, created_at FROM workspaces WHERE id = ${id}
+      SELECT id, slug, name, created_at, settings
+      FROM workspaces WHERE id = ${id}
     `;
     return rows[0] ? toWorkspace(rows[0]) : null;
   }
 
   async findBySlug(slug: WorkspaceSlug) {
     const rows = await this.sql<Row[]>`
-      SELECT id, slug, name, created_at FROM workspaces WHERE slug = ${slug}
+      SELECT id, slug, name, created_at, settings
+      FROM workspaces WHERE slug = ${slug}
     `;
     return rows[0] ? toWorkspace(rows[0]) : null;
   }
@@ -41,8 +49,26 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
   async create(input: { slug: WorkspaceSlug; name: string }) {
     const rows = await this.sql<Row[]>`
       INSERT INTO workspaces (slug, name) VALUES (${input.slug}, ${input.name})
-      RETURNING id, slug, name, created_at
+      RETURNING id, slug, name, created_at, settings
     `;
     return toWorkspace(rows[0]!);
+  }
+
+  async updateSettings(
+    id: WorkspaceId,
+    patch: Partial<WorkspaceSettings>,
+  ) {
+    // jsonb || does shallow merge. The application layer already
+    // pre-validates the patch via parseWorkspaceSettingsPatch so any
+    // keys that land here are typed and known.
+    const rows = await this.sql<Row[]>`
+      UPDATE workspaces
+      SET settings = settings || ${this.sql.json(
+        patch as Record<string, unknown>,
+      )}::jsonb
+      WHERE id = ${id}
+      RETURNING id, slug, name, created_at, settings
+    `;
+    return rows[0] ? toWorkspace(rows[0]) : null;
   }
 }
