@@ -206,6 +206,7 @@ try {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const x1McpPath = path.resolve(here, "x1-mcp.ts");
+const filesMcpPath = path.resolve(here, "files-mcp.ts");
 
 // Resolve tsx so spawned MCP subprocesses can find it whether we're in
 // a container (tsx on PATH) or local dev (node_modules/.bin/tsx).
@@ -231,6 +232,15 @@ const mcpServers: Record<string, StdioMcp | HttpMcp> = {
   x1agent: {
     command: tsxPath,
     args: [x1McpPath],
+    env: { SIDECAR_URL: sidecarUrl },
+  },
+  // `files` provider tools (list / get / download). Always registered;
+  // returns permission_required at call time when the user hasn't
+  // connected Google Drive. The agent decides whether to advertise the
+  // tool to the LLM (we always do — discovery > silence).
+  files: {
+    command: tsxPath,
+    args: [filesMcpPath],
     env: { SIDECAR_URL: sidecarUrl },
   },
 };
@@ -266,6 +276,9 @@ const allowedTools = [
   "mcp__x1agent__share",
   "mcp__x1agent__request_permission",
   "mcp__x1agent__end_session",
+  "mcp__files__list_files",
+  "mcp__files__get_file",
+  "mcp__files__download_file",
 ];
 
 // ── System prompt ───────────────────────────────────────

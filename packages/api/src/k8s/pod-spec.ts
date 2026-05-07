@@ -62,6 +62,18 @@ export interface SessionPodSpec {
   agentKind: AgentKind;
   workspaceSlug: string;
   workspaceName: string;
+  /**
+   * The user whose stored OAuth tokens this session acts as. For
+   * user-triggered sessions this is the user who triggered. For
+   * scheduler / orchestrator wakes, this is the agent's owner.
+   * Sidecar attaches this to provider→external-API calls so the
+   * api's user-OAuth credential proxy mints the right user's token.
+   *
+   * Optional for back-compat: pre-Phase-1 sessions don't set it; the
+   * sidecar's provider-bridge routes return permission_required
+   * cleanly when the env is missing.
+   */
+  triggeringUserId?: string;
   agentPrompt: string;
   systemPromptText: string;
   heartbeatMd: string;
@@ -187,6 +199,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
   const agentEnv = [
     { name: "SESSION_ID", value: spec.sessionId },
     { name: "AGENT_ID", value: spec.agentId },
+    ...(spec.triggeringUserId
+      ? [{ name: "TRIGGERING_USER_ID", value: spec.triggeringUserId }]
+      : []),
     { name: "AGENT_PROMPT", value: spec.agentPrompt },
     { name: "MAX_TURNS", value: String(spec.maxTurns) },
     { name: "SESSION_MODE", value: spec.sessionMode },
@@ -258,6 +273,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "API_INTERNAL_TOKEN", value: spec.apiInternalToken },
     { name: "AGENT_ID", value: spec.agentId },
     { name: "SESSION_WORKSPACE_SLUG", value: spec.workspaceSlug },
+    ...(spec.triggeringUserId
+      ? [{ name: "TRIGGERING_USER_ID", value: spec.triggeringUserId }]
+      : []),
     { name: "AGENT_REPOS_JSON", value: JSON.stringify(spec.repos) },
     {
       name: "AGENT_COLLECTIONS_JSON",
