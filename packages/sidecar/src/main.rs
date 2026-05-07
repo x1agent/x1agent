@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 mod audit;
 mod channel;
+mod files;
 mod git;
 mod collections;
 mod messaging;
@@ -26,6 +27,7 @@ mod nats_bridge;
 mod orchestration;
 mod shares;
 mod stream;
+mod user_tokens;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -168,6 +170,10 @@ async fn main() {
     let app = Router::new()
         .route("/event", routing::post(handle_event))
         .route("/git/credential", routing::get(git::handle_git_credential))
+        .route(
+            "/user-oauth-token",
+            routing::get(user_tokens::handle_user_token),
+        )
         .route("/spawn", routing::post(orchestration::handle_spawn))
         .route("/spawnable", routing::get(orchestration::handle_spawnable))
         .route(
@@ -194,6 +200,9 @@ async fn main() {
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
         )
+        .route("/files/list", routing::post(files::handle_list))
+        .route("/files/get", routing::post(files::handle_get))
+        .route("/files/download", routing::post(files::handle_download))
         .route("/share", routing::post(shares::handle_share))
         .route(
             "/collections",
