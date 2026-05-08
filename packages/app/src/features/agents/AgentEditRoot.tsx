@@ -505,7 +505,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <div className="rounded-md border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+                      <div className="rounded-md border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200 light:border-amber-300 light:bg-amber-50 light:text-amber-900">
                         No Claude models enabled in this deployment.{" "}
                         {isPlatformAdmin ? (
                           <>

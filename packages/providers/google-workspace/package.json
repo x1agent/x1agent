@@ -1,0 +1,21 @@
+{
+  "name": "@x1agent/provider-google-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --hot run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@x1agent/kernel": "workspace:*",
+    "@x1agent/observability": "workspace:*",
+    "nats": "^2.29.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

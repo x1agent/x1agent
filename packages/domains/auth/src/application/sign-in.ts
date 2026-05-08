@@ -3,6 +3,7 @@ import type { UserRepository } from "../ports/user-repository.js";
 import type { SessionTokenizer } from "../ports/session-tokenizer.js";
 import type { PersonRepository } from "../ports/person-repository.js";
 import type { AccessGate } from "../ports/access-gate.js";
+import type { UserOAuthTokenStore } from "../ports/user-oauth-token-store.js";
 import {
   assertAllowedDomain,
   type AuthProfile,
@@ -11,8 +12,19 @@ import {
   assertHasMembership,
   type AuthSession,
 } from "../domain/auth-session.js";
+import type { EncryptedToken, OAuthGrant } from "../domain/oauth-grant.js";
 import { DomainNotAllowedError } from "../domain/errors.js";
 import { isPlatformAdmin } from "../domain/platform-admin.js";
+
+/**
+ * Encrypts a plaintext token at the cipher boundary. Composition root
+ * supplies an implementation backed by AES-256-GCM and the
+ * deployment-wide WORKSPACE_SECRETS_MASTER_KEY (same cipher used by
+ * workspace_secrets / mcp_oauth_clients / user_mcp_tokens). Domain
+ * doesn't import the cipher directly — keeps the auth domain
+ * crypto-agnostic and the cipher swappable for tests.
+ */
+export type EncryptOAuthToken = (plaintext: string) => EncryptedToken;
 
 export interface SignInDeps {
   authProvider: AuthProvider;
@@ -32,6 +44,18 @@ export interface SignInDeps {
    * outside the domain whitelist without weakening it for everyone.
    */
   accessGate?: AccessGate;
+  /**
+   * Optional user-OAuth-token persistence. When the auth provider
+   * returned an OAuthGrant on the profile AND this dep is wired, the
+   * grant is encrypted and upserted. Keeps the token-store concern
+   * cleanly outside the identity path — installs that don't have
+   * downstream-API providers wired (no Google Workspace integration
+   * yet) skip this entirely.
+   */
+  oauthTokens?: {
+    store: UserOAuthTokenStore;
+    encrypt: EncryptOAuthToken;
+  };
 }
 
 export interface SignInResult {
@@ -84,6 +108,22 @@ export async function completeSignIn(
     }
   }
 
+  // Persist the provider's OAuth grant when both the grant and the
+  // token store are present. Best-effort: a failure here doesn't deny
+  // the sign-in itself (the user already has identity), but it does
+  // log so a subsequent provider call can surface
+  // permission_required cleanly. Sign-in identity is NOT gated on
+  // downstream-API access being available.
+  if (profile.oauthGrant && deps.oauthTokens) {
+    try {
+      await persistOAuthGrant(deps.oauthTokens, user.id, profile.oauthGrant);
+    } catch (err) {
+      console.warn(
+        `[auth] failed to persist OAuth grant for ${profile.providerId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const memberships = await deps.users.listMemberships(user.id);
   const session = assertHasMembership({
     userId: user.id,
@@ -94,4 +134,23 @@ export async function completeSignIn(
   });
   const token = deps.tokenizer.sign(session);
   return { session, token };
+}
+
+async function persistOAuthGrant(
+  oauthTokens: { store: UserOAuthTokenStore; encrypt: EncryptOAuthToken },
+  userId: string,
+  grant: OAuthGrant,
+): Promise<void> {
+  const encryptedAccess = oauthTokens.encrypt(grant.accessToken);
+  const encryptedRefresh = grant.refreshToken
+    ? oauthTokens.encrypt(grant.refreshToken)
+    : null;
+  await oauthTokens.store.upsert({
+    userId,
+    providerId: grant.providerId,
+    accessToken: encryptedAccess,
+    refreshToken: encryptedRefresh,
+    scopesGranted: grant.scopesGranted,
+    expiresAt: grant.expiresAt,
+  });
 }

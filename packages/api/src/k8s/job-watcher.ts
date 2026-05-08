@@ -393,6 +393,14 @@ async function launchSession(
     agentKind: agent.kind,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
+    // The user whose stored OAuth tokens this session acts as.
+    // User-triggered sessions: the user who triggered. Scheduler
+    // and child-spawned sessions inherit the parent's user via
+    // session.triggeredByUserId. Worker sessions without a user
+    // (cold scheduler with no human attribution) leave this unset
+    // and provider→Google calls return permission_required.
+    triggeringUserId:
+      (session.triggeredByUserId as unknown as string | null) ?? undefined,
     agentPrompt: initialPrompt,
     systemPromptText: composedSystemPrompt,
     heartbeatMd: agent.heartbeatMd,

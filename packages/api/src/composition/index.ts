@@ -9,6 +9,7 @@ import {
   PostgresLinkAttemptStore,
   PostgresPasswordCredentialStore,
   PostgresAccessGate,
+  PostgresUserOAuthTokenStore,
   createAuthRoutes,
   createRequireAuth,
   isPlatformAdmin as isEmailPlatformAdmin,
@@ -53,6 +54,8 @@ import {
   PostgresSecretRepository,
   SecretService,
   loadMasterKey,
+  encrypt,
+  decrypt,
   createWorkspaceSecretsRoutes,
 } from "@x1agent/domain-workspace-secrets";
 import {
@@ -316,6 +319,25 @@ export function compose(env: CompositionEnv): Composition {
   const agentRepos = new PostgresAgentRepoStore(env.sql);
   const tokenizer = new JwtSessionTokenizer({ secret: env.jwtSecret });
 
+  // Load the deployment-wide AES-256-GCM master key once. Used by the
+  // workspace_secrets store, mcp_oauth_clients, user_mcp_tokens, and
+  // (since Phase 0) user_oauth_tokens. One key, four callers — same
+  // rotation procedure across all of them. We load it here at the top
+  // of compose so the auth routes (which need it for OAuth-grant
+  // persistence) and downstream secret-bearing services can share it.
+  const workspaceSecretsKey = loadMasterKey(
+    env.workspaceSecretsMasterKey ?? process.env.WORKSPACE_SECRETS_MASTER_KEY,
+  );
+
+  // Per-user OAuth token store. Encryption is performed at the auth /
+  // internal-route boundary using the workspaceSecretsKey above.
+  const userOAuthTokenStore = new PostgresUserOAuthTokenStore(env.sql);
+  const encryptOAuthToken = (plaintext: string) =>
+    encrypt(plaintext, workspaceSecretsKey);
+  const decryptOAuthToken = (
+    blob: import("@x1agent/domain-auth").EncryptedToken,
+  ) => decrypt(blob, workspaceSecretsKey);
+
   const google = new GoogleAuthProvider({
     clientId: env.googleClientId,
     clientSecret: env.googleClientSecret,
@@ -367,6 +389,15 @@ export function compose(env: CompositionEnv): Composition {
     linkAttempts,
     passwords,
     clock: systemClock,
+    // Persist the OAuth grant (Drive/Calendar/Gmail/etc. tokens) on
+    // every Google sign-in so downstream providers can call APIs on
+    // the user's behalf. Sign-in identity itself is unaffected if
+    // this fails — best-effort; check `auth` log for warn-level
+    // "failed to persist OAuth grant" if a session can't act later.
+    oauthTokens: {
+      store: userOAuthTokenStore,
+      encrypt: encryptOAuthToken,
+    },
   });
 
   const requireAuth = createRequireAuth(tokenizer);
@@ -538,6 +569,17 @@ export function compose(env: CompositionEnv): Composition {
     natsConnection: env.natsConnection,
     quietHints,
     sql: env.sql,
+    // helper hits /api/internal/user-oauth-token to mint a fresh
+    // access token for a (user, provider) on every outbound provider
+    // → external-API call. Refreshers map provider id → adapter that
+    // exchanges a refresh_token for a fresh access_token. Add a new
+    // entry per future provider (microsoft-365, etc.).
+    userOAuthTokens: {
+      store: userOAuthTokenStore,
+      encrypt: encryptOAuthToken,
+      decrypt: decryptOAuthToken,
+      refreshers: { google },
+    },
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -579,13 +621,10 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  // Workspace secret store. The master key is loaded once at compose
-  // time and held in memory for the life of the process. Decryption
-  // happens only inside the SecretService — repository never sees it.
+  // Workspace secret store. Reuses `workspaceSecretsKey` (loaded near
+  // the top of compose). Decryption happens only inside the
+  // SecretService — repository never sees the key.
   const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
-  const workspaceSecretsKey = loadMasterKey(
-    env.workspaceSecretsMasterKey ?? process.env.WORKSPACE_SECRETS_MASTER_KEY,
-  );
   const workspaceSecretsService = new SecretService(
     workspaceSecretsRepo,
     workspaceSecretsKey,

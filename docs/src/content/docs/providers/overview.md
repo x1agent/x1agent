@@ -14,6 +14,7 @@ Providers are the pluggable parts of x1agent. Each provider implements a defined
 | `auth` | SSO, identity, token issuance | Google OAuth |
 | `graph` | Knowledge graph storage and queries | SurrealDB |
 | `files` | External file sync and browsing | Google Drive |
+| `documents` | Structured document read/write (Docs, Sheets, Word Online, Excel Online) | Google Workspace |
 | `messaging` | Chat platform integration | Slack |
 | `calendar` | Calendar read/write | Google Calendar |
 | `email` | Email send/read | Gmail |

@@ -52,6 +52,33 @@ export interface InternalRoutesConfig {
    * the agent-repo-store adapter exposes this as a first-class method.
    */
   sql?: import("postgres").Sql<Record<string, unknown>>;
+  /**
+   * User-scoped OAuth token substrate. When present, exposes
+   * looks up the user's stored grant for a provider, refreshes the
+   * access token if it's near expiry, returns a fresh access_token.
+   * Composition root wires this only when downstream-API providers
+   * (Google Workspace, Microsoft 365, …) are part of the install.
+   *
+   * `refreshers` map provider id → refresher. v1 has just "google";
+   * adding Microsoft 365 means adding a "microsoft-365" entry — no
+   * route changes.
+   */
+  userOAuthTokens?: {
+    store: import("@x1agent/domain-auth").UserOAuthTokenStore;
+    encrypt: (plaintext: string) => import("@x1agent/domain-auth").EncryptedToken;
+    decrypt: (
+      blob: import("@x1agent/domain-auth").EncryptedToken,
+    ) => string;
+    refreshers: Record<
+      string,
+      {
+        refreshAccessToken(refreshToken: string): Promise<{
+          accessToken: string;
+          expiresAt: Date | null;
+        }>;
+      }
+    >;
+  };
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -488,6 +515,153 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         504,
       );
     }
+  });
+
+  // Mint a fresh user-OAuth access token for a (user, provider) pair.
+  // before forwarding any provider→external-API call. Refreshes the
+  // access token transparently when expired; returns 403
+  // permission_required when the user hasn't granted the requested
+  // scope or the refresh token is missing/revoked.
+  //
+  // Query params: user_id (required), provider (required, e.g.
+  // "google"), scope (optional — when set, the granted scopes must
+  // include it; the platform-required identity scopes like email/
+  // profile are NOT required to be in the query — caller asks only
+  // for the downstream-API scope it actually needs).
+  //
+  // Returns: { access_token, expires_at: ISO8601 | null }.
+  app.get("/user-oauth-token", async (c) => {
+    if (!cfg.userOAuthTokens) {
+      return c.json({ error: "user_oauth_disabled" }, 503);
+    }
+    const userId = c.req.query("user_id");
+    const provider = c.req.query("provider");
+    const scope = c.req.query("scope");
+    if (!userId || !provider) {
+      return c.json(
+        { error: "missing_param", message: "user_id and provider required" },
+        400,
+      );
+    }
+
+    const blob = await cfg.userOAuthTokens.store.loadEncryptedTokens(
+      userId,
+      provider,
+    );
+    if (!blob) {
+      return c.json(
+        {
+          error: "permission_required",
+          message: `user has no ${provider} grant`,
+        },
+        403,
+      );
+    }
+
+    if (scope && !blob.scopesGranted.includes(scope)) {
+      return c.json(
+        {
+          error: "permission_required",
+          message: `scope not granted: ${scope}`,
+          granted: blob.scopesGranted,
+        },
+        403,
+      );
+    }
+
+    // 30s buffer — refresh if the access token is at-or-near expiry.
+    // The provider's clock and ours can drift slightly; a buffer
+    // saves a wasted upstream 401 round-trip.
+    const expiresAt = blob.expiresAt;
+    const needsRefresh =
+      expiresAt !== null && expiresAt.getTime() < Date.now() + 30_000;
+
+    if (!needsRefresh) {
+      try {
+        const accessToken = cfg.userOAuthTokens.decrypt(blob.accessToken);
+        return c.json({
+          access_token: accessToken,
+          expires_at: expiresAt ? expiresAt.toISOString() : null,
+        });
+      } catch (err) {
+        return c.json(
+          { error: "decrypt_failed", message: (err as Error).message },
+          500,
+        );
+      }
+    }
+
+    const refresher = cfg.userOAuthTokens.refreshers[provider];
+    if (!refresher) {
+      return c.json(
+        {
+          error: "refresh_unavailable",
+          message: `no refresher wired for provider ${provider}`,
+        },
+        503,
+      );
+    }
+    if (!blob.refreshToken) {
+      return c.json(
+        {
+          error: "permission_required",
+          message:
+            "access token expired and no refresh token; user must re-authenticate",
+        },
+        403,
+      );
+    }
+
+    let refreshTokenPlain: string;
+    try {
+      refreshTokenPlain = cfg.userOAuthTokens.decrypt(blob.refreshToken);
+    } catch (err) {
+      return c.json(
+        { error: "decrypt_failed", message: (err as Error).message },
+        500,
+      );
+    }
+
+    let refreshed: { accessToken: string; expiresAt: Date | null };
+    try {
+      refreshed = await refresher.refreshAccessToken(refreshTokenPlain);
+    } catch (err) {
+      return c.json(
+        {
+          error: "permission_required",
+          message: `refresh failed: ${(err as Error).message}`,
+        },
+        403,
+      );
+    }
+
+    // Persist the new access token. Refresh token usually doesn't
+    // rotate, but if the provider returned a new one we'd handle
+    // that in the refresher (today neither Google nor Microsoft
+    // rotate refresh on every refresh).
+    const newEncrypted = cfg.userOAuthTokens.encrypt(refreshed.accessToken);
+    try {
+      await cfg.userOAuthTokens.store.updateAccessToken(
+        userId,
+        provider,
+        newEncrypted,
+        refreshed.expiresAt,
+      );
+    } catch (err) {
+      // Persist failed but the user still has a working token for
+      // this call. Log + continue — next call will refresh again,
+      // worst case is one extra round-trip.
+      console.warn(
+        `[user-oauth-token] persist refreshed access_token failed: ${(err as Error).message}`,
+      );
+    }
+
+    return c.json({
+      access_token: refreshed.accessToken,
+      expires_at: refreshed.expiresAt
+        ? refreshed.expiresAt.toISOString()
+        : null,
+    });
   });
 
   // Mint a short-lived GitHub App installation token for the sidecar.

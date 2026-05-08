@@ -222,10 +222,13 @@ describe("session routes", () => {
     const c = await login("admin@example.com");
     const id = await newAgent(c, "every-min", "@every 1m");
 
-    // Seed a prior scheduler row 10 min ago so the next slot is in the past.
+    // Seed a prior scheduler row 80s ago so the next slot is ~20s overdue.
+    // The no-backfill policy skips firing when the missed slot is more than
+    // one full interval behind; here the slot is 20s past on a 60s interval,
+    // which is firmly inside the threshold and should fire.
     await dbSql`
       INSERT INTO sessions (agent_id, triggered_by, triggered_by_user_id, triggered_at)
-      VALUES (${id}, 'scheduler', NULL, now() - interval '10 minutes')
+      VALUES (${id}, 'scheduler', NULL, now() - interval '80 seconds')
     `;
 
     const result = await composed.tickScheduler();

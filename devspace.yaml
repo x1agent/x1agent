@@ -17,6 +17,14 @@ vars:
     source: env
   GOOGLE_OAUTH_CLIENT_SECRET:
     source: env
+  # Space-separated OAuth scope list. Defaults to identity-only
+  # (openid/email/profile) inside the api when unset. Add downstream-
+  # API scopes (drive.readonly, calendar, gmail.modify, etc.) when
+  # the operator wants the Google Workspace provider to act on the
+  # user's behalf. Re-consent at next sign-in.
+  GOOGLE_OAUTH_SCOPES:
+    source: env
+    default: ""
   ALLOWED_DOMAINS:
     source: env
     default: ""
@@ -131,6 +139,18 @@ images:
     dockerfile: ./deploy/docker/mcp-oauth-proxy.dev.Dockerfile
     context: .
     rebuildStrategy: ignoreContextChanges
+  # Google Workspace provider — Drive (v1), Docs/Sheets/Calendar/Gmail
+  # in subsequent phases. Subscribes to x1.provider.{files,documents,
+  # calendar,email}.* over NATS. Per-call user OAuth via the api's
+  # /api/internal/user-oauth-token (Phase 0 substrate). Session pods
+  # never import Google API code.
+  google-workspace:
+    image: x1agent-provider-google-workspace
+    tags:
+      - latest
+    dockerfile: ./deploy/docker/google-workspace.dev.Dockerfile
+    context: .
+    rebuildStrategy: ignoreContextChanges
   app:
     image: x1agent-app
     tags:
@@ -159,6 +179,10 @@ deployments:
     kubectl:
       manifests:
         - deploy/k8s/dev/messaging-slack.yaml
+  google-workspace:
+    kubectl:
+      manifests:
+        - deploy/k8s/dev/google-workspace.yaml
   surrealdb:
     kubectl:
       manifests:
@@ -254,6 +278,8 @@ dev:
         value: ${GOOGLE_OAUTH_CLIENT_ID}
       - name: GOOGLE_OAUTH_CLIENT_SECRET
         value: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      - name: GOOGLE_OAUTH_SCOPES
+        value: ${GOOGLE_OAUTH_SCOPES}
       - name: ALLOWED_DOMAINS
         value: ${ALLOWED_DOMAINS}
       - name: PLATFORM_ADMIN_EMAILS
@@ -328,6 +354,38 @@ dev:
         value: /etc/nats-tls/client.key
       - name: SLACK_BOT_TOKEN
         value: ${SLACK_BOT_TOKEN}
+
+  google-workspace:
+    labelSelector:
+      app: google-workspace
+    devImage: x1agent-provider-google-workspace
+    sync:
+      - path: ./packages:/app/packages
+        excludePaths:
+          - node_modules
+          - dist
+          - "*.log"
+        startContainer: true
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cd /app
+        exec bun --hot run packages/providers/google-workspace/src/index.ts
+    env:
+      - name: NATS_URL
+        value: nats://nats:4222
+      - name: NATS_CA_FILE
+        value: /etc/nats-tls/ca.crt
+      - name: NATS_CLIENT_CERT
+        value: /etc/nats-tls/client.crt
+      - name: NATS_CLIENT_KEY
+        value: /etc/nats-tls/client.key
+      - name: X1_API_URL
+        value: http://api:30001
+      - name: API_INTERNAL_TOKEN
+        value: ${API_INTERNAL_TOKEN}
 
   graph-surrealdb:
     labelSelector:
