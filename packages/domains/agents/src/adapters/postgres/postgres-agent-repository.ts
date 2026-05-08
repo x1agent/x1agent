@@ -121,6 +121,16 @@ export class PostgresAgentRepository implements AgentRepository {
   }
 
   async update(id: AgentId, patch: UpdateAgentInput): Promise<Agent> {
+    // When the schedule field is part of this patch (set to a value or
+    // explicitly cleared), reset last_scheduler_tick_at to now(). This
+    // anchors the next nextDue computation off "now" instead of the
+    // agent's createdAt, which prevents the scheduler from emitting a
+    // backfill of phantom sessions for every missed slot since the
+    // agent was created. No backfill is the documented policy — see
+    // schedule-due-sessions.ts. When `schedule` is not in the patch,
+    // last_scheduler_tick_at is left untouched so live scheduling
+    // continues uninterrupted.
+    const scheduleIncluded = patch.schedule !== undefined;
     const rows = await this.sql<Row[]>`
       UPDATE agents SET
         name          = COALESCE(${patch.name ?? null}, name),
@@ -134,6 +144,7 @@ export class PostgresAgentRepository implements AgentRepository {
         model         = ${patch.model === undefined ? this.sql`model` : patch.model},
         owner_user_id = ${patch.ownerUserId === undefined ? this.sql`owner_user_id` : patch.ownerUserId},
         visibility    = COALESCE(${patch.visibility ?? null}, visibility),
+        last_scheduler_tick_at = ${scheduleIncluded ? this.sql`now()` : this.sql`last_scheduler_tick_at`},
         updated_at    = now()
       WHERE id = ${id}
       RETURNING ${this.sql.unsafe(SELECT)}
