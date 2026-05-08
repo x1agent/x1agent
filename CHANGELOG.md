@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/x1agent/x1agent/compare/v1.13.0...v1.13.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **collections:** hooks below early-return broke the page (X1A-21) ([#57](https://github.com/x1agent/x1agent/issues/57)) ([d061ec4](https://github.com/x1agent/x1agent/commit/d061ec45f1936557ae4c58103edd2eaa0819bcc3))
+
 # [1.13.0](https://github.com/x1agent/x1agent/compare/v1.12.0...v1.13.0) (2026-05-08)
 
 
