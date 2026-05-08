@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { useCollectionsStore } from "../../stores/collectionsStore";
+import { useHasCollections } from "../../stores/capabilitiesStore";
 import { useGitHubStore } from "../../stores/githubStore";
 import { useGrantsStore } from "../../stores/grantsStore";
 import { useMcpStore, mcpAgentKey } from "../../stores/mcpStore";
@@ -41,6 +42,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
 
   const loadCollections = useCollectionsStore((s) => s.loadAttachments);
   const attachmentsByKey = useCollectionsStore((s) => s.attachmentsByAgentKey);
+  const hasCollections = useHasCollections();
 
   const loadSpawnGrants = useGrantsStore((s) => s.loadSpawnGrants);
   const spawnByAgent = useGrantsStore((s) => s.spawnByAgent);
@@ -71,13 +73,14 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   useEffect(() => {
     if (!agent) return;
     loadRepos(workspaceSlug, agent.id);
-    loadCollections(workspaceSlug, agent.id);
+    if (hasCollections) loadCollections(workspaceSlug, agent.id);
     loadSpawnGrants(workspaceSlug, agent.id);
     void loadMcpAttachments(workspaceSlug, agent.id);
     void loadEnvBindings(workspaceSlug, agent.id);
   }, [
     agent,
     workspaceSlug,
+    hasCollections,
     loadRepos,
     loadCollections,
     loadSpawnGrants,
@@ -170,7 +173,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
               muted={!agent.system_prompt.trim()}
             />
             <SummaryRow
-              href={`${editHref}?tab=repos`}
+              href={`${editHref}?tab=connections`}
               disabled={!canManage}
               label="Repositories"
               value={
@@ -180,19 +183,25 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
               }
               muted={repos.length === 0}
             />
+            {/* Collections only when the deployment has a graph
+                provider — same gate the Connections tab and the
+                sidebar use. Avoids surfacing a feature the cluster
+                cannot back. */}
+            {hasCollections && (
+              <SummaryRow
+                href={`${editHref}?tab=connections`}
+                disabled={!canManage}
+                label="Collections"
+                value={
+                  collections.length === 0
+                    ? "None attached"
+                    : `${collections.length} attached`
+                }
+                muted={collections.length === 0}
+              />
+            )}
             <SummaryRow
-              href={`${editHref}?tab=collections`}
-              disabled={!canManage}
-              label="Collections"
-              value={
-                collections.length === 0
-                  ? "None attached"
-                  : `${collections.length} attached`
-              }
-              muted={collections.length === 0}
-            />
-            <SummaryRow
-              href={`${editHref}?tab=mcp`}
+              href={`${editHref}?tab=connections`}
               disabled={!canManage}
               label="MCP servers"
               value={
@@ -205,7 +214,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
               muted={mcpAttachmentCount === 0 || mcpAttachmentCount === null}
             />
             <SummaryRow
-              href={`${editHref}?tab=mcp`}
+              href={`${editHref}?tab=connections`}
               disabled={!canManage}
               label="Environment variables"
               value={

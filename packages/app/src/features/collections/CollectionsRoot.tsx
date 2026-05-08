@@ -85,6 +85,15 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
     if (hasCollections) load(workspaceSlug);
   }, [workspaceSlug, load, hasCollections]);
 
+  // Hooks MUST run unconditionally on every render — keep them above
+  // the early return below. capabilitiesStore loads asynchronously, so
+  // the first render goes past the not-installed branch and the second
+  // (after caps land) takes it. If hooks live below the branch the
+  // count changes between renders → "Rendered fewer hooks than expected"
+  // (X1A-21).
+  const [showCreate, setShowCreate] = useState(false);
+  const { confirm, dialog } = useConfirm();
+
   if (capsStatus === "ready" && !hasCollections) {
     return (
       <AppShell
@@ -111,9 +120,6 @@ export function CollectionsRoot({ workspaceSlug }: Props) {
   const err = errorBySlug[workspaceSlug];
   const ws = memberships.find((m) => m.slug === workspaceSlug);
   const canManage = ws?.role === "admin" || ws?.role === "owner";
-
-  const [showCreate, setShowCreate] = useState(false);
-  const { confirm, dialog } = useConfirm();
 
   return (
     <AppShell
