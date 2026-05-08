@@ -324,6 +324,14 @@ dev:
         value: x1agent
       - name: IMAGE_PULL_POLICY
         value: IfNotPresent
+      # Capability gating mirrors the Helm chart so /api/capabilities
+      # reports the same backends in dev as it would on a prod install.
+      # surrealdb is the only graph provider in v1 and it implements
+      # vector too — both point at the same Deployment.
+      - name: PROVIDER_GRAPH
+        value: surrealdb
+      - name: PROVIDER_VECTOR
+        value: surrealdb
 
   messaging-slack:
     labelSelector:
