@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/x1agent/x1agent/compare/v1.11.0...v1.12.0) (2026-05-08)
+
+
+### Features
+
+* **image-catalog:** Phase 2 — workspace-authored container images ([#56](https://github.com/x1agent/x1agent/issues/56)) ([fd4a5f8](https://github.com/x1agent/x1agent/commit/fd4a5f86f83d36e9042a52bfede928bac30b1ca2))
+
 # [1.11.0](https://github.com/x1agent/x1agent/compare/v1.10.5...v1.11.0) (2026-05-08)
 
 
