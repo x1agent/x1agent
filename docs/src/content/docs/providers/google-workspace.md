@@ -200,16 +200,23 @@ A user signs in with Google. The consent screen lists exactly the scopes you add
 
 If a user revokes access in their Google Account settings later, the next agent call returns `permission_required` and the UI prompts them to reconnect. No silent failure paths.
 
+## What's in v1 (live)
+
+All five surfaces ship in PR #55 — the credential-proxy substrate, the provider deployment, the sidecar bridge, and the agent MCPs are all proven end-to-end:
+
+- **Drive** (`files`) — list, get, download, upload, update content / metadata, create folder, trash
+- **Sheets** (`sheets`) — read range, update range, append row, create spreadsheet
+- **Docs** (`docs`) — read, create, replace text, append paragraph
+- **Calendar** (`calendar`) — list events, create / update / delete event
+- **Gmail** (`email`) — list threads, get message, send, trash
+
 ## What's NOT in v1
 
-These are documented but not yet implemented in the `google-workspace` provider; calls to them return `provider_timeout` until the corresponding phase ships:
-
-- `documents` (Sheets + Docs)
-- `calendar` (Calendar)
-- `email` (Gmail)
-- Drive write paths (`drive` full scope)
-
-Read-only Drive (the `files` domain via `drive.readonly`) is the v1 surface. Subsequent phases land per-handler without changing the install steps above.
+- Drive folder mount-and-sync (POSIX access at `/workspace/drive/<mount>`). Per-call API was the chosen v1 path — see decision discussion in PR #55 commits.
+- A search index over the user's Drive content. Per-call list with the Drive `q=` query string is the v1 path; an indexed search backed by the workspace's vector provider is a v2 PRD.
+- Drive change-watch / push notifications for live freshness. Per-call API model is always-fresh.
+- Multi-user Calendar / shared mailbox handling. v1 is one user per session, the active TRIGGERING_USER_ID.
+- Resumable Drive upload for files >20 MB. v1 caps content uploads at 20 MB.
 
 ## Microsoft 365 alternative
 
