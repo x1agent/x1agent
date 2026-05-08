@@ -46,6 +46,7 @@ COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 # even though the api image doesn't run them.
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
+COPY packages/providers/google-workspace/package.json packages/providers/google-workspace/tsconfig.json ./packages/providers/google-workspace/
 COPY packages/providers/preview/package.json packages/providers/preview/tsconfig.json ./packages/providers/preview/
 # docs is listed as a workspace in the root package.json; its manifest has
 # to be present at install time even though the api image doesn't run it.

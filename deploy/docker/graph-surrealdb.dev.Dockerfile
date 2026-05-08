@@ -32,6 +32,7 @@ COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
+COPY packages/providers/google-workspace/package.json packages/providers/google-workspace/tsconfig.json ./packages/providers/google-workspace/
 COPY docs/package.json ./docs/
 
 RUN bun install --frozen-lockfile --ignore-scripts
