@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/x1agent/x1agent/compare/v1.12.0...v1.13.0) (2026-05-08)
+
+
+### Features
+
+* **dev:** turn on the surrealdb graph + vector providers in OrbStack ([#58](https://github.com/x1agent/x1agent/issues/58)) ([8de89da](https://github.com/x1agent/x1agent/commit/8de89daad0976b7f75b637396ee52d00bab9aab7))
+
 # [1.12.0](https://github.com/x1agent/x1agent/compare/v1.11.0...v1.12.0) (2026-05-08)
 
 
