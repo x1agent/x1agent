@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/x1agent/x1agent/compare/v1.10.5...v1.11.0) (2026-05-08)
+
+
+### Features
+
+* Google Workspace integration — user-OAuth substrate + Drive read-only provider ([#55](https://github.com/x1agent/x1agent/issues/55)) ([e57d406](https://github.com/x1agent/x1agent/commit/e57d406472b5fa3c9c474b07a31ea45310cce6c9))
+
 ## [1.10.5](https://github.com/x1agent/x1agent/compare/v1.10.4...v1.10.5) (2026-05-06)
 
 
