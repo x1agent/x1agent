@@ -98,55 +98,56 @@ Admission controllers (OPA/Kyverno) in x1agent deployments can further restrict 
 
 Images are built by Kaniko — the standard K8s-native builder. Kaniko runs as an unprivileged container, reads a Dockerfile, builds the image layer-by-layer, and pushes to a registry. No Docker daemon, no privileged containers, no host socket.
 
+See [Image catalog](/architecture/image-catalog) for the full pipeline. The short version:
+
 ```mermaid
 sequenceDiagram
     participant UI as Browser
     participant API
-    participant K8s
+    participant N as NATS
+    participant W as image-builder
     participant Kaniko as Kaniko Job
     participant Reg as in-cluster registry
 
-    UI->>API: POST /images/:id/versions { dockerfile, siblings_yaml }
-    API->>API: validate, compute dockerfile_hash
-    API->>K8s: create Kaniko Job with Dockerfile in a ConfigMap
-    K8s->>Kaniko: schedule pod
-    Kaniko->>Reg: pull FROM runtime-core (if needed)
-    Kaniko->>Kaniko: build layers
-    Kaniko->>Reg: push ws/<id>/<name>:<version>
-    Kaniko-->>K8s: exit 0 (or exit 1 on failure)
-    K8s-->>API: Job status watcher
-    API->>API: update agent_image_versions row (status = succeeded/failed)
-    API->>N: publish image.build.<id>.status
-    N->>UI: status event (in-flight progress)
+    UI->>API: POST /workspaces/:slug/images { dockerfile_source }
+    API->>API: insert agent_images row, status=pending
+    API->>N: publish x1.image.build {id}
+    API-->>UI: 201 row
+    N->>W: deliver x1.image.build {id}
+    W->>W: create ConfigMap with Dockerfile
+    W->>Kaniko: create Kaniko Job
+    Kaniko->>Reg: pull FROM runtime-core
+    Kaniko->>Reg: push ws/<id>/<name>:latest, capture digest
+    W->>API: update agent_images row (status, built_ref@sha256:digest)
 ```
 
 Key properties:
 
-- **One Kaniko Job per build.** Jobs are not reused. Each version's build is its own pod; logs are kept as the Job's pod logs plus a copy in Postgres's `agent_image_versions.log_ref` pointer to a blob store.
-- **ConfigMap holds the Dockerfile.** Kaniko mounts it from a ConfigMap that's created per-build and deleted on success. No build-context tarball is shipped around; the Dockerfile is the entire context in v1 (admins cannot `COPY` local files from their laptop). If `COPY` from the repo becomes a need, we ship a git-context fetcher at Phase 3 follow-up — sidestepping it for v1 keeps the surface small.
-- **Log streaming.** The API subscribes to the Kaniko pod's logs and forwards lines to NATS subject `x1.image.build.<version_id>.logs`. The admin UI's build-log viewer subscribes the same way the session event viewer subscribes to session events — same pattern, same infrastructure.
-- **Concurrency.** Per workspace, one build at a time by default; global concurrency cap prevents runaway clusters during a mass rebuild. Configurable in the platform config.
-- **Cache.** Kaniko supports layer cache on a shared volume; in v1 we run without cache (every build is clean). Cached builds are a follow-up optimization.
+- **One Kaniko Job per build.** Jobs are not reused; each save spawns its own pod.
+- **ConfigMap holds the Dockerfile.** Created per-build, deleted on success. No build-context tarball — the Dockerfile is the entire context (admins cannot `COPY` from a local repo in v1). Build-context upload is a Phase 3 follow-up.
+- **NATS-triggered, async.** The API enqueues; a separate `image-builder` deployment consumes `x1.image.build` and runs the Kaniko Job. The HTTP request returns in milliseconds; the row goes from `pending` → `building` → `succeeded`/`failed` over the build's lifetime.
+- **Concurrency.** Per workspace, one build at a time, enforced by the application use case. Cluster-wide cap prevents runaway parallelism during mass rebuilds.
+- **Cache.** v1 runs Kaniko without cache (every build is clean). Cached builds are a follow-up optimization.
+- **Single-row schema.** v1 stores `dockerfile_source`, `build_status`, `built_ref` directly on `agent_images` — latest build wins, no version history. Versioning is a Phase 3 add when someone needs rollback.
 
 ## Scenarios
 
 ### Admin creates a new Python/Django image
 
-1. Admin clicks **Images → New**, fills in name, Dockerfile, siblings YAML. Save.
-2. API validates, creates an `agent_images` row and a first `agent_image_versions` row with `status: pending`.
-3. API creates a Kaniko Job and a ConfigMap containing the Dockerfile.
-4. Kaniko pulls `x1agent/runtime-core:v1` from the registry, builds the image, pushes to `ws/<id>/python-django:v1`.
-5. API watcher updates the row to `status: succeeded` and sets `built_ref` to the registry reference with digest.
-6. Admin's UI flips from "building" to "ready" — the image is now selectable on agent edit screens.
+1. Admin clicks **Add image**, fills in name, Dockerfile. Save.
+2. API validates, inserts an `agent_images` row with `build_status: pending`, publishes `x1.image.build {id}`.
+3. `image-builder` consumes the message, materializes a per-build ConfigMap, creates the Kaniko Job.
+4. Kaniko pulls `x1agent/runtime-core:v1` from the registry, builds the image, pushes to `ws/<workspace_id>/python-django:latest`.
+5. `image-builder` reads the digest from the push, updates the row to `build_status: succeeded`, sets `built_ref = <reg>/ws/<id>/python-django@sha256:<digest>`.
+6. Admin's UI flips the status pill from "building" to "ready" — the image is now selectable on agent edit screens.
 
 ### Admin edits the Dockerfile
 
 1. Edit the Dockerfile text. Save.
-2. API computes the new hash, creates a new `agent_image_versions` row with `status: pending`. Previous version stays around.
-3. Kaniko builds, pushes as `ws/<id>/python-django:v2`.
-4. Admin flips `current_version_id` to v2 (or does so automatically depending on workspace policy).
+2. API updates the row, sets `build_status: pending`, republishes `x1.image.build {id}`.
+3. Kaniko builds, pushes; `built_ref` swaps to the new digest. Previous digest is no longer addressable from the UI but the registry blob remains until garbage collection.
 
-Rollback is changing `current_version_id` back. The built image is still in the registry; no rebuild needed.
+Rollback in v1 means re-editing the Dockerfile to the prior content and rebuilding. Faster rollback (pinning to a previous digest) is a Phase 3 add — see [Image catalog § Versioning](/architecture/image-catalog#versioning).
 
 ### Session uses a shipped preset
 
