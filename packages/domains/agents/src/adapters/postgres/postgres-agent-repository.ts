@@ -32,6 +32,7 @@ interface Row {
   owner_user_id: string | null;
   visibility: string;
   created_by: string | null;
+  scheduled_run_as_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
   last_scheduler_tick_at: Date | string | null;
@@ -54,6 +55,9 @@ function toAgent(r: Row): Agent {
     ownerUserId: r.owner_user_id ? UserId(r.owner_user_id) : null,
     visibility: (r.visibility as "private" | "workspace" | "via_grants") ?? "workspace",
     createdBy: r.created_by ? UserId(r.created_by) : null,
+    scheduledRunAsUserId: r.scheduled_run_as_user_id
+      ? UserId(r.scheduled_run_as_user_id)
+      : null,
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
     lastSchedulerTickAt: r.last_scheduler_tick_at
@@ -65,7 +69,7 @@ function toAgent(r: Row): Agent {
 const SELECT = `
   id, workspace_id, slug, name, runtime_type, kind, system_prompt,
   heartbeat_md, schedule, is_active, image_id, model,
-  owner_user_id, visibility, created_by,
+  owner_user_id, visibility, created_by, scheduled_run_as_user_id,
   created_at, updated_at, last_scheduler_tick_at
 `;
 
@@ -73,11 +77,19 @@ export class PostgresAgentRepository implements AgentRepository {
   constructor(private readonly sql: Sql) {}
 
   async create(input: CreateAgentInput): Promise<Agent> {
+    // Default scheduledRunAsUserId to the creator. Same default the
+    // migration backfilled for existing rows. Caller can pass null to
+    // explicitly opt out (rare — only useful when an agent has neither
+    // a schedule nor remote_oauth MCPs).
+    const runAs =
+      input.scheduledRunAsUserId === undefined
+        ? input.createdBy
+        : input.scheduledRunAsUserId;
     const rows = await this.sql<Row[]>`
       INSERT INTO agents
         (workspace_id, slug, name, runtime_type, kind, system_prompt,
          heartbeat_md, schedule, image_id, model,
-         owner_user_id, visibility, created_by)
+         owner_user_id, visibility, created_by, scheduled_run_as_user_id)
       VALUES
         (${input.workspaceId}, ${input.slug}, ${input.name},
          ${input.runtimeType}, ${input.kind ?? "worker"},
@@ -85,7 +97,8 @@ export class PostgresAgentRepository implements AgentRepository {
          ${input.imageId ?? null}, ${input.model ?? null},
          ${input.createdBy /* default ownership = creator */},
          ${input.visibility ?? "workspace"},
-         ${input.createdBy})
+         ${input.createdBy},
+         ${runAs})
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
     return toAgent(rows[0]!);
@@ -144,6 +157,7 @@ export class PostgresAgentRepository implements AgentRepository {
         model         = ${patch.model === undefined ? this.sql`model` : patch.model},
         owner_user_id = ${patch.ownerUserId === undefined ? this.sql`owner_user_id` : patch.ownerUserId},
         visibility    = COALESCE(${patch.visibility ?? null}, visibility),
+        scheduled_run_as_user_id = ${patch.scheduledRunAsUserId === undefined ? this.sql`scheduled_run_as_user_id` : patch.scheduledRunAsUserId},
         last_scheduler_tick_at = ${scheduleIncluded ? this.sql`now()` : this.sql`last_scheduler_tick_at`},
         updated_at    = now()
       WHERE id = ${id}

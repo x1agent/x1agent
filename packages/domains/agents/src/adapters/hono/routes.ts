@@ -2,16 +2,23 @@ import { Hono, type MiddlewareHandler, type Context } from "hono";
 import {
   DomainError,
   Email,
+  UserId,
   WorkspaceSlug,
-  type UserId,
   type WorkspaceId,
 } from "@x1agent/kernel";
-import { AgentId, AgentNotFoundError, AgentSlugTakenError, type Agent } from "../../domain/agent.js";
+import {
+  AgentId,
+  AgentNotFoundError,
+  AgentSlugTakenError,
+  ScheduledRunAsUserNotInWorkspaceError,
+  type Agent,
+} from "../../domain/agent.js";
 import { CronSchedule } from "../../domain/cron-schedule.js";
 import { RuntimeType } from "../../domain/runtime.js";
 import { AgentKind } from "../../domain/kind.js";
 import type { AgentRepository } from "../../ports/agent-repository.js";
 import type { AdminGuard } from "../../ports/admin-guard.js";
+import type { WorkspaceMemberReader } from "../../ports/workspace-member-reader.js";
 import { createAgent } from "../../application/create-agent.js";
 import { updateAgent } from "../../application/update-agent.js";
 import { deleteAgent } from "../../application/delete-agent.js";
@@ -20,6 +27,13 @@ import { listAgents } from "../../application/list-agents.js";
 export interface AgentRoutesConfig {
   agents: AgentRepository;
   adminGuard: AdminGuard;
+  /**
+   * Wired in the composition root. When present, createAgent /
+   * updateAgent validate that scheduled_run_as_user_id refers to a
+   * member of the agent's workspace before persisting. Optional in
+   * tests that don't exercise that field.
+   */
+  members?: WorkspaceMemberReader;
   /**
    * Resolver: slug → workspace id. Mirrors the invitations routes — keeps
    * agents independent of the workspaces adapter.
@@ -56,6 +70,7 @@ function serialize(a: Agent) {
     image_id: a.imageId,
     model: a.model,
     created_by: a.createdBy,
+    scheduled_run_as_user_id: a.scheduledRunAsUserId,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
   };
@@ -64,6 +79,7 @@ function serialize(a: Agent) {
 function errStatus(err: unknown): number {
   if (err instanceof AgentNotFoundError) return 404;
   if (err instanceof AgentSlugTakenError) return 409;
+  if (err instanceof ScheduledRunAsUserNotInWorkspaceError) return 400;
   if (err instanceof DomainError) {
     if (err.code === "admin_denied" || err.code === "not_a_member" || err.code === "insufficient_role")
       return 403;
@@ -113,13 +129,18 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       system_prompt?: string;
       heartbeat_md?: string;
       schedule?: string | null;
+      scheduled_run_as_user_id?: string | null;
     };
     if (!body.slug || !body.name || !body.runtime_type) {
       return c.json({ error: "missing_fields" }, 400);
     }
     try {
       const a = await createAgent(
-        { agents: cfg.agents, adminGuard: cfg.adminGuard },
+        {
+          agents: cfg.agents,
+          adminGuard: cfg.adminGuard,
+          members: cfg.members,
+        },
         {
           actor: actor.userId,
           workspaceId: wsId,
@@ -133,6 +154,15 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
             body.schedule === null || body.schedule === undefined
               ? null
               : CronSchedule(body.schedule),
+          // Empty string from the form is treated as "default to creator"
+          // — same shape the rest of the route uses for null/empty.
+          scheduledRunAsUserId:
+            body.scheduled_run_as_user_id === undefined
+              ? undefined
+              : body.scheduled_run_as_user_id === null ||
+                  body.scheduled_run_as_user_id === ""
+                ? null
+                : UserId(body.scheduled_run_as_user_id),
         },
       );
       return c.json({ agent: serialize(a) }, 201);
@@ -215,9 +245,20 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
               ? null
               : String(body.model),
         }),
+        ...(body.scheduled_run_as_user_id !== undefined && {
+          scheduledRunAsUserId:
+            body.scheduled_run_as_user_id === null ||
+            body.scheduled_run_as_user_id === ""
+              ? null
+              : UserId(String(body.scheduled_run_as_user_id)),
+        }),
       };
       const a = await updateAgent(
-        { agents: cfg.agents, adminGuard: cfg.adminGuard },
+        {
+          agents: cfg.agents,
+          adminGuard: cfg.adminGuard,
+          members: cfg.members,
+        },
         actor.userId,
         AgentId(c.req.param("agentId")!),
         patch,

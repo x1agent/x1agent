@@ -93,7 +93,8 @@ function normalizeTab(raw: string): TabKey {
 }
 
 export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
-  const { status, memberships, fetchMe, isPlatformAdmin } = useAuthStore();
+  const { status, memberships, fetchMe, isPlatformAdmin, user: currentUser } =
+    useAuthStore();
   const { bySlug, load, create, update, remove } = useAgentsStore();
   const isCreate = !agentSlug;
 
@@ -108,6 +109,15 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     "worker",
   );
   const [schedule, setSchedule] = useState("");
+  // User the scheduler should impersonate when this agent's cron tick
+  // fires. Defaults to the current admin (= creator) on create. The
+  // /members endpoint populates the picker; null means "no run-as
+  // user" (rare — only valid for agents with no schedule + no
+  // remote_oauth MCPs).
+  const [scheduledRunAsUserId, setScheduledRunAsUserId] = useState<string>("");
+  const [workspaceMembers, setWorkspaceMembers] = useState<
+    { user_id: string; email: string; name: string }[]
+  >([]);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [heartbeatMd, setHeartbeatMd] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -159,6 +169,32 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     loadImages(workspaceSlug);
   }, [workspaceSlug, loadImages]);
 
+  // On create, default scheduled-run-as to the current user (= creator).
+  // Edit mode loads the existing value below.
+  useEffect(() => {
+    if (isCreate && currentUser && !scheduledRunAsUserId) {
+      setScheduledRunAsUserId(currentUser.id);
+    }
+  }, [isCreate, currentUser, scheduledRunAsUserId]);
+
+  // Workspace members for the "Run as" picker on the Schedule card.
+  // Only fetched when this user has admin/owner role — non-admins
+  // can't edit agents anyway and the API would 403. One fetch per
+  // workspace mount; the list is small (typically <20 users) so we
+  // don't bother caching across mounts.
+  useEffect(() => {
+    void apiFetch<{
+      members: { user_id: string; email: string; name: string }[];
+    }>(`/api/workspaces/${workspaceSlug}/members`)
+      .then((r) => setWorkspaceMembers(r.members))
+      .catch(() => {
+        // 403 (non-admin) or transient — picker falls back to a
+        // single "creator" option. Form still saves; the API
+        // membership-check on the create/update path is the real
+        // guard.
+      });
+  }, [workspaceSlug]);
+
   const existing =
     !isCreate && agentSlug
       ? (bySlug[workspaceSlug] ?? []).find((a) => a.slug === agentSlug)
@@ -182,6 +218,10 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setIsActive(existing.is_active);
       setImageId((existing as { image_id?: string | null }).image_id ?? "");
       setModel((existing as { model?: string | null }).model ?? "");
+      setScheduledRunAsUserId(
+        (existing as { scheduled_run_as_user_id?: string | null })
+          .scheduled_run_as_user_id ?? "",
+      );
     }
   }, [existing]);
 
@@ -236,7 +276,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
-        });
+          scheduled_run_as_user_id: scheduledRunAsUserId || null,
+        } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${slugInput.trim()}`;
       } else if (existing) {
         await update(workspaceSlug, existing.id, {
@@ -249,6 +290,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           is_active: isActive,
           image_id: imageId === "" ? null : imageId,
           model: model.trim() === "" ? null : model.trim(),
+          scheduled_run_as_user_id: scheduledRunAsUserId || null,
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
@@ -557,8 +599,49 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     Pick a cadence or drop to a raw cron under Custom.
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   <ScheduleBuilder value={schedule} onChange={setSchedule} />
+
+                  {/* Run as: workspace user the scheduler impersonates
+                      when this agent's cron tick fires. The credential
+                      proxy mints per-user OAuth tokens against this id
+                      at session-spawn time, so any Zone-3 MCPs the
+                      agent has attached (Google Workspace, Linear, …)
+                      run as this user. Defaults to the creator. */}
+                  <div className="space-y-1.5 pt-2">
+                    <Label htmlFor="agent-run-as">Run as</Label>
+                    <Select
+                      value={scheduledRunAsUserId || "__none__"}
+                      onValueChange={(v) =>
+                        setScheduledRunAsUserId(v === "__none__" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger id="agent-run-as">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">
+                          No run-as user (no scheduled runs)
+                        </SelectItem>
+                        {workspaceMembers.map((m) => (
+                          <SelectItem key={m.user_id} value={m.user_id}>
+                            {m.name || m.email}
+                            {m.email !== m.name && m.name
+                              ? ` (${m.email})`
+                              : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-fg-faint">
+                      The scheduler fires this agent's cron ticks as the
+                      selected user — required for any agent with{" "}
+                      <code>remote_oauth</code> MCPs attached (Google
+                      Workspace, Linear, etc). Defaults to the agent's
+                      creator. Workspace admins can change this to a
+                      service account or another member.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
 

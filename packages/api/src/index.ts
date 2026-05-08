@@ -174,6 +174,7 @@ const {
   agentCollectionRoutes,
   sharedAgentResourcesRoutes,
   workspaceImageCatalogRoutes,
+  workspaceMembersRoutes,
   adminAnthropicModelsRoutes,
   adminWorkspacesRoutes,
   sharedResources: composedSharedResources,
@@ -361,6 +362,7 @@ app.route(
   "/api/workspaces/:slug/agent-images",
   workspaceImageCatalogRoutes,
 );
+app.route("/api/workspaces/:slug/members", workspaceMembersRoutes);
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
 
