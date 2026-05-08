@@ -17,6 +17,7 @@ import { getSql } from "./db/client.js";
 import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import { startImageBuilder } from "./image-catalog/builder.js";
 import { capabilitiesRoutes } from "./capabilities/routes.js";
 import { listAnthropicModels } from "./capabilities/anthropic-models.js";
 
@@ -446,6 +447,43 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
+    );
+  }
+
+  // Image builder — consumes x1.image.build, runs Kaniko inside the
+  // api's namespace, writes built_ref back to agent_images. Lives in
+  // the api process for v1 (RBAC + k8s client + DB conn already wired);
+  // can be extracted to its own deployment in Phase 3 if memory pressure
+  // matters.
+  if (
+    sharedKubeConfig &&
+    providerNats &&
+    process.env.IMAGE_BUILDER_DISABLED !== "true"
+  ) {
+    try {
+      const handle = await startImageBuilder({
+        natsConnection: providerNats,
+        sql: composedSql,
+        kubeConfig: sharedKubeConfig,
+        buildNamespace: process.env.IMAGE_BUILD_NAMESPACE || "x1agent",
+        registryAddress:
+          process.env.IMAGE_REGISTRY ||
+          "x1-registry.x1agent.svc.cluster.local:5000",
+        registryInsecure: process.env.IMAGE_REGISTRY_INSECURE !== "false",
+      });
+      registerCleanup(() => handle.stop());
+    } catch (err) {
+      console.warn(
+        `[image-builder] failed to start: ${(err as Error).message} — workspace image builds will sit at 'pending' until restart`,
+      );
+    }
+  } else if (!sharedKubeConfig) {
+    console.warn(
+      "[image-builder] no kubeconfig — workspace image builds disabled",
+    );
+  } else if (!providerNats) {
+    console.warn(
+      "[image-builder] no NATS connection — workspace image builds disabled",
     );
   }
 }

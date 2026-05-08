@@ -139,6 +139,7 @@ import {
 } from "./invitation-adapters.js";
 import { createInternalRoutes } from "../internal/routes.js";
 import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
+import { NatsBuildQueue } from "@x1agent/domain-image-catalog";
 import {
   createWorkspaceShareRoutes,
   createWorkspaceSharesIndexRoutes,
@@ -1004,11 +1005,19 @@ export function compose(env: CompositionEnv): Composition {
     }
   }
 
+  // BuildQueue for the image catalog. When NATS is available we wire
+  // a real publisher; in NATS-disabled boots (test, gateway-down dev)
+  // the routes use the NoopBuildQueue and rows sit at 'pending'
+  // forever — surfaces as a clear UI signal rather than a silent fail.
+  const imageBuildQueue = env.natsConnection
+    ? new NatsBuildQueue(env.natsConnection)
+    : undefined;
   const workspaceImageCatalogRoutes = createWorkspaceImageCatalogRoutes({
     sql: env.sql,
     resolveWorkspace: async (slug) => resolveWorkspace(slug),
     requireAuth,
     getActor,
+    buildQueue: imageBuildQueue,
   });
 
   const sharedAgentResourcesRoutes = createSharedAgentResourcesRoutes({
