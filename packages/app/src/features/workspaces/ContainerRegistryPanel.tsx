@@ -272,7 +272,7 @@ function ImageDetail({
             <div className="flex items-center gap-2">
               <CardTitle>{image.display_name}</CardTitle>
               <Badge variant={image.is_preset ? "info" : "secondary"}>
-                {image.is_preset ? "preset" : "workspace"}
+                {image.is_preset ? "preset" : "custom"}
               </Badge>
               <BuildStatusBadge status={image.build_status} />
             </div>
