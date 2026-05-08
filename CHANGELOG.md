@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/x1agent/x1agent/compare/v1.14.0...v1.14.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **deploy:** graph-surrealdb / messaging-slack / preview dev Dockerfiles missed workspace manifests ([#60](https://github.com/x1agent/x1agent/issues/60)) ([202daff](https://github.com/x1agent/x1agent/commit/202daff8c0449e6fa18972b62a7327591942a30c)), closes [#56](https://github.com/x1agent/x1agent/issues/56)
+
 # [1.14.0](https://github.com/x1agent/x1agent/compare/v1.13.1...v1.14.0) (2026-05-08)
 
 
