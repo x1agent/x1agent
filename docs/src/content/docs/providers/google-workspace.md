@@ -21,7 +21,7 @@ gcloud services enable \
   --project=MY-PROJECT
 
 # 2. (Console) OAuth consent screen → add the same five scopes:
-#    https://console.cloud.google.com/apis/credentials/consent?project=MY-PROJECT
+#    https://console.cloud.google.com/auth/scopes?project=MY-PROJECT
 #    Edit App → Scopes → Add or Remove Scopes
 
 # 3. (Console) Create OAuth Client ID with this redirect URI:
@@ -133,7 +133,22 @@ gcloud services enable \
 
 ### Don't forget the OAuth consent screen
 
-API enablement is necessary but not sufficient. Each scope you intend to request **must also be declared on the OAuth consent screen** at https://console.cloud.google.com/apis/credentials/consent?project=MY-PROJECT → **Edit App** → **Scopes** → "Add or Remove Scopes." If a scope is in your authorize URL but not on the consent screen, Google silently drops it (Internal user-type) or rejects the request (External user-type). The same five scopes from the superset above need to be checked here.
+API enablement is necessary but not sufficient. Each scope you intend to request **must also be declared on the OAuth consent screen** at https://console.cloud.google.com/auth/scopes?project=MY-PROJECT → **Add or remove scopes**. If a scope is in your authorize URL but not on the consent screen, Google silently drops it (Internal user-type) or rejects the request (External user-type).
+
+In Google's dialog, scroll to the **Manually add scopes** textbox at the bottom and paste this list as-is (one scope per line — Google accepts that format directly):
+
+```
+https://www.googleapis.com/auth/drive
+https://www.googleapis.com/auth/spreadsheets
+https://www.googleapis.com/auth/documents
+https://www.googleapis.com/auth/calendar
+https://www.googleapis.com/auth/gmail.modify
+openid
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+```
+
+Click **Add to table**, then **Update** at the bottom of the dialog, then **Save** on the Data Access page. The Data Access listing should now show all 8 across the non-sensitive / sensitive / restricted buckets.
 
 ## 5. Wire it into your install
 
