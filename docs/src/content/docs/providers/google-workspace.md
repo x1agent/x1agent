@@ -9,6 +9,36 @@ The `google-workspace` provider implements the `files`, `documents`, `calendar`,
 
 This page is the per-install setup walkthrough. You run it once when you decide to enable Google Workspace for your install. Everything below happens in your own Google Cloud project — x1agent has nothing centralized you depend on.
 
+## Quick path (if you know your way around GCP)
+
+Replace `MY-PROJECT` with your GCP project id, run the gcloud command, paste the scope superset into your install file, finish in the Console.
+
+```bash
+# 1. Enable the five Workspace APIs in one shot.
+gcloud services enable \
+  drive.googleapis.com sheets.googleapis.com docs.googleapis.com \
+  calendar-json.googleapis.com gmail.googleapis.com \
+  --project=MY-PROJECT
+
+# 2. (Console) OAuth consent screen → add the same five scopes:
+#    https://console.cloud.google.com/apis/credentials/consent?project=MY-PROJECT
+#    Edit App → Scopes → Add or Remove Scopes
+
+# 3. (Console) Create OAuth Client ID with this redirect URI:
+#    https://api.<your-base-domain>/auth/google/callback
+#    https://console.cloud.google.com/apis/credentials?project=MY-PROJECT
+#    + Create Credentials → OAuth client ID → Web application
+
+# 4. Paste into installs/<base-domain>.local:
+GOOGLE_OAUTH_CLIENT_ID="<client id from step 3>"
+GOOGLE_OAUTH_CLIENT_SECRET="<client secret from step 3>"
+GOOGLE_OAUTH_SCOPES="openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.modify"
+```
+
+Then `mise run deploy:prod`. Operators sign in via Google → consent screen lists everything → grant captured in `user_oauth_tokens`.
+
+If you're new to GCP / want the longer walkthrough, keep reading.
+
 ## What you'll do
 
 1. Create or pick a GCP project that owns the OAuth client.
@@ -75,15 +105,17 @@ Click **Create**. Copy the **Client ID** and **Client secret** — you'll paste 
 
 ## 4. Enable the Google APIs
 
-For each integration you want agents to use, enable the matching API in your project. Click each link, then click **Enable**:
+For each integration you want agents to use, enable the matching API in your project.
 
-| API | Direct link (replace `MY-PROJECT`) | Used for |
+Replace `MY-PROJECT` with your GCP project id everywhere below. **Tip:** find-and-replace `MY-PROJECT` once in this section and bookmark the result — every link below is a one-click "Enable" page pre-scoped to your project. The links are deterministic GCP URLs, no extra setup needed.
+
+| API | Direct link | Used for |
 |---|---|---|
-| Drive | `https://console.cloud.google.com/apis/library/drive.googleapis.com?project=MY-PROJECT` | `files` domain — list/get/download (and later upload) |
-| Sheets | `https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=MY-PROJECT` | `documents` domain — read cell ranges, patch values |
-| Docs | `https://console.cloud.google.com/apis/library/docs.googleapis.com?project=MY-PROJECT` | `documents` domain — read/patch document content |
-| Calendar | `https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=MY-PROJECT` | `calendar` domain — events read/write |
-| Gmail | `https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=MY-PROJECT` | `email` domain — read threads, send messages |
+| Drive | https://console.cloud.google.com/apis/library/drive.googleapis.com?project=MY-PROJECT | `files` domain — list/get/download/upload/update/trash, folder mgmt |
+| Sheets | https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=MY-PROJECT | `documents` domain — read cell ranges, patch values |
+| Docs | https://console.cloud.google.com/apis/library/docs.googleapis.com?project=MY-PROJECT | `documents` domain — read/patch document content |
+| Calendar | https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=MY-PROJECT | `calendar` domain — events read/write |
+| Gmail | https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=MY-PROJECT | `email` domain — read threads, send messages |
 
 Or do it in one shot with gcloud:
 
@@ -97,7 +129,11 @@ gcloud services enable \
   --project=MY-PROJECT
 ```
 
-You can enable all five even if you only plan to use a subset today; there's no charge until you actually call them. Skipping ahead means later phases work without coming back to the Console.
+**Recommendation: enable all five up front,** even if you only plan to use a subset today. There's no charge until you actually call them, and you avoid coming back to the Console every time a new phase ships. Future phases (Sheets/Docs/Calendar/Gmail handlers) land as pure code work — no Console click cycle.
+
+### Don't forget the OAuth consent screen
+
+API enablement is necessary but not sufficient. Each scope you intend to request **must also be declared on the OAuth consent screen** at https://console.cloud.google.com/apis/credentials/consent?project=MY-PROJECT → **Edit App** → **Scopes** → "Add or Remove Scopes." If a scope is in your authorize URL but not on the consent screen, Google silently drops it (Internal user-type) or rejects the request (External user-type). The same five scopes from the superset above need to be checked here.
 
 ## 5. Wire it into your install
 
@@ -109,18 +145,25 @@ GOOGLE_OAUTH_CLIENT_SECRET="<your client secret>"
 GOOGLE_OAUTH_SCOPES="openid email profile https://www.googleapis.com/auth/drive.readonly"
 ```
 
-The `GOOGLE_OAUTH_SCOPES` value is a space-separated list. Add scopes here for every Workspace surface you want available. The full set we support today:
+The `GOOGLE_OAUTH_SCOPES` value is a space-separated list. Add scopes here for every Workspace surface you want available. **Recommendation: set the maximum-capability superset once.** Avoids a re-consent cycle every time we ship a new phase, and Google's consent screen is identical-effort whether you pick one scope or five.
+
+The full superset (covers Drive + Sheets + Docs + Calendar + Gmail with read+write):
 
 ```bash
 GOOGLE_OAUTH_SCOPES="openid email profile \
-  https://www.googleapis.com/auth/drive.readonly \
+  https://www.googleapis.com/auth/drive \
   https://www.googleapis.com/auth/spreadsheets \
   https://www.googleapis.com/auth/documents \
   https://www.googleapis.com/auth/calendar \
-  https://www.googleapis.com/auth/gmail.readonly"
+  https://www.googleapis.com/auth/gmail.modify"
 ```
 
-Quote the whole value — it contains spaces, and unquoted whitespace will break dotenv parsing.
+Notes:
+- `gmail.modify` is a superset of `gmail.readonly` + `gmail.send` + label management. Pick `gmail.modify` instead of carrying both sub-scopes.
+- `drive` (full) is a Google **restricted** scope — fine for Internal user-type installs (org-only), but External installs need a CASA audit before non-org users can complete consent. Read the "Verification" section above.
+- The platform NEVER stores credentials beyond the encrypted `user_oauth_tokens` row. Adding a scope to this list is a request for a capability; the user's actual grant is whatever they click "Allow" on at consent time and is reflected in `scopes_granted`.
+
+**Quote the whole value** — it contains spaces, and unquoted whitespace will break the dotenv parser.
 
 After editing, re-run `mise run configure:prod` to validate the install file, then `mise run deploy:prod` to roll the new scopes out to the api. Users sign in once with the new scopes; their grants persist in the platform's `user_oauth_tokens` table and providers can act on their behalf going forward.
 
