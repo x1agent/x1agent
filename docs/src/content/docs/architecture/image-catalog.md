@@ -136,7 +136,7 @@ sequenceDiagram
   participant API as api (Hono)
   participant DB as Postgres
   participant N as NATS
-  participant W as image-builder
+  participant W as image-builder<br/>(in-api subscriber)
   participant K8s as Kubernetes API
   participant Reg as in-cluster registry
 
@@ -159,9 +159,11 @@ sequenceDiagram
 
 The api never blocks on the build. It enqueues and returns. Builds take 20s–3min; HTTP can't carry that.
 
-### image-builder deployment
+### image-builder
 
-A new platform deployment subscribes to `x1.image.build` (queue group `image-builder` for at-least-once delivery with crash recovery). For each message:
+v1 ships the builder as a NATS subscriber inside the api process. The api already has Kubernetes RBAC for Jobs and ConfigMaps, a Postgres connection, and a NATS connection — putting the builder there avoided a new deployment, a new chart slot, and a new RBAC stanza. Phase 3 extracts it to its own deployment if api memory pressure becomes a real problem.
+
+Subscribes to `x1.image.build` (queue group `image-builder` for at-least-once delivery with crash recovery). For each message:
 
 1. Load the row. Refuse if `is_preset=true`.
 2. Materialize the Dockerfile into a per-build ConfigMap in the build namespace (`x1agent-infra`, alongside the registry).

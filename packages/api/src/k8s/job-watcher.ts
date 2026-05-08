@@ -278,8 +278,14 @@ async function launchSession(
     JOIN agent_images i ON i.id = a.image_id
     WHERE a.id = ${agent.id}
   `;
+  // Empty built_ref means a workspace-authored image whose build hasn't
+  // pushed a digest yet (status=pending/building) or whose latest build
+  // failed. The agent edit dropdown filters those out, but defense in
+  // depth — fall back to the deployment default rather than spawning
+  // a pod with an empty image and ImagePullBackOff'ing.
+  const candidateRef = imageRow[0]?.built_ref ?? "";
   const resolvedAgentImage =
-    imageRow[0]?.built_ref ?? cfg.agentImage;
+    candidateRef.trim().length > 0 ? candidateRef : cfg.agentImage;
   if (ws.length === 0) {
     await cfg.sessions.updateStatus(sessionId, {
       status: "failed",
