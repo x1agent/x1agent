@@ -19,7 +19,10 @@ export async function waitForJob(
   const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const res = await batch.readNamespacedJobStatus({ name, namespace });
+    // readNamespacedJob (not …Status) — both return the same status
+    // field, but the /status subresource needs a separate RBAC verb
+    // (jobs/status) which not every consumer's role grants.
+    const res = await batch.readNamespacedJob({ name, namespace });
     const status = res.status;
     if (status?.succeeded && status.succeeded > 0) return "complete";
     if (status?.failed && status.failed > 0) return "failed";

@@ -93,6 +93,22 @@ describe("buildKanikoJob", () => {
     expect(args).toContain("--image-name-with-digest-file=/dev/termination-log");
   });
 
+  it("runs the Kaniko container as uid 0 with default caps (CAP_CHOWN required)", () => {
+    const job = buildKanikoJob({
+      jobName: "j",
+      namespace: "x1agent",
+      destination: "reg/foo:latest",
+      insecureRegistry: false,
+      context: { kind: "inline", configMapName: "cm" },
+    });
+    const sec = job.spec!.template!.spec!.containers[0]!.securityContext!;
+    expect(sec.runAsUser).toBe(0);
+    expect(sec.allowPrivilegeEscalation).toBe(false);
+    // No `capabilities.drop: ["ALL"]` — Kaniko needs CAP_CHOWN /
+    // CAP_FOWNER / CAP_DAC_OVERRIDE to unpack rootfs ownership.
+    expect(sec.capabilities).toBeUndefined();
+  });
+
   it("merges custom labels onto the Job + Pod", () => {
     const job = buildKanikoJob({
       jobName: "j",
@@ -131,6 +147,17 @@ describe("parseDigestFromTerminationMessage", () => {
     expect(parseDigestFromTerminationMessage("")).toBeNull();
     expect(parseDigestFromTerminationMessage("error: something went wrong")).toBeNull();
     expect(parseDigestFromTerminationMessage("foo@sha256:short")).toBeNull();
+  });
+
+  it("preserves host:port when Kaniko emits no :tag (regression: lost :5000 port)", () => {
+    const msg =
+      "x1-registry.x1agent.svc.cluster.local:5000/ws/wsid/django@sha256:" +
+      "f".repeat(64);
+    const parsed = parseDigestFromTerminationMessage(msg);
+    expect(parsed).toBe(
+      "x1-registry.x1agent.svc.cluster.local:5000/ws/wsid/django@sha256:" +
+        "f".repeat(64),
+    );
   });
 
   it("survives trailing whitespace / newlines", () => {

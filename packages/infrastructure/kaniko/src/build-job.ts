@@ -142,8 +142,15 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
               volumeMounts,
               terminationMessagePolicy: "File",
               securityContext: {
+                // Kaniko needs CAP_CHOWN, CAP_FOWNER, CAP_DAC_OVERRIDE
+                // (and friends) to unpack base-image rootfs ownership.
+                // Dropping ALL caps fails with
+                // `chown /etc/gshadow: operation not permitted` on the
+                // first RUN. Run as uid 0 with the default capability
+                // set, and rely on seccomp + the Job's namespace-scoped
+                // RBAC (no host network, no host pid) for isolation.
                 allowPrivilegeEscalation: false,
-                capabilities: { drop: ["ALL"] },
+                runAsUser: 0,
               },
               resources: inputs.resources ?? {
                 requests: { cpu: "500m", memory: "1Gi" },
@@ -174,10 +181,17 @@ export function parseDigestFromTerminationMessage(
   const m = trimmed.match(/(.+)@sha256:([0-9a-f]{64})\b/);
   if (!m) return null;
   // Normalize: strip the tag from the image part and reattach the digest.
+  // Kaniko's `--image-name-with-digest-file` may or may not include the
+  // `:tag`, depending on version. Only strip a trailing `:tag` when the
+  // colon comes AFTER the last `/` — colons before the first `/` are
+  // part of `host:port` (e.g. `localhost:5000`) and must be preserved.
   const imageWithTag = m[1]!;
   const digest = m[2]!;
-  const imageNoTag = imageWithTag.includes(":")
-    ? imageWithTag.slice(0, imageWithTag.lastIndexOf(":"))
-    : imageWithTag;
+  const lastSlash = imageWithTag.lastIndexOf("/");
+  const lastColon = imageWithTag.lastIndexOf(":");
+  const imageNoTag =
+    lastColon > lastSlash
+      ? imageWithTag.slice(0, lastColon)
+      : imageWithTag;
   return `${imageNoTag}@sha256:${digest}`;
 }

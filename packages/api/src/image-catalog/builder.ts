@@ -1,5 +1,5 @@
 import * as k8s from "@kubernetes/client-node";
-import { connect, StringCodec, type NatsConnection } from "nats";
+import { StringCodec, type NatsConnection } from "nats";
 import type postgres from "postgres";
 import {
   buildKanikoJob,
@@ -10,7 +10,10 @@ import {
 } from "@x1agent/infra-kaniko";
 
 export interface ImageBuilderOptions {
-  natsUrl: string;
+  /** Pre-built NATS connection — share the api's providerNats so the
+   * dev TLS opts (CA + client cert) flow through cleanly without
+   * duplicating connect helpers. */
+  natsConnection: NatsConnection;
   sql: postgres.Sql<Record<string, unknown>>;
   /** KubeConfig already loaded (from the in-cluster ServiceAccount).
    * The builder no-ops when this is undefined — api runs outside a
@@ -67,13 +70,7 @@ export async function startImageBuilder(
 ): Promise<ImageBuilderHandle> {
   const subject = opts.subject ?? DEFAULT_SUBJECT;
   const queue = opts.queueGroup ?? DEFAULT_QUEUE;
-
-  const nc = await connect({
-    servers: opts.natsUrl,
-    name: "x1agent-image-builder",
-    reconnect: true,
-    maxReconnectAttempts: -1,
-  });
+  const nc = opts.natsConnection;
 
   const batch = opts.kubeConfig.makeApiClient(k8s.BatchV1Api);
   const core = opts.kubeConfig.makeApiClient(k8s.CoreV1Api);
@@ -137,15 +134,12 @@ export async function startImageBuilder(
         // sub already torn down
       }
       // Let in-flight builds finish (best-effort within a short window).
+      // Don't drain the NATS connection — it's owned by the api and
+      // shared with other subscribers.
       await Promise.race([
         Promise.allSettled(inflight),
         new Promise((r) => setTimeout(r, 5_000)),
       ]);
-      try {
-        await nc.drain();
-      } catch {
-        // drain race during shutdown — fine
-      }
     },
   };
 }

@@ -455,10 +455,14 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   // the api process for v1 (RBAC + k8s client + DB conn already wired);
   // can be extracted to its own deployment in Phase 3 if memory pressure
   // matters.
-  if (sharedKubeConfig && process.env.IMAGE_BUILDER_DISABLED !== "true") {
+  if (
+    sharedKubeConfig &&
+    providerNats &&
+    process.env.IMAGE_BUILDER_DISABLED !== "true"
+  ) {
     try {
       const handle = await startImageBuilder({
-        natsUrl,
+        natsConnection: providerNats,
         sql: composedSql,
         kubeConfig: sharedKubeConfig,
         buildNamespace: process.env.IMAGE_BUILD_NAMESPACE || "x1agent",
@@ -476,6 +480,10 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } else if (!sharedKubeConfig) {
     console.warn(
       "[image-builder] no kubeconfig — workspace image builds disabled",
+    );
+  } else if (!providerNats) {
+    console.warn(
+      "[image-builder] no NATS connection — workspace image builds disabled",
     );
   }
 }

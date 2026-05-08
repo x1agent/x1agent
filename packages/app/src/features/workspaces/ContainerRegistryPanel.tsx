@@ -187,7 +187,7 @@ function ImageTable({
               </TableCell>
               <TableCell>
                 <Badge variant={img.is_preset ? "info" : "secondary"}>
-                  {img.is_preset ? "preset" : "workspace"}
+                  {img.is_preset ? "preset" : "custom"}
                 </Badge>
               </TableCell>
             </TableRow>
