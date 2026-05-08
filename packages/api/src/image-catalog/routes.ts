@@ -220,7 +220,7 @@ export function createWorkspaceImageCatalogRoutes(
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
       await svc.delete(wsId as unknown as string, c.req.param("id")!);
-      return c.body(null, 204);
+      return c.json({ ok: true });
     } catch (err) {
       if (err instanceof DomainError) {
         return c.json(
