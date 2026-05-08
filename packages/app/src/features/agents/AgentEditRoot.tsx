@@ -446,10 +446,16 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                             );
                           })()}
 
-                          {/* Workspace-authored images — non-preset. */}
+                          {/* Workspace-authored images — non-preset. Hide
+                              rows that aren't ready to run: pending /
+                              building / failed images would crash a
+                              session pod with ImagePullBackOff. */}
                           {(() => {
                             const workspace = images.filter(
-                              (img) => !img.is_preset,
+                              (img) =>
+                                !img.is_preset &&
+                                (img.build_status === "ready" ||
+                                  img.build_status === "succeeded"),
                             );
                             if (workspace.length === 0) return null;
                             return (

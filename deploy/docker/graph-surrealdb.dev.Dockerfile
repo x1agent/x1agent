@@ -9,6 +9,8 @@ WORKDIR /app
 
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
+COPY packages/domains/image-catalog/package.json packages/domains/image-catalog/tsconfig.json ./packages/domains/image-catalog/
+COPY packages/infrastructure/kaniko/package.json packages/infrastructure/kaniko/tsconfig.json ./packages/infrastructure/kaniko/
 COPY packages/observability/package.json packages/observability/tsconfig.json ./packages/observability/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
@@ -30,6 +32,7 @@ COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
+COPY packages/providers/google-workspace/package.json packages/providers/google-workspace/tsconfig.json ./packages/providers/google-workspace/
 COPY docs/package.json ./docs/
 
 RUN bun install --frozen-lockfile --ignore-scripts
