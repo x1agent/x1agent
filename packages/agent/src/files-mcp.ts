@@ -113,6 +113,99 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         additionalProperties: false,
       },
     },
+    {
+      name: "upload_file",
+      description:
+        "Upload a NEW file to Google Drive. Creates a file with the given name and content. Optional parent_folder_id puts it inside a folder; omit for the user's My Drive root. Use this when creating a fresh file. To replace the contents of an existing file, use update_file_content instead. Caps at ~20 MB.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "The new file's display name." },
+          parent_folder_id: {
+            type: "string",
+            description: "Optional Drive folder id to create the file inside. Omit for My Drive root.",
+          },
+          content_base64: {
+            type: "string",
+            description: "Base64-encoded file bytes.",
+          },
+          mime_type: {
+            type: "string",
+            description: "Optional MIME type (e.g. text/plain, text/markdown). Defaults to application/octet-stream.",
+          },
+        },
+        required: ["name", "content_base64"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "update_file_content",
+      description:
+        "REPLACE the content bytes of an existing Drive file. Keeps the same file_id, name, parents, and modifiedTime gets bumped. Native Google formats (Docs/Sheets/Slides) can't be written this way — use the documents tools (when available) for those.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          file_id: { type: "string", description: "The existing file's id." },
+          content_base64: {
+            type: "string",
+            description: "Base64-encoded new file bytes.",
+          },
+          mime_type: {
+            type: "string",
+            description: "Optional new MIME type. Omit to keep the file's current type.",
+          },
+        },
+        required: ["file_id", "content_base64"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "update_file_metadata",
+      description:
+        "Rename a Drive file or move it to a different folder. Pass `name` to rename, `parent_folder_id` to move (replaces existing parent). At least one of the two is required.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          file_id: { type: "string", description: "The file's id." },
+          name: { type: "string", description: "Optional new name." },
+          parent_folder_id: {
+            type: "string",
+            description: "Optional new parent folder id. Replaces existing parent.",
+          },
+        },
+        required: ["file_id"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "create_folder",
+      description: "Create a new folder in Google Drive. Returns the new folder's id and web_view_link.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "Folder name." },
+          parent_folder_id: {
+            type: "string",
+            description: "Optional parent folder id. Omit for My Drive root.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "trash_file",
+      description:
+        "Move a Drive file to trash. Reversible from the user's Drive UI. Hard delete is intentionally not exposed — agents should never permanently delete user data.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          file_id: { type: "string", description: "The file's id." },
+        },
+        required: ["file_id"],
+        additionalProperties: false,
+      },
+    },
   ],
 }));
 
@@ -136,6 +229,42 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       break;
     case "download_file":
       path = "/files/download";
+      body = { file_id: a.file_id as string };
+      break;
+    case "upload_file":
+      path = "/files/upload";
+      body = {
+        name: a.name as string,
+        parent_folder_id: a.parent_folder_id as string | undefined,
+        content_base64: a.content_base64 as string,
+        mime_type: a.mime_type as string | undefined,
+      };
+      break;
+    case "update_file_content":
+      path = "/files/update_content";
+      body = {
+        file_id: a.file_id as string,
+        content_base64: a.content_base64 as string,
+        mime_type: a.mime_type as string | undefined,
+      };
+      break;
+    case "update_file_metadata":
+      path = "/files/update_metadata";
+      body = {
+        file_id: a.file_id as string,
+        name: a.name as string | undefined,
+        parent_folder_id: a.parent_folder_id as string | undefined,
+      };
+      break;
+    case "create_folder":
+      path = "/files/create_folder";
+      body = {
+        name: a.name as string,
+        parent_folder_id: a.parent_folder_id as string | undefined,
+      };
+      break;
+    case "trash_file":
+      path = "/files/trash";
       body = { file_id: a.file_id as string };
       break;
     default:

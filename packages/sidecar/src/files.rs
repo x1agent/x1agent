@@ -43,6 +43,40 @@ pub struct GetOrDownloadRequest {
     pub file_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct UploadFileRequest {
+    pub name: String,
+    #[serde(default)]
+    pub parent_folder_id: Option<String>,
+    pub content_base64: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateFileContentRequest {
+    pub file_id: String,
+    pub content_base64: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateFileMetadataRequest {
+    pub file_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub parent_folder_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CreateFolderRequest {
+    pub name: String,
+    #[serde(default)]
+    pub parent_folder_id: Option<String>,
+}
+
 #[derive(Serialize)]
 struct ErrorBody {
     ok: bool,
@@ -178,4 +212,87 @@ pub async fn handle_download(
         "file_id": req.file_id,
     });
     nats_provider_request(&state, "x1.provider.files.download", body).await
+}
+
+pub async fn handle_upload(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UploadFileRequest>,
+) -> axum::response::Response {
+    let user_id = match user_id_or_error() {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "name": req.name,
+        "parent_folder_id": req.parent_folder_id,
+        "content_base64": req.content_base64,
+        "mime_type": req.mime_type,
+    });
+    nats_provider_request(&state, "x1.provider.files.upload", body).await
+}
+
+pub async fn handle_update_content(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpdateFileContentRequest>,
+) -> axum::response::Response {
+    let user_id = match user_id_or_error() {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "file_id": req.file_id,
+        "content_base64": req.content_base64,
+        "mime_type": req.mime_type,
+    });
+    nats_provider_request(&state, "x1.provider.files.update_content", body).await
+}
+
+pub async fn handle_update_metadata(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpdateFileMetadataRequest>,
+) -> axum::response::Response {
+    let user_id = match user_id_or_error() {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "file_id": req.file_id,
+        "name": req.name,
+        "parent_folder_id": req.parent_folder_id,
+    });
+    nats_provider_request(&state, "x1.provider.files.update_metadata", body).await
+}
+
+pub async fn handle_create_folder(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateFolderRequest>,
+) -> axum::response::Response {
+    let user_id = match user_id_or_error() {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "name": req.name,
+        "parent_folder_id": req.parent_folder_id,
+    });
+    nats_provider_request(&state, "x1.provider.files.create_folder", body).await
+}
+
+pub async fn handle_trash(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GetOrDownloadRequest>,
+) -> axum::response::Response {
+    let user_id = match user_id_or_error() {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "file_id": req.file_id,
+    });
+    nats_provider_request(&state, "x1.provider.files.trash", body).await
 }

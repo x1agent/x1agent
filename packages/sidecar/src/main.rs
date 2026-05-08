@@ -203,6 +203,20 @@ async fn main() {
         .route("/files/list", routing::post(files::handle_list))
         .route("/files/get", routing::post(files::handle_get))
         .route("/files/download", routing::post(files::handle_download))
+        .route("/files/upload", routing::post(files::handle_upload))
+        .route(
+            "/files/update_content",
+            routing::post(files::handle_update_content),
+        )
+        .route(
+            "/files/update_metadata",
+            routing::post(files::handle_update_metadata),
+        )
+        .route(
+            "/files/create_folder",
+            routing::post(files::handle_create_folder),
+        )
+        .route("/files/trash", routing::post(files::handle_trash))
         .route("/share", routing::post(shares::handle_share))
         .route(
             "/collections",

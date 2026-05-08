@@ -279,6 +279,11 @@ const allowedTools = [
   "mcp__files__list_files",
   "mcp__files__get_file",
   "mcp__files__download_file",
+  "mcp__files__upload_file",
+  "mcp__files__update_file_content",
+  "mcp__files__update_file_metadata",
+  "mcp__files__create_folder",
+  "mcp__files__trash_file",
 ];
 
 // ── System prompt ───────────────────────────────────────

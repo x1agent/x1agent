@@ -24,12 +24,22 @@ initOtel({ serviceName: "x1agent-provider-google-workspace" });
 
 import { connect, StringCodec, type Msg, type NatsConnection } from "nats";
 import {
+  handleCreateFolder,
   handleDownload,
   handleGet,
   handleList,
+  handleTrash,
+  handleUpdateContent,
+  handleUpdateMetadata,
+  handleUpload,
+  type CreateFolderRequest,
   type DownloadFileRequest,
   type GetFileRequest,
   type ListFilesRequest,
+  type TrashFileRequest,
+  type UpdateFileContentRequest,
+  type UpdateFileMetadataRequest,
+  type UploadFileRequest,
 } from "./files.js";
 
 const NATS_URL = process.env.NATS_URL ?? "nats://nats:4222";
@@ -61,6 +71,26 @@ const HANDLERS: NatsHandler<unknown>[] = [
   {
     subject: "x1.provider.files.download",
     handle: (req) => handleDownload(req as DownloadFileRequest),
+  },
+  {
+    subject: "x1.provider.files.upload",
+    handle: (req) => handleUpload(req as UploadFileRequest),
+  },
+  {
+    subject: "x1.provider.files.update_content",
+    handle: (req) => handleUpdateContent(req as UpdateFileContentRequest),
+  },
+  {
+    subject: "x1.provider.files.update_metadata",
+    handle: (req) => handleUpdateMetadata(req as UpdateFileMetadataRequest),
+  },
+  {
+    subject: "x1.provider.files.create_folder",
+    handle: (req) => handleCreateFolder(req as CreateFolderRequest),
+  },
+  {
+    subject: "x1.provider.files.trash",
+    handle: (req) => handleTrash(req as TrashFileRequest),
   },
 ];
 
