@@ -9,6 +9,8 @@ WORKDIR /app
 
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/kernel/package.json packages/kernel/tsconfig.json ./packages/kernel/
+COPY packages/domains/image-catalog/package.json packages/domains/image-catalog/tsconfig.json ./packages/domains/image-catalog/
+COPY packages/infrastructure/kaniko/package.json packages/infrastructure/kaniko/tsconfig.json ./packages/infrastructure/kaniko/
 COPY packages/observability/package.json packages/observability/tsconfig.json ./packages/observability/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api/package.json packages/api/tsconfig.json ./packages/api/
