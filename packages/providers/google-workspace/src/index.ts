@@ -41,6 +41,46 @@ import {
   type UpdateFileMetadataRequest,
   type UploadFileRequest,
 } from "./files.js";
+import {
+  handleAppendRow,
+  handleCreateSpreadsheet,
+  handleReadRange,
+  handleUpdateRange,
+  type AppendSheetRowRequest,
+  type CreateSpreadsheetRequest,
+  type ReadSheetRangeRequest,
+  type UpdateSheetRangeRequest,
+} from "./sheets.js";
+import {
+  handleAppendParagraph,
+  handleCreateDoc,
+  handleReadDoc,
+  handleReplaceText,
+  type AppendParagraphRequest,
+  type CreateDocRequest,
+  type ReadDocRequest,
+  type ReplaceTextRequest,
+} from "./docs.js";
+import {
+  handleCreateEvent,
+  handleDeleteEvent,
+  handleListEvents,
+  handleUpdateEvent,
+  type CreateEventRequest,
+  type DeleteEventRequest,
+  type ListEventsRequest,
+  type UpdateEventRequest,
+} from "./calendar.js";
+import {
+  handleGetMessage,
+  handleListThreads,
+  handleSendEmail,
+  handleTrashEmail,
+  type GetMessageRequest,
+  type ListThreadsRequest,
+  type SendEmailRequest,
+  type TrashEmailRequest,
+} from "./email.js";
 
 const NATS_URL = process.env.NATS_URL ?? "nats://nats:4222";
 
@@ -91,6 +131,74 @@ const HANDLERS: NatsHandler<unknown>[] = [
   {
     subject: "x1.provider.files.trash",
     handle: (req) => handleTrash(req as TrashFileRequest),
+  },
+  // Sheets
+  {
+    subject: "x1.provider.sheets.read_range",
+    handle: (req) => handleReadRange(req as ReadSheetRangeRequest),
+  },
+  {
+    subject: "x1.provider.sheets.update_range",
+    handle: (req) => handleUpdateRange(req as UpdateSheetRangeRequest),
+  },
+  {
+    subject: "x1.provider.sheets.append_row",
+    handle: (req) => handleAppendRow(req as AppendSheetRowRequest),
+  },
+  {
+    subject: "x1.provider.sheets.create",
+    handle: (req) => handleCreateSpreadsheet(req as CreateSpreadsheetRequest),
+  },
+  // Docs
+  {
+    subject: "x1.provider.docs.read",
+    handle: (req) => handleReadDoc(req as ReadDocRequest),
+  },
+  {
+    subject: "x1.provider.docs.create",
+    handle: (req) => handleCreateDoc(req as CreateDocRequest),
+  },
+  {
+    subject: "x1.provider.docs.replace_text",
+    handle: (req) => handleReplaceText(req as ReplaceTextRequest),
+  },
+  {
+    subject: "x1.provider.docs.append_paragraph",
+    handle: (req) => handleAppendParagraph(req as AppendParagraphRequest),
+  },
+  // Calendar
+  {
+    subject: "x1.provider.calendar.list_events",
+    handle: (req) => handleListEvents(req as ListEventsRequest),
+  },
+  {
+    subject: "x1.provider.calendar.create_event",
+    handle: (req) => handleCreateEvent(req as CreateEventRequest),
+  },
+  {
+    subject: "x1.provider.calendar.update_event",
+    handle: (req) => handleUpdateEvent(req as UpdateEventRequest),
+  },
+  {
+    subject: "x1.provider.calendar.delete_event",
+    handle: (req) => handleDeleteEvent(req as DeleteEventRequest),
+  },
+  // Email (Gmail)
+  {
+    subject: "x1.provider.email.list_threads",
+    handle: (req) => handleListThreads(req as ListThreadsRequest),
+  },
+  {
+    subject: "x1.provider.email.get_message",
+    handle: (req) => handleGetMessage(req as GetMessageRequest),
+  },
+  {
+    subject: "x1.provider.email.send",
+    handle: (req) => handleSendEmail(req as SendEmailRequest),
+  },
+  {
+    subject: "x1.provider.email.trash",
+    handle: (req) => handleTrashEmail(req as TrashEmailRequest),
   },
 ];
 
