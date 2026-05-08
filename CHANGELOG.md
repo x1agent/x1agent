@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/x1agent/x1agent/compare/v1.13.1...v1.14.0) (2026-05-08)
+
+
+### Features
+
+* **agents:** collapse seven edit tabs into a single Connections tab ([#59](https://github.com/x1agent/x1agent/issues/59)) ([fff2f99](https://github.com/x1agent/x1agent/commit/fff2f99ccebd4bdd75a99db9c62727ded9091b5f))
+
 ## [1.13.1](https://github.com/x1agent/x1agent/compare/v1.13.0...v1.13.1) (2026-05-08)
 
 
