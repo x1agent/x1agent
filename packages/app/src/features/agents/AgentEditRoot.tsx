@@ -65,27 +65,31 @@ interface Props {
  * the detail page and can attach repos/collections/grants from there.
  */
 
-type TabKey =
-  | "general"
-  | "prompts"
-  | "repos"
-  | "collections"
-  | "mcp"
-  | "slack"
-  | "permissions";
+type TabKey = "general" | "prompts" | "connections" | "permissions";
 
 const DEFAULT_TAB: TabKey = "general";
+
+// Pre-IA-collapse tab values that older deep-links may still carry.
+// Map them onto "connections" so a stale URL lands on the right place.
+const LEGACY_CONNECTION_TABS: ReadonlySet<string> = new Set([
+  "repos",
+  "collections",
+  "mcp",
+  "slack",
+]);
 
 function isTabKey(value: string): value is TabKey {
   return (
     value === "general" ||
     value === "prompts" ||
-    value === "repos" ||
-    value === "collections" ||
-    value === "mcp" ||
-    value === "slack" ||
+    value === "connections" ||
     value === "permissions"
   );
+}
+
+function normalizeTab(raw: string): TabKey {
+  if (LEGACY_CONNECTION_TABS.has(raw)) return "connections";
+  return isTabKey(raw) ? raw : DEFAULT_TAB;
 }
 
 export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
@@ -126,7 +130,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [tabRaw, setTab] = useUrlSearchParam("tab", DEFAULT_TAB);
-  const tab: TabKey = isTabKey(tabRaw) ? tabRaw : DEFAULT_TAB;
+  const tab: TabKey = normalizeTab(tabRaw);
 
   const fetchCapabilities = useCapabilitiesStore((s) => s.fetch);
   const hasCollections = useHasCollections();
@@ -284,12 +288,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
             <TabsTrigger value="prompts">Prompts</TabsTrigger>
             {!isCreate && (
               <>
-                <TabsTrigger value="repos">Repositories</TabsTrigger>
-                {hasCollections && (
-                  <TabsTrigger value="collections">Collections</TabsTrigger>
-                )}
-                <TabsTrigger value="mcp">MCP &amp; env</TabsTrigger>
-                <TabsTrigger value="slack">Slack</TabsTrigger>
+                <TabsTrigger value="connections">Connections</TabsTrigger>
                 <TabsTrigger value="permissions">Permissions</TabsTrigger>
               </>
             )}
@@ -636,39 +635,45 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
             {!isCreate && existing && (
               <>
-                <TabsContent value="repos" className="mt-0">
+                {/*
+                 * Connections — every external thing this agent reads
+                 * from or writes to. Stacked cards instead of N tabs:
+                 * each kind is small enough that scrolling is faster
+                 * than tab-switching, and the verb on each card stays
+                 * focused (attach, link, bind, pair).
+                 *
+                 * Order is roughly "code first, tools second, data
+                 * third, outputs last" — the natural reading order an
+                 * admin scans when configuring a new agent.
+                 */}
+                <TabsContent value="connections" className="mt-0 space-y-6">
                   <AgentReposSection
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
                   />
-                </TabsContent>
 
-                {hasCollections && (
-                  <TabsContent value="collections" className="mt-0">
-                    <CollectionsAttachCard
-                      workspaceSlug={workspaceSlug}
-                      agentId={existing.id}
-                      agentName={existing.name}
-                      canManage={!!canManage}
-                    />
-                  </TabsContent>
-                )}
-
-                <TabsContent value="mcp" className="mt-0 space-y-6">
                   <AgentMcpAttachmentsCard
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
                     agentKind={existing.kind}
                     canManage={!!canManage}
                   />
+
                   <AgentEnvBindingsCard
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
                     canManage={!!canManage}
                   />
-                </TabsContent>
 
-                <TabsContent value="slack" className="mt-0">
+                  {hasCollections && (
+                    <CollectionsAttachCard
+                      workspaceSlug={workspaceSlug}
+                      agentId={existing.id}
+                      agentName={existing.name}
+                      canManage={!!canManage}
+                    />
+                  )}
+
                   <AgentSlackBotCard
                     workspaceSlug={workspaceSlug}
                     agentId={existing.id}
