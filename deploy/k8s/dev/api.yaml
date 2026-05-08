@@ -121,6 +121,16 @@ spec:
               value: /etc/nats-tls/client.crt
             - name: NATS_CLIENT_KEY
               value: /etc/nats-tls/client.key
+            # Capability gating — same env vars the Helm chart wires
+            # in deploy/helm/x1agent/templates/api.yaml. Setting these
+            # makes /api/capabilities report graph + vector backends, so
+            # the frontend stops hiding Collections behind the
+            # `useHasCollections` gate. surrealdb is the only graph
+            # provider in v1 and it implements vector too.
+            - name: PROVIDER_GRAPH
+              value: surrealdb
+            - name: PROVIDER_VECTOR
+              value: surrealdb
           # Secrets:
           # - devspace dev mode injects them via devspace.yaml `dev:` block (its
           #   `env:` overrides identical names from envFrom).
