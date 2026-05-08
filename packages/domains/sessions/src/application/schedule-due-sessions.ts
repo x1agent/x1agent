@@ -74,6 +74,22 @@ export async function scheduleDueSessions(
       const due = nextDueAfter(agent.schedule, anchor);
       if (due.getTime() > now.getTime()) continue;
 
+      // No-backfill policy: if `due` is more than one full interval
+      // behind `now`, the agent has been off long enough that catching
+      // up by emitting one session per missed slot is wrong — that's
+      // what produces phantom-session backlogs after a schedule is
+      // first activated, an agent is reactivated after pause, or the
+      // anchor falls back to `agent.createdAt` (which can be days or
+      // weeks old). Skip the missed slots entirely and advance the
+      // anchor to `now`. The next firing happens at the next
+      // future due time.
+      const slotAfterDue = nextDueAfter(agent.schedule, due);
+      const intervalMs = slotAfterDue.getTime() - due.getTime();
+      if (now.getTime() - due.getTime() > intervalMs) {
+        await deps.agents.recordSchedulerTick(agent.id, now);
+        continue;
+      }
+
       if (isOrchestratorKind(agent.kind)) {
         // Branch: find-or-create. Live session → inject heartbeat;
         // no live session → create a new session with heartbeat as

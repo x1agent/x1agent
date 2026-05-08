@@ -6,6 +6,7 @@ export * from "./domain/platform-admin.js";
 export * from "./domain/user.js";
 export * from "./domain/person.js";
 export * from "./domain/link-attempt.js";
+export * from "./domain/oauth-grant.js";
 
 // Ports
 export type { AuthProvider } from "./ports/auth-provider.js";
@@ -15,6 +16,11 @@ export type { PersonRepository } from "./ports/person-repository.js";
 export type { LinkAttemptStore } from "./ports/link-attempt-store.js";
 export type { PasswordCredentialStore } from "./ports/password-credential-store.js";
 export type { AccessGate } from "./ports/access-gate.js";
+export type {
+  UserOAuthTokenStore,
+  EncryptedUserOAuthTokenInput,
+  EncryptedUserOAuthTokenBlob,
+} from "./ports/user-oauth-token-store.js";
 export { denyAllAccessGate } from "./ports/access-gate.js";
 
 // Application
@@ -33,5 +39,6 @@ export { PostgresPersonRepository } from "./adapters/postgres/postgres-person-re
 export { PostgresLinkAttemptStore } from "./adapters/postgres/postgres-link-attempt-store.js";
 export { PostgresPasswordCredentialStore } from "./adapters/postgres/postgres-password-credential-store.js";
 export { PostgresAccessGate } from "./adapters/postgres/postgres-access-gate.js";
+export { PostgresUserOAuthTokenStore } from "./adapters/postgres/postgres-user-oauth-token-store.js";
 export { createAuthRoutes } from "./adapters/hono/routes.js";
 export { createRequireAuth } from "./adapters/hono/require-auth.js";

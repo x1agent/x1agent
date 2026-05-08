@@ -1,4 +1,5 @@
 import { Email } from "@x1agent/kernel";
+import type { OAuthGrant } from "./oauth-grant.js";
 import { DomainNotAllowedError } from "./errors.js";
 
 /**
@@ -14,6 +15,16 @@ export interface AuthProfile {
   providerUserId: string;
   /** Which AuthProvider produced this profile. */
   providerId: string;
+  /**
+   * OAuth grant (access_token / refresh_token / scopes / expiry) when
+   * the provider returned downstream-API tokens. Present for Google
+   * sign-ins and any future provider that issues tokens we'll use to
+   * call the provider's APIs on the user's behalf. Absent for
+   * dev-bypass and password-auth flows. Sign-in core ignores this
+   * field for identity decisions; it's persisted via the optional
+   * UserOAuthTokenStore dependency in completeSignIn.
+   */
+  oauthGrant?: OAuthGrant;
 }
 
 /**

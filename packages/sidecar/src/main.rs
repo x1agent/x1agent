@@ -18,14 +18,20 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 mod audit;
+mod calendar;
 mod channel;
+mod docs;
+mod email;
+mod files;
 mod git;
 mod collections;
 mod messaging;
 mod nats_bridge;
 mod orchestration;
+mod sheets;
 mod shares;
 mod stream;
+mod user_tokens;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -168,6 +174,10 @@ async fn main() {
     let app = Router::new()
         .route("/event", routing::post(handle_event))
         .route("/git/credential", routing::get(git::handle_git_credential))
+        .route(
+            "/user-oauth-token",
+            routing::get(user_tokens::handle_user_token),
+        )
         .route("/spawn", routing::post(orchestration::handle_spawn))
         .route("/spawnable", routing::get(orchestration::handle_spawnable))
         .route(
@@ -194,6 +204,76 @@ async fn main() {
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
         )
+        .route("/files/list", routing::post(files::handle_list))
+        .route("/files/get", routing::post(files::handle_get))
+        .route("/files/download", routing::post(files::handle_download))
+        .route("/files/upload", routing::post(files::handle_upload))
+        .route(
+            "/files/update_content",
+            routing::post(files::handle_update_content),
+        )
+        .route(
+            "/files/update_metadata",
+            routing::post(files::handle_update_metadata),
+        )
+        .route(
+            "/files/create_folder",
+            routing::post(files::handle_create_folder),
+        )
+        .route("/files/trash", routing::post(files::handle_trash))
+        // Sheets
+        .route(
+            "/sheets/read_range",
+            routing::post(sheets::handle_read_range),
+        )
+        .route(
+            "/sheets/update_range",
+            routing::post(sheets::handle_update_range),
+        )
+        .route(
+            "/sheets/append_row",
+            routing::post(sheets::handle_append_row),
+        )
+        .route("/sheets/create", routing::post(sheets::handle_create))
+        // Docs
+        .route("/docs/read", routing::post(docs::handle_read))
+        .route("/docs/create", routing::post(docs::handle_create))
+        .route(
+            "/docs/replace_text",
+            routing::post(docs::handle_replace_text),
+        )
+        .route(
+            "/docs/append_paragraph",
+            routing::post(docs::handle_append_paragraph),
+        )
+        // Calendar
+        .route(
+            "/calendar/list_events",
+            routing::post(calendar::handle_list_events),
+        )
+        .route(
+            "/calendar/create_event",
+            routing::post(calendar::handle_create_event),
+        )
+        .route(
+            "/calendar/update_event",
+            routing::post(calendar::handle_update_event),
+        )
+        .route(
+            "/calendar/delete_event",
+            routing::post(calendar::handle_delete_event),
+        )
+        // Email (Gmail)
+        .route(
+            "/email/list_threads",
+            routing::post(email::handle_list_threads),
+        )
+        .route(
+            "/email/get_message",
+            routing::post(email::handle_get_message),
+        )
+        .route("/email/send", routing::post(email::handle_send))
+        .route("/email/trash", routing::post(email::handle_trash))
         .route("/share", routing::post(shares::handle_share))
         .route(
             "/collections",

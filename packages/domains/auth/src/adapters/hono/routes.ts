@@ -5,7 +5,12 @@ import type { SessionTokenizer } from "../../ports/session-tokenizer.js";
 import type { PersonRepository } from "../../ports/person-repository.js";
 import type { LinkAttemptStore } from "../../ports/link-attempt-store.js";
 import type { PasswordCredentialStore } from "../../ports/password-credential-store.js";
-import { signInWithCode, completeSignIn } from "../../application/sign-in.js";
+import type { UserOAuthTokenStore } from "../../ports/user-oauth-token-store.js";
+import {
+  signInWithCode,
+  completeSignIn,
+  type EncryptOAuthToken,
+} from "../../application/sign-in.js";
 import { signInWithPassword } from "../../application/sign-in-with-password.js";
 import { verifySessionToken } from "../../application/verify-session.js";
 import { beginLink } from "../../application/begin-link.js";
@@ -76,6 +81,20 @@ export interface AuthRoutesConfig {
    * this deployment (no SMTP).
    */
   passwords?: PasswordCredentialStore;
+
+  /**
+   * When set, the Google sign-in callback persists the OAuth grant
+   * (access_token / refresh_token / scopes / expiry) into the
+   * UserOAuthTokenStore via the supplied encrypt boundary. Composition
+   * root wires this only when downstream-API providers (Google
+   * Workspace, Microsoft 365, etc.) are part of the install. Skip →
+   * sign-in still works for identity, downstream providers report
+   * permission_required when called.
+   */
+  oauthTokens?: {
+    store: UserOAuthTokenStore;
+    encrypt: EncryptOAuthToken;
+  };
 }
 
 function buildCookieHeader(
@@ -152,6 +171,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           allowedDomains: cfg.allowedDomains ?? [],
           platformAdmins: cfg.platformAdmins ?? [],
           accessGate: cfg.accessGate,
+          oauthTokens: cfg.oauthTokens,
         },
         code,
         redirectUri(),

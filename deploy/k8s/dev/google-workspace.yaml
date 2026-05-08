@@ -1,0 +1,77 @@
+# DEV ONLY — Google Workspace provider deployment. Prod path is the
+# Helm chart (deploy/helm/providers/google-workspace, future).
+#
+# Standalone provider per docs/providers/overview.md. Session pods
+# never import Google API code. The agent calls its sidecar; the
+# sidecar publishes on `x1.provider.files.*` (and later `documents.*`,
+# `calendar.*`, `email.*`); this service handles the request and
+# replies on the NATS inbox.
+#
+# Auth: per-call user OAuth via the api's
+# `/api/internal/user-oauth-token` endpoint (Phase 0 substrate). The
+# provider holds an access token only for the duration of one
+# outbound Google API call. The agent container never sees the token.
+apiVersion: v1
+kind: Service
+metadata:
+  name: google-workspace
+  labels:
+    app: google-workspace
+spec:
+  # Headless — the provider only speaks NATS.
+  clusterIP: None
+  selector:
+    app: google-workspace
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: google-workspace
+  labels:
+    app: google-workspace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: google-workspace
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: google-workspace
+    spec:
+      containers:
+        - name: provider
+          image: x1agent-provider-google-workspace
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            - name: X1_API_URL
+              value: http://api:30001
+          # API_INTERNAL_TOKEN comes from the same dev-secrets Secret
+          # the api uses. Without it the provider's credential helper
+          # logs the misconfig at boot and every request returns 401.
+          envFrom:
+            - secretRef:
+                name: x1agent-dev-secrets
+                optional: true
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-tls
