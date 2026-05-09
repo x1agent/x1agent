@@ -321,7 +321,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           setSlugInput(slugify(v));
                         }
                       }}
-                      placeholder="Heartbeat"
+                      placeholder="Researcher"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -339,7 +339,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         // can recover from a mistake without retyping.
                         setSlugDirty(v !== "" && v !== slugify(name));
                       }}
-                      placeholder="heartbeat"
+                      placeholder="researcher"
                     />
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
