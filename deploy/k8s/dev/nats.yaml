@@ -45,6 +45,32 @@ data:
       port: 8080
       no_tls: true
     }
+
+    # JetStream — durable, replayable subjects layered over NATS-core.
+    # store_dir is the file-backed home for stream + consumer state and
+    # MUST live on a real PV; emptyDir would defeat the entire point of
+    # turning it on. Limits are dev-sized: 256MB in-memory cap for
+    # ephemeral streams, 1GB on-disk cap for durable streams. Helm prod
+    # values will raise these; the local dev surface is small enough
+    # that 1GB covers many days of session-event history.
+    jetstream {
+      store_dir: "/data/jetstream"
+      max_memory_store: 256MB
+      max_file_store: 1GB
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nats-jetstream-data
+  labels:
+    app: nats
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
 ---
 apiVersion: v1
 kind: Service
@@ -109,6 +135,8 @@ spec:
             - name: tls
               mountPath: /etc/nats-tls
               readOnly: true
+            - name: jetstream
+              mountPath: /data
       volumes:
         - name: config
           configMap:
@@ -116,3 +144,6 @@ spec:
         - name: tls
           secret:
             secretName: nats-tls
+        - name: jetstream
+          persistentVolumeClaim:
+            claimName: nats-jetstream-data
