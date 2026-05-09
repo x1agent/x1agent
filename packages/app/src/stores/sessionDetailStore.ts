@@ -5,6 +5,10 @@ import type {
   SessionEventListResponse,
 } from "@x1agent/shared";
 import { apiFetch } from "../lib/api";
+import {
+  compactTimeline,
+  type CompactItem,
+} from "../features/sessions/eventClassification";
 
 type ConnStatus = "connecting" | "live" | "ended" | "error";
 
@@ -187,6 +191,15 @@ interface SessionDetailState {
   parentBySession: Record<string, ParentRef | null>;
   childrenBySession: Record<string, ChildRef[]>;
   eventsBySession: Record<string, SessionEventDTO[]>;
+  /**
+   * Pre-computed compact timeline for each session — derived from
+   * `eventsBySession` and refreshed every time the events array
+   * changes. Cached here so `EventStream` doesn't recompute the
+   * grouping on every render and so the items array reference stays
+   * stable across unrelated store updates (which lets `React.memo`
+   * on `EventCard` actually skip work).
+   */
+  compactItemsBySession: Record<string, CompactItem[]>;
   statusBySession: Record<string, ConnStatus>;
   errorBySession: Record<string, string | null>;
 
@@ -229,6 +242,7 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   parentBySession: {},
   childrenBySession: {},
   eventsBySession: {},
+  compactItemsBySession: {},
   statusBySession: {},
   errorBySession: {},
 
@@ -307,6 +321,10 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ),
         },
         eventsBySession: { ...s.eventsBySession, [sessionId]: merged },
+        compactItemsBySession: {
+          ...s.compactItemsBySession,
+          [sessionId]: compactTimeline(merged),
+        },
       }));
     } catch (err) {
       set((s) => ({
@@ -363,10 +381,15 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
         sessionId,
       );
 
+      const nextEvents = [...cur, ev];
       return {
         eventsBySession: {
           ...s.eventsBySession,
-          [sessionId]: [...cur, ev],
+          [sessionId]: nextEvents,
+        },
+        compactItemsBySession: {
+          ...s.compactItemsBySession,
+          [sessionId]: compactTimeline(nextEvents),
         },
         sessionsById: sessions,
         childrenBySession: childrenUpdate
