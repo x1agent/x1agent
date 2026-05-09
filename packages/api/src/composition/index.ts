@@ -139,6 +139,7 @@ import {
 } from "./invitation-adapters.js";
 import { createInternalRoutes } from "../internal/routes.js";
 import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
+import { createWorkspaceMembersRoutes } from "../workspace-members/routes.js";
 import { NatsBuildQueue } from "@x1agent/domain-image-catalog";
 import {
   createWorkspaceShareRoutes,
@@ -191,6 +192,8 @@ export interface Composition {
   agentCollectionRoutes: Hono;
   sharedAgentResourcesRoutes: Hono;
   workspaceImageCatalogRoutes: Hono;
+  /** /api/workspaces/:slug/members — read-only member roster for UI pickers. */
+  workspaceMembersRoutes: Hono;
   /** /api/admin/anthropic/models — platform-admin model curation. */
   adminAnthropicModelsRoutes: Hono;
   /** /api/admin/workspaces — platform-admin cross-workspace list. */
@@ -436,6 +439,16 @@ export function compose(env: CompositionEnv): Composition {
   const agentRoutes = createAgentRoutes({
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    // Used by createAgent / updateAgent to validate that
+    // scheduled_run_as_user_id refers to a member of this agent's
+    // workspace — closes a cross-tenant hole where an admin in
+    // workspace A could otherwise pin the field to a user from B.
+    members: {
+      isMember: async (workspaceId, userId) => {
+        const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+        return m !== null;
+      },
+    },
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
@@ -1020,6 +1033,14 @@ export function compose(env: CompositionEnv): Composition {
     buildQueue: imageBuildQueue,
   });
 
+  const workspaceMembersRoutes = createWorkspaceMembersRoutes({
+    memberships,
+    users,
+    resolveWorkspace: async (slug) => resolveWorkspace(slug),
+    requireAuth,
+    getActor,
+  });
+
   const sharedAgentResourcesRoutes = createSharedAgentResourcesRoutes({
     resources: sharedResources,
     installers,
@@ -1109,6 +1130,7 @@ export function compose(env: CompositionEnv): Composition {
     agentCollectionRoutes,
     sharedAgentResourcesRoutes,
     workspaceImageCatalogRoutes,
+    workspaceMembersRoutes,
     adminAnthropicModelsRoutes,
     adminWorkspacesRoutes,
     sharedResources,

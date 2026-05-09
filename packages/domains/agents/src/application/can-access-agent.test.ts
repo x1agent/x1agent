@@ -69,6 +69,7 @@ function makeAgent(opts: Partial<Agent> = {}): Agent {
     ownerUserId: ALICE,
     visibility: "workspace",
     createdBy: ALICE,
+    scheduledRunAsUserId: ALICE,
     createdAt: new Date(),
     updatedAt: new Date(),
     lastSchedulerTickAt: null,

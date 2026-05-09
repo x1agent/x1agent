@@ -63,6 +63,17 @@ export class PostgresMembershipRepository implements MembershipRepository {
     return rows.map(toMembership);
   }
 
+  async listByWorkspace(
+    workspaceId: WorkspaceId,
+  ): Promise<readonly Membership[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT workspace_id, user_id, role, added_at
+      FROM workspace_members WHERE workspace_id = ${workspaceId}
+      ORDER BY added_at ASC
+    `;
+    return rows.map(toMembership);
+  }
+
   async grant(input: {
     workspaceId: WorkspaceId;
     userId: UserId;

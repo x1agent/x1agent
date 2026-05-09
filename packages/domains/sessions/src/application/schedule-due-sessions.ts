@@ -107,7 +107,13 @@ export async function scheduleDueSessions(
           await deps.sessions.create({
             agentId: agent.id,
             triggeredBy: "scheduler",
-            triggeredByUserId: null,
+            // Impersonate the admin-configured run-as user so any
+            // remote_oauth MCPs the agent has attached can mint tokens
+            // at session-spawn time. Defaults to agent.createdBy via
+            // migration 044's backfill; null only when the creator left
+            // and the field hasn't been re-picked. See
+            // docs/architecture/orchestration.md § Scheduler attribution.
+            triggeredByUserId: agent.scheduledRunAsUserId,
             parentSessionId: null,
             parentAgentId: null,
             resumedFromSessionId: null,

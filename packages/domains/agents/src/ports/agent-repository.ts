@@ -28,6 +28,13 @@ export interface CreateAgentInput {
   ownerUserId?: UserId | null;
   /** Coarse visibility tier. Defaults to 'workspace'. */
   visibility?: "private" | "workspace" | "via_grants";
+  /**
+   * Defaults to `createdBy` at the adapter layer when omitted — the
+   * scheduler's natural attribution for cron-fired sessions. Set to
+   * NULL explicitly only if scheduling is intentionally disabled or
+   * the agent has no schedule + no remote_oauth MCPs.
+   */
+  scheduledRunAsUserId?: UserId | null;
   createdBy: UserId | null;
 }
 
@@ -45,6 +52,8 @@ export interface UpdateAgentInput {
   /** Same convention — null clears, undefined leaves untouched. */
   ownerUserId?: UserId | null;
   visibility?: "private" | "workspace" | "via_grants";
+  /** Same convention. */
+  scheduledRunAsUserId?: UserId | null;
 }
 
 export interface AgentRepository {
