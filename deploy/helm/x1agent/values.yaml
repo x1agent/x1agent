@@ -115,6 +115,18 @@ api:
     limits:   { cpu: 1,    memory: 1Gi }
   serviceAccountName: x1agent-api
   port: 30001
+  # Wave 1 of rfcs/jetstream-migration.md. Both default off so a chart
+  # upgrade introduces JetStream the *infrastructure* (configmap, PV,
+  # stream) without touching the runtime publish/consume paths. Flip
+  # to true to opt into the durable wake path:
+  #   1. useJetstreamPublish — api publishes wakes via JetStream so
+  #      msg-ids dedup and the broker stores every wake.
+  #   2. useJetstreamConsume — api injects USE_JETSTREAM_CONSUME=true
+  #      into NEW session sidecars; existing sessions stay on their
+  #      core subscriber until they terminate.
+  # Reversible: flip back to false + helm upgrade.
+  useJetstreamPublish: false
+  useJetstreamConsume: false
 
 # ============================================================================
 # app Deployment
@@ -356,6 +368,43 @@ infra:
   nats:
     enabled: true
     image: nats:2.10-alpine
+    # Single-replica is fine when JetStream's PV is durable. Bump to 3
+    # (or 5) on multi-node clusters where node-failure tolerance for
+    # NATS itself matters; the chart will switch to a StatefulSet shape
+    # automatically when replicas > 1. Stream replicas must be <= this.
+    replicas: 1
     resources:
       requests: { cpu: 50m,  memory: 64Mi }
       limits:   { cpu: 500m, memory: 512Mi }
+    # JetStream enables durable, replayable subjects layered over NATS-
+    # core. Required by the wake-reliability work in
+    # rfcs/jetstream-migration.md. When disabled, the chart still
+    # deploys NATS but no PV is mounted and no streams are bootstrapped.
+    jetstream:
+      enabled: true
+      # `storageClass` falls back to the cluster default when empty.
+      # On GKE that's pd-balanced; on EKS gp3; on dev (OrbStack)
+      # local-path. Set explicitly when an operator wants SSD-class.
+      storageClass: ""
+      # File-backed home for stream + consumer state. Must be at least
+      # `maxFileStore` plus a small headroom; outgrowing the PV silently
+      # back-pressures publishes (max-bytes already caps the streams).
+      fileStorageSize: 10Gi
+      maxMemoryStore: 256Mi
+      maxFileStore: 8Gi
+    # Stream definitions bootstrapped by the post-upgrade Job. Adding a
+    # stream here + helm upgrade is the only way to provision new
+    # JetStream streams; never `nats stream add` against a customer
+    # cluster by hand.
+    streams:
+      x1Session:
+        enabled: true
+        # Replicas must be <= infra.nats.replicas. Customers running
+        # 3-replica NATS should bump this to 3 for stream-level HA.
+        replicas: 1
+        # 24h is enough for a forensic flight-recorder at v1 scale.
+        # Audit subject's 30d retention will live in its own stream
+        # in Wave 2 (rfcs/jetstream-migration.md).
+        maxAge: 24h
+        maxBytes: 134217728   # 128 MiB
+        duplicateWindow: 2m

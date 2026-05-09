@@ -1,7 +1,25 @@
-# DEV ONLY — ephemeral single-instance Postgres with emptyDir storage.
-# Prod uses a managed Postgres (Cloud SQL / RDS / Neon) referenced via a
-# K8s Secret populated by External Secrets Operator; this manifest is not
-# in the Helm chart.
+# DEV ONLY — single-instance Postgres backed by a local-path PVC so
+# data survives `orb stop k8s` / OrbStack reboots / pod recreate. The
+# manifest used to use emptyDir, which acted like a fresh-DB-on-every-
+# restart. Operators kept losing workspace state on cluster bounces;
+# the PVC fix means the dev DB is durable for the same reasons the
+# JetStream and registry PVCs are.
+#
+# Prod uses a managed Postgres (Cloud SQL / RDS / Neon) referenced via
+# a K8s Secret populated by External Secrets Operator; this manifest
+# is not in the Helm chart.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  labels:
+    app: postgres
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -58,4 +76,5 @@ spec:
               mountPath: /var/lib/postgresql/data
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: postgres-data

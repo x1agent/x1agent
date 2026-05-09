@@ -1,0 +1,144 @@
+{{- /*
+Post-install / post-upgrade hook that creates (or updates in place)
+every JetStream stream the platform requires. Runs after the regular
+chart templates have applied so the NATS pod, the cert-manager-issued
+client cert, and the configmap are all in place.
+
+Why a hook + Job (vs a server-side `nats stream add` baked into NATS
+config or a long-running operator):
+  - NATS server config doesn't declare streams; only stream-aware
+    clients can mint them. So *something* has to issue the API call.
+  - A hook runs on a known schedule (every helm upgrade) without
+    requiring an operator presence in the cluster.
+  - `nats stream add --replace --config` is idempotent: same config in
+    -> no-op, changed config -> updated stream.
+
+The Job is intentionally minimal -- one stream today, but
+`infra.nats.streams.*` is structured so adding more streams (e.g. the
+audit / archive streams in Wave 2/3 of rfcs/jetstream-migration.md)
+is a values change + one extra `nats stream add --config` line, not
+a new template.
+
+helm.sh/hook-weight: 6  -- runs after the migrate-job (weight 5) so a
+                           failed migration aborts before we touch
+                           NATS streams.
+*/}}
+{{- $nats := .Values.infra.nats -}}
+{{- $js := default (dict) $nats.jetstream -}}
+{{- if and $nats.enabled $js.enabled }}
+{{- $streams := default (dict) $nats.streams -}}
+{{- $x1Session := default (dict) $streams.x1Session -}}
+{{- if $x1Session.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-streams-bootstrap
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  X1_SESSION.json: |
+    {
+      "name": "X1_SESSION",
+      "subjects": ["x1.session.>"],
+      "retention": "limits",
+      "max_consumers": -1,
+      "max_msgs": -1,
+      "max_bytes": {{ int (default 134217728 $x1Session.maxBytes) }},
+      "max_age": {{ default "24h" $x1Session.maxAge | quote }},
+      "max_msgs_per_subject": -1,
+      "max_msg_size": -1,
+      "discard": "old",
+      "storage": "file",
+      "num_replicas": {{ int (default 1 $x1Session.replicas) }},
+      "duplicate_window": {{ default "2m" $x1Session.duplicateWindow | quote }},
+      "sealed": false,
+      "deny_delete": false,
+      "deny_purge": false,
+      "allow_rollup_hdrs": false,
+      "allow_direct": true
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: x1agent-nats-streams-bootstrap
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats-streams-bootstrap") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Wait for NATS to be reachable before issuing the stream API
+      # call. cert-manager + the Deployment/StatefulSet both come up
+      # async with respect to this hook on a fresh install.
+      initContainers:
+        - name: wait-for-nats
+          image: natsio/nats-box:0.14.5
+          env:
+            - { name: NATS_URL,  value: "tls://nats.{{ .Release.Namespace }}.svc.cluster.local:4222" }
+            - { name: NATS_CA,   value: "/tls/ca.crt" }
+            - { name: NATS_CERT, value: "/tls/tls.crt" }
+            - { name: NATS_KEY,  value: "/tls/tls.key" }
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for i in $(seq 1 60); do
+                if nats server check connection >/dev/null 2>&1; then
+                  echo "nats reachable"; exit 0
+                fi
+                echo "waiting for nats ($i/60)…"; sleep 2
+              done
+              echo "ERROR: nats never became reachable" >&2; exit 1
+          volumeMounts:
+            - { name: tls, mountPath: /tls, readOnly: true }
+      containers:
+        - name: bootstrap
+          image: natsio/nats-box:0.14.5
+          env:
+            - { name: NATS_URL,  value: "tls://nats.{{ .Release.Namespace }}.svc.cluster.local:4222" }
+            - { name: NATS_CA,   value: "/tls/ca.crt" }
+            - { name: NATS_CERT, value: "/tls/tls.crt" }
+            - { name: NATS_KEY,  value: "/tls/tls.key" }
+          # `--replace` makes this idempotent: first install creates
+          # the stream, every helm upgrade applies any changes from
+          # values.yaml without losing message data. Loop covers all
+          # *.json files in /streams so adding a new stream is a
+          # values.yaml + ConfigMap edit, no template change.
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for f in /streams/*.json; do
+                name=$(basename "$f" .json)
+                echo "+ nats stream add --replace --config $f ($name)"
+                nats stream add --replace --config "$f"
+              done
+              echo "all streams reconciled."
+          volumeMounts:
+            - { name: tls,     mountPath: /tls,     readOnly: true }
+            - { name: streams, mountPath: /streams, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+      volumes:
+        - name: tls
+          secret:
+            secretName: nats-api-client-tls
+        - name: streams
+          configMap:
+            name: nats-streams-bootstrap
+{{- end }}
+{{- end }}
