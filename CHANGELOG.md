@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/x1agent/x1agent/compare/v1.15.1...v1.16.0) (2026-05-09)
+
+
+### Features
+
+* **nats:** JetStream substrate + Waves 1-3 + chart + dev postgres PVC ([#71](https://github.com/x1agent/x1agent/issues/71)) ([83b707c](https://github.com/x1agent/x1agent/commit/83b707c28d6f54eab013497bc2440cf57994338e))
+
 ## [1.15.1](https://github.com/x1agent/x1agent/compare/v1.15.0...v1.15.1) (2026-05-09)
 
 
