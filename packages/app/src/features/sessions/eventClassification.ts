@@ -2,18 +2,23 @@
  * Event classification for the session timeline.
  *
  * The timeline has two modes:
- *   - default ("compact")   — shows only the latest *public* event,
- *                             framed by dividers. New public events
- *                             replace the previous one in place.
- *   - verbose               — renders the full event stream, including
- *                             internal/intermittent events (tool
- *                             searches, internal LLM tool calls,
- *                             session.init dumps, raw tool results).
+ *   - default ("compact")   — chronological view that hides the noisy
+ *                             internals. Consecutive `agent.status`
+ *                             entries collapse to the latest one (a
+ *                             single line that mutates in place);
+ *                             consecutive `agent.tool_call` entries
+ *                             collapse into one `[ N tool calls ]`
+ *                             pill the user can expand. Everything
+ *                             else (text, shares, artifacts, prompts,
+ *                             session banners) renders inline so the
+ *                             conversational arc is preserved.
+ *   - verbose               — renders the full event stream including
+ *                             internals (tool searches, raw tool
+ *                             results, thinking, session.init dumps).
  *
- * "Public" events are the ones an operator should see at-a-glance to
- * understand what the agent is doing or saying. Tool-call mechanics
- * are useful for debugging but they bury the signal — keep them
- * behind the verbose toggle.
+ * Tool-call mechanics matter for debugging but bury the signal an
+ * operator wants in the calm view; collapse them but keep them one
+ * click away.
  */
 import type { SessionEventDTO } from "@x1agent/shared";
 
@@ -21,10 +26,8 @@ import type { SessionEventDTO } from "@x1agent/shared";
  * Event types that are always considered public — they describe an
  * agent's state or visible output and belong in the calm default view.
  *
- * Anything not in this set is treated as internal and only renders in
- * verbose mode. The `default` branch in EventCard already collapses
- * unknown types to null in compact mode, so this list is intentionally
- * narrow rather than guessing.
+ * Kept around for callers that just want a per-type yes/no — the
+ * compact-timeline grouper below uses a finer-grained `compactKind`.
  */
 const PUBLIC_EVENT_TYPES = new Set<string>([
   "session.started",
@@ -48,12 +51,10 @@ export function isPublicEventType(type: string): boolean {
 
 /**
  * Returns the most recent public event from the stream, or `null` if
- * the stream contains no public events yet (e.g. session just spun up
- * and we've only seen `session.init` + tool searches).
+ * the stream contains no public events yet.
  *
- * Events are assumed to be in append order (lowest seq first). We walk
- * from the tail to find the latest public entry without sorting —
- * sorting on every render would be quadratic for long sessions.
+ * Retained for older callers; the compact view now uses
+ * `compactTimeline` instead. Walks from the tail to avoid sorting.
  */
 export function latestPublicEvent(
   events: readonly SessionEventDTO[],
@@ -63,4 +64,74 @@ export function latestPublicEvent(
     if (ev && isPublicEventType(ev.type)) return ev;
   }
   return null;
+}
+
+/**
+ * How a single event participates in the compact view.
+ *   - "event"  — render with the regular EventCard, full content
+ *   - "status" — collapse with adjacent statuses; only the latest renders
+ *   - "tools"  — collapse with adjacent tool_calls into one pill
+ *   - "hidden" — only shown in verbose
+ */
+export type CompactKind = "event" | "status" | "tools" | "hidden";
+
+export function compactKind(type: string): CompactKind {
+  if (type === "agent.status") return "status";
+  if (type === "agent.tool_call") return "tools";
+  if (PUBLIC_EVENT_TYPES.has(type)) return "event";
+  return "hidden";
+}
+
+/**
+ * One row in the compact timeline.
+ *
+ * `key` is stable across re-grouping so React reuses the same DOM
+ * node when a status collapses-and-replaces or a tools group grows
+ * — that's what makes status feel like an in-place mutation rather
+ * than a flash of new card.
+ */
+export type CompactItem =
+  | { kind: "event"; key: string; event: SessionEventDTO }
+  | { kind: "status"; key: string; latest: SessionEventDTO }
+  | { kind: "tools"; key: string; events: readonly SessionEventDTO[] };
+
+const itemKey = (e: SessionEventDTO) => `${e.session_id}-${e.seq}`;
+
+/**
+ * Walk events in order, emitting compact rows. Hidden events are
+ * dropped. Adjacent status/tools entries are merged with the *first*
+ * group's key — so the row's identity sticks to where the run started.
+ */
+export function compactTimeline(
+  events: readonly SessionEventDTO[],
+): CompactItem[] {
+  const out: CompactItem[] = [];
+  for (const ev of events) {
+    const k = compactKind(ev.type);
+    if (k === "hidden") continue;
+    if (k === "event") {
+      out.push({ kind: "event", key: itemKey(ev), event: ev });
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (k === "status") {
+      if (last?.kind === "status") {
+        out[out.length - 1] = { kind: "status", key: last.key, latest: ev };
+      } else {
+        out.push({ kind: "status", key: itemKey(ev), latest: ev });
+      }
+      continue;
+    }
+    // tools
+    if (last?.kind === "tools") {
+      out[out.length - 1] = {
+        kind: "tools",
+        key: last.key,
+        events: [...last.events, ev],
+      };
+    } else {
+      out.push({ kind: "tools", key: itemKey(ev), events: [ev] });
+    }
+  }
+  return out;
 }
