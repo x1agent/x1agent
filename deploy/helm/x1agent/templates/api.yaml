@@ -168,6 +168,21 @@ spec:
               value: /etc/nats-tls/client.crt
             - name: NATS_CLIENT_KEY
               value: /etc/nats-tls/client.key
+            # Wave 1 of rfcs/jetstream-migration.md. Default off so a
+            # chart upgrade is a no-op at the application layer; flip
+            # to "true" in values.yaml when the operator is ready to
+            # cut over wakes to durable JetStream. _CONSUME injects
+            # the same flag into new session sidecars at session
+            # create time -- existing sessions stay on their core
+            # subscriber until they reach a terminal state.
+            {{- if eq (default false .Values.api.useJetstreamPublish | toString) "true" }}
+            - name: USE_JETSTREAM_PUBLISH
+              value: "true"
+            {{- end }}
+            {{- if eq (default false .Values.api.useJetstreamConsume | toString) "true" }}
+            - name: USE_JETSTREAM_CONSUME
+              value: "true"
+            {{- end }}
             - name: DATABASE_URL
               value: "postgres://x1agent:$(POSTGRES_PASSWORD)@postgres:5432/x1agent"
             - name: K8S_NAMESPACE
