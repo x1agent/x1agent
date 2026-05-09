@@ -202,7 +202,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           status as 400,
         );
       }
-      return c.json({ error: "internal_error" }, 500);
+      // Unknown error — bubble to app.onError → Sentry.
+      throw err;
     }
   });
 

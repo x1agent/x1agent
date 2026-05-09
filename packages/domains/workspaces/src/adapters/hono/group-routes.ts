@@ -28,12 +28,14 @@ export interface GroupRoutesConfig {
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
 }
 
+// Maps known domain errors to HTTP status. Unknown errors are
+// rethrown so Hono's app.onError fires (→ Sentry.captureException).
 function statusFor(err: unknown): number {
   if (err instanceof GroupNotFoundError) return 404;
   if (err instanceof GroupSlugTakenError) return 409;
   if (err instanceof CannotEditMirroredGroupError) return 409;
   if (err instanceof DomainError) return 400;
-  return 500;
+  throw err;
 }
 function errBody(err: unknown): { error: string; message?: string } {
   if (err instanceof DomainError) return { error: err.code, message: err.message };
