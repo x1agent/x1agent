@@ -87,9 +87,9 @@ The alternative — having the browser pull from JetStream via WebSocket gateway
 
 These are decisions made for the dev POC that customers will need to override in Helm:
 
-| Decision | Dev POC | Helm production default | Rationale |
+| Decision | Dev POC | Helm chart default | Rationale |
 |---|---|---|---|
-| Replicas | 1 | 3 | Single-replica is data-loss on node failure. Prod must run 3 replicas of NATS so JetStream RAFT can quorum. |
+| Replicas | 1 | 1, customer-overridable to 3 or 5 | Single-replica works fine if the PV is durable -- proven on OrbStack across pod restarts. Customers who care about node-failure HA flip `nats.replicas: 3` in their values; the post-upgrade hook creates streams with matching `--replicas`. Defaulting to 3 would cost 3x compute + 3 PVs + RAFT chatter for installs that don't need it. |
 | Storage | 2 GiB PVC | 50 GiB+ PVC, customer-tunable | Audit + 30-day session history at scale. |
 | `max_age` | 24h | 30d (`x1.session.*.audit`), 24h (others) | Audit retention is the compliance answer. |
 | `max_bytes` | 128 MiB | unlimited (`audit`), 1 GiB (`input`/`events`) | Audit records can't be dropped silently. |
