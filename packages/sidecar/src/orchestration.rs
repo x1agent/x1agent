@@ -157,6 +157,12 @@ pub async fn handle_inject_child(
     }
 
     // Publish a user.message envelope to the child's input subject.
+    // Routes through channel::publish_input_envelope so the same
+    // JetStream / NATS-core branch the api uses for wake publishes
+    // applies here too. (parent_session_id, child_id, sequence) is
+    // the dedup key -- monotonic per parent, so a publisher retry of
+    // an inject reuses the same id and JetStream collapses it within
+    // the duplicate window.
     let seq = state.sequence.fetch_add(1, Ordering::SeqCst);
     let msg = SessionMessage {
         session_id: child_id.clone(),
@@ -168,9 +174,22 @@ pub async fn handle_inject_child(
             "from_session_id": state.session_id,
         }),
     };
-    let subject = format!("x1.session.{}.input", child_id);
-    match state.nc.publish(subject, serde_json::to_vec(&msg).unwrap().into()).await {
-        Ok(_) => (
+    let payload = match serde_json::to_vec(&msg) {
+        Ok(b) => bytes::Bytes::from(b),
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "encode_failed",
+                &e.to_string(),
+            )
+        }
+    };
+    let msg_id = format!(
+        "wake.inject.{}.{}.{}",
+        state.session_id, child_id, seq
+    );
+    match crate::channel::publish_input_envelope(&state.nc, &child_id, payload, &msg_id).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({ "ok": true, "sequence": seq })),
         )
