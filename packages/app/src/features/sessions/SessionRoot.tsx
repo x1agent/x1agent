@@ -10,6 +10,7 @@ import { EventStream } from "./EventStream";
 import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
 import { ArtifactPanel } from "./ArtifactPanel";
+import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { Badge, type BadgeVariant } from "../../components/ui/badge";
@@ -292,6 +293,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
+          <SessionTitle session={session ?? null} sessionId={sessionId} />
+        </div>
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs">
           {parent && (
             <a

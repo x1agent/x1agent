@@ -98,6 +98,15 @@ export interface SessionDTO {
   completed_at: string | null;
   error_message: string | null;
   created_at: string;
+  /**
+   * LLM-generated 1-line description of what this session is doing.
+   * Null when the summarizer hasn't run yet (brand-new sessions, or
+   * deployments without an Anthropic key wired). UIs that show this
+   * MUST fall back to a slice of `id` when null.
+   */
+  summary: string | null;
+  /** When `summary` was last (re)generated. Null while summary is null. */
+  summary_updated_at: string | null;
 }
 
 export interface SessionListResponse {

@@ -37,6 +37,22 @@ export interface Session {
   completedAt: Date | null;
   errorMessage: string | null;
   createdAt: Date;
+  /**
+   * LLM-generated 1-line description of what this session is doing.
+   * Periodically (re)written by the api's summarizer — see
+   * packages/api/src/nats/subscriber.ts. NULL when the session is
+   * brand-new or has too few events to summarize; the UI falls back
+   * to the session id hash in that case.
+   */
+  summary: string | null;
+  /** When `summary` was last (re)generated. NULL while summary is NULL. */
+  summaryUpdatedAt: Date | null;
+  /**
+   * Highest session_events.seq included in the current `summary`.
+   * Used by the regenerate trigger to skip work when too few new
+   * events have arrived since the last summary.
+   */
+  summaryEventSeq: number | null;
 }
 
 export class SessionNotFoundError extends DomainError {
