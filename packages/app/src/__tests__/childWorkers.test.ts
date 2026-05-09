@@ -12,18 +12,44 @@ import {
 } from "../stores/sessionDetailStore";
 import type { SessionEventDTO } from "@x1agent/shared";
 
-const SESSION_ID = "ses-parent";
+const PARENT_ID = "11111111-1111-4111-8111-111111111111";
+const CHILD_ID_A = "22222222-2222-4222-8222-222222222222";
+const CHILD_ID_B = "33333333-3333-4333-8333-333333333333";
+const AGENT_ID = "44444444-4444-4444-8444-444444444444";
+const FOREIGN_PARENT_ID = "99999999-9999-4999-8999-999999999999";
 
 function child(overrides: Partial<ChildWorker> = {}): ChildWorker {
   return {
-    id: overrides.id ?? "ses-child-a",
+    id: overrides.id ?? CHILD_ID_A,
     status: overrides.status ?? "running",
     triggered_at: overrides.triggered_at ?? "2026-05-09T12:00:00.000Z",
     agent: overrides.agent ?? {
-      id: "agt-1",
+      id: AGENT_ID,
       slug: "worker-bot",
       name: "Worker Bot",
     },
+  };
+}
+
+function spawnEvent(
+  payload: unknown,
+  overrides: Partial<SessionEventDTO> = {},
+): SessionEventDTO {
+  return {
+    id: overrides.id ?? "ev-1",
+    session_id: overrides.session_id ?? PARENT_ID,
+    seq: overrides.seq ?? 1,
+    type: overrides.type ?? "agent.tool_result",
+    payload,
+    timestamp: overrides.timestamp ?? "2026-05-09T12:34:56.000Z",
+  };
+}
+
+function spawnPayload(session: Record<string, unknown>, isError = false) {
+  return {
+    tool_use_id: "use-1",
+    is_error: isError,
+    content: [{ type: "text", text: JSON.stringify({ session }) }],
   };
 }
 
@@ -42,10 +68,10 @@ beforeEach(() => {
 describe("countActiveWorkers", () => {
   it("counts only pending + running children", () => {
     const list: ChildWorker[] = [
-      child({ id: "a", status: "running" }),
-      child({ id: "b", status: "pending" }),
-      child({ id: "c", status: "complete" }),
-      child({ id: "d", status: "failed" }),
+      child({ id: "id-a", status: "running" }),
+      child({ id: "id-b", status: "pending" }),
+      child({ id: "id-c", status: "complete" }),
+      child({ id: "id-d", status: "failed" }),
     ];
     expect(countActiveWorkers(list)).toBe(2);
   });
@@ -73,18 +99,13 @@ describe("formatWorkersLabel", () => {
 describe("sortChildrenForFlyout", () => {
   it("places active children before terminal ones, newest first within each bucket", () => {
     const list: ChildWorker[] = [
-      child({ id: "old-complete", status: "complete", triggered_at: "2026-05-08T00:00:00Z" }),
-      child({ id: "new-complete", status: "complete", triggered_at: "2026-05-09T00:00:00Z" }),
-      child({ id: "old-running", status: "running", triggered_at: "2026-05-08T00:00:00Z" }),
-      child({ id: "new-running", status: "running", triggered_at: "2026-05-09T00:00:00Z" }),
+      child({ id: "id-old-c", status: "complete", triggered_at: "2026-05-08T00:00:00Z" }),
+      child({ id: "id-new-c", status: "complete", triggered_at: "2026-05-09T00:00:00Z" }),
+      child({ id: "id-old-r", status: "running", triggered_at: "2026-05-08T00:00:00Z" }),
+      child({ id: "id-new-r", status: "running", triggered_at: "2026-05-09T00:00:00Z" }),
     ];
     const ordered = sortChildrenForFlyout(list).map((c) => c.id);
-    expect(ordered).toEqual([
-      "new-running",
-      "old-running",
-      "new-complete",
-      "old-complete",
-    ]);
+    expect(ordered).toEqual(["id-new-r", "id-old-r", "id-new-c", "id-old-c"]);
   });
 
   it("does not mutate the input array", () => {
@@ -99,56 +120,66 @@ describe("sortChildrenForFlyout", () => {
 });
 
 describe("childrenAfterEvent", () => {
-  function spawnEvent(payload: unknown, overrides: Partial<SessionEventDTO> = {}): SessionEventDTO {
-    return {
-      id: overrides.id ?? "ev-1",
-      session_id: overrides.session_id ?? SESSION_ID,
-      seq: overrides.seq ?? 1,
-      type: overrides.type ?? "agent.tool_result",
-      payload,
-      timestamp: overrides.timestamp ?? "2026-05-09T12:34:56.000Z",
-    };
-  }
-
   it("appends a new child for a successful spawn_session tool_result", () => {
-    const ev = spawnEvent({
-      tool_use_id: "use-1",
-      is_error: false,
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            session: {
-              id: "ses-child-new",
-              agent_id: "agt-worker",
-              status: "pending",
-              triggered_at: "2026-05-09T12:34:56.000Z",
-              parent_session_id: SESSION_ID,
-            },
-          }),
-        },
-      ],
-    });
-    const next = childrenAfterEvent([], ev);
+    const ev = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_A,
+        agent_id: AGENT_ID,
+        status: "pending",
+        triggered_at: "2026-05-09T12:34:56.000Z",
+        parent_session_id: PARENT_ID,
+      }),
+    );
+    const next = childrenAfterEvent([], ev, PARENT_ID);
     expect(next).not.toBeNull();
     expect(next!).toHaveLength(1);
-    expect(next![0]!.id).toBe("ses-child-new");
+    expect(next![0]!.id).toBe(CHILD_ID_A);
     expect(next![0]!.status).toBe("pending");
-    expect(next![0]!.agent.id).toBe("agt-worker");
+    expect(next![0]!.agent.id).toBe(AGENT_ID);
   });
 
   it("returns null for non tool_result events", () => {
     const ev = spawnEvent({}, { type: "agent.text" });
-    expect(childrenAfterEvent([], ev)).toBeNull();
+    expect(childrenAfterEvent([], ev, PARENT_ID)).toBeNull();
   });
 
   it("returns null when the tool result reports an error", () => {
-    const ev = spawnEvent({
-      tool_use_id: "use-1",
-      is_error: true,
-      content: [{ type: "text", text: JSON.stringify({ session: { id: "x" } }) }],
-    });
-    expect(childrenAfterEvent([], ev)).toBeNull();
+    const ev = spawnEvent(
+      spawnPayload(
+        {
+          id: CHILD_ID_A,
+          agent_id: AGENT_ID,
+          status: "pending",
+          parent_session_id: PARENT_ID,
+        },
+        true,
+      ),
+    );
+    expect(childrenAfterEvent([], ev, PARENT_ID)).toBeNull();
+  });
+
+  it("returns null when the parsed parent_session_id targets a different session", () => {
+    const ev = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_A,
+        agent_id: AGENT_ID,
+        status: "pending",
+        parent_session_id: FOREIGN_PARENT_ID,
+      }),
+    );
+    expect(childrenAfterEvent([], ev, PARENT_ID)).toBeNull();
+  });
+
+  it("rejects non-UUID ids — defence against path-traversal payloads", () => {
+    const ev = spawnEvent(
+      spawnPayload({
+        id: "../../other-slug/sessions/abc",
+        agent_id: AGENT_ID,
+        status: "pending",
+        parent_session_id: PARENT_ID,
+      }),
+    );
+    expect(childrenAfterEvent([], ev, PARENT_ID)).toBeNull();
   });
 
   it("returns null when the result content is not a spawn_session shape", () => {
@@ -156,28 +187,95 @@ describe("childrenAfterEvent", () => {
       tool_use_id: "use-1",
       content: [{ type: "text", text: '"hello world"' }],
     });
-    expect(childrenAfterEvent([], ev)).toBeNull();
+    expect(childrenAfterEvent([], ev, PARENT_ID)).toBeNull();
   });
 
-  it("ignores duplicates when the child id already exists", () => {
-    const existing: ChildRef[] = [child({ id: "ses-dup" })];
+  it("skips invalid content blocks and parses the next valid one", () => {
     const ev = spawnEvent({
       tool_use_id: "use-1",
+      is_error: false,
       content: [
+        { type: "image", text: "no good" },
+        { type: "text", text: "{{ not json" },
         {
           type: "text",
-          text: JSON.stringify({ session: { id: "ses-dup" } }),
+          text: JSON.stringify({
+            session: {
+              id: CHILD_ID_A,
+              agent_id: AGENT_ID,
+              status: "running",
+              triggered_at: "2026-05-09T12:34:56.000Z",
+              parent_session_id: PARENT_ID,
+            },
+          }),
         },
       ],
     });
-    expect(childrenAfterEvent(existing, ev)).toBeNull();
+    const next = childrenAfterEvent([], ev, PARENT_ID);
+    expect(next).not.toBeNull();
+    expect(next![0]!.id).toBe(CHILD_ID_A);
+  });
+
+  it("upserts an existing child and updates its status", () => {
+    const existing: ChildRef[] = [
+      child({
+        id: CHILD_ID_A,
+        status: "pending",
+        agent: { id: AGENT_ID, slug: "worker-bot", name: "Worker Bot" },
+      }),
+    ];
+    const ev = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_A,
+        agent_id: AGENT_ID,
+        status: "running",
+        triggered_at: "2026-05-09T12:34:56.000Z",
+        parent_session_id: PARENT_ID,
+      }),
+    );
+    const next = childrenAfterEvent(existing, ev, PARENT_ID);
+    expect(next).not.toBeNull();
+    expect(next!).toHaveLength(1);
+    expect(next![0]!.status).toBe("running");
+    // The previously-resolved agent name beats the parser's
+    // placeholder so the flyout doesn't degrade after a status update.
+    expect(next![0]!.agent.name).toBe("Worker Bot");
+  });
+
+  it("returns null when the upsert would be a true no-op", () => {
+    const existing: ChildRef[] = [
+      child({
+        id: CHILD_ID_A,
+        status: "pending",
+        triggered_at: "2026-05-09T12:34:56.000Z",
+        agent: {
+          id: AGENT_ID,
+          // Existing record is itself a placeholder, so the parser's
+          // placeholder is the same agent ref. With status and
+          // triggered_at also matching, this is a referentially
+          // identical update and we keep selectors stable.
+          slug: AGENT_ID,
+          name: "Child session",
+        },
+      }),
+    ];
+    const ev = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_A,
+        agent_id: AGENT_ID,
+        status: "pending",
+        triggered_at: "2026-05-09T12:34:56.000Z",
+        parent_session_id: PARENT_ID,
+      }),
+    );
+    expect(childrenAfterEvent(existing, ev, PARENT_ID)).toBeNull();
   });
 });
 
 describe("sessionDetailStore selector stability", () => {
   it("childrenBySession[sessionId] returns the same reference when unchanged", () => {
     const sel = (s: ReturnType<typeof useSessionDetailStore.getState>) =>
-      s.childrenBySession[SESSION_ID];
+      s.childrenBySession[PARENT_ID];
     // Empty case (no slot yet).
     const a = sel(useSessionDetailStore.getState());
     const b = sel(useSessionDetailStore.getState());
@@ -186,7 +284,7 @@ describe("sessionDetailStore selector stability", () => {
 
     // Populated case.
     useSessionDetailStore.setState({
-      childrenBySession: { [SESSION_ID]: [child()] },
+      childrenBySession: { [PARENT_ID]: [child()] },
     });
     const c = sel(useSessionDetailStore.getState());
     const d = sel(useSessionDetailStore.getState());
@@ -196,36 +294,48 @@ describe("sessionDetailStore selector stability", () => {
 
   it("appendEvent updates childrenBySession in place when a spawn result lands", () => {
     useSessionDetailStore.setState({
-      childrenBySession: { [SESSION_ID]: [] },
+      childrenBySession: { [PARENT_ID]: [] },
     });
-    const event: SessionEventDTO = {
-      id: "ev-1",
-      session_id: SESSION_ID,
-      seq: 1,
-      type: "agent.tool_result",
-      payload: {
-        tool_use_id: "use-1",
-        is_error: false,
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              session: {
-                id: "ses-spawned",
-                agent_id: "agt-worker",
-                status: "running",
-                triggered_at: "2026-05-09T12:34:56.000Z",
-              },
-            }),
-          },
-        ],
-      },
-      timestamp: "2026-05-09T12:34:56.000Z",
-    };
-    useSessionDetailStore.getState().appendEvent(SESSION_ID, event);
+    const event: SessionEventDTO = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_B,
+        agent_id: AGENT_ID,
+        status: "running",
+        triggered_at: "2026-05-09T12:34:56.000Z",
+        parent_session_id: PARENT_ID,
+      }),
+    );
+    useSessionDetailStore.getState().appendEvent(PARENT_ID, event);
     const list =
-      useSessionDetailStore.getState().childrenBySession[SESSION_ID] ?? [];
+      useSessionDetailStore.getState().childrenBySession[PARENT_ID] ?? [];
     expect(list).toHaveLength(1);
-    expect(list[0]!.id).toBe("ses-spawned");
+    expect(list[0]!.id).toBe(CHILD_ID_B);
+  });
+
+  it("appendEvent advances a child's status on a follow-up spawn result", () => {
+    const seeded = child({
+      id: CHILD_ID_A,
+      status: "pending",
+      agent: { id: AGENT_ID, slug: "worker-bot", name: "Worker Bot" },
+    });
+    useSessionDetailStore.setState({
+      childrenBySession: { [PARENT_ID]: [seeded] },
+    });
+    const followup: SessionEventDTO = spawnEvent(
+      spawnPayload({
+        id: CHILD_ID_A,
+        agent_id: AGENT_ID,
+        status: "running",
+        triggered_at: "2026-05-09T12:35:00.000Z",
+        parent_session_id: PARENT_ID,
+      }),
+      { seq: 5 },
+    );
+    useSessionDetailStore.getState().appendEvent(PARENT_ID, followup);
+    const list =
+      useSessionDetailStore.getState().childrenBySession[PARENT_ID] ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0]!.status).toBe("running");
+    expect(list[0]!.agent.name).toBe("Worker Bot");
   });
 });

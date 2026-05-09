@@ -18,9 +18,12 @@ interface Props {
  * label that opens a flyout listing each child session.
  *
  * Real-time: pulls `childrenBySession[sessionId]` straight off the
- * shared zustand store, so any update there (initial load, future
- * spawn/complete events appended via `appendEvent`) re-renders the
+ * shared zustand store, so any update there (initial load,
+ * spawn-result append/upsert via `appendEvent`) re-renders the
  * counter and the flyout in lockstep. No internal polling.
+ *
+ * When there are no children at all, the pill renders as static
+ * text — there's nothing useful behind a click.
  */
 export function ChildWorkersCounter({ workspaceSlug, sessionId }: Props) {
   // Pull the slot raw (no ??-inside-selector) so the same reference
@@ -34,6 +37,22 @@ export function ChildWorkersCounter({ workspaceSlug, sessionId }: Props) {
 
   const activeCount = countActiveWorkers(children);
   const label = formatWorkersLabel(activeCount);
+  const isInteractive = children.length > 0;
+
+  if (!isInteractive) {
+    // No spawn has ever happened on this session — a button that
+    // opens an empty flyout is just noise. Render the same text in
+    // the same slot so layout doesn't jump when the first spawn
+    // lands.
+    return (
+      <span
+        className="text-[12px] text-fg-faint"
+        data-testid="child-workers-counter"
+      >
+        {label}
+      </span>
+    );
+  }
 
   return (
     <div className="relative inline-flex">

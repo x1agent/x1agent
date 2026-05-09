@@ -19,9 +19,22 @@ export type ChildRef = {
 
 /**
  * If `ev` is the durable record of a successful `spawn_session` MCP
- * call, return a new children list containing the freshly spawned
- * child. Otherwise return `null` so the caller knows to leave the
- * existing reference intact (selectors stay referentially stable).
+ * call attributable to `parentSessionId`, return a new children list
+ * with the freshly spawned (or status-updated) child folded in.
+ * Otherwise return `null` so the caller leaves the existing reference
+ * intact — that keeps zustand selectors referentially stable.
+ *
+ * Behaviour:
+ *  - Strict bail on `tool_error` / `is_error: true`.
+ *  - Strict bail unless the parsed `parent_session_id` matches the
+ *    session we're tracking. This binds the parser to the right
+ *    spawn (defence against a malicious agent emitting a fake
+ *    `agent.tool_result` for a spawn it didn't perform), and prevents
+ *    foreign-tenant ids from sneaking into our DOM.
+ *  - On duplicate id, **upsert** (overwrite status/triggered_at) so a
+ *    child's pending → running → complete progression actually flows
+ *    into the counter / flyout — vs. the previous bail-on-dup that
+ *    pinned the row to its first state.
  *
  * Exported so tests can hit the parser directly without driving a
  * full NATS round-trip.
@@ -29,21 +42,84 @@ export type ChildRef = {
 export function childrenAfterEvent(
   current: ChildRef[],
   ev: SessionEventDTO,
+  parentSessionId: string,
 ): ChildRef[] | null {
   if (ev.type !== "agent.tool_result") return null;
-  const child = parseSpawnSessionResult(ev.payload);
+  const child = parseSpawnSessionResult(ev.payload, parentSessionId);
   if (!child) return null;
-  if (current.some((c) => c.id === child.id)) return null;
-  return [...current, child];
+  const idx = current.findIndex((c) => c.id === child.id);
+  if (idx === -1) return [...current, child];
+  // Upsert — keep the existing record's resolved agent name (if any)
+  // since loadInitial fills `agent.name` from the api but the spawn
+  // tool_result carries only an agent_id. New status/triggered_at
+  // win; the resolved name is preferred over the placeholder.
+  const existing = current[idx]!;
+  const keepExistingAgent =
+    existing.agent.name &&
+    existing.agent.name !== PLACEHOLDER_AGENT_NAME;
+  const mergedAgent = keepExistingAgent ? existing.agent : child.agent;
+  if (
+    existing.status === child.status &&
+    existing.triggered_at === child.triggered_at &&
+    sameAgent(existing.agent, mergedAgent)
+  ) {
+    // Genuinely no-op — preserve referential stability for selectors.
+    return null;
+  }
+  const merged: ChildRef = {
+    id: child.id,
+    status: child.status,
+    triggered_at: child.triggered_at,
+    agent: mergedAgent,
+  };
+  const next = current.slice();
+  next[idx] = merged;
+  return next;
+}
+
+function sameAgent(a: ChildRef["agent"], b: ChildRef["agent"]): boolean {
+  return a.id === b.id && a.slug === b.slug && a.name === b.name;
+}
+
+const PLACEHOLDER_AGENT_NAME = "Child session";
+
+/**
+ * Merge the api's authoritative child list with whatever the store
+ * already had (typically rows appended by the spawn-result sniffer
+ * while the api fetch was in flight). Server rows win on every
+ * field; rows the server doesn't know about yet are preserved so an
+ * in-flight spawn isn't silently dropped on a refresh.
+ */
+function mergeChildren(
+  current: ReadonlyArray<ChildRef>,
+  incoming: ReadonlyArray<ChildRef>,
+): ChildRef[] {
+  const byId = new Map<string, ChildRef>();
+  for (const c of current) byId.set(c.id, c);
+  for (const c of incoming) byId.set(c.id, c);
+  return Array.from(byId.values());
+}
+
+// Lower-cased UUID v4-ish. Loose enough to also accept v1/v5 shapes
+// the database may produce; tight enough to refuse path traversal
+// payloads ("../../foo") in router-bound interpolations.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function isUuid(v: unknown): v is string {
+  return typeof v === "string" && UUID_RE.test(v);
 }
 
 /**
  * The `spawn_session` MCP handler stringifies the api's `{ session: {...} }`
  * response into a single `text` block of MCP content. This walks
  * that shape defensively — any deviation from the expected schema
- * causes us to bail out (return null) rather than throw mid-render.
+ * causes us to bail out (return null) rather than throw mid-render
+ * or pollute the store with a half-baked row.
  */
-function parseSpawnSessionResult(payload: unknown): ChildRef | null {
+function parseSpawnSessionResult(
+  payload: unknown,
+  parentSessionId: string,
+): ChildRef | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as { content?: unknown; is_error?: unknown };
   if (p.is_error === true) return null;
@@ -63,10 +139,16 @@ function parseSpawnSessionResult(payload: unknown): ChildRef | null {
     const session = obj.session;
     if (!session || typeof session !== "object") continue;
     const sObj = session as Record<string, unknown>;
-    const id = typeof sObj["id"] === "string" ? (sObj["id"] as string) : null;
-    if (!id) continue;
-    const agentId =
-      typeof sObj["agent_id"] === "string" ? (sObj["agent_id"] as string) : id;
+    if (!isUuid(sObj["id"])) continue;
+    if (!isUuid(sObj["parent_session_id"])) continue;
+    // Bind to the parent we're tracking. A spawn the orchestrator
+    // legitimately performed always carries our session id; anything
+    // else is either a bug or an injection.
+    if (sObj["parent_session_id"] !== parentSessionId) continue;
+    const id = sObj["id"] as string;
+    const agentIdRaw = sObj["agent_id"];
+    const agentId = isUuid(agentIdRaw) ? (agentIdRaw as string) : null;
+    if (!agentId) continue;
     const status =
       sObj["status"] === "pending" ||
       sObj["status"] === "running" ||
@@ -74,9 +156,11 @@ function parseSpawnSessionResult(payload: unknown): ChildRef | null {
       sObj["status"] === "failed"
         ? (sObj["status"] as ChildRef["status"])
         : "pending";
+    const triggeredAtRaw = sObj["triggered_at"];
     const triggeredAt =
-      typeof sObj["triggered_at"] === "string"
-        ? (sObj["triggered_at"] as string)
+      typeof triggeredAtRaw === "string" &&
+      Number.isFinite(Date.parse(triggeredAtRaw))
+        ? triggeredAtRaw
         : new Date().toISOString();
     return {
       id,
@@ -86,9 +170,11 @@ function parseSpawnSessionResult(payload: unknown): ChildRef | null {
         id: agentId,
         // Slug + display name are not in the spawn response; surface
         // a stable placeholder until either the user refreshes or
-        // X1A-7 backfills.
+        // X1A-7 backfills. The placeholder name is also the sentinel
+        // childrenAfterEvent uses to decide when to swap in the
+        // loadInitial-resolved name during an upsert.
         slug: agentId,
-        name: "Child session",
+        name: PLACEHOLDER_AGENT_NAME,
       },
     };
   }
@@ -134,7 +220,8 @@ interface SessionDetailState {
  * Backs the session detail page. `loadInitial` hits the workspace-scoped
  * `/sessions/:id/events` endpoint for durable history; the page then
  * subscribes to NATS for live events and calls `appendEvent` on each.
- * `maxSeqBySession` de-dupes between the two streams.
+ * `appendEvent` de-dupes by `(seq, type)` so the REST replay and the
+ * live NATS stream can overlap without double-rendering.
  */
 export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   sessionsById: {},
@@ -204,9 +291,20 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ...s.parentBySession,
           [sessionId]: res.parent ?? null,
         },
+        // Merge by id rather than replace. The current code path
+        // awaits loadInitial before subscribing to NATS, so any
+        // childrenAfterEvent appends today happen *after* this set —
+        // safe. But a future caller that re-runs loadInitial with a
+        // live subscription (focus refresh, manual reload) would
+        // otherwise wipe in-flight appends. Server rows win on field
+        // values; placeholder rows survive only when the server
+        // doesn't (yet) know about them.
         childrenBySession: {
           ...s.childrenBySession,
-          [sessionId]: res.children ?? [],
+          [sessionId]: mergeChildren(
+            s.childrenBySession[sessionId] ?? [],
+            res.children ?? [],
+          ),
         },
         eventsBySession: { ...s.eventsBySession, [sessionId]: merged },
       }));
@@ -252,16 +350,17 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
       // Real-time child-worker tracking. An orchestrator's NATS event
       // stream emits `agent.tool_result` for every MCP call, including
       // the platform's own `spawn_session`. We sniff that result and
-      // append the new child to `childrenBySession` so the
-      // ChildWorkersCounter reflects the new spawn without a refetch
-      // or a fresh poll. The server-side spawn route returns the same
-      // `{ session: { id, agent_id, status, triggered_at, ... } }`
-      // shape we mirror in the store; everything else (display name)
-      // stays as a placeholder until the operator either refreshes or
-      // X1A-7 ships LLM summaries that backfill names too.
+      // append (or upsert) the matching child into
+      // `childrenBySession` so the ChildWorkersCounter reflects the
+      // new spawn without a refetch or a fresh poll. The parser is
+      // bound to `sessionId` — only spawn results whose
+      // `parent_session_id` matches the session we're rendering are
+      // accepted, which keeps an unrelated tool emitting a
+      // `{session: ...}` shape from injecting phantom rows.
       const childrenUpdate = childrenAfterEvent(
         s.childrenBySession[sessionId] ?? [],
         ev,
+        sessionId,
       );
 
       return {
