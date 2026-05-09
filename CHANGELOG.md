@@ -1,3 +1,10 @@
+## [1.16.2](https://github.com/x1agent/x1agent/compare/v1.16.1...v1.16.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** stabilize images selector on new-agent form ([#69](https://github.com/x1agent/x1agent/issues/69)) ([c4f7ae2](https://github.com/x1agent/x1agent/commit/c4f7ae2d64066168297595702c4be889a16bc9a5))
+
 ## [1.16.1](https://github.com/x1agent/x1agent/compare/v1.16.0...v1.16.1) (2026-05-09)
 
 
