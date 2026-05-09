@@ -1,9 +1,40 @@
 use crate::AppState;
 use async_nats::jetstream::{self, consumer::pull::Config as PullConfig, AckKind};
+use async_nats::HeaderMap;
+use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Mirror of api side `publishInputEnvelope` in
+/// packages/api/src/orchestration/wake-publisher.ts. When the sidecar
+/// pushes a wake into another session's input subject (today: an
+/// orchestrator's `inject_message` MCP tool routed through
+/// `handle_inject_child`), it goes through this helper so the publish
+/// path is the same as the api's: msg-id-deduped, JetStream-aware,
+/// gated by USE_JETSTREAM_PUBLISH so cutover is reversible per
+/// process. Without it, we'd close the api wake gap in Wave 1 but
+/// leave a wake-loss hole on orchestrator → child spawn.
+pub async fn publish_input_envelope(
+    nc: &async_nats::Client,
+    target_session_id: &str,
+    payload: Bytes,
+    msg_id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let subject = format!("x1.session.{}.input", target_session_id);
+    if std::env::var("USE_JETSTREAM_PUBLISH").as_deref() == Ok("true") {
+        let js = jetstream::new(nc.clone());
+        let mut headers = HeaderMap::new();
+        headers.insert("Nats-Msg-Id", msg_id);
+        js.publish_with_headers(subject, headers, payload)
+            .await?
+            .await?;
+        return Ok(());
+    }
+    nc.publish(subject, payload).await?;
+    Ok(())
+}
 
 #[derive(Serialize)]
 struct InjectPayload {
