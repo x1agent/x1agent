@@ -1,3 +1,10 @@
+## [1.14.2](https://github.com/x1agent/x1agent/compare/v1.14.1...v1.14.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** replace 'heartbeat' placeholder on agent create form ([#62](https://github.com/x1agent/x1agent/issues/62)) ([cb32a0b](https://github.com/x1agent/x1agent/commit/cb32a0b72fc3f5ff6d9c7f4c9934f8e88d941d69))
+
 ## [1.14.1](https://github.com/x1agent/x1agent/compare/v1.14.0...v1.14.1) (2026-05-08)
 
 
