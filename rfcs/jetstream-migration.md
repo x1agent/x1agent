@@ -44,6 +44,8 @@ Two subjects are load-bearing under at-least-once: `*.input` and `*.audit`. `*.e
 
 Three waves, each independently shippable. Each wave can be reverted at the publisher with a one-line flag (`USE_JETSTREAM_PUBLISH=false`) so the cluster never goes through a one-shot migration.
 
+**Status as of 2026-05-09**: Waves 1, 2, and 3 substrate-shipped on `feat/nats-jetstream-dev`. Wave 1 dev-verified end-to-end (publish + durable consume + NATS bounce mid-session). Waves 2 and 3 substrate-shipped with the same publish helper Wave 1 proved; live re-acceptance blocked by an OrbStack disk-pressure incident that wiped the dev postgres. Two consumer-side follow-ups remain open: (a) Wave 2's durable audit-archiver in the api, (b) Wave 3.5 chart change to tighten the X1_SESSION subject filter so `*.events` is no longer double-stored.
+
 ### Wave 1 — `x1.session.*.input` (wakes)
 
 The deepest pain point and the simplest cutover.
