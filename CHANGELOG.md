@@ -1,3 +1,17 @@
+## [1.14.2](https://github.com/x1agent/x1agent/compare/v1.14.1...v1.14.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** replace 'heartbeat' placeholder on agent create form ([#62](https://github.com/x1agent/x1agent/issues/62)) ([cb32a0b](https://github.com/x1agent/x1agent/commit/cb32a0b72fc3f5ff6d9c7f4c9934f8e88d941d69))
+
+## [1.14.1](https://github.com/x1agent/x1agent/compare/v1.14.0...v1.14.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **deploy:** graph-surrealdb / messaging-slack / preview dev Dockerfiles missed workspace manifests ([#60](https://github.com/x1agent/x1agent/issues/60)) ([202daff](https://github.com/x1agent/x1agent/commit/202daff8c0449e6fa18972b62a7327591942a30c)), closes [#56](https://github.com/x1agent/x1agent/issues/56)
+
 # [1.14.0](https://github.com/x1agent/x1agent/compare/v1.13.1...v1.14.0) (2026-05-08)
 
 
