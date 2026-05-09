@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { useAuthStore } from "../../stores/authStore";
-import { apiFetch } from "../../lib/api";
+import { useWorkspaceCreateStore } from "../../stores/workspaceCreateStore";
 
 /**
  * Form for creating the first workspace. Mounted at /workspaces/new.
@@ -12,17 +12,34 @@ import { apiFetch } from "../../lib/api";
  * Gated to platform admins (email in PLATFORM_ADMIN_EMAILS) — non-admins
  * shouldn't see this even if they navigate directly. The api also
  * enforces the same gate; UI gate is for affordance, not security.
+ *
+ * Form draft state (name / slug / slugDirty / submitting / error) lives
+ * in `useWorkspaceCreateStore` per CLAUDE.md "Frontend state management"
+ * — the slug auto-tracks the name until the user edits it manually.
  */
 export function CreateWorkspaceRoot() {
   const { isPlatformAdmin, status, fetchMe } = useAuthStore();
-  const [slug, setSlug] = useState("");
-  const [name, setName] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Atomic selectors — one per primitive — return referentially stable
+  // values across renders and avoid the `selector returns a fresh object
+  // each render → React error #185` foot-gun called out in CLAUDE.md.
+  const name = useWorkspaceCreateStore((s) => s.name);
+  const slug = useWorkspaceCreateStore((s) => s.slug);
+  const submitting = useWorkspaceCreateStore((s) => s.submitting);
+  const error = useWorkspaceCreateStore((s) => s.error);
+  const setName = useWorkspaceCreateStore((s) => s.setName);
+  const setSlug = useWorkspaceCreateStore((s) => s.setSlug);
+  const reset = useWorkspaceCreateStore((s) => s.reset);
+  const submit = useWorkspaceCreateStore((s) => s.submit);
 
   useEffect(() => {
     if (status === "idle") fetchMe();
   }, [status, fetchMe]);
+
+  // Reset the draft when the form mounts so a previous attempt's name /
+  // slug / error don't leak into a fresh visit.
+  useEffect(() => {
+    reset();
+  }, [reset]);
 
   const slugInvalid =
     slug.length > 0 && !/^[a-z][a-z0-9-]{1,31}$/.test(slug);
@@ -34,17 +51,9 @@ export function CreateWorkspaceRoot() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const ws = await apiFetch<{ slug: string }>(`/api/workspaces`, {
-        method: "POST",
-        body: JSON.stringify({ slug, name: name.trim() }),
-      });
+    const ws = await submit();
+    if (ws) {
       window.location.href = `/workspaces/${ws.slug}`;
-    } catch (err) {
-      setError((err as Error).message);
-      setSubmitting(false);
     }
   }
 
@@ -102,7 +111,7 @@ export function CreateWorkspaceRoot() {
               id="ws-slug"
               placeholder="acme"
               value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase())}
+              onChange={(e) => setSlug(e.target.value)}
               required
               aria-invalid={slugInvalid}
             />
