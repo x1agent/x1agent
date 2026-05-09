@@ -132,4 +132,41 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       },
     );
   });
+
+  describe("USE_JETSTREAM_CONSUME propagation", () => {
+    function sidecarEnv(): Array<{ name: string; value?: string }> {
+      const job = buildSessionJob(baseSpec("worker"));
+      const sidecar = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "sidecar",
+      )!;
+      return sidecar.env ?? [];
+    }
+
+    it("does not set USE_JETSTREAM_CONSUME when the api flag is absent", () => {
+      const saved = process.env.USE_JETSTREAM_CONSUME;
+      delete process.env.USE_JETSTREAM_CONSUME;
+      try {
+        expect(
+          sidecarEnv().find((e) => e.name === "USE_JETSTREAM_CONSUME"),
+        ).toBeUndefined();
+      } finally {
+        if (saved !== undefined) process.env.USE_JETSTREAM_CONSUME = saved;
+      }
+    });
+
+    it("propagates USE_JETSTREAM_CONSUME=true when the api flag is set", () => {
+      const saved = process.env.USE_JETSTREAM_CONSUME;
+      process.env.USE_JETSTREAM_CONSUME = "true";
+      try {
+        const entry = sidecarEnv().find(
+          (e) => e.name === "USE_JETSTREAM_CONSUME",
+        );
+        expect(entry).toBeDefined();
+        expect(entry!.value).toBe("true");
+      } finally {
+        if (saved === undefined) delete process.env.USE_JETSTREAM_CONSUME;
+        else process.env.USE_JETSTREAM_CONSUME = saved;
+      }
+    });
+  });
 });

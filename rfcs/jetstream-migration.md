@@ -120,3 +120,38 @@ When all three waves are done:
 - Browser-side JetStream consumption (still NATS-core via WebSocket gateway).
 - Replacing the existing audit-record storage path (none yet — archiver is in scope of Wave 2's follow-up, not this RFC).
 - Layer 4 (stuck-tool detector), Layer 2 (MCP enumeration), Layer 3 (wake reconciler) — those are separate roadmap items that build *on top of* this substrate.
+
+## Production rollout (chart + flags)
+
+The dev manifest under `deploy/k8s/dev/nats.yaml` is local-only. Customer-facing rollout goes through the Helm chart. The chart change is a separate slice from the code waves:
+
+### Chart change (prerequisite for anything below to take effect on customer clusters)
+
+1. Mirror the dev configmap edit into `deploy/helm/x1agent/templates/nats/configmap.yaml`: add the `jetstream { store_dir, max_memory_store, max_file_store }` block.
+2. Replace the single-replica NATS Deployment with a 3-replica StatefulSet that uses `volumeClaimTemplates` for the JetStream PV. JetStream is *less* available than core NATS at single-replica because the PV becomes a single point of failure for consumer state — the chart fixes this by quorum, not by hoping the PV survives. Document this in the chart's `UPGRADING.md`.
+3. Add chart values: `nats.replicas` (default 3 prod / 1 dev), `nats.jetstream.fileStorageSize` (default 50Gi), `nats.jetstream.maxMemoryStore`, `nats.jetstream.maxFileStore`.
+4. Add a Helm `post-install,post-upgrade` hook Job that idempotently creates the streams (`X1_SESSION_INPUT`, `X1_SESSION_AUDIT`, `X1_SESSION_ARCHIVE` per the per-purpose split). Image = `natsio/nats-box`. Hook-delete-policy: `hook-succeeded`. Same shape as DB migration hooks.
+5. Bump chart minor version.
+6. `mise run install` and `mise run deploy` must both come up clean on a fresh GKE cluster — that's the artifact-under-test (per CLAUDE.md "install IS the test"). No manual `kubectl apply` or `helm upgrade` patches.
+
+### Operator opt-in (after chart upgrade is live)
+
+The code-side flags are off by default so a chart upgrade is a no-op at the application layer.
+
+```yaml
+# values.yaml
+api:
+  env:
+    USE_JETSTREAM_PUBLISH: "true"   # Wave 1 phase 1
+    USE_JETSTREAM_CONSUME: "true"   # Wave 1 phase 2 (new session pods only)
+```
+
+Phase 1 (`USE_JETSTREAM_PUBLISH`) is reversible at any time and doesn't affect existing consumers — JetStream-aware publish still emits to core subscribers, so existing sidecars are unchanged.
+
+Phase 2 (`USE_JETSTREAM_CONSUME`) only affects **new** session pods. The api process injects the env var into sidecar pod specs at session-create time; existing long-lived sessions keep using their core subscriber until they reach a terminal state. Net effect: no in-flight session sees its consumer path swap mid-lifecycle.
+
+Roll back by flipping the flag(s) back to `"false"` (or removing). Existing JetStream-consumer sessions on the rolled-back side won't auto-fall-back; they'll keep using JetStream until the next session.
+
+### Default flip + legacy removal
+
+After 2-3 chart minor versions of the flags being available, the chart's default `values.yaml` flips both to `"true"`. After another minor version, the legacy `input_subscriber_core` and the non-JetStream branch of `publishInputEnvelope` get deleted. That's the last commit of the migration.
