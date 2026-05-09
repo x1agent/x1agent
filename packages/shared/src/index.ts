@@ -61,6 +61,14 @@ export interface AgentRepoAttachment {
   branch: string;
   mount_path: string;
   auto_push: boolean;
+  /**
+   * When false, the sidecar's git credential helper refuses to hand
+   * out credentials for this repo, so `git push` (and any
+   * credential-helper-driven `git fetch`) fails. The agent can still
+   * read, edit, and commit locally. See migration 020 +
+   * docs/security/repo-access.md.
+   */
+  allow_push: boolean;
 }
 
 export interface AgentReposResponse {
