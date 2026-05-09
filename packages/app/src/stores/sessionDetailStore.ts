@@ -10,12 +10,90 @@ type ConnStatus = "connecting" | "live" | "ended" | "error";
 
 type AgentRef = { id: string; slug: string; name: string };
 type ParentRef = { session_id: string; agent: AgentRef };
-type ChildRef = {
+export type ChildRef = {
   id: string;
   status: SessionDTO["status"];
   triggered_at: string;
   agent: AgentRef;
 };
+
+/**
+ * If `ev` is the durable record of a successful `spawn_session` MCP
+ * call, return a new children list containing the freshly spawned
+ * child. Otherwise return `null` so the caller knows to leave the
+ * existing reference intact (selectors stay referentially stable).
+ *
+ * Exported so tests can hit the parser directly without driving a
+ * full NATS round-trip.
+ */
+export function childrenAfterEvent(
+  current: ChildRef[],
+  ev: SessionEventDTO,
+): ChildRef[] | null {
+  if (ev.type !== "agent.tool_result") return null;
+  const child = parseSpawnSessionResult(ev.payload);
+  if (!child) return null;
+  if (current.some((c) => c.id === child.id)) return null;
+  return [...current, child];
+}
+
+/**
+ * The `spawn_session` MCP handler stringifies the api's `{ session: {...} }`
+ * response into a single `text` block of MCP content. This walks
+ * that shape defensively — any deviation from the expected schema
+ * causes us to bail out (return null) rather than throw mid-render.
+ */
+function parseSpawnSessionResult(payload: unknown): ChildRef | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as { content?: unknown; is_error?: unknown };
+  if (p.is_error === true) return null;
+  if (!Array.isArray(p.content)) return null;
+  for (const block of p.content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: unknown; text?: unknown };
+    if (b.type !== "text" || typeof b.text !== "string") continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(b.text);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const obj = parsed as { session?: unknown };
+    const session = obj.session;
+    if (!session || typeof session !== "object") continue;
+    const sObj = session as Record<string, unknown>;
+    const id = typeof sObj["id"] === "string" ? (sObj["id"] as string) : null;
+    if (!id) continue;
+    const agentId =
+      typeof sObj["agent_id"] === "string" ? (sObj["agent_id"] as string) : id;
+    const status =
+      sObj["status"] === "pending" ||
+      sObj["status"] === "running" ||
+      sObj["status"] === "complete" ||
+      sObj["status"] === "failed"
+        ? (sObj["status"] as ChildRef["status"])
+        : "pending";
+    const triggeredAt =
+      typeof sObj["triggered_at"] === "string"
+        ? (sObj["triggered_at"] as string)
+        : new Date().toISOString();
+    return {
+      id,
+      status,
+      triggered_at: triggeredAt,
+      agent: {
+        id: agentId,
+        // Slug + display name are not in the spawn response; surface
+        // a stable placeholder until either the user refreshes or
+        // X1A-7 backfills.
+        slug: agentId,
+        name: "Child session",
+      },
+    };
+  }
+  return null;
+}
 
 interface SessionDetailState {
   sessionsById: Record<string, SessionDTO>;
@@ -170,12 +248,31 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           },
         };
       }
+
+      // Real-time child-worker tracking. An orchestrator's NATS event
+      // stream emits `agent.tool_result` for every MCP call, including
+      // the platform's own `spawn_session`. We sniff that result and
+      // append the new child to `childrenBySession` so the
+      // ChildWorkersCounter reflects the new spawn without a refetch
+      // or a fresh poll. The server-side spawn route returns the same
+      // `{ session: { id, agent_id, status, triggered_at, ... } }`
+      // shape we mirror in the store; everything else (display name)
+      // stays as a placeholder until the operator either refreshes or
+      // X1A-7 ships LLM summaries that backfill names too.
+      const childrenUpdate = childrenAfterEvent(
+        s.childrenBySession[sessionId] ?? [],
+        ev,
+      );
+
       return {
         eventsBySession: {
           ...s.eventsBySession,
           [sessionId]: [...cur, ev],
         },
         sessionsById: sessions,
+        childrenBySession: childrenUpdate
+          ? { ...s.childrenBySession, [sessionId]: childrenUpdate }
+          : s.childrenBySession,
       };
     });
   },
