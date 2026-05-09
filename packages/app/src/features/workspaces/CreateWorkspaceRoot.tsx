@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { slugify } from "@x1agent/kernel";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -17,6 +18,10 @@ export function CreateWorkspaceRoot() {
   const { isPlatformAdmin, status, fetchMe } = useAuthStore();
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
+  // Tracks whether the user has manually edited the slug. While false,
+  // the slug auto-tracks the name. Once true, manual edits win.
+  // Clearing the slug field re-enables auto-tracking.
+  const [slugDirty, setSlugDirty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +95,13 @@ export function CreateWorkspaceRoot() {
               id="ws-name"
               placeholder="Acme Engineering"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setName(v);
+                if (!slugDirty) {
+                  setSlug(slugify(v));
+                }
+              }}
               autoFocus
               required
             />
@@ -102,7 +113,14 @@ export function CreateWorkspaceRoot() {
               id="ws-slug"
               placeholder="acme"
               value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase())}
+              onChange={(e) => {
+                const v = e.target.value.toLowerCase();
+                setSlug(v);
+                // Manual edit takes over auto-tracking. Clearing the
+                // field re-enables auto-tracking so the user can recover
+                // from a mistake without retyping.
+                setSlugDirty(v !== "" && v !== slugify(name));
+              }}
               required
               aria-invalid={slugInvalid}
             />
