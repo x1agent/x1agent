@@ -26,6 +26,8 @@ export type {
   SessionShareRepository,
   CreateSessionShareInput,
 } from "./ports/session-share-repository.js";
+export type { SessionSummarizer } from "./ports/session-summarizer.js";
+export { StubSessionSummarizer } from "./ports/session-summarizer.js";
 
 // Application
 export * from "./application/trigger-session.js";
@@ -40,6 +42,14 @@ export * from "./application/spawn-child-session.js";
 export * from "./application/resume-session.js";
 export * from "./application/reconcile-session-status.js";
 export * from "./application/manage-session-shares.js";
+export {
+  maybeUpdateSessionSummary,
+  DEFAULT_SUMMARY_CONFIG,
+  type MaybeUpdateSessionSummaryConfig,
+  type MaybeUpdateSessionSummaryDeps,
+  type MaybeUpdateSessionSummaryInput,
+  type MaybeUpdateSessionSummaryResult,
+} from "./application/maybe-update-session-summary.js";
 
 // Adapters
 export { PostgresSessionRepository } from "./adapters/postgres/postgres-session-repository.js";
@@ -50,6 +60,10 @@ export {
   type PriceOverride,
 } from "./adapters/postgres/postgres-token-usage-repository.js";
 export { PostgresSessionShareRepository } from "./adapters/postgres/postgres-session-share-repository.js";
+export {
+  AnthropicSessionSummarizer,
+  type AnthropicSessionSummarizerOptions,
+} from "./adapters/anthropic/anthropic-session-summarizer.js";
 export {
   createSessionRoutes,
   createWorkspaceSessionRoutes,

@@ -95,6 +95,25 @@ export interface SessionRepository {
   ): Promise<Session>;
 
   /**
+   * Persist a freshly-generated LLM summary for a session, alongside
+   * the seq of the highest event included in the prompt. The api's
+   * periodic summarizer is the only caller (see
+   * packages/api/src/nats/subscriber.ts). Idempotent on re-issue —
+   * later calls overwrite earlier ones.
+   *
+   * Returns false when no row matched (session was deleted between
+   * trigger and write); callers swallow that, since the row is gone.
+   */
+  updateSummary(
+    id: SessionId,
+    summary: string,
+    /** Highest event seq folded into this summary. */
+    eventSeq: number,
+    /** Wall-clock time the summary was generated at. */
+    updatedAt: Date,
+  ): Promise<boolean>;
+
+  /**
    * Sessions still in a non-terminal state (`pending` or `running`)
    * whose `triggered_at` is older than `threshold`. Used by the pod
    * reconciler to find ghost sessions — rows left as "running" after

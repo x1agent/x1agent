@@ -17,6 +17,13 @@ import { getSql } from "./db/client.js";
 import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import {
+  AnthropicSessionSummarizer,
+  StubSessionSummarizer,
+  DEFAULT_SUMMARY_CONFIG,
+  type SessionSummarizer,
+  type MaybeUpdateSessionSummaryConfig,
+} from "@x1agent/domain-sessions";
 import { startImageBuilder } from "./image-catalog/builder.js";
 import { capabilitiesRoutes } from "./capabilities/routes.js";
 import { listAnthropicModels } from "./capabilities/anthropic-models.js";
@@ -28,6 +35,51 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
  * boot adds at most one Vertex / Anthropic round-trip per restart.
  * Returns undefined when nothing is available (let the SDK pick).
  */
+/**
+ * Build the SessionSummarizer for this process. Anthropic API-key path
+ * only for now (Vertex routing is a follow-up — see the X1A-7 PR
+ * body). When the api key is unset, fall back to the stub so periodic
+ * triggers stay no-ops and session.summary stays NULL.
+ */
+function buildSessionSummarizer(): SessionSummarizer {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const provider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
+  if (provider === "api_key" && apiKey && apiKey.trim()) {
+    const model =
+      process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
+    return new AnthropicSessionSummarizer({ apiKey, model });
+  }
+  console.log(
+    "[summarizer] no anthropic api key — session summaries disabled",
+  );
+  return new StubSessionSummarizer();
+}
+
+/**
+ * Read summary cooldown overrides from env. Both knobs are optional;
+ * unset → DEFAULT_SUMMARY_CONFIG. Operators tune these to control
+ * token spend on chatty workspaces without a code change.
+ */
+function readSummaryConfigFromEnv(): MaybeUpdateSessionSummaryConfig {
+  const eventsRaw = Number(process.env.SESSION_SUMMARY_EVENTS_THRESHOLD);
+  const intervalRaw = Number(process.env.SESSION_SUMMARY_INTERVAL_MS);
+  const windowRaw = Number(process.env.SESSION_SUMMARY_WINDOW_SIZE);
+  return {
+    eventsThreshold:
+      Number.isFinite(eventsRaw) && eventsRaw > 0
+        ? eventsRaw
+        : DEFAULT_SUMMARY_CONFIG.eventsThreshold,
+    intervalMs:
+      Number.isFinite(intervalRaw) && intervalRaw > 0
+        ? intervalRaw
+        : DEFAULT_SUMMARY_CONFIG.intervalMs,
+    windowSize:
+      Number.isFinite(windowRaw) && windowRaw > 0
+        ? windowRaw
+        : DEFAULT_SUMMARY_CONFIG.windowSize,
+  };
+}
+
 async function resolveDefaultAnthropicModel(): Promise<string | undefined> {
   const explicit = process.env.ANTHROPIC_MODEL;
   if (explicit && explicit.trim()) return explicit.trim();
@@ -432,6 +484,8 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       sessions: composedSessions,
       agents: composedAgents,
       tokenUsage: composedTokenUsage,
+      summarizer: buildSessionSummarizer(),
+      summaryConfig: readSummaryConfigFromEnv(),
     });
     registerCleanup(() => sub.stop());
     console.log(`[nats] connected to ${natsUrl}`);
