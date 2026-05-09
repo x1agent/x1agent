@@ -1,0 +1,10 @@
+# Bun test config for the app package.
+#
+# `preload` runs before every test file. We register happy-dom's globals
+# (window, document, navigator, etc.) on the bun runtime so React Testing
+# Library can render components into a DOM. This mirrors the
+# vitest/jest+jsdom setup other React projects use.
+#
+# See packages/app/src/__tests__/happydom.ts for the registration.
+[test]
+preload = ["./src/__tests__/happydom.ts"]
