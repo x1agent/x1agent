@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { StringCodec, type NatsConnection } from "nats";
 import {
   type Session,
@@ -5,6 +6,39 @@ import {
 } from "@x1agent/domain-sessions";
 import type { AgentRepository, AgentId } from "@x1agent/domain-agents";
 import { isOrchestratorKind } from "@x1agent/domain-agents";
+
+/**
+ * One choke-point for every `x1.session.{id}.input` publish in this
+ * module. When `USE_JETSTREAM_PUBLISH=true` the message goes through a
+ * JetStream-aware publish that waits for an ACK from the server and
+ * carries an Nats-Msg-Id header for dedup; otherwise it's the legacy
+ * NATS-core publish (fire-and-forget). Every call site supplies a
+ * deterministic msg-id so the JetStream stream's duplicate window
+ * absorbs publisher-side retries and double-fires from racing watchers
+ * without injecting the same wake into the orchestrator twice.
+ *
+ * The two paths coexist so the cutover can happen one publisher and
+ * one consumer at a time. See rfcs/jetstream-migration.md.
+ */
+async function publishInputEnvelope(
+  nc: NatsConnection,
+  sessionId: string,
+  envelope: object,
+  msgId: string,
+): Promise<void> {
+  const subject = `x1.session.${sessionId}.input`;
+  const sc = StringCodec();
+  const data = sc.encode(JSON.stringify(envelope));
+  if (process.env.USE_JETSTREAM_PUBLISH === "true") {
+    await nc.jetstream().publish(subject, data, { msgID: msgId });
+    return;
+  }
+  nc.publish(subject, data);
+}
+
+function sha256Hex(input: string): string {
+  return createHash("sha256").update(input).digest("hex");
+}
 
 /**
  * Platform → orchestrator wake publisher.
@@ -104,11 +138,11 @@ export async function publishStateChangeWake(
     },
   };
 
-  const sc = StringCodec();
-  deps.nc.publish(
-    `x1.session.${parent.id}.input`,
-    sc.encode(JSON.stringify(envelope)),
-  );
+  // A child only transitions into each terminal state once, so the
+  // (childSessionId, status) tuple is enough to dedup any duplicate
+  // fire from a racing terminal-state watcher.
+  const msgId = `wake.state_change.${childSession.id}.${terminalStatus}`;
+  await publishInputEnvelope(deps.nc, parent.id, envelope, msgId);
 }
 
 /**
@@ -150,11 +184,10 @@ export async function publishWatchdogWake(
       source: "platform",
     },
   };
-  const sc = StringCodec();
-  nc.publish(
-    `x1.session.${parentSessionId}.input`,
-    sc.encode(JSON.stringify(envelope)),
-  );
+  // attempt is monotonic per (parent, child); two publishes for the
+  // same attempt are publisher-side retries that should dedup.
+  const msgId = `wake.watchdog.${parentSessionId}.${childSessionId}.${attempt}`;
+  await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
 /**
@@ -191,11 +224,22 @@ export async function publishMessageWake(
       source: "platform",
     },
   };
-  const sc = StringCodec();
-  nc.publish(
-    `x1.session.${parentSessionId}.input`,
-    sc.encode(JSON.stringify(envelope)),
-  );
+  // The child has no nominal request id at this layer; hashing the
+  // payload makes a publisher retry of an identical message dedup,
+  // while a child sending the same summary+body twice on purpose
+  // (rare, and almost certainly a bug) is also collapsed -- which
+  // is the right side to err on for a 2-minute window.
+  const msgId =
+    "wake.message." +
+    sha256Hex(
+      [
+        opts.childSessionId,
+        opts.summary,
+        opts.body ?? "",
+        opts.needsResponse ? "1" : "0",
+      ].join(" "),
+    );
+  await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
 export function formatMessageWakeText(opts: {
@@ -257,9 +301,10 @@ export async function publishCheckupWake(
   parentSessionId: string,
   snapshot: readonly ChildSnapshot[],
 ): Promise<void> {
+  const timestamp = new Date().toISOString();
   const envelope = {
     session_id: parentSessionId,
-    timestamp: new Date().toISOString(),
+    timestamp,
     type: "user.message",
     payload: {
       text: formatCheckupWakeText(snapshot),
@@ -275,11 +320,10 @@ export async function publishCheckupWake(
       source: "platform",
     },
   };
-  const sc = StringCodec();
-  nc.publish(
-    `x1.session.${parentSessionId}.input`,
-    sc.encode(JSON.stringify(envelope)),
-  );
+  // Checkup is cadence-driven; the wall-clock at publish time is the
+  // natural dedup key. A retry of the same tick reuses this id.
+  const msgId = `wake.checkup.${parentSessionId}.${timestamp}`;
+  await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
 export function formatCheckupWakeText(
@@ -360,9 +404,10 @@ export async function publishHeartbeatWake(
   sessionId: string,
   heartbeatText: string,
 ): Promise<void> {
+  const timestamp = new Date().toISOString();
   const envelope = {
     session_id: sessionId,
-    timestamp: new Date().toISOString(),
+    timestamp,
     type: "user.message",
     payload: {
       text: wrapHeartbeatText(heartbeatText),
@@ -371,11 +416,9 @@ export async function publishHeartbeatWake(
       source: "platform",
     },
   };
-  const sc = StringCodec();
-  nc.publish(
-    `x1.session.${sessionId}.input`,
-    sc.encode(JSON.stringify(envelope)),
-  );
+  // Scheduler tick dedup: same wall-clock = same heartbeat publish.
+  const msgId = `wake.heartbeat.${sessionId}.${timestamp}`;
+  await publishInputEnvelope(nc, sessionId, envelope, msgId);
 }
 
 /**

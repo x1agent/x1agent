@@ -280,3 +280,40 @@ html[data-theme="light"] .rail-noise {
 .composer-border {
   background-image: var(--composer-border);
 }
+
+/* Scrollbars. Default browser scrollbars (chunky grey on dark, white on
+ * light) clash with the warm-tinted surface ladder; replace them with a
+ * thin, token-driven track + thumb that picks up the same border tones
+ * surfaces already use. Firefox gets `scrollbar-width: thin` plus a
+ * two-color `scrollbar-color`; WebKit/Blink gets the pseudo-elements.
+ * Hover state lifts the thumb to `--color-fg-faint` so it's discoverable
+ * without being loud. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-faint);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

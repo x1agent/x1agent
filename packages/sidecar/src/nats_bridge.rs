@@ -1,3 +1,4 @@
+use crate::channel::publish_with_dedup;
 use crate::{AppState, SessionMessage};
 use async_nats::{Client as NatsClient, ConnectOptions};
 use std::path::PathBuf;
@@ -56,6 +57,25 @@ pub fn events_subject(session_id: &str) -> String {
     format!("x1.session.{}.events", session_id)
 }
 
+pub fn archive_subject(session_id: &str) -> String {
+    format!("x1.session.{}.archive", session_id)
+}
+
+/// Wave 3 of rfcs/jetstream-migration.md splits agent SDK events into
+/// two subjects with different durability profiles:
+///   - `x1.session.{id}.events` -- NATS-core, the live browser tail.
+///     Stays as-is so the WebSocket gateway path is unchanged. No
+///     replay, no durability; that's the right shape for a live UI.
+///   - `x1.session.{id}.archive` -- JetStream-aware (when
+///     USE_JETSTREAM_PUBLISH=true), msg-id-deduped, picked up by the
+///     forensic archiver consumer (deferred follow-up). Same payload
+///     as events; consumers choose which subject matches their needs.
+///
+/// We keep BOTH publishes on every event so a flag flip is reversible
+/// and the browser path is never on JetStream. Doubles per-event
+/// publish work and (for now) per-event stream storage; the stream
+/// will be tightened to filter `*.events` out in a follow-up chart
+/// change once the archiver consumer is in place.
 pub async fn publish_event(
     state: &Arc<AppState>,
     event_type: &str,
@@ -63,14 +83,31 @@ pub async fn publish_event(
 ) {
     let seq = state.sequence.fetch_add(1, Ordering::Relaxed);
     let message = build_message(&state.session_id, event_type, payload, seq);
-    let subject = events_subject(&state.session_id);
     let data = serde_json::to_vec(&message).unwrap_or_default();
+
+    // Live browser tail -- unconditional, NATS-core only.
+    let events = events_subject(&state.session_id);
     if let Err(e) = state
         .nc
-        .publish(async_nats::subject::Subject::from(subject), data.into())
+        .publish(
+            async_nats::subject::Subject::from(events),
+            data.clone().into(),
+        )
         .await
     {
-        tracing::error!("NATS publish failed: {}", e);
+        tracing::error!("NATS events publish failed: {}", e);
+    }
+
+    // Durable archive copy -- gated inside publish_with_dedup. msg-id
+    // is monotonic per session, so a publisher retry of the same
+    // logical event reuses it and JetStream's duplicate window
+    // collapses it.
+    let archive = archive_subject(&state.session_id);
+    let msg_id = format!("archive.{}.{}", state.session_id, seq);
+    if let Err(e) =
+        publish_with_dedup(&state.nc, archive, data.into(), &msg_id).await
+    {
+        tracing::error!("NATS archive publish failed: {}", e);
     }
 }
 
@@ -106,6 +143,16 @@ mod tests {
             events_subject(id),
             "x1.session.019d6a7a-b559-7650-bc7d-ac466c9a2dbb.events"
         );
+    }
+
+    #[test]
+    fn archive_subject_is_distinct_from_events() {
+        let id = "019d6a7a-b559-7650-bc7d-ac466c9a2dbb";
+        assert_eq!(
+            archive_subject(id),
+            "x1.session.019d6a7a-b559-7650-bc7d-ac466c9a2dbb.archive"
+        );
+        assert_ne!(archive_subject(id), events_subject(id));
     }
 
     #[test]
