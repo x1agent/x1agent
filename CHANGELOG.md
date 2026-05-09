@@ -1,3 +1,10 @@
+## [1.17.1](https://github.com/x1agent/x1agent/compare/v1.17.0...v1.17.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** align workspace switcher popover with chip top edge (X1A-12) ([#64](https://github.com/x1agent/x1agent/issues/64)) ([e0bbb50](https://github.com/x1agent/x1agent/commit/e0bbb50ace6fac5c0767bca15a593bd305b43a50))
+
 # [1.17.0](https://github.com/x1agent/x1agent/compare/v1.16.3...v1.17.0) (2026-05-09)
 
 
