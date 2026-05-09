@@ -31,7 +31,12 @@ import {
 } from "../../components/ui/tabs";
 import { useAuthStore } from "../../stores/authStore";
 import { useAgentsStore } from "../../stores/agentsStore";
-import { useImagesStore } from "../../stores/imagesStore";
+import { useImagesStore, type AgentImage } from "../../stores/imagesStore";
+
+// Stable empty array reference for the images selector. Returning a
+// fresh `[]` from a zustand selector defeats React's identity check
+// and causes downstream effects/memos to re-run on every render.
+const EMPTY_IMAGES: ReadonlyArray<AgentImage> = [];
 import {
   useCapabilitiesStore,
   useHasCollections,
@@ -130,11 +135,13 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     { id: string; label: string }[]
   >([]);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
-  const {
-    bySlug: imagesBySlug,
-    load: loadImages,
-  } = useImagesStore();
-  const images = imagesBySlug[workspaceSlug] ?? [];
+  // Selector returns the cached array, never a freshly-allocated `[]`
+  // -- React's identity check then sees a stable reference across
+  // renders and any effect / memo depending on `images` doesn't loop.
+  // The `?? []` foot-gun (per CLAUDE.md "Selector foot-gun") goes here,
+  // INSIDE the selector, not outside.
+  const images = useImagesStore((s) => s.bySlug[workspaceSlug] ?? EMPTY_IMAGES);
+  const loadImages = useImagesStore((s) => s.load);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -195,9 +202,10 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       });
   }, [workspaceSlug]);
 
+  const workspaceAgents = bySlug[workspaceSlug];
   const existing =
-    !isCreate && agentSlug
-      ? (bySlug[workspaceSlug] ?? []).find((a) => a.slug === agentSlug)
+    !isCreate && agentSlug && workspaceAgents
+      ? workspaceAgents.find((a) => a.slug === agentSlug)
       : undefined;
 
   useEffect(() => {

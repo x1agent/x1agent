@@ -1,3 +1,31 @@
+## [1.16.3](https://github.com/x1agent/x1agent/compare/v1.16.2...v1.16.3) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** point agent MCP card to settings/integrations/mcp ([#66](https://github.com/x1agent/x1agent/issues/66)) ([6cecbf9](https://github.com/x1agent/x1agent/commit/6cecbf907d9b99ab3da6a1f5341d1e747d0fe6d8))
+
+## [1.16.2](https://github.com/x1agent/x1agent/compare/v1.16.1...v1.16.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** stabilize images selector on new-agent form ([#69](https://github.com/x1agent/x1agent/issues/69)) ([c4f7ae2](https://github.com/x1agent/x1agent/commit/c4f7ae2d64066168297595702c4be889a16bc9a5))
+
+## [1.16.1](https://github.com/x1agent/x1agent/compare/v1.16.0...v1.16.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** expose allow_push toggle when attaching/managing agent repos ([#70](https://github.com/x1agent/x1agent/issues/70)) ([7afe5e0](https://github.com/x1agent/x1agent/commit/7afe5e0d3d07ac4b6b9c2a2c93026cc1e72dbc43))
+
+# [1.16.0](https://github.com/x1agent/x1agent/compare/v1.15.1...v1.16.0) (2026-05-09)
+
+
+### Features
+
+* **nats:** JetStream substrate + Waves 1-3 + chart + dev postgres PVC ([#71](https://github.com/x1agent/x1agent/issues/71)) ([83b707c](https://github.com/x1agent/x1agent/commit/83b707c28d6f54eab013497bc2440cf57994338e))
+
 ## [1.15.1](https://github.com/x1agent/x1agent/compare/v1.15.0...v1.15.1) (2026-05-09)
 
 

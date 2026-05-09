@@ -32,13 +32,17 @@ interface GitHubState {
     agentId: string,
     installationId: number,
     repoFullName: string,
-    options?: { branch?: string; auto_push?: boolean },
+    options?: { branch?: string; auto_push?: boolean; allow_push?: boolean },
   ): Promise<void>;
   updateRepo(
     workspaceSlug: string,
     agentId: string,
     repoFullName: string,
-    patch: { branch?: string; auto_push?: boolean },
+    patch: {
+      branch?: string;
+      auto_push?: boolean;
+      allow_push?: boolean;
+    },
   ): Promise<void>;
   detachRepo(
     workspaceSlug: string,
@@ -123,6 +127,12 @@ export const useGitHubStore = create<GitHubState>((set, get) => ({
           repo_full_name: repoFullName,
           branch: options?.branch,
           auto_push: options?.auto_push,
+          // Without this, the API receives `undefined` and the postgres
+          // column default (`false`) wins -- which silently denies every
+          // agent push because the sidecar's git credential helper checks
+          // `allow_push` before handing out tokens. See migration 020 +
+          // docs/security/repo-access.md.
+          allow_push: options?.allow_push,
         }),
       },
     );

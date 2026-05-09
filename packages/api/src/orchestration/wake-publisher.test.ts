@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { StringCodec } from "nats";
 import {
   InMemoryAgentRepository,
@@ -7,20 +7,55 @@ import {
 import { InMemorySessionRepository } from "@x1agent/domain-sessions";
 import {
   publishStateChangeWake,
+  publishWatchdogWake,
+  publishMessageWake,
+  publishCheckupWake,
+  publishHeartbeatWake,
   formatStateChangeWakeText,
 } from "./wake-publisher.js";
 
 /**
- * Minimal NATS fake: records every publish. The wake publisher only
- * uses `publish`; nothing else on the NatsConnection interface is
- * exercised, so we pass through a subset with an `as never` cast in
- * the deps rather than reaching for a full mock library.
+ * Minimal NATS fake: records every publish on either the core or the
+ * JetStream path. The wake publisher only uses `publish` (core) and
+ * `jetstream().publish` (JS-aware); nothing else on the NatsConnection
+ * interface is exercised, so the test passes a subset with an
+ * `as never` cast rather than reaching for a full mock library.
  */
 class FakeNats {
-  published: Array<{ subject: string; body: unknown }> = [];
+  publishedCore: Array<{ subject: string; body: unknown }> = [];
+  publishedJs: Array<{
+    subject: string;
+    body: unknown;
+    msgId: string | undefined;
+  }> = [];
+
   publish(subject: string, data: Uint8Array) {
     const sc = StringCodec();
-    this.published.push({ subject, body: JSON.parse(sc.decode(data)) });
+    this.publishedCore.push({ subject, body: JSON.parse(sc.decode(data)) });
+  }
+
+  jetstream() {
+    return {
+      publish: async (
+        subject: string,
+        data: Uint8Array,
+        opts?: { msgID?: string },
+      ) => {
+        const sc = StringCodec();
+        this.publishedJs.push({
+          subject,
+          body: JSON.parse(sc.decode(data)),
+          msgId: opts?.msgID,
+        });
+        return { stream: "X1_SESSION", seq: this.publishedJs.length };
+      },
+    };
+  }
+
+  // Convenience for tests that don't care which path the message
+  // travelled — wake publishers shouldn't mix paths in a single call.
+  get published(): Array<{ subject: string; body: unknown }> {
+    return [...this.publishedCore, ...this.publishedJs];
   }
 }
 
@@ -276,6 +311,101 @@ describe("formatMessageWakeText", () => {
     expect(t).toContain("needs_response=true");
     expect(t).toContain("waiting for you to inject_message");
     expect(t).toContain("post-mortem");
+  });
+});
+
+describe("USE_JETSTREAM_PUBLISH path", () => {
+  let savedFlag: string | undefined;
+
+  beforeEach(() => {
+    savedFlag = process.env.USE_JETSTREAM_PUBLISH;
+    process.env.USE_JETSTREAM_PUBLISH = "true";
+  });
+
+  afterEach(() => {
+    if (savedFlag === undefined) delete process.env.USE_JETSTREAM_PUBLISH;
+    else process.env.USE_JETSTREAM_PUBLISH = savedFlag;
+  });
+
+  it("publishStateChangeWake routes through jetstream() with a deterministic msg-id", async () => {
+    const parentAgent = await makeAgent("orch", "orchestrator");
+    const childAgent = await makeAgent("worker", "worker");
+    const parent = await sessions.create({
+      agentId: parentAgent.id,
+      triggeredBy: "user",
+      triggeredByUserId: uuid(1) as never,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: new Date(),
+    });
+    const child = await sessions.create({
+      agentId: childAgent.id,
+      triggeredBy: "agent",
+      triggeredByUserId: null,
+      parentSessionId: parent.id,
+      parentAgentId: parentAgent.id,
+      resumedFromSessionId: null,
+      triggeredAt: new Date(),
+    });
+
+    await publishStateChangeWake(deps(), child, "complete", new Date(), null);
+    // Re-publish the same terminal event: a racing watcher firing
+    // twice for the same child + status. Both calls go through the
+    // JetStream publish path with identical msg-ids.
+    await publishStateChangeWake(deps(), child, "complete", new Date(), null);
+
+    expect(nats.publishedCore.length).toBe(0);
+    expect(nats.publishedJs.length).toBe(2);
+    expect(nats.publishedJs[0]!.subject).toBe(`x1.session.${parent.id}.input`);
+    expect(nats.publishedJs[0]!.msgId).toBe(
+      `wake.state_change.${child.id}.complete`,
+    );
+    expect(nats.publishedJs[1]!.msgId).toBe(nats.publishedJs[0]!.msgId);
+  });
+
+  it("publishWatchdogWake encodes (parent, child, attempt) into the msg-id", async () => {
+    await publishWatchdogWake(
+      nats as never,
+      "p-1",
+      "c-1",
+      "child-slug",
+      120,
+      3,
+    );
+    expect(nats.publishedJs.length).toBe(1);
+    expect(nats.publishedJs[0]!.msgId).toBe("wake.watchdog.p-1.c-1.3");
+  });
+
+  it("publishMessageWake hashes content so retries dedup but distinct messages don't", async () => {
+    const opts = {
+      childSessionId: "c-1",
+      childSlug: "child",
+      summary: "hello",
+      body: "world",
+      needsResponse: false,
+    };
+    await publishMessageWake(nats as never, "p-1", opts);
+    await publishMessageWake(nats as never, "p-1", opts);
+    expect(nats.publishedJs[0]!.msgId).toMatch(/^wake\.message\.[0-9a-f]{64}$/);
+    expect(nats.publishedJs[0]!.msgId).toBe(nats.publishedJs[1]!.msgId);
+
+    await publishMessageWake(nats as never, "p-1", { ...opts, summary: "diff" });
+    expect(nats.publishedJs[2]!.msgId).not.toBe(nats.publishedJs[0]!.msgId);
+  });
+
+  it("publishCheckupWake msg-id includes the envelope timestamp", async () => {
+    await publishCheckupWake(nats as never, "p-1", []);
+    const pub = nats.publishedJs[0]!;
+    const ts = (pub.body as { timestamp: string }).timestamp;
+    expect(pub.msgId).toBe(`wake.checkup.p-1.${ts}`);
+  });
+
+  it("publishHeartbeatWake msg-id includes the envelope timestamp", async () => {
+    await publishHeartbeatWake(nats as never, "s-1", "do the thing");
+    const pub = nats.publishedJs[0]!;
+    const ts = (pub.body as { timestamp: string }).timestamp;
+    expect(pub.msgId).toBe(`wake.heartbeat.s-1.${ts}`);
   });
 });
 
