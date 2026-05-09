@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/x1agent/x1agent/compare/v1.15.0...v1.15.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **sessions:** allow scheduler rows to carry triggered_by_user_id ([#63](https://github.com/x1agent/x1agent/issues/63)) ([600351c](https://github.com/x1agent/x1agent/commit/600351cfe89c5a6a61e7f3381fde164d02107c81)), closes [#61](https://github.com/x1agent/x1agent/issues/61)
+
 # [1.15.0](https://github.com/x1agent/x1agent/compare/v1.14.2...v1.15.0) (2026-05-09)
 
 
