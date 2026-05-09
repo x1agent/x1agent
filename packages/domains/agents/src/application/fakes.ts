@@ -44,7 +44,15 @@ export class InMemoryAgentRepository implements AgentRepository {
       schedule: input.schedule,
       isActive: true,
       imageId: input.imageId ?? null,
+      model: input.model ?? null,
+      ownerUserId:
+        input.ownerUserId === undefined ? input.createdBy : input.ownerUserId,
+      visibility: input.visibility ?? "workspace",
       createdBy: input.createdBy,
+      scheduledRunAsUserId:
+        input.scheduledRunAsUserId === undefined
+          ? input.createdBy
+          : input.scheduledRunAsUserId,
       createdAt: now,
       updatedAt: now,
       lastSchedulerTickAt: null,
@@ -80,6 +88,12 @@ export class InMemoryAgentRepository implements AgentRepository {
       ...(patch.schedule !== undefined && { schedule: patch.schedule }),
       ...(patch.isActive !== undefined && { isActive: patch.isActive }),
       ...(patch.imageId !== undefined && { imageId: patch.imageId }),
+      ...(patch.model !== undefined && { model: patch.model }),
+      ...(patch.ownerUserId !== undefined && { ownerUserId: patch.ownerUserId }),
+      ...(patch.visibility !== undefined && { visibility: patch.visibility }),
+      ...(patch.scheduledRunAsUserId !== undefined && {
+        scheduledRunAsUserId: patch.scheduledRunAsUserId,
+      }),
       updatedAt: new Date(),
     };
     this.rows.set(id, updated);

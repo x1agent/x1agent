@@ -12,6 +12,7 @@ export type {
   UpdateAgentInput,
 } from "./ports/agent-repository.js";
 export type { AdminGuard } from "./ports/admin-guard.js";
+export type { WorkspaceMemberReader } from "./ports/workspace-member-reader.js";
 export type {
   AgentGrantRepository,
   CreateAgentGrantInput,

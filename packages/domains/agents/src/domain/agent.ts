@@ -60,6 +60,22 @@ export interface Agent {
    */
   visibility: "private" | "workspace" | "via_grants";
   createdBy: UserId | null;
+  /**
+   * User the scheduler should impersonate when firing this agent's
+   * cron-driven sessions. Drives the per-session triggered_by_user_id
+   * — required for any agent that has Zone-3 / remote_oauth MCPs
+   * attached, since those MCPs need a per-user OAuth token to mint
+   * credentials with.
+   *
+   * Defaulted to `createdBy` at agent-create time and backfilled the
+   * same way for existing rows in migration 044. Reassignable by
+   * workspace admins. May be NULL when (a) the original creator left
+   * the workspace and a new run-as user hasn't been picked yet, or
+   * (b) the agent has no schedule and no remote_oauth MCPs (in which
+   * case the field is decorative). Must reference a current member of
+   * the agent's workspace; the application layer enforces that.
+   */
+  scheduledRunAsUserId: UserId | null;
   createdAt: Date;
   updatedAt: Date;
   /**
@@ -84,5 +100,14 @@ export class AgentSlugTakenError extends DomainError {
   readonly code = "agent_slug_taken";
   constructor(public readonly slug: string) {
     super(`an agent with slug ${slug} already exists in this workspace`);
+  }
+}
+
+export class ScheduledRunAsUserNotInWorkspaceError extends DomainError {
+  readonly code = "scheduled_run_as_user_not_in_workspace";
+  constructor(public readonly userId: string) {
+    super(
+      `user ${userId} is not a member of this agent's workspace and cannot be set as the scheduled-run-as user`,
+    );
   }
 }

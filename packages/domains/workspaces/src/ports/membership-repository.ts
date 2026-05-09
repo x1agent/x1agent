@@ -20,6 +20,15 @@ export interface MembershipRepository {
   listByUser(userId: UserId): Promise<readonly Membership[]>;
 
   /**
+   * Every member of a workspace. Used by UI surfaces that need to
+   * present a member picker (e.g. agent edit's "Run as" select for
+   * scheduled-run-as-user-id). Caller is responsible for joining
+   * users to enrich with email/name — this port returns memberships
+   * only.
+   */
+  listByWorkspace(workspaceId: WorkspaceId): Promise<readonly Membership[]>;
+
+  /**
    * Upserts (workspaceId, userId). If the user is already a member, the
    * role is updated to the requested value. Idempotent.
    */
