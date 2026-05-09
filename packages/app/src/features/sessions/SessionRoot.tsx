@@ -87,6 +87,12 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const parent = parentBySession[sessionId] ?? null;
   const events = eventsBySession[sessionId] ?? [];
   const error = errorBySession[sessionId];
+  // Selector returns the cached array reference; `?? []` lives outside
+  // the selector per the project's zustand foot-gun rule (a default
+  // inside the selector would mint a new `[]` on every render and
+  // tank `React.memo` further down the tree).
+  const compactItems =
+    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? [];
 
   useEffect(() => {
     if (authStatus === "idle") fetchMe();
@@ -349,6 +355,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
 
         <EventStream
           events={events}
+          compactItems={compactItems}
           verbose={verbose}
           onRespond={sendMessage}
           workspaceSlug={workspaceSlug}

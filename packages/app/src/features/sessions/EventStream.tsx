@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { EventCard } from "./EventCard";
@@ -13,6 +13,14 @@ interface Props {
   agentId?: string;
   /** The session id — used as the session_id when an approved grant has scope='session'. */
   sessionId: string;
+  /**
+   * Pre-computed compact rows from the store. Optional — if absent,
+   * the component derives them from `events` on the fly. Production
+   * passes the cached value from `useSessionDetailStore` so we don't
+   * re-group on every render; tests can omit it and exercise the
+   * inline path.
+   */
+  compactItems?: CompactItem[];
 }
 
 /**
@@ -82,12 +90,22 @@ export function EventStream({
   workspaceSlug,
   agentId,
   sessionId,
+  compactItems,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [events.length]);
+
+  // Fall back to the inline grouper when the parent didn't supply
+  // pre-computed rows (tests, isolated previews). useMemo here keeps
+  // the items array reference stable across unrelated re-renders so
+  // a future React.memo on EventCard can actually skip work.
+  const fallbackItems = useMemo(
+    () => (compactItems === undefined ? compactTimeline(events) : null),
+    [events, compactItems],
+  );
 
   if (events.length === 0) {
     return (
@@ -104,7 +122,7 @@ export function EventStream({
   // session banners) renders inline so the conversational arc stays
   // intact. Verbose mode (below) keeps showing every event.
   if (!verbose) {
-    const items: CompactItem[] = compactTimeline(events);
+    const items: CompactItem[] = compactItems ?? fallbackItems ?? [];
     return (
       <div
         className="flex-1 overflow-y-auto"
