@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/x1agent/x1agent/compare/v1.14.2...v1.15.0) (2026-05-09)
+
+
+### Features
+
+* **agents:** per-agent "Run as" user for scheduler-triggered sessions ([#61](https://github.com/x1agent/x1agent/issues/61)) ([b8fa878](https://github.com/x1agent/x1agent/commit/b8fa878b361c5ff268dc73f35f8d2097e6ebbb94))
+
 ## [1.14.2](https://github.com/x1agent/x1agent/compare/v1.14.1...v1.14.2) (2026-05-09)
 
 
