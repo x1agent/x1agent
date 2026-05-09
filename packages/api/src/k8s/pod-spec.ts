@@ -274,6 +274,27 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
       name: "AGENT_COLLECTIONS_JSON",
       value: JSON.stringify(spec.collections),
     },
+    // Wave 1 of the JetStream cutover (rfcs/jetstream-migration.md).
+    // The control point is the api process so a single env flip rolls
+    // every subsequent pod over without touching the chart per-pod.
+    // Both flags are propagated, not re-read from the pod's own env,
+    // so api↔sidecar agree on which path is in use:
+    //
+    //   USE_JETSTREAM_PUBLISH — sidecar publishes wakes via JetStream
+    //                           when an orchestrator's `inject_message`
+    //                           MCP tool routes through its sidecar
+    //                           into a child's input subject. Without
+    //                           this, the api side of Wave 1 is durable
+    //                           but the sidecar side leaves a wake-loss
+    //                           hole on orchestrator → child spawn.
+    //   USE_JETSTREAM_CONSUME — sidecar reads its own session's input
+    //                           subject as a durable JetStream consumer.
+    ...(process.env.USE_JETSTREAM_PUBLISH === "true"
+      ? [{ name: "USE_JETSTREAM_PUBLISH", value: "true" }]
+      : []),
+    ...(process.env.USE_JETSTREAM_CONSUME === "true"
+      ? [{ name: "USE_JETSTREAM_CONSUME", value: "true" }]
+      : []),
   ];
 
   // Pod-shape branching by agent kind. Orchestrators are long-lived

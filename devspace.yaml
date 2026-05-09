@@ -332,6 +332,16 @@ dev:
         value: surrealdb
       - name: PROVIDER_VECTOR
         value: surrealdb
+      # Wave 1 of rfcs/jetstream-migration.md. Local dev exercises the
+      # JetStream publish path so we catch publisher-side bugs (missing
+      # ack, msg-id collision, stream back-pressure) before they ship in
+      # the chart. USE_JETSTREAM_CONSUME makes new session pods get a
+      # durable consumer; existing sessions stay on their core path
+      # until they reach a terminal state.
+      - name: USE_JETSTREAM_PUBLISH
+        value: "true"
+      - name: USE_JETSTREAM_CONSUME
+        value: "true"
 
   messaging-slack:
     labelSelector:

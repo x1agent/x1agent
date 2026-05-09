@@ -132,4 +132,80 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       },
     );
   });
+
+  describe("USE_JETSTREAM_* propagation", () => {
+    function sidecarEnv(): Array<{ name: string; value?: string }> {
+      const job = buildSessionJob(baseSpec("worker"));
+      const sidecar = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "sidecar",
+      )!;
+      return sidecar.env ?? [];
+    }
+
+    function withEnv(
+      vars: Record<string, string | undefined>,
+      fn: () => void,
+    ) {
+      const saved: Record<string, string | undefined> = {};
+      for (const k of Object.keys(vars)) saved[k] = process.env[k];
+      try {
+        for (const [k, v] of Object.entries(vars)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+        fn();
+      } finally {
+        for (const [k, v] of Object.entries(saved)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }
+    }
+
+    it("does not set either flag when the api process has neither", () => {
+      withEnv(
+        { USE_JETSTREAM_PUBLISH: undefined, USE_JETSTREAM_CONSUME: undefined },
+        () => {
+          const env = sidecarEnv();
+          expect(env.find((e) => e.name === "USE_JETSTREAM_PUBLISH")).toBeUndefined();
+          expect(env.find((e) => e.name === "USE_JETSTREAM_CONSUME")).toBeUndefined();
+        },
+      );
+    });
+
+    it("propagates USE_JETSTREAM_PUBLISH=true when the api flag is set", () => {
+      withEnv(
+        { USE_JETSTREAM_PUBLISH: "true", USE_JETSTREAM_CONSUME: undefined },
+        () => {
+          const entry = sidecarEnv().find(
+            (e) => e.name === "USE_JETSTREAM_PUBLISH",
+          );
+          expect(entry?.value).toBe("true");
+        },
+      );
+    });
+
+    it("propagates USE_JETSTREAM_CONSUME=true when the api flag is set", () => {
+      withEnv(
+        { USE_JETSTREAM_PUBLISH: undefined, USE_JETSTREAM_CONSUME: "true" },
+        () => {
+          const entry = sidecarEnv().find(
+            (e) => e.name === "USE_JETSTREAM_CONSUME",
+          );
+          expect(entry?.value).toBe("true");
+        },
+      );
+    });
+
+    it("propagates both flags independently when both are set", () => {
+      withEnv(
+        { USE_JETSTREAM_PUBLISH: "true", USE_JETSTREAM_CONSUME: "true" },
+        () => {
+          const env = sidecarEnv();
+          expect(env.find((e) => e.name === "USE_JETSTREAM_PUBLISH")?.value).toBe("true");
+          expect(env.find((e) => e.name === "USE_JETSTREAM_CONSUME")?.value).toBe("true");
+        },
+      );
+    });
+  });
 });
