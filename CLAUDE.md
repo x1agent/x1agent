@@ -23,7 +23,7 @@ Open-source, Kubernetes-native agent platform. Runs LLM agents in isolated pods 
 4. **Never work directly on `main` or `rc`. Branch from `main`; target `rc` in the PR.** All work happens on feature branches cut from the latest `main` (the stable line). The PR targets `rc`, the buffer zone where `app.local.x1agent.dev` deploys from. The CEO smoke-tests on `rc`, then promotes `rc → main` (which fires `semantic-release`). Direct commits to either branch are reserved for release tooling.
 
    ```
-   feature branch (cut from main)  →  PR to rc  →  CEO smoke-test  →  rc → main  →  release
+   feature branch (cut from main)  →  PR to rc  →  Maintainer smoke-test  →  rc → main  →  release
    ```
 
    Branching from `main` (not `rc`) keeps every worker building on top of the known-good line — if `rc` has an in-flight regression, new work isn't sitting on top of it.
