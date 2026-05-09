@@ -76,6 +76,8 @@ function serialize(a: Agent) {
   };
 }
 
+// Maps known domain errors to HTTP status. Unknown errors are
+// rethrown so Hono's app.onError fires (→ Sentry.captureException).
 function errStatus(err: unknown): number {
   if (err instanceof AgentNotFoundError) return 404;
   if (err instanceof AgentSlugTakenError) return 409;
@@ -85,7 +87,7 @@ function errStatus(err: unknown): number {
       return 403;
     return 400;
   }
-  return 500;
+  throw err;
 }
 
 function errBody(err: unknown) {

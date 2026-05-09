@@ -142,11 +142,14 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
         });
         return c.redirect(start.authorizeUrl, 302);
       } catch (err) {
+        // `field` is set by start-time validation/UX failures we want
+        // to surface to the form. Unknown shape = bug — bubble to
+        // app.onError → Sentry instead of masquerading as a 400.
         const e = err as { field?: string; message?: string };
-        return c.json(
-          { error: e.message ?? "start failed", field: e.field ?? null },
-          400,
-        );
+        if (e && typeof e === "object" && e.field) {
+          return c.json({ error: e.message ?? "start failed", field: e.field }, 400);
+        }
+        throw err;
       }
     },
   );
@@ -251,6 +254,13 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
         // 4xx debug payloads sometimes contain submitted secrets, and
         // stack-shaped errors leak internal detail. Log server-side,
         // show a generic message client-side.
+        //
+        // Telemetry gap: this catch returns a friendly HTML page so we
+        // can't rethrow into app.onError → Sentry. Wire a
+        // `captureException` callback through OAuthRoutesConfig so the
+        // composition root can hand in `Sentry.captureException` without
+        // pulling @sentry/node into this domain. Tracked in the Hono
+        // hardening punch-list.
         wipeFlowCookie();
         const e = err as { field?: string; message?: string };
         console.warn(

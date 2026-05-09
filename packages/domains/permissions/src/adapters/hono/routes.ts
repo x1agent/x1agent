@@ -73,7 +73,9 @@ function domainErrorStatus(err: unknown): number {
         return 400;
     }
   }
-  return 500;
+  // Unknown error — bubble to app.onError → Sentry. Returning 500
+  // here would silently swallow real bugs.
+  throw err;
 }
 
 function domainErrorBody(err: unknown) {
