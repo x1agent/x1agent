@@ -214,6 +214,7 @@ export function AppSidebar() {
                 side="right"
                 align="start"
                 sideOffset={4}
+                alignOffset={-1}
               >
                 <div className="px-2 py-1.5 text-xs font-medium text-fg-faint">
                   Workspaces
