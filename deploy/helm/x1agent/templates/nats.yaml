@@ -23,6 +23,20 @@ spec:
       port: 8080
       targetPort: 8080
 ---
+{{- $nats := .Values.infra.nats -}}
+{{- $js := default (dict) $nats.jetstream -}}
+{{- $jsEnabled := and (default false $js.enabled) (gt (int (default 1 $nats.replicas)) 0) -}}
+{{- $replicas := int (default 1 $nats.replicas) -}}
+{{- /*
+NATS pod shape branches on:
+  - replicas > 1  -> StatefulSet (per-pod PVCs via volumeClaimTemplates,
+                     headless service for peer discovery)
+  - replicas = 1  -> Deployment (Recreate strategy + a single PVC when
+                     JetStream is enabled)
+JetStream's stream + consumer state lives on the PV; emptyDir defeats
+the durability guarantee, so PVC is non-negotiable when jetstream is on.
+*/}}
+{{- if eq $replicas 1 }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,25 +44,21 @@ metadata:
   labels: {{- include "x1agent.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  strategy:
+    # Single-replica + RWO PVC means the old pod must be gone before
+    # the new one mounts. Rolling update would deadlock on the PVC.
+    type: Recreate
   selector:
     matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 6 }}
   template:
     metadata:
       labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 8 }}
       annotations:
-        # Hash the values that drive the rendered nats.conf. Any change
-        # to authorization, TLS, or websocket settings shifts this
-        # annotation and helm upgrade recreates the pod. Without it a
-        # `helm upgrade` that only edited nats.conf leaves NATS running
-        # with the old config (silent — no error, just unexplained
-        # PERMISSIONS_VIOLATION from clients trying to use the new ACL).
-        # We can't `include` this file from itself (recursive); hashing
-        # the conf-relevant values is good enough.
-        checksum/config: {{ printf "%v|%v" .Values.infra.nats .Values.providers | sha256sum }}
+        checksum/config: {{ printf "%v|%v" $nats .Values.providers | sha256sum }}
     spec:
       containers:
         - name: nats
-          image: {{ .Values.infra.nats.image | quote }}
+          image: {{ $nats.image | quote }}
           args:
             - "-c"
             - "/etc/nats/nats.conf"
@@ -57,17 +67,18 @@ spec:
               name: client
             - containerPort: 8080
               name: ws
-          resources: {{- toYaml .Values.infra.nats.resources | nindent 12 }}
+          resources: {{- toYaml $nats.resources | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/nats
               readOnly: true
-            # Server cert (tls.crt + tls.key) AND the issuing CA
-            # (ca.crt) — cert-manager writes all three into this one
-            # Secret, so we don't need a separate CA mount.
             - name: server-tls
               mountPath: /etc/nats/tls/server
               readOnly: true
+            {{- if $jsEnabled }}
+            - name: jetstream
+              mountPath: /data
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -75,6 +86,97 @@ spec:
         - name: server-tls
           secret:
             secretName: nats-server-tls
+        {{- if $jsEnabled }}
+        - name: jetstream
+          persistentVolumeClaim:
+            claimName: nats-jetstream-data
+        {{- end }}
+{{- if $jsEnabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nats-jetstream-data
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  {{- if $js.storageClass }}
+  storageClassName: {{ $js.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $js.fileStorageSize | default "10Gi" | quote }}
+{{- end }}
+{{- else }}
+{{- /*
+Multi-replica StatefulSet path. Each pod gets its own JetStream PV via
+volumeClaimTemplates, and they discover each other through the
+`nats-headless` service for clustering + RAFT quorum.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-headless
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 4 }}
+  ports:
+    - { name: client,  port: 4222, targetPort: 4222 }
+    - { name: cluster, port: 6222, targetPort: 6222 }
+    - { name: ws,      port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  serviceName: nats-headless
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "nats") | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%v|%v" $nats .Values.providers | sha256sum }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ $nats.image | quote }}
+          args:
+            - "-c"
+            - "/etc/nats/nats.conf"
+          ports:
+            - { containerPort: 4222, name: client }
+            - { containerPort: 6222, name: cluster }
+            - { containerPort: 8080, name: ws }
+          resources: {{- toYaml $nats.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config,     mountPath: /etc/nats,            readOnly: true }
+            - { name: server-tls, mountPath: /etc/nats/tls/server, readOnly: true }
+            {{- if $jsEnabled }}
+            - { name: jetstream,  mountPath: /data }
+            {{- end }}
+      volumes:
+        - { name: config,     configMap: { name: nats-config } }
+        - { name: server-tls, secret:    { secretName: nats-server-tls } }
+  {{- if $jsEnabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: jetstream
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- if $js.storageClass }}
+        storageClassName: {{ $js.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $js.fileStorageSize | default "10Gi" | quote }}
+  {{- end }}
+{{- end }}
 ---
 # NATS config. mTLS with subject-level ACLs by CN.
 #
@@ -104,6 +206,32 @@ data:
       verify_and_map: true
     }
 
+    {{- if $jsEnabled }}
+
+    # JetStream — durable, replayable subjects. store_dir lives on the
+    # PV mounted at /data; emptyDir would defeat the durability point.
+    # Limits cap memory + on-disk cap independently; per-stream limits
+    # in the bootstrap Job apply within these.
+    jetstream {
+      store_dir: "/data/jetstream"
+      max_memory_store: {{ $js.maxMemoryStore | default "256Mi" | quote }}
+      max_file_store:   {{ $js.maxFileStore   | default "8Gi"   | quote }}
+    }
+    {{- end }}
+
+    {{- if gt $replicas 1 }}
+
+    cluster {
+      name: x1agent
+      port: 6222
+      routes: [
+        {{- range $i, $_ := until $replicas }}
+        nats://nats-{{ $i }}.nats-headless:6222{{- if ne $i (sub $replicas 1) }},{{- end }}
+        {{- end }}
+      ]
+    }
+    {{- end }}
+
     # verify_and_map extracts the username from the client cert. Order
     # of precedence (per NATS server v2.10): Email SAN, URI SAN, then
     # the Subject DN in RFC 2253 form. Our certs (issued by cert-manager
@@ -115,7 +243,7 @@ data:
         {
           user: "CN=x1agent-api"
           permissions: {
-            publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>"] }
+            publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>"{{- if $jsEnabled }}, "$JS.API.>"{{- end }}] }
             subscribe: { allow: ["x1.session.*.events", "x1.session.*.audit", "_INBOX.>"] }
           }
         }
@@ -125,7 +253,14 @@ data:
             # v1: shared cert means any sidecar can publish on any session
             # id. Per-session certs would tighten this. NATS subscribes are
             # narrower since each pod cares about its own session's input.
-            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit"] }
+            #
+            # JetStream consumer mechanics: pull-based consumers issue
+            # API requests to $JS.API.> (create-or-update / next / info)
+            # and acknowledge messages on $JS.ACK.>. Both are *publish*
+            # subjects from the client's perspective; the response /
+            # delivered messages flow back over _INBOX.> which is
+            # already in the subscribe allow list.
+            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
             subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] }
           }
         }

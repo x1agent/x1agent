@@ -48,6 +48,13 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
 
   const [selectedInstall, setSelectedInstall] = useState<number | null>(null);
   const [branchDraft, setBranchDraft] = useState<Record<string, string>>({});
+  // Per-row "Push allowed" pre-attach choice. Defaults to true on each
+  // row so the common case (agent will commit + push) just works; the
+  // sidecar's credential helper still gates access to the actual token,
+  // and an admin can flip a row to read-only after attach.
+  const [pushAllowedDraft, setPushAllowedDraft] = useState<
+    Record<string, boolean>
+  >({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,10 +114,21 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
     setBusy(true);
     try {
       const branch = (branchDraft[repoFullName] || defaultBranch).trim();
+      // Default true: most attachments are "agent will commit + PR"; an
+      // admin can flip to read-only on the attached row. The wire DTO's
+      // `?? true` keeps the migration's safe-by-default schema column
+      // happy when the request body explicitly says `true`.
+      const allowPush = pushAllowedDraft[repoFullName] ?? true;
       await attachRepo(workspaceSlug, agentId, activeInstall, repoFullName, {
         branch: branch || defaultBranch,
+        allow_push: allowPush,
       });
       setBranchDraft((d) => {
+        const next = { ...d };
+        delete next[repoFullName];
+        return next;
+      });
+      setPushAllowedDraft((d) => {
         const next = { ...d };
         delete next[repoFullName];
         return next;
@@ -126,6 +144,19 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
     try {
       await updateRepo(workspaceSlug, agentId, repoFullName, {
         branch: branch.trim() || "main",
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const onUpdateAllowPush = async (
+    repoFullName: string,
+    allowPush: boolean,
+  ) => {
+    try {
+      await updateRepo(workspaceSlug, agentId, repoFullName, {
+        allow_push: allowPush,
       });
     } catch (err) {
       setError((err as Error).message);
@@ -225,6 +256,23 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
                     placeholder="branch"
                     aria-label={`Branch for ${repo.repo_full_name}`}
                   />
+                  <Select
+                    value={repo.allow_push ? "push" : "read"}
+                    onValueChange={(v) =>
+                      onUpdateAllowPush(repo.repo_full_name, v === "push")
+                    }
+                  >
+                    <SelectTrigger
+                      className="h-7 w-36 text-xs"
+                      aria-label={`Access for ${repo.repo_full_name}`}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push allowed</SelectItem>
+                      <SelectItem value="read">Read-only</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Button
                     type="button"
                     variant="ghost"
@@ -288,6 +336,30 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
                       placeholder={repo.default_branch}
                       aria-label={`Branch for ${repo.full_name}`}
                     />
+                    <Select
+                      value={
+                        (pushAllowedDraft[repo.full_name] ?? true)
+                          ? "push"
+                          : "read"
+                      }
+                      onValueChange={(v) =>
+                        setPushAllowedDraft((d) => ({
+                          ...d,
+                          [repo.full_name]: v === "push",
+                        }))
+                      }
+                    >
+                      <SelectTrigger
+                        className="h-7 w-36 text-xs"
+                        aria-label={`Access for ${repo.full_name}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="push">Push allowed</SelectItem>
+                        <SelectItem value="read">Read-only</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       type="button"
                       size="sm"
