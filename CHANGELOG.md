@@ -1,3 +1,17 @@
+# [1.17.0](https://github.com/x1agent/x1agent/compare/v1.16.3...v1.17.0) (2026-05-09)
+
+
+### Features
+
+* **app:** style scrollbars to match app visual language ([#65](https://github.com/x1agent/x1agent/issues/65)) ([59f2a54](https://github.com/x1agent/x1agent/commit/59f2a5457043b38c81998ea435fd3662680f9894))
+
+## [1.16.3](https://github.com/x1agent/x1agent/compare/v1.16.2...v1.16.3) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** point agent MCP card to settings/integrations/mcp ([#66](https://github.com/x1agent/x1agent/issues/66)) ([6cecbf9](https://github.com/x1agent/x1agent/commit/6cecbf907d9b99ab3da6a1f5341d1e747d0fe6d8))
+
 ## [1.16.2](https://github.com/x1agent/x1agent/compare/v1.16.1...v1.16.2) (2026-05-09)
 
 
