@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/x1agent/x1agent/compare/v1.16.3...v1.17.0) (2026-05-09)
+
+
+### Features
+
+* **app:** style scrollbars to match app visual language ([#65](https://github.com/x1agent/x1agent/issues/65)) ([59f2a54](https://github.com/x1agent/x1agent/commit/59f2a5457043b38c81998ea435fd3662680f9894))
+
 ## [1.16.3](https://github.com/x1agent/x1agent/compare/v1.16.2...v1.16.3) (2026-05-09)
 
 
