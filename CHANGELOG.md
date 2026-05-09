@@ -1,3 +1,10 @@
+## [1.16.1](https://github.com/x1agent/x1agent/compare/v1.16.0...v1.16.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **app:** expose allow_push toggle when attaching/managing agent repos ([#70](https://github.com/x1agent/x1agent/issues/70)) ([7afe5e0](https://github.com/x1agent/x1agent/commit/7afe5e0d3d07ac4b6b9c2a2c93026cc1e72dbc43))
+
 # [1.16.0](https://github.com/x1agent/x1agent/compare/v1.15.1...v1.16.0) (2026-05-09)
 
 
