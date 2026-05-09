@@ -349,7 +349,7 @@ export function AgentMcpAttachmentsCard({
               No MCP servers registered in this workspace.{" "}
               <a
                 className="underline"
-                href={`/workspaces/${workspaceSlug}/settings?tab=mcp`}
+                href={`/workspaces/${workspaceSlug}/settings/integrations/mcp`}
               >
                 Register one
               </a>{" "}
