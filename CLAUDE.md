@@ -20,7 +20,19 @@ Open-source, Kubernetes-native agent platform. Runs LLM agents in isolated pods 
 
    When the user reports a UI bug, the FIRST move is to ask for the network tab + console error + relevant pod log slice. Don't ship speculative fixes based on guesses; each cycle wastes a deploy and erodes trust. After confirming the root cause, write the regression test that would have caught it, then ship the fix.
 
-4. **Never work on main.** All work happens on feature branches. Create a branch, do the work, open a PR. Direct commits to main are only for releases (automated by semantic-release). Branch naming: `feat/short-description`, `fix/short-description`, `docs/short-description`.
+4. **Never work directly on `main` or `rc`. Branch from `main`; target `rc` in the PR.** All work happens on feature branches cut from the latest `main` (the stable line). The PR targets `rc`, the buffer zone where `app.local.x1agent.dev` deploys from. The CEO smoke-tests on `rc`, then promotes `rc → main` (which fires `semantic-release`). Direct commits to either branch are reserved for release tooling.
+
+   ```
+   feature branch (cut from main)  →  PR to rc  →  CEO smoke-test  →  rc → main  →  release
+   ```
+
+   Branching from `main` (not `rc`) keeps every worker building on top of the known-good line — if `rc` has an in-flight regression, new work isn't sitting on top of it.
+
+   **Branch naming:**
+   - **Orchestrator-spawned worker branches** use `worker/x1a-<n>-<short-slug>` (e.g. `worker/x1a-29-workspace-slug-autogen`). Linear's branch auto-association still matches because the ticket id appears in the branch name.
+   - **Human-authored branches** use `feat/<short-slug>`, `fix/<short-slug>`, `docs/<short-slug>`, `refactor/<short-slug>`, `ci/<short-slug>` — same as before.
+
+   The historical `christian/x1a-...` prefix is retired; existing PRs on that prefix will continue to merge as-is.
 
 5. **Docs are the product.** The `docs/` directory builds into the public documentation site. Write for operators and contributors, not for ourselves. No internal jargon without definition. No "see Slack" references. Everything a reader needs is in the docs or linked from them.
 
@@ -103,6 +115,32 @@ A pre-push hook runs an automated Claude code review before pushing. The review 
 To run a review manually: `mise run review`
 
 The review agents are in `.claude/commands/`. The pre-push hook is in `.githooks/pre-push`.
+
+## Pull requests
+
+PRs go to `rc`, not `main`. Keep them tight — the reviewer should be able to grasp the change in 30 seconds.
+
+**Required PR-description shape (≤ ~25 lines for routine fixes):**
+
+```
+## Summary
+- 1–3 bullets stating what changed and why. Mention the user-visible effect first.
+- Link the Linear ticket explicitly: e.g. "Closes X1A-29." (Linear's GitHub linkback also adds a footer; both are fine.)
+
+## Test plan
+- [ ] What you ran or clicked locally to convince yourself it works.
+- [ ] Any test added.
+```
+
+That's the whole PR body for normal fix / small-feature work. Don't pad with rationale, file-by-file walkthroughs, "Why this exists" essays, or release-note prose — those belong in the commit body or in a `docs/decisions/` ADR in the orchestrator repo. **Substrate-scale changes** (migrations, breaking refactors, infra cutovers) may justify a longer body; ordinary feature/fix PRs do not.
+
+**Visual changes ship with screenshots.** Any PR that changes pixels — UI layout, spacing, color, copy, components, charts — must include a before/after screenshot in the PR body or attached to the Linear ticket. The reviewer should be able to confirm the change visually without checking out the branch.
+
+- **Preferred path:** capture via the `chrome-devtools` MCP (Playwright-backed) in headless mode against `app.local.x1agent.dev` or a local devspace deploy. Drop the PNG into the PR body via GitHub's image upload, or share to the Linear ticket.
+- **If `chrome-devtools` MCP is unavailable** (still being seeded — see X1A-33), say so explicitly in the PR body ("Screenshots TBD: chrome-devtools MCP not yet attached to this worker") so the reviewer doesn't assume the visual was checked.
+- **If the change is invisible** (refactor, internal API, build/CI), state "No visible change" so the reviewer knows the screenshot section was considered, not skipped.
+
+A PR that touches `packages/app/` or any user-facing surface and ships without either a screenshot or an explicit "no visible change" note will be sent back.
 
 ## Repository structure
 
