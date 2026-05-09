@@ -8,21 +8,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Mirror of api side `publishInputEnvelope` in
-/// packages/api/src/orchestration/wake-publisher.ts. When the sidecar
-/// pushes a wake into another session's input subject (today: an
-/// orchestrator's `inject_message` MCP tool routed through
-/// `handle_inject_child`), it goes through this helper so the publish
-/// path is the same as the api's: msg-id-deduped, JetStream-aware,
-/// gated by USE_JETSTREAM_PUBLISH so cutover is reversible per
-/// process. Without it, we'd close the api wake gap in Wave 1 but
-/// leave a wake-loss hole on orchestrator → child spawn.
-pub async fn publish_input_envelope(
+/// packages/api/src/orchestration/wake-publisher.ts. When
+/// USE_JETSTREAM_PUBLISH=true the publish goes through JetStream with
+/// a Nats-Msg-Id header so the broker's duplicate window absorbs
+/// publisher-side retries; otherwise it falls back to NATS-core. The
+/// flag is process-level so the cutover is reversible per pod.
+pub async fn publish_with_dedup(
     nc: &async_nats::Client,
-    target_session_id: &str,
+    subject: String,
     payload: Bytes,
     msg_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let subject = format!("x1.session.{}.input", target_session_id);
     if std::env::var("USE_JETSTREAM_PUBLISH").as_deref() == Ok("true") {
         let js = jetstream::new(nc.clone());
         let mut headers = HeaderMap::new();
@@ -34,6 +30,26 @@ pub async fn publish_input_envelope(
     }
     nc.publish(subject, payload).await?;
     Ok(())
+}
+
+/// Wake publishes from the sidecar (today: orchestrator's
+/// `inject_message` MCP tool routed through handle_inject_child) go
+/// through this helper so the publish path matches the api side.
+/// Without it, Wave 1 would have a wake-loss hole on orchestrator →
+/// child spawn that the api fix doesn't cover.
+pub async fn publish_input_envelope(
+    nc: &async_nats::Client,
+    target_session_id: &str,
+    payload: Bytes,
+    msg_id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    publish_with_dedup(
+        nc,
+        format!("x1.session.{}.input", target_session_id),
+        payload,
+        msg_id,
+    )
+    .await
 }
 
 #[derive(Serialize)]
