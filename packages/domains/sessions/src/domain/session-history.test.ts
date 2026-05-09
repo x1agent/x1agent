@@ -29,6 +29,9 @@ function mkSession(
     completedAt: new Date(),
     errorMessage: null,
     createdAt: new Date(),
+    summary: null,
+    summaryUpdatedAt: null,
+    summaryEventSeq: null,
   };
 }
 
