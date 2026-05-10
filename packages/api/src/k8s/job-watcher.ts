@@ -12,6 +12,8 @@ import type {
   AgentRepoStore,
   InstallationId,
 } from "@x1agent/domain-github";
+import type { UserRepository } from "@x1agent/domain-auth";
+import { UserId } from "@x1agent/kernel";
 import type { SessionEventRepository } from "@x1agent/domain-sessions";
 import type { CollectionRepository } from "@x1agent/domain-collections";
 import {
@@ -50,6 +52,15 @@ export interface JobWatcherConfig {
   sessions: SessionRepository;
   agentRepos: AgentRepoStore;
   collections: CollectionRepository;
+  /**
+   * X1A-42: at session-launch the watcher resolves the triggering
+   * user's stored git identity and forwards it to pod-spec so worker
+   * commits attribute to the human, not `x1agent[bot]`. Optional —
+   * when null the existing bot-attribution fallback stands (no
+   * regression). Required for the "commits author as $user" path to
+   * work end-to-end.
+   */
+  users?: UserRepository | null;
   namespace: string;
   agentImage: string;
   sidecarImage: string;
@@ -392,6 +403,31 @@ async function launchSession(
     return;
   }
 
+  // X1A-42: resolve the triggering user's git identity, if any, so
+  // pod-spec can stamp GIT_AUTHOR_* / GIT_COMMITTER_* into the agent
+  // container's env. Best-effort: if the lookup fails or the user has
+  // no identity set we fall through with `gitIdentity: undefined`,
+  // which preserves the existing `x1agent[bot]` attribution path
+  // exactly.
+  let gitIdentity: { name: string; email: string } | undefined;
+  if (cfg.users && session.triggeredByUserId) {
+    try {
+      const triggerUser = await cfg.users.findById(
+        UserId(session.triggeredByUserId as unknown as string),
+      );
+      if (triggerUser?.gitIdentity) {
+        gitIdentity = {
+          name: triggerUser.gitIdentity.name,
+          email: triggerUser.gitIdentity.email,
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[jobs] git identity lookup for session ${session.id} failed (non-fatal): ${(err as Error).message}`,
+      );
+    }
+  }
+
   const job = buildSessionJob({
     sessionId: session.id,
     agentId: agent.id,
@@ -448,6 +484,7 @@ async function launchSession(
     sessionHistoryConfigMapName: resumeHistoryConfigMapName ?? undefined,
     mcpOAuthProxyImage: cfg.mcpOAuthProxyImage,
     remoteOAuthAttachments,
+    gitIdentity,
   });
 
   // Orchestrator pods use a PVC-backed workspace so the SDK transcript

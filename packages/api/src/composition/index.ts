@@ -11,6 +11,7 @@ import {
   PostgresAccessGate,
   PostgresUserOAuthTokenStore,
   createAuthRoutes,
+  createMeRoutes,
   createRequireAuth,
   isPlatformAdmin as isEmailPlatformAdmin,
   type AuthProvider,
@@ -153,6 +154,8 @@ import { createAdminWorkspacesRoutes } from "../admin/workspaces-routes.js";
 
 export interface Composition {
   authRoutes: Hono;
+  /** /api/me — per-user account-management routes (X1A-42 git identity). */
+  meRoutes: Hono;
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
   /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
@@ -405,6 +408,11 @@ export function compose(env: CompositionEnv): Composition {
   });
 
   const requireAuth = createRequireAuth(tokenizer);
+  // Per-user self-management surface — currently only the X1A-42 git
+  // identity. Mounted at /api/me; every route in here scopes to the
+  // authenticated session's own userId. See domains/auth/.../me-routes.ts
+  // for the scope guardrail rationale.
+  const meRoutes = createMeRoutes({ users, requireAuth });
   const getActor = (c: Context) => {
     const session = c.get("session");
     if (!session) return null;
@@ -1100,6 +1108,7 @@ export function compose(env: CompositionEnv): Composition {
 
   return {
     authRoutes,
+    meRoutes,
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     workspaceCreateRoutes,

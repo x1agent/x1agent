@@ -2,6 +2,7 @@ import type { Email, UserId } from "@x1agent/kernel";
 import type { User } from "../domain/user.js";
 import type { AuthProfile } from "../domain/auth-profile.js";
 import type { WorkspaceMembership } from "../domain/auth-session.js";
+import type { GitIdentity } from "../domain/git-identity.js";
 
 export interface UserRepository {
   findById(id: UserId): Promise<User | null>;
@@ -21,4 +22,14 @@ export interface UserRepository {
    * canonical implementation and this port will delegate.
    */
   listMemberships(userId: UserId): Promise<readonly WorkspaceMembership[]>;
+
+  /**
+   * Account-level git identity for worker commits (X1A-42). Setting
+   * `null` clears both columns; the worker then runs without
+   * GIT_AUTHOR_* env, which falls back to the platform GitHub App
+   * principal (`x1agent[bot]`) for commit attribution. Only the user
+   * themselves writes their own value — the api enforces that the
+   * authenticated session matches the userId before calling this port.
+   */
+  setGitIdentity(userId: UserId, identity: GitIdentity | null): Promise<void>;
 }
