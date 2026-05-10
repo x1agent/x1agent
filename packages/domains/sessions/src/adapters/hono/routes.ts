@@ -75,6 +75,12 @@ function serialize(s: Session) {
     completed_at: s.completedAt ? s.completedAt.toISOString() : null,
     error_message: s.errorMessage,
     created_at: s.createdAt.toISOString(),
+    // LLM-generated 1-line description. Null until the summarizer has
+    // run — UIs fall back to the session id hash when null.
+    summary: s.summary,
+    summary_updated_at: s.summaryUpdatedAt
+      ? s.summaryUpdatedAt.toISOString()
+      : null,
   };
 }
 

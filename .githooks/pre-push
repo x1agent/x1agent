@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push hook: runs Claude code review on changes being pushed
+# Pre-push hook: runs Claude code review on changes being pushed.
 # Install: git config core.hooksPath .githooks
 
 set -e
@@ -10,16 +10,43 @@ if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ]; then
   exit 0
 fi
 
-# Get the remote and branch being pushed to
+# Get the remote and branch being pushed to.
 remote="$1"
 url="$2"
 
-# Only review when pushing to the remote (not local operations)
+# Only review when pushing to the remote (not local operations).
 if [ -z "$remote" ]; then
   exit 0
 fi
 
-# Check if there are commits to push that differ from origin/main
+# Gate: only run the multi-agent review when the push targets `rc`.
+# `rc` is the integration branch — the place where review-driven gates
+# pay for themselves. Worker branches, fix branches, perf branches, etc.
+# all push without burning Claude tokens; they get covered when the
+# slice is brought into rc.
+#
+# Set X1_PRE_PUSH_REVIEW_FORCE=1 to override (e.g. you want a review
+# on a specific feature branch before merging it into rc).
+#
+# Git pipes one line per ref being pushed to stdin:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# We capture stdin once because `claude --print` below doesn't need it
+# and we want to inspect every ref in the push without consuming twice.
+PUSH_REFS=$(cat)
+PUSHING_RC=0
+while IFS=' ' read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/rc" ]; then
+    PUSHING_RC=1
+  fi
+done <<<"$PUSH_REFS"
+
+if [ "$PUSHING_RC" -ne 1 ] && [ -z "$X1_PRE_PUSH_REVIEW_FORCE" ]; then
+  echo "[pre-push] not pushing rc — skipping multi-agent review."
+  echo "[pre-push] set X1_PRE_PUSH_REVIEW_FORCE=1 to run anyway."
+  exit 0
+fi
+
+# Check if there are commits to push that differ from origin/main.
 CHANGES=$(git diff --stat origin/main 2>/dev/null || echo "")
 if [ -z "$CHANGES" ]; then
   echo "No changes to review."
