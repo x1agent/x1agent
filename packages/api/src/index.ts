@@ -19,6 +19,7 @@ import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import {
   AnthropicSessionSummarizer,
+  OpenAISessionSummarizer,
   StubSessionSummarizer,
   DEFAULT_SUMMARY_CONFIG,
   type SessionSummarizer,
@@ -36,21 +37,43 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
  * Returns undefined when nothing is available (let the SDK pick).
  */
 /**
- * Build the SessionSummarizer for this process. Anthropic API-key path
- * only for now (Vertex routing is a follow-up — see the X1A-7 PR
- * body). When the api key is unset, fall back to the stub so periodic
- * triggers stay no-ops and session.summary stays NULL.
+ * Build the SessionSummarizer for this process.
+ *
+ * Selection order:
+ *   1. ANTHROPIC_API_KEY (when ANTHROPIC_PROVIDER is unset or "api_key").
+ *   2. OPENAI_API_KEY — fallback so an install with an OpenAI key (e.g.
+ *      the one already used for collection embeddings) can light up
+ *      summaries without also acquiring an Anthropic key.
+ *   3. Stub — no creds available; session.summary stays NULL and the UI
+ *      falls back to the id hash.
+ *
+ * Vertex routing for the Anthropic side is still on the X1A-7 follow-up
+ * list; until that ships, a Vertex-only install can opt into OpenAI by
+ * setting OPENAI_API_KEY.
  */
 function buildSessionSummarizer(): SessionSummarizer {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const provider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
-  if (provider === "api_key" && apiKey && apiKey.trim()) {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicProvider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
+  if (
+    anthropicProvider === "api_key" &&
+    anthropicKey &&
+    anthropicKey.trim()
+  ) {
     const model =
       process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
-    return new AnthropicSessionSummarizer({ apiKey, model });
+    console.log("[summarizer] using anthropic api-key path");
+    return new AnthropicSessionSummarizer({ apiKey: anthropicKey, model });
   }
+
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey && openaiKey.trim()) {
+    const model = process.env.OPENAI_SUMMARY_MODEL?.trim() || undefined;
+    console.log("[summarizer] using openai api-key path");
+    return new OpenAISessionSummarizer({ apiKey: openaiKey, model });
+  }
+
   console.log(
-    "[summarizer] no anthropic api key — session summaries disabled",
+    "[summarizer] no anthropic or openai api key — session summaries disabled",
   );
   return new StubSessionSummarizer();
 }

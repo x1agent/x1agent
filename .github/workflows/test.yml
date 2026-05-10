@@ -3,7 +3,7 @@ name: Test
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, rc]
 
 permissions:
   contents: read
@@ -18,9 +18,38 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - name: Run pure-logic tests (kernel + domains)
+      - name: Run pure-logic tests (kernel + domains + adapters)
         run: |
-          for pkg in kernel domains/auth domains/workspaces domains/invitations; do
+          # Every package with at least one in-process unit test. New
+          # domains MUST be added here when they land or their tests
+          # silently sit outside CI — the lesson from the
+          # scheduleDueSessions failures that lived green-locally,
+          # red-on-rc for weeks because only auth/workspaces/invitations
+          # were wired up.
+          set -e
+          for pkg in \
+              kernel \
+              agent \
+              domains/auth \
+              domains/workspaces \
+              domains/invitations \
+              domains/agents \
+              domains/sessions \
+              domains/github \
+              domains/messaging \
+              domains/mcp-catalog \
+              domains/image-catalog \
+              domains/collections \
+              domains/permissions \
+              domains/agent-env \
+              domains/workspace-secrets \
+              domains/vector \
+              domains/graph \
+              domains/agent-resources \
+              domains/agent-resources-postgres \
+              domains/agent-resources-redis \
+              infrastructure/kaniko \
+              providers/preview; do
             echo "=== $pkg ==="
             (cd packages/$pkg && bun test)
           done
