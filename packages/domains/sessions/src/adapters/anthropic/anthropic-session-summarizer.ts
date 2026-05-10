@@ -1,4 +1,5 @@
 import type { SessionEvent } from "../../domain/event.js";
+import { renderTranscript } from "../../domain/render-transcript.js";
 import type { SessionSummarizer } from "../../ports/session-summarizer.js";
 
 /**
@@ -126,71 +127,6 @@ export class AnthropicSessionSummarizer implements SessionSummarizer {
     if (!text) return null;
     return text.slice(0, MAX_SUMMARY_CHARS);
   }
-}
-
-/**
- * Render an event slice into a compact transcript the LLM can read.
- *
- * Public-facing event types only: user messages, agent text, tool calls
- * (just the tool name; arguments are noisy and often contain transient
- * file paths). Skips usage / heartbeat / housekeeping events. We
- * collapse consecutive same-author lines so a chatty agent doesn't blow
- * the prompt budget.
- */
-function renderTranscript(events: readonly SessionEvent[]): string {
-  const lines: string[] = [];
-  for (const ev of events) {
-    const line = renderEvent(ev);
-    if (line) lines.push(line);
-  }
-  // Cap total transcript size — Haiku has plenty of context, but no
-  // reason to ship 100 KB of tool output for a 1-line summary.
-  const joined = lines.join("\n");
-  return joined.length > 6000 ? joined.slice(joined.length - 6000) : joined;
-}
-
-function renderEvent(ev: SessionEvent): string | null {
-  const p = (ev.payload ?? {}) as Record<string, unknown>;
-  switch (ev.type) {
-    case "user.message":
-    case "user.input_response": {
-      const text = stringFrom(p, ["text", "answer"]);
-      return text ? `user: ${trim(text)}` : null;
-    }
-    case "agent.text": {
-      const text = stringFrom(p, ["text"]);
-      return text ? `agent: ${trim(text)}` : null;
-    }
-    case "agent.tool_call": {
-      const name = stringFrom(p, ["name", "tool"]);
-      return name ? `agent calls tool: ${name}` : null;
-    }
-    case "agent.input_request": {
-      const text = stringFrom(p, ["text", "question"]);
-      return text ? `agent asks: ${trim(text)}` : null;
-    }
-    case "session.started": {
-      const text = stringFrom(p, ["prompt", "task"]);
-      return text ? `task: ${trim(text)}` : null;
-    }
-    default:
-      return null;
-  }
-}
-
-function stringFrom(o: Record<string, unknown>, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = o[k];
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return null;
-}
-
-function trim(s: string): string {
-  const collapsed = s.replace(/\s+/g, " ").trim();
-  return collapsed.length > 400
-    ? `${collapsed.slice(0, 400)}…`
-    : collapsed;
 }
 
 function extractText(json: unknown): string | null {
