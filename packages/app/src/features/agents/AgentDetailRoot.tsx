@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { ChevronRight } from "lucide-react";
 import { AppShell } from "../../shell/AppShell";
-import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { AgentRuntimeBadge } from "./AgentRuntimeBadge";
 import {
   Card,
   CardContent,
@@ -18,6 +18,7 @@ import { useGitHubStore } from "../../stores/githubStore";
 import { useGrantsStore } from "../../stores/grantsStore";
 import { useMcpStore, mcpAgentKey } from "../../stores/mcpStore";
 import { useAgentEnvBindingsStore } from "../../stores/agentEnvBindingsStore";
+import { useSessionsStore } from "../../stores/sessionsStore";
 import { RecentRunsSection } from "../sessions/RecentRunsSection";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
@@ -52,6 +53,9 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   const mcpAttachmentsByKey = useMcpStore((s) => s.attachmentsByAgentKey);
   const envBindingsByKey = useAgentEnvBindingsStore((s) => s.byAgentKey);
 
+  const loadSessions = useSessionsStore((s) => s.load);
+  const sessionsByAgent = useSessionsStore((s) => s.byAgent);
+
   useEffect(() => {
     if (status === "idle") fetchMe();
   }, [status, fetchMe]);
@@ -77,6 +81,10 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadSpawnGrants(workspaceSlug, agent.id);
     void loadMcpAttachments(workspaceSlug, agent.id);
     void loadEnvBindings(workspaceSlug, agent.id);
+    // Sessions are also fetched by RecentRunsSection further down the
+    // page; we mirror the load here so the runtime badge has its own
+    // explicit dependency rather than depending on render order.
+    void loadSessions(workspaceSlug, agent.id);
   }, [
     agent,
     workspaceSlug,
@@ -86,6 +94,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadSpawnGrants,
     loadMcpAttachments,
     loadEnvBindings,
+    loadSessions,
   ]);
 
   const breadcrumbs = [
@@ -112,6 +121,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   const attachmentKey = `${workspaceSlug}:${agent.id}`;
   const collections = attachmentsByKey[attachmentKey] ?? [];
   const spawnGrants = spawnByAgent[attachmentKey] ?? [];
+  const sessions = sessionsByAgent[agent.id] ?? [];
 
   const editHref = `/workspaces/${workspaceSlug}/agents/${agent.slug}/edit`;
 
@@ -134,9 +144,10 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
             <span>·</span>
             <span>{agent.runtime_type}</span>
             <span>·</span>
-            <Badge variant={agent.is_active ? "success" : "secondary"}>
-              {agent.is_active ? "active" : "paused"}
-            </Badge>
+            <AgentRuntimeBadge
+              isActive={agent.is_active}
+              sessions={sessions}
+            />
           </div>
         </div>
 
