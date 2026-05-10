@@ -1,3 +1,10 @@
+## [1.17.2](https://github.com/x1agent/x1agent/compare/v1.17.1...v1.17.2) (2026-05-10)
+
+
+### Bug Fixes
+
+* **app:** session timeline groups status + tool runs (X1A-41) ([#80](https://github.com/x1agent/x1agent/issues/80)) ([f374dab](https://github.com/x1agent/x1agent/commit/f374dabff7aa92275e116c43c8f2d04edc1ba456)), closes [#75](https://github.com/x1agent/x1agent/issues/75) [#73](https://github.com/x1agent/x1agent/issues/73) [#74](https://github.com/x1agent/x1agent/issues/74) [#76](https://github.com/x1agent/x1agent/issues/76)
+
 ## [1.17.1](https://github.com/x1agent/x1agent/compare/v1.17.0...v1.17.1) (2026-05-09)
 
 
