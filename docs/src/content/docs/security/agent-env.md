@@ -42,7 +42,18 @@ Agent env:
 
 The left column is the env-var name as the agent sees it. The right column is the workspace secret it resolves to. Mapping is explicit because the workspace secret name is generally not the env-var name the agent's tooling expects.
 
-At session-start time the api's pod-spec generator translates each row to a `valueFrom.secretKeyRef` against the workspace's secret bundle. Plaintext never transits the pod spec. The agent container starts with these vars in its env; everything the agent runs (bash, the LLM's tool calls, child processes) inherits them.
+At session-start the api decrypts each referenced workspace secret
+(AES-256-GCM, master key from `WORKSPACE_SECRETS_MASTER_KEY`), packs
+the (env-name → plaintext) pairs into a freshly minted Kubernetes
+Secret named `x1-session-creds-{shortId}`, and points the agent
+container's `envFrom` at it. Plaintext does not appear in the Job
+manifest, but it does appear briefly in the api process's memory
+(during decrypt) and in etcd (in the per-session Secret) until the
+session ends and the Secret is deleted. Cluster etcd encryption-at-rest
+is required for at-rest protection.
+
+Once the agent boots, everything it runs (bash, the LLM's tool calls,
+child processes) inherits the env via the standard `envFrom` mechanism.
 
 ## The threat model
 
@@ -54,12 +65,24 @@ Anything the agent can run can read every Zone 2 var. Concretely:
 
 In short: Zone 2 is a **trust grant from the operator to the agent**. The operator is saying "I want this agent to act with these credentials." Treat it like adding a key to a CI runner — necessary for some workflows, but every consumer of that runner's output is a potential exfil channel.
 
+### What stays in the api's compromise blast radius
+
+Because the api decrypts workspace secrets in-process to materialize
+them into per-session Secrets, a compromise of the api process gives
+an attacker access to the master key AND the ability to decrypt every
+workspace secret in the install. Rotate every workspace secret after a
+suspected api compromise — not just the ones bound to live sessions.
+
 ## Visual signals
 
-Agents that have any Zone 2 secrets attached display an **operator-injected credentials** badge on:
-- The agent detail page header
-- The sessions list (per-session row when the session was launched from a Zone-2 agent)
-- The agent edit screen (next to the Environment variables section)
+Agents that have any Zone 2 secrets attached display an
+**operator-injected credentials** badge. The badge is computed from
+`hasAnyBindings` on the agent-env binding repository (see
+`packages/domains/agent-env/src/ports/binding-repository.ts`).
+
+(TODO: confirm exact UI placement — agent detail header, sessions list
+row, agent edit screen — matches the implementation. Reported by an
+audit in 2026-05; flag for UI maintainer to verify.)
 
 The badge is intentional friction. An agent that quietly has `ANTHROPIC_API_KEY` in its env should not look identical at a glance to one that doesn't. Workspace admins reviewing the agent catalog can spot Zone 2 trust grants without opening every edit screen.
 

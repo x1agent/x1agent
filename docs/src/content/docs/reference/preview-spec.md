@@ -7,7 +7,9 @@ sidebar:
 
 `.x1agent/preview.yaml` tells a [Preview Provider](/providers/preview) how to deploy a repo into a [preview environment](/architecture/preview-environments). The file is checked into the repo, written by the orchestrator agent (or a human) once per repo, validated by the provider on every deploy.
 
-This page is the binding reference. Everything in it is JSONSchema-backed; the schema itself lives at `packages/domains/previews/schema/preview-spec.v1.schema.json` and is the source of truth when human prose and schema disagree. Agents should read this page to know *how* to write the file, and (via the schema) to validate what they wrote.
+This page is the binding reference for **v1**. The canonical implementation
+lives in `packages/providers/preview/src/preview-spec.ts`; when this page and
+the parser disagree, the parser wins.
 
 ## File location
 
@@ -34,59 +36,35 @@ spec:
 
 Everything else is optional and has defaults. This deploys a container built from `./Dockerfile`, exposes port 3000 as the HTTP entry, runs as the image's default user, has no dependencies, reads no secrets.
 
-## Full structure
+## Full structure (v1)
 
 ```yaml
 apiVersion: x1agent.io/v1
 kind: PreviewSpec
 metadata:
-  name: string                   # display name, no special chars
-  description: string | null     # free text shown in UI
+  name: string                   # K8s DNS-1123 label (see metadata.name below)
 spec:
-  entrypoint:                    # required
-    kind: dockerfile | compose | helm | kustomize | manifest
-    path: string                 # relative to repo root
-    buildContext: string | null  # default: path's parent directory
-    args:                        # build args, kind-specific
-      KEY: value
+  entrypoint:                    # required — v1: dockerfile only
+    kind: dockerfile
+    path: string                 # relative to repo root, e.g. "./Dockerfile"
+    buildContext: string         # default: "." (repo root)
   runtime:                       # required
     port: integer                # 1024-65535
-    protocol: http | http2 | tcp # default: http
-    path: string                 # default: "/" — root path the app serves
     healthcheck:
       path: string               # default: "/"
       initialDelaySeconds: integer  # default: 15
       periodSeconds: integer     # default: 10
-      timeoutSeconds: integer    # default: 3
-      failureThreshold: integer  # default: 3
-  dependencies:                  # optional
-    - kind: postgres | redis | mcp
-      shared: bool               # use workspace shared resource
-      name: string               # for kind=mcp, the attached MCP name
-      required: bool             # default: true
-      provides:                  # env var names this dep fills in
-        - DATABASE_URL
   env:                           # optional
     - name: string
-      from: literal | secret:<name> | preview.self_url | preview.share_base_url | dep:<dep-index>.<field>
-      value: string              # when from: literal
+      value: string              # for literal values (no `from`)
+      from: preview.self_url | secret:<UPPER_NAME>
   resources:                     # optional
     requests:
-      cpu: string                # e.g. "100m"
-      memory: string             # e.g. "256Mi"
+      cpu: string                # default: "200m"
+      memory: string             # default: "512Mi"
     limits:
-      cpu: string
-      memory: string
-    ephemeralStorage: string     # e.g. "1Gi", default: 512Mi
-  volumes:                       # optional
-    - name: string
-      kind: emptyDir | tmpfs
-      mountPath: string
-      sizeLimit: string          # e.g. "100Mi"
-  ingress:                       # optional, overrides provider defaults
-    stripPath: bool              # default: true for subpath-hosted setups
-    additionalHeaders:
-      X-Custom: value
+      cpu: string                # default: "1"
+      memory: string             # default: "1Gi"
 ```
 
 ## Field reference
@@ -97,21 +75,15 @@ Always `x1agent.io/v1` and `PreviewSpec` for now. A future v2 will move over the
 
 ### `metadata.name`
 
-Display name only. Does not have to match the repo name, does not have to be unique across the workspace. Alphanumeric, dashes, underscores, 1–64 chars.
+Used as a DNS-1123 label in K8s resource names. Must match `^[a-z][a-z0-9-]{0,62}$` — lowercase letters/digits/hyphens, must start with a letter, max 63 chars. **No underscores, no uppercase.** (The 64-char "alphanumeric + dashes + underscores" claim in the previous version of this doc was incorrect — orchestrator agents emitting names with uppercase letters or underscores will hit a hard validator error.)
 
 ### `spec.entrypoint.kind`
 
-Five values, each with its own `path` semantics:
-
-| kind | What `path` points at | Build model |
-|---|---|---|
-| `dockerfile` | A `Dockerfile` | Provider builds the image via Kaniko / docker / native equivalent, rolls a Deployment. |
-| `compose` | A `docker-compose.yaml` (or `.yml`, or `compose.yaml`) | Provider runs Kompose to translate to K8s manifests (local-k8s only). |
-| `helm` | A `Chart.yaml` or the chart directory | Provider runs `helm template` with supplied `args` as values, applies output. |
-| `kustomize` | A `kustomization.yaml` | Provider runs `kubectl kustomize` or `kustomize build`, applies output. |
-| `manifest` | A `.yaml` file or directory of them | Provider applies the raw manifests. Most control, least portability. |
-
-Not every provider supports every kind. The [Preview Provider reference](/providers/preview) describes the matrix per provider. Validation fails fast if a repo's `kind` is not supported by the target environment's `provider_kind`.
+v1: only `dockerfile` is supported. The provider builds the image via Kaniko
+and rolls a Deployment. Other kinds (`compose`, `helm`, `kustomize`,
+`manifest`) are planned but not yet implemented; specifying them today fails
+validation with `spec.entrypoint.kind: v1 only supports kind='dockerfile', got
+...`.
 
 ### `spec.entrypoint.path`
 
@@ -119,80 +91,39 @@ Relative to the repo root. Must not contain `..`, must not be absolute, must res
 
 ### `spec.entrypoint.buildContext`
 
-For `kind: dockerfile` only. Defaults to the directory containing the Dockerfile. Relative to repo root.
+Defaults to `"."` (repo root), not the Dockerfile's parent directory. Relative to repo root.
 
 ### `spec.entrypoint.args`
 
-Kind-specific:
-
-- `dockerfile`: passed as `--build-arg KEY=value` to the build.
-- `helm`: passed as `--set key=value` to `helm template`.
-- `kustomize` / `manifest`: unused (warning emitted if set).
-- `compose`: passed as environment variables to the Compose substitution process (not to the containers).
+Planned. Not parsed in v1.
 
 ### `spec.runtime.port`
 
 The single HTTP entry port the PE's URL maps to. Must be in 1024–65535. The provider exposes this port through its ingress; other ports declared in manifests are in-cluster-only unless you opt into additional ingress rules via `spec.ingress` (advanced).
 
-### `spec.runtime.protocol`
-
-- `http` — the normal case.
-- `http2` — for apps that speak h2c or gRPC-web. Provider configures the ingress accordingly.
-- `tcp` — raw TCP. Most providers won't support this (ingress is almost always HTTP); validator rejects on unsupported providers.
-
 ### `spec.runtime.healthcheck`
 
-Used by the provider both for readiness (don't route traffic until healthy) and for liveness (restart if unhealthy). Same fields as a Kubernetes HTTP probe.
-
-### `spec.dependencies`
-
-Declarative list of things the app needs from the workspace. Each entry is either:
-
-**`kind: postgres` / `kind: redis`** — the workspace's [shared agent resources](/architecture/shared-agent-resources). `shared: true` is required for now (dedicated-per-preview is future work). The provider mints a per-environment database + role (for Postgres) or per-environment user + key-prefix (for Redis), and populates the listed `provides` env vars with the connection string.
-
-```yaml
-dependencies:
-  - kind: postgres
-    shared: true
-    provides: [DATABASE_URL]
-```
-
-**`kind: mcp`** — an MCP server attached to the running agent. `name` must match an attached MCP. The provider doesn't deploy anything (MCPs are attached via the agent config); it validates that the named MCP exists and that the declared secrets are present.
-
-```yaml
-dependencies:
-  - kind: mcp
-    name: notion
-    provides: [NOTION_MCP_URL]
-```
-
-Missing dependencies surface as validator errors at dry-run. If you declare a shared Postgres but the workspace doesn't have one installed, validation fails with `dependency_not_available`; the orchestrator can then decide whether to install one first.
+Fields parsed: `path` (must start with `/`), `initialDelaySeconds` (default 15), `periodSeconds` (default 10). `timeoutSeconds` and `failureThreshold` are documented in some agent prompts but **not parsed today** — silently dropped if present.
 
 ### `spec.env`
 
-Environment variables for the runtime container. Every entry has a `name` and one of four `from` sources:
+Environment variables for the runtime container. Each entry has a `name` and either a literal `value` (no `from`) or a `from` source:
 
 | `from` | What it resolves to |
 |---|---|
-| `literal` | The `value` field literally. Never use this for secrets. |
-| `secret:<name>` | The value of the named workspace secret. Never appears in the rendered pod spec — provider injects via `secretKeyRef`. |
+| (omit `from`) | Use the literal `value` field. Never use this for secrets. |
 | `preview.self_url` | The preview environment's durable URL. Useful for `NEXT_PUBLIC_APP_URL`, OAuth redirect bases, webhook self-registration. |
-| `preview.share_base_url` | Where the api serves shares for this session. For embedded dashboards that link to share artifacts. |
-| `dep:<dep-index>.<field>` | A field from the resolved dependency. `dep:0.url` returns the first dependency's provided URL. |
+| `secret:<NAME>` | The value of the named workspace secret. `<NAME>` MUST match `^[A-Z_][A-Z0-9_]{0,63}$` (uppercase letters, digits, underscore; max 64 chars; cannot start with a digit). Provider injects via `secretKeyRef` so the value never lands in the rendered pod spec. |
 
-Validation refuses duplicate names, refuses `literal` + `value` missing, refuses `from: secret:X` where secret X doesn't exist.
+Other `from` values from earlier drafts (`preview.share_base_url`, `dep:<index>.<field>`, the literal string `literal`) are **not parsed in v1** and trigger a validator error.
 
 ### `spec.resources`
 
-Standard Kubernetes resource quantities. Provider enforces the workspace's preview quota as a ceiling — requests above the quota fail validation with actionable numbers.
+Standard Kubernetes resource quantities. Defaults: `requests {cpu: "200m", memory: "512Mi"}`, `limits {cpu: "1", memory: "1Gi"}`. `ephemeralStorage` is documented in some agent prompts but **not parsed today**.
 
-### `spec.volumes`
+### Planned (not yet in v1)
 
-Limited to `emptyDir` (disk-backed scratch space) and `tmpfs` (RAM-backed — `emptyDir` with `medium: Memory`). No `hostPath`, no `persistentVolumeClaim`, no `secret`, no `configMap` at the spec level. If your app needs something more exotic, switch `entrypoint.kind` to `manifest` and declare it yourself — with the understanding that the validator's security checks apply.
-
-### `spec.ingress`
-
-Rarely needed. Only used when the app has non-standard routing requirements. Most apps leave this unset and inherit the provider's defaults.
+The following fields appear in earlier drafts of this doc and may ship in a future version, but are **not parsed today**: `metadata.description`, `entrypoint.{compose,helm,kustomize,manifest}` kinds, `entrypoint.args`, `runtime.protocol`, `runtime.path`, `runtime.healthcheck.{timeoutSeconds,failureThreshold}`, `dependencies` (postgres/redis/mcp), `env.from: preview.share_base_url`, `env.from: dep:<index>.<field>`, `volumes`, `ingress`, `resources.ephemeralStorage`. Orchestrator agents that emit these fields will get a hard validator error or have them silently dropped depending on the field — see `packages/providers/preview/src/preview-spec.ts`.
 
 ## Placeholder resolution
 

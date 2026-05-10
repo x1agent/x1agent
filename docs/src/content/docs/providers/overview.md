@@ -9,19 +9,16 @@ Providers are the pluggable parts of x1agent. Each provider implements a defined
 
 ## Provider domains
 
-| Domain | What it controls | Reference provider |
-|--------|-----------------|-------------------|
-| `auth` | SSO, identity, token issuance | Google OAuth |
-| `graph` | Knowledge graph storage and queries | SurrealDB |
-| `files` | External file sync and browsing | Google Drive |
-| `documents` | Structured document read/write (Docs, Sheets, Word Online, Excel Online) | Google Workspace |
-| `messaging` | Chat platform integration | Slack |
-| `calendar` | Calendar read/write | Google Calendar |
-| `email` | Email send/read | Gmail |
-| `ai` | LLM API routing and proxying | Anthropic (direct) |
-| `storage` | Object storage for session artifacts | GCS |
-| `vector` | Vector search backend | Turbopuffer |
-| `preview` | Ephemeral deploy targets for E2E testing of agent-authored code | Local Kubernetes |
+| Domain | What it controls | Reference provider | Status |
+|--------|------------------|--------------------|--------|
+| `auth` | SSO, identity, token issuance | Google OAuth | Port + 2 adapters (`google`, `dev-bypass`); composition is hardcoded — see [authoring](/providers/authoring) |
+| `graph` | Knowledge graph storage and queries | SurrealDB | Port + 1 adapter; selectable via `providers.graph` Helm value |
+| `vector` | Vector search backend | SurrealDB (co-located with graph in v1) | Port + 1 adapter; locked to `graph` in v1 |
+| `messaging` | Chat platform integration | Slack | Port + 1 adapter; not yet Helm-selectable |
+| `files` / `documents` / `calendar` / `email` | Drive / Docs+Sheets / Calendar / Gmail | google-workspace provider | NATS-handler-only; no domain port yet |
+| `preview` | Ephemeral deploy targets | Local Kubernetes | NATS handler for `provision` only; no domain port yet |
+| `ai` | LLM routing | Anthropic direct or Vertex | Runtime toggle (`anthropic.provider` Helm value), not a port |
+| `storage` | Object storage for shares | GCS / local | Configured via runtime env, not a port |
 
 Each domain has a defined NATS request/reply contract. A provider implements one or more domains.
 
@@ -68,30 +65,27 @@ Domains are filled independently. You can use the Microsoft 365 provider for fil
 
 ## Configuration
 
-Provider selection is driven by Helm values:
+Provider selection today is partial. The shape in `deploy/helm/x1agent/values.yaml`:
 
 ```yaml
 providers:
-  graph:
-    type: surrealdb
-    config:
-      url: "http://surrealdb:8000"
+  # Singleton domains. "none" disables the capability + skips the
+  # provider Deployment. Today the only graph kind is surrealdb,
+  # which also implements vector — so vector is locked to graph in v1.
+  graph: surrealdb        # or "none"
+  vector: surrealdb       # locked to graph in v1
 
-  files:
-    type: gdrive
-    # No extra config -- uses OAuth tokens via credential proxy
-
-  messaging:
-    type: slack
-    config:
-      clientId: "..."
-      # clientSecret via K8s Secret
-
-  calendar:
-    type: google
+  # Per-kind config block — only the block matching `graph` is consumed.
+  graphSurrealdb:
+    image:
+      repository: ""
+      tag: latest
+    surrealImage: surrealdb/surrealdb:v2.3
+    storageSize: 10Gi
+    # …
 ```
 
-Each provider type maps to a Deployment that gets created (or already exists) in the cluster. The provider reads its domain-specific config from environment variables.
+`auth` and `messaging` are not yet Helm-selectable; their adapters are wired in the API composition root and configured via env vars.
 
 ## Provider discovery
 
@@ -110,15 +104,10 @@ See [Security: Credential proxy](/security/credential-proxy) for the full flow.
 
 ## Lifecycle hooks
 
-Providers can subscribe to session lifecycle events:
-
-```
-x1.session.{id}.lifecycle.started     -- session pod is running
-x1.session.{id}.lifecycle.completed   -- session finished normally
-x1.session.{id}.lifecycle.failed      -- session errored
-```
-
-Multiple providers can subscribe to the same lifecycle events. A file provider might sync files on `started` and sync back on `completed`. A messaging provider might post a notification on `completed`. The sidecar publishes once; every interested provider receives it.
+**Status: not yet implemented.** Today the only session subjects are
+`x1.session.*.{events,audit,input,presence}`. Lifecycle subjects are
+on the roadmap; until they ship, file-sync providers should hook
+session-start via the API rather than NATS.
 
 ## Writing a provider
 

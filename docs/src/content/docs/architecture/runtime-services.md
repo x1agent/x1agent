@@ -5,6 +5,17 @@ sidebar:
   order: 8
 ---
 
+:::caution[Status: proposal — not implemented]
+The `request_service` MCP tool, the `runtime_service_grants` table, the
+approval modal, the Deployment + Service creation, and the
+`allow_runtime_service_requests` workspace setting are **not present in
+the code today**. Today, mid-session service needs cannot be added; an
+agent that needs a service it didn't pre-declare must ask the user to
+restart the session with an updated [siblings](/architecture/siblings)
+config. This page specifies the flow we want to land. Tracked in
+[`ROADMAP.md`](https://github.com/x1agent/x1agent/blob/main/ROADMAP.md).
+:::
+
 A session pod's containers are decided at pod creation and cannot be changed while the pod is running. This is a Kubernetes invariant, not an x1 design choice. If an agent pre-declares Postgres in its [siblings](/architecture/siblings) and mid-session decides it also needs Redis, the pod cannot mutate to add it.
 
 This doc specifies the out-of-pod escape valve for that case: the `request_service` flow, a mid-session pattern that creates an ephemeral Deployment + Service accessible from the session pod via in-cluster DNS, and that tears down with the session.
@@ -54,7 +65,7 @@ The shape is identical to the [request_grant flow for permission-grants](/securi
 
 ## The `request_service` tool
 
-Exposed to the agent as an x1 runtime tool (an x1-mcp tool today; a Pi extension after the runtime swap). Signature:
+Exposed to the agent as an x1 runtime tool — an [`x1agent` MCP](/providers/mcp-servers) tool that the platform registers automatically into every session. Signature:
 
 ```
 request_service(

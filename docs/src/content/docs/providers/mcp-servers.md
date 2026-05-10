@@ -5,7 +5,20 @@ sidebar:
   order: 3
 ---
 
-x1agent ships with one built-in MCP server -- `x1agent` -- exposing the seven tools every session uses to talk back to the user (`emit_status`, `emit_artifact`, `request_input`, `emit_error`, `share`, `request_permission`, `end_session`). That's the platform surface. Beyond it, agents can be attached to **external MCP servers** -- any process that speaks the Model Context Protocol -- to gain tools for third-party systems (Linear, Slack, Notion, a custom in-house API, anything).
+x1agent ships with one built-in MCP server -- `x1agent` -- exposing
+the platform's control-plane tools every session uses. The seven core
+tools every agent uses to talk to the user are `emit_status`,
+`emit_artifact`, `request_input`, `emit_error`, `share`,
+`request_permission`, `end_session`. The same MCP also exposes
+graph + vector + collection tools (`graph_query`, `graph_write`,
+`graph_relate`, `graph_resolve`, `graph_discover`, `vector_upsert`,
+`vector_search`, `vector_delete`, `list_collections`), messaging
+(`post_message`), permission-grant (`request_grant`), preview
+(`preview_deploy`), and the spawn / message routing tools
+(`spawn_session`, `list_spawnable_agents`, `read_child_output`,
+`inject_message`, `expect_quiet_for`, `message_caller`). See
+[Tool catalog](/reference/protocol#x1agent-mcp-tools) for the full
+list and signatures. Beyond it, agents can be attached to **external MCP servers** -- any process that speaks the Model Context Protocol -- to gain tools for third-party systems (Linear, Slack, Notion, a custom in-house API, anything).
 
 This doc covers three concerns:
 
@@ -166,7 +179,7 @@ graph TB
 At session-start time, the API reads the agent's MCP attachments and, for each one, injects:
 
 - A new container `mcp-<name>` in the pod spec, using the image from the catalog.
-- Env on that container: every `kind: value` becomes an `env.value` entry; every `${SECRET_NAME}` reference becomes an `env.valueFrom.secretKeyRef` pointing at the workspace's secret object. **Plaintext is never written to the pod spec.**
+- Env on that container: every `kind: value` becomes an `env.value` entry. In v1 (current), `${SECRET_NAME}` references are resolved by the API at render time and the resulting plaintext is materialised into the pod spec's `env.value` (the value still never crosses the agent container, only the MCP sibling). In v2 the resolution moves to `env.valueFrom.secretKeyRef` against a per-workspace K8s `Secret`, removing plaintext from the pod spec entirely; see *Storage — v2 (target)* above.
 - An `emptyDir` volume mounted at `/run/x1/mcp/` on both the MCP container and the agent container.
 - The MCP container's entrypoint is wrapped so stdio is bound to a Unix socket in the shared volume (via `socat UNIX-LISTEN:/run/x1/mcp/<name>.sock,fork EXEC:<mcp-binary>,stderr`).
 
