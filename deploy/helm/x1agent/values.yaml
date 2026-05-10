@@ -173,6 +173,13 @@ externalSecrets:
     # required. See templates/external-secrets.yaml for the gate.
     - envName: ANTHROPIC_API_KEY
       gsmSecretName: x1agent-anthropic-api-key
+    # OPENAI_API_KEY: optional. The api uses it as the session-summarizer
+    # fallback when ANTHROPIC_API_KEY is unset (e.g. Vertex installs that
+    # haven't lit up Vertex routing for the summarizer yet) and for
+    # collection embeddings. Missing GSM secret renders to empty env, so
+    # an install without an OpenAI key still boots cleanly.
+    - envName: OPENAI_API_KEY
+      gsmSecretName: x1agent-openai-api-key
     - envName: GOOGLE_OAUTH_CLIENT_ID
       gsmSecretName: x1agent-google-oauth-client-id
     - envName: GOOGLE_OAUTH_CLIENT_SECRET

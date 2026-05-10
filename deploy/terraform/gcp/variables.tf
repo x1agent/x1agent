@@ -115,6 +115,7 @@ variable "gsm_secret_names" {
     "x1agent-jwt-secret",
     "x1agent-api-internal-token",
     "x1agent-anthropic-api-key",
+    "x1agent-openai-api-key",
     "x1agent-google-oauth-client-id",
     "x1agent-google-oauth-client-secret",
     "x1agent-github-app-id",
