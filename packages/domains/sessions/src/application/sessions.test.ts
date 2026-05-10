@@ -335,12 +335,23 @@ describe("scheduleDueSessions", () => {
     expect(second.created).toBe(0);
   });
 
-  it("fires one catch-up run after a long outage, not many", async () => {
+  it("does not backfill missed slots after a long outage; advances anchor", async () => {
+    // No-backfill policy (schedule-due-sessions.ts): if `due` is more
+    // than one full interval behind `now`, the agent has been off long
+    // enough that catching up by firing one session per missed slot is
+    // wrong — that produces phantom backlogs. Skip the missed slots,
+    // advance the anchor, and let the next future slot fire normally.
     const a = await makeAgent({ schedule: "@hourly" });
     await seedPriorRun(a.id, new Date("2026-04-18T00:00:00Z"));
     clock.set(new Date("2026-04-18T06:05:00Z"));
     const result = await scheduleDueSessions({ agents, sessions, clock });
-    expect(result.created).toBe(1);
+    expect(result.created).toBe(0);
+    // Anchor advanced so the next tick within the same interval is a
+    // no-op rather than firing for the recent missed slot.
+    const reloaded = await agents.findById(a.id);
+    expect(reloaded!.lastSchedulerTickAt?.toISOString()).toBe(
+      "2026-04-18T06:05:00.000Z",
+    );
   });
 
   it("honors @every Nm", async () => {
@@ -394,14 +405,14 @@ describe("scheduleDueSessions", () => {
         triggeredAt: new Date("2026-04-18T10:00:00Z"),
       });
       await sessions.updateStatus(live.id, { status: "running" });
-      // Orchestrator has never ticked before; anchor is agent.createdAt.
-      // Move the clock well past the next-due boundary.
-      // Seed an anchor in the past so the next-due calc fires. Without
-      // this, the fake agent's wall-clock createdAt anchors the tick
-      // in the future and nothing fires.
+      // Seed the anchor one full hour ago so `due` is exactly the
+      // current top-of-hour. Anchors further back hit the no-backfill
+      // branch (schedule-due-sessions.ts:87) which advances the anchor
+      // without firing — that's a separate property covered by the
+      // catch-up test below.
       await agents.recordSchedulerTick(
         a.id,
-        new Date("2026-04-18T10:00:00Z"),
+        new Date("2026-04-18T12:30:00Z"),
       );
       clock.set(new Date("2026-04-18T13:05:00Z"));
 
@@ -432,12 +443,11 @@ describe("scheduleDueSessions", () => {
         schedule: "@hourly",
         kind: "orchestrator",
       });
-      // Seed an anchor in the past so the next-due calc fires. Without
-      // this, the fake agent's wall-clock createdAt anchors the tick
-      // in the future and nothing fires.
+      // Anchor inside the previous slot so `due` is the current
+      // top-of-hour; see the live-session test above for the rationale.
       await agents.recordSchedulerTick(
         a.id,
-        new Date("2026-04-18T10:00:00Z"),
+        new Date("2026-04-18T12:30:00Z"),
       );
       clock.set(new Date("2026-04-18T13:05:00Z"));
 
@@ -476,12 +486,10 @@ describe("scheduleDueSessions", () => {
         status: "complete",
         completedAt: new Date("2026-04-18T10:30:00Z"),
       });
-      // Seed an anchor in the past so the next-due calc fires. Without
-      // this, the fake agent's wall-clock createdAt anchors the tick
-      // in the future and nothing fires.
+      // Anchor inside the previous slot — see live-session test rationale.
       await agents.recordSchedulerTick(
         a.id,
-        new Date("2026-04-18T10:00:00Z"),
+        new Date("2026-04-18T12:30:00Z"),
       );
       clock.set(new Date("2026-04-18T13:05:00Z"));
 
@@ -551,12 +559,10 @@ describe("scheduleDueSessions", () => {
         triggeredAt: new Date("2026-04-18T10:00:00Z"),
       });
       await sessions.updateStatus(live.id, { status: "running" });
-      // Seed an anchor in the past so the next-due calc fires. Without
-      // this, the fake agent's wall-clock createdAt anchors the tick
-      // in the future and nothing fires.
+      // Anchor inside the previous slot — see live-session test rationale.
       await agents.recordSchedulerTick(
         a.id,
-        new Date("2026-04-18T10:00:00Z"),
+        new Date("2026-04-18T12:30:00Z"),
       );
       clock.set(new Date("2026-04-18T13:05:00Z"));
 
