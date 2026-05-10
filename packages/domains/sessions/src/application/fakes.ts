@@ -52,6 +52,9 @@ export class InMemorySessionRepository implements SessionRepository {
       completedAt: null,
       errorMessage: null,
       createdAt: new Date(),
+      summary: null,
+      summaryUpdatedAt: null,
+      summaryEventSeq: null,
     };
     this.rows.push(session);
     return session;
@@ -146,6 +149,24 @@ export class InMemorySessionRepository implements SessionRepository {
     const idx = this.rows.findIndex((r) => r.id === id);
     if (idx < 0) return false;
     this.rows.splice(idx, 1);
+    return true;
+  }
+
+  async updateSummary(
+    id: SessionId,
+    summary: string,
+    eventSeq: number,
+    updatedAt: Date,
+  ): Promise<boolean> {
+    const i = this.rows.findIndex((r) => r.id === id);
+    if (i < 0) return false;
+    const cur = this.rows[i]!;
+    this.rows[i] = {
+      ...cur,
+      summary,
+      summaryEventSeq: eventSeq,
+      summaryUpdatedAt: updatedAt,
+    };
     return true;
   }
 }

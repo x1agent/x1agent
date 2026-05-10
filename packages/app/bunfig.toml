@@ -1,10 +1,11 @@
-# Bun test config for the app package.
+# Use happy-dom for tests that touch the DOM (React components,
+# session timeline rendering, etc.). The bun:test preload below sets
+# `globalThis.document/window/HTMLElement` before any test imports
+# run, so React Testing Library can render into a real DOM.
 #
-# `preload` runs before every test file. We register happy-dom's globals
-# (window, document, navigator, etc.) on the bun runtime so React Testing
-# Library can render components into a DOM. This mirrors the
-# vitest/jest+jsdom setup other React projects use.
-#
-# See packages/app/src/__tests__/happydom.ts for the registration.
+# Excludes the Playwright e2e/ directory — those tests run via
+# `bun run test:e2e`, not under bun:test, and pulling them into the
+# same runner causes "two versions of @playwright/test" loader errors.
 [test]
-preload = ["./src/__tests__/happydom.ts"]
+preload = ["./src/test-setup.ts"]
+root = "./src"

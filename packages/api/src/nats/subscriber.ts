@@ -2,11 +2,16 @@ import { connect, StringCodec, type NatsConnection } from "nats";
 import {
   SessionId,
   appendSessionEvent,
+  maybeUpdateSessionSummary,
+  DEFAULT_SUMMARY_CONFIG,
+  type MaybeUpdateSessionSummaryConfig,
   type SessionEventRepository,
   type SessionRepository,
+  type SessionSummarizer,
   type TokenUsageRepository,
 } from "@x1agent/domain-sessions";
 import type { AgentRepository } from "@x1agent/domain-agents";
+import { systemClock } from "@x1agent/kernel";
 import { recordTokenUsageMetric } from "@x1agent/observability";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
 import { publishStateChangeWake } from "../orchestration/wake-publisher.js";
@@ -41,7 +46,34 @@ export interface StartSubscriberOptions {
    * still ingest events without the subscriber crashing.
    */
   tokenUsage?: TokenUsageRepository;
+  /**
+   * LLM summarizer for periodic session-description refreshes. When
+   * absent, summary generation is skipped — session.summary stays
+   * NULL and the UI falls back to the session id hash. Composition
+   * wires AnthropicSessionSummarizer when ANTHROPIC_API_KEY is
+   * configured, StubSessionSummarizer otherwise.
+   */
+  summarizer?: SessionSummarizer;
+  /**
+   * Override the default cooldown thresholds (10 events / 5 min).
+   * Composition reads these from env so an operator can tune token
+   * spend without a code change. Optional — DEFAULT_SUMMARY_CONFIG
+   * applies when absent.
+   */
+  summaryConfig?: MaybeUpdateSessionSummaryConfig;
 }
+
+// Public events — types we want the summarizer to "see". `agent.usage`
+// is excluded because it's metering noise; tools-call/result are
+// excluded because they explode prompt size for little signal.
+const PUBLIC_EVENT_TYPES = new Set([
+  "user.message",
+  "user.input_response",
+  "agent.text",
+  "agent.tool_call",
+  "agent.input_request",
+  "session.started",
+]);
 
 export interface Subscriber {
   nc: NatsConnection;
@@ -113,6 +145,39 @@ export async function startSessionEventSubscriber(
         console.warn(
           `[nats] failed to persist event type=${parsed.type} seq=${parsed.sequence}: ${(err as Error).message}`,
         );
+      }
+
+      // Periodic LLM summary refresh. Bounded by event count + wall
+      // clock so a chatty session doesn't generate one summary per
+      // turn. Best-effort — every error path inside the summarizer
+      // returns null/skipped, never throws. Skip noise events
+      // (agent.usage, agent.tool_result, etc.) to keep the trigger
+      // count honest.
+      if (opts.summarizer && PUBLIC_EVENT_TYPES.has(parsed.type)) {
+        try {
+          const result = await maybeUpdateSessionSummary(
+            {
+              sessions: opts.sessions,
+              events: opts.events,
+              summarizer: opts.summarizer,
+              clock: systemClock,
+            },
+            opts.summaryConfig ?? DEFAULT_SUMMARY_CONFIG,
+            { sessionId, currentSeq: parsed.sequence },
+          );
+          if (result.kind === "updated") {
+            console.log(
+              `[summarizer] session=${sessionId} seq=${result.eventSeq} summary="${result.summary}"`,
+            );
+          }
+        } catch (err) {
+          // maybeUpdateSessionSummary is supposed to swallow upstream
+          // errors. A throw means a bug in the persist path — log
+          // loudly but keep the subscriber alive.
+          console.warn(
+            `[summarizer] unexpected throw for session ${sessionId}: ${(err as Error).message}`,
+          );
+        }
       }
 
       // Token usage capture. The agent emits one `agent.usage` event

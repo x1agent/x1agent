@@ -58,6 +58,13 @@ vars:
   ANTHROPIC_API_KEY:
     source: env
     default: ""
+  # Optional fallback for the session summarizer (and any future
+  # OpenAI-powered embedding work). When set in `.env.local` and
+  # ANTHROPIC_API_KEY is empty, the api will use this for periodic
+  # session-summary refreshes.
+  OPENAI_API_KEY:
+    source: env
+    default: ""
   # AES-256-GCM key for the workspace-secrets domain. Generate with
   # `openssl rand -hex 32`. Used by the api at boot to decrypt secrets
   # the operator pastes into workspace settings (e.g. Stripe key for
@@ -307,6 +314,8 @@ dev:
         value: ${GITHUB_APP_WEBHOOK_SECRET}
       - name: ANTHROPIC_API_KEY
         value: ${ANTHROPIC_API_KEY}
+      - name: OPENAI_API_KEY
+        value: ${OPENAI_API_KEY}
       - name: WORKSPACE_SECRETS_MASTER_KEY
         value: ${WORKSPACE_SECRETS_MASTER_KEY}
       - name: NATS_URL
