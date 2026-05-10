@@ -1,6 +1,6 @@
 {
   "env": {
-    "KUBECONFIG": "/Users/ctoivola/.orbstack/k8s/config.yml",
+    "KUBECONFIG": "${HOME}/.orbstack/k8s/config.yml",
     "CLOUDSDK_ACTIVE_CONFIG_NAME": "x1agent"
   },
   "hooks": {
