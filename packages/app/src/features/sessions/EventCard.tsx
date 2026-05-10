@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { SharePill } from "./SharePill";
@@ -45,26 +45,54 @@ const WAKE_KIND_LABELS: Record<string, { label: string; tint: string }> = {
   message: { label: "message from child", tint: "border-emerald-700/60 bg-emerald-950/40" },
 };
 
-function UserBubble({ event }: { event: SessionEventDTO }) {
+/**
+ * Platform wakes (scheduler heartbeats, watchdog pings, child
+ * state-change notifications, etc.) carry the same shape as a
+ * human-typed user message but are pure platform noise from an
+ * operator's perspective — they shouldn't dominate the timeline.
+ * Render them as a tiny one-line pill that expands on click to show
+ * the full payload. Default state is collapsed; mirrors the
+ * `ToolGroupPill` / `ToolCallCard` pattern already used elsewhere in
+ * the timeline so we don't introduce new design tokens.
+ */
+function PlatformWakePill({
+  event,
+  label,
+  tint,
+}: {
+  event: SessionEventDTO;
+  label: string;
+  tint: string;
+}) {
+  const [open, setOpen] = useState(false);
   const payload = p(event);
   const fromSessionId = payload["from_session_id"] as string | undefined;
   const fromAgent = payload["from_agent_slug"] as string | undefined;
-  const source = payload["source"] as string | undefined;
-  const kind = payload["kind"] as string | undefined;
   const driverless = payload["driverless"] === true;
-
-  // Platform-originated wake: render as a labeled card with a kind
-  // badge, not a human-chat bubble. The operator shouldn't think a
-  // server-driven wake was typed by a user.
-  if (source === "platform" && kind && WAKE_KIND_LABELS[kind]) {
-    const { label, tint } = WAKE_KIND_LABELS[kind];
-    return (
-      <div className="py-2">
-        <div className={`rounded-md border ${tint} px-3 py-2 text-xs`}>
+  const text = String(payload["text"] ?? "");
+  const time = new Date(event.timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const Icon = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border-soft px-2 py-1 text-[11px] text-fg-muted hover:border-border-strong hover:text-fg"
+      >
+        <Icon className="size-3" />
+        <span className="rounded bg-bg-muted px-1.5 py-0.5 font-medium text-fg">
+          {driverless ? "scheduler wake" : "platform wake"}
+        </span>
+        <span>{label}</span>
+        <span className="text-fg-faint">· {time}</span>
+      </button>
+      {open && (
+        <div className={`mt-1 rounded-md border ${tint} px-3 py-2 text-xs`}>
           <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-fg-muted">
-            <span className="rounded bg-bg-muted px-1.5 py-0.5 font-medium text-fg">
-              Platform wake
-            </span>
             <span>{label}</span>
             {driverless && (
               <span className="text-fg-faint">· driverless</span>
@@ -76,12 +104,27 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
               </span>
             )}
           </div>
-          <p className="whitespace-pre-wrap text-fg">
-            {String(payload["text"] ?? "")}
-          </p>
+          <p className="whitespace-pre-wrap text-fg">{text}</p>
         </div>
-      </div>
-    );
+      )}
+    </div>
+  );
+}
+
+function UserBubble({ event }: { event: SessionEventDTO }) {
+  const payload = p(event);
+  const fromSessionId = payload["from_session_id"] as string | undefined;
+  const fromAgent = payload["from_agent_slug"] as string | undefined;
+  const source = payload["source"] as string | undefined;
+  const kind = payload["kind"] as string | undefined;
+
+  // Platform-originated wake: collapse to a pill so server-driven
+  // heartbeats and child state-change notifications don't look like
+  // multi-paragraph human messages cluttering the timeline. The full
+  // payload is one click away.
+  if (source === "platform" && kind && WAKE_KIND_LABELS[kind]) {
+    const { label, tint } = WAKE_KIND_LABELS[kind];
+    return <PlatformWakePill event={event} label={label} tint={tint} />;
   }
 
   // User turns: subtle right-aligned bubble. Light tint distinguishes
