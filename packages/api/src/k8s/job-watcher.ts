@@ -90,12 +90,6 @@ export interface JobWatcherConfig {
    * "nats-session-client-tls" (cert-manager-issued).
    */
   natsClientTlsSecret?: string;
-  /**
-   * Dev-only: host home directory to mount `.claude` + `.claude.json`
-   */
-  /**
-   * authenticates without an API key.
-   */
   /** Poll interval in ms. */
   intervalMs?: number;
   /** Called on fatal per-tick errors. Defaults to console.warn. */

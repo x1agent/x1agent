@@ -26,12 +26,6 @@ KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
 # hit the same host — cookies scope cleanly under .local.x1agent.dev.
 PUBLIC_API_URL = "https://api.local.x1agent.dev"
 
-# dev only — the in-repo default assumes the operator is running
-# x1agent for their own solo use on their own machine with their own
-# Claude subscription. Not appropriate for shared or multi-user
-# deployments; for anything beyond solo local dev, use
-# ANTHROPIC_API_KEY via the workspace-secrets path.
-
 # ============================================================================
 # Naming convention
 # ----------------------------------------------------------------------------
@@ -289,15 +283,6 @@ run = "echo '`mise run deploy` was renamed to `mise run deploy:prod`.' >&2 && ex
 description = "(removed) renamed to logs:prod"
 hide = true
 run = "echo '`mise run logs` was renamed to `mise run logs:prod`.' >&2 && exit 2"
-
-# (the file is also refreshed automatically by Claude Code inside the
-# pod because the hostPath mount is read/write).
-#
-# `mise run dev` depends on this task so the file is always populated
-run = """
-mkdir -p "$(dirname "$dest")"
-chmod 600 "$dest"
-"""
 
 [tasks."dev:cluster:stop"]
 description = "Tear down the devspace-managed cluster dev stack"
