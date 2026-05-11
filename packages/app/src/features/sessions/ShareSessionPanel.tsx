@@ -10,6 +10,8 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { apiFetch } from "../../lib/api";
+import { useAuthStore } from "../../stores/authStore";
+import { useSessionDetailStore } from "../../stores/sessionDetailStore";
 
 interface ShareDTO {
   id: string;
@@ -59,6 +61,22 @@ export function ShareSessionPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Current user — needed to:
+  //   1. Hide self from recipient picker (you can't share with yourself).
+  //   2. Decide which revoke buttons to surface — only the share's
+  //      creator OR the session author can revoke. The backend enforces
+  //      this; hiding the icon avoids decoy 403s.
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+
+  // Session author — the user whose action originally triggered this
+  // session. Owner-level access is implicit and not stored as a row in
+  // the shares table; we surface them in the access list anyway so the
+  // operator can see "who has access" without mental gymnastics. The
+  // author cannot be removed (no revoke button, no API path for it).
+  const sessionAuthorId = useSessionDetailStore(
+    (s) => s.sessionsById[sessionId]?.triggered_by_user_id ?? null,
+  );
+
   const base = `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/user-shares`;
 
   const refresh = async () => {
@@ -98,16 +116,20 @@ export function ShareSessionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId, workspaceSlug]);
 
-  // Hide users who already have a grant — re-granting the same user is
-  // an idempotent upsert on the server, but surfacing it as a fresh
-  // "Share" action confuses people who skim the list. The owner is
-  // implicit in the session's triggered_by_user_id and is never a row
-  // in the shares table, so they need to be filtered out separately if
-  // we ever surface the owner's id here.
+  // Hide users who already have access from the recipient picker:
+  //   - Anyone already in `shares` — re-granting is an idempotent
+  //     upsert on the server, but surfacing it as a fresh "Share"
+  //     action confuses people who skim the list.
+  //   - The session author — they already have owner-level access via
+  //     `triggered_by_user_id`. Sharing back to them is a no-op the
+  //     backend rejects.
+  //   - The current user — you can't share a session with yourself.
   const eligibleMembers = useMemo(() => {
-    const granted = new Set(shares.map((s) => s.user_id));
-    return members.filter((m) => !granted.has(m.user_id));
-  }, [members, shares]);
+    const ineligible = new Set(shares.map((s) => s.user_id));
+    if (sessionAuthorId) ineligible.add(sessionAuthorId);
+    if (currentUserId) ineligible.add(currentUserId);
+    return members.filter((m) => !ineligible.has(m.user_id));
+  }, [members, shares, sessionAuthorId, currentUserId]);
 
   if (!open) return null;
 
@@ -156,6 +178,16 @@ export function ShareSessionPanel({
     const m = members.find((x) => x.user_id === s.user_id);
     if (m) return renderMemberLabel(m);
     return s.user_id.slice(0, 8);
+  };
+
+  // Same fallback chain for the owner row. The session author may not
+  // appear in the workspace members list if they've since been removed
+  // from the workspace (rare); fall back to their user id prefix so
+  // the row still renders.
+  const authorDisplay = (authorId: string) => {
+    const m = members.find((x) => x.user_id === authorId);
+    if (m) return renderMemberLabel(m);
+    return authorId.slice(0, 8);
   };
 
   return (
@@ -225,11 +257,15 @@ export function ShareSessionPanel({
           </div>
           {/* `size="default"` matches the h-9 of Input/SelectTrigger
               so the button sits flush with the recipient + role
-              controls instead of riding 4px high on `size="sm"`. */}
+              controls. `self-center` is defensive — if the button
+              ever grows past h-9 (size="lg", taller icon), it
+              centers in the row instead of extending past the input
+              tops. With identical heights the visual is unchanged. */}
           <Button
             type="submit"
             size="default"
             disabled={busy || !recipientUserId}
+            className="self-center"
           >
             <UserPlus className="size-3.5" />
             <span className="ml-1">Share</span>
@@ -245,35 +281,70 @@ export function ShareSessionPanel({
           </div>
         )}
 
-        {shares.length > 0 && (
+        {(shares.length > 0 || sessionAuthorId) && (
           <div className="space-y-1">
             <div className="text-xs uppercase tracking-wider text-fg-faint">
-              Current grants
+              Who has access
             </div>
             <ul className="divide-y divide-border-soft rounded border border-border-soft">
-              {shares.map((s) => (
+              {sessionAuthorId && (
                 <li
-                  key={s.id}
+                  key={`owner-${sessionAuthorId}`}
                   className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="truncate text-fg" title={grantedDisplay(s)}>
-                      {grantedDisplay(s)}
+                    <span
+                      className="truncate text-fg"
+                      title={authorDisplay(sessionAuthorId)}
+                    >
+                      {authorDisplay(sessionAuthorId)}
                     </span>
                     <span className="text-fg-faint">·</span>
-                    <span className="capitalize text-fg-muted">{s.role}</span>
+                    <span className="rounded bg-bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg">
+                      Owner
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => revoke(s.user_id)}
-                    disabled={busy}
-                    className="text-fg-faint hover:text-red-500 disabled:opacity-50"
-                    title="Revoke"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  {/* Owner cannot be removed. No revoke button. */}
                 </li>
-              ))}
+              )}
+              {shares.map((s) => {
+                // Revoke is owner-only on the backend. Show the button
+                // only when the current user can actually use it —
+                // either they created this share (`shared_by`), or
+                // they're the session author (who can revoke anyone).
+                const canRevoke =
+                  currentUserId !== null &&
+                  (s.shared_by === currentUserId ||
+                    currentUserId === sessionAuthorId);
+                return (
+                  <li
+                    key={s.id}
+                    className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span
+                        className="truncate text-fg"
+                        title={grantedDisplay(s)}
+                      >
+                        {grantedDisplay(s)}
+                      </span>
+                      <span className="text-fg-faint">·</span>
+                      <span className="capitalize text-fg-muted">{s.role}</span>
+                    </div>
+                    {canRevoke && (
+                      <button
+                        type="button"
+                        onClick={() => revoke(s.user_id)}
+                        disabled={busy}
+                        className="text-fg-faint hover:text-red-500 disabled:opacity-50"
+                        title="Revoke"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
