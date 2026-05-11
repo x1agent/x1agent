@@ -260,17 +260,8 @@ export function formatMessageWakeText(opts: {
   if (opts.body) {
     lines.push("", opts.body);
   }
-  lines.push("");
   if (opts.needsResponse) {
-    lines.push(
-      "The child flagged needs_response=true — it is waiting for you to inject_message back.",
-      "Decide and respond, or cancel_session + post-mortem if the ask is out of scope.",
-    );
-  } else {
-    lines.push(
-      "The child does not need a response — it will keep working. Glance, record any",
-      "decisions you need to, and end the turn.",
-    );
+    lines.push("", "needs_response: true");
   }
   lines.push("", "No human is watching — do not ask clarifying questions.");
   return lines.join("\n");
@@ -333,8 +324,7 @@ export function formatCheckupWakeText(
     return [
       "[driverless wake: platform checkup — no active children]",
       "",
-      "No children are currently in flight. If there's work to do",
-      "per your roadmap, commission it. Otherwise end the turn.",
+      "No children are currently in flight.",
       "",
       "No human is watching — do not ask clarifying questions.",
     ].join("\n");
@@ -349,12 +339,6 @@ export function formatCheckupWakeText(
     "",
     `Active children (${snapshot.length}):`,
     ...lines,
-    "",
-    "Glance at the snapshot. Most checkups end with 'looks fine, continue'.",
-    "If something looks stuck or wrong:",
-    "  - read_session on the suspicious child for detail",
-    "  - cancel_session + post-mortem if genuinely stuck",
-    "  - otherwise end the turn; the next checkup or wake will re-engage you",
     "",
     "No human is watching — do not ask clarifying questions.",
   ].join("\n");
@@ -377,12 +361,6 @@ export function formatWatchdogWakeText(opts: {
     "",
     `Child session ${shortId} (${opts.childSlug}) has emitted no events for ${mins} minutes.`,
     attemptNote,
-    "",
-    "Options per your CLAUDE.md governance rules:",
-    "  - read_session to inspect last activity — may be a legitimate long-running operation",
-    "  - inject_message to ask the child for a status update",
-    "  - cancel_session + post-mortem share if the child is genuinely stuck",
-    "  - end the turn to let the next watchdog tick re-escalate",
     "",
     "No human is watching — do not ask clarifying questions.",
   ].join("\n");
@@ -431,20 +409,7 @@ export function wrapHeartbeatText(heartbeatMd: string): string {
   return [
     "[driverless wake: scheduler heartbeat]",
     "",
-    "You are being woken by the scheduler, not by a user. No human is",
-    "watching this turn in real time. Per your CLAUDE.md:",
-    "",
-    "  1. Read your current state (roadmap, last session, pending",
-    "     post-mortems).",
-    "  2. Is there work that can progress without human input?",
-    "     - Yes: commission it via the normal loop.",
-    "     - No: emit `agent.status` = \"quiescent\" and end the turn.",
-    "  3. Do NOT ask clarifying questions. If something is genuinely",
-    "     blocked on a human decision, post a `share` titled",
-    "     \"Needs human review: <short>\" and end the turn.",
-    "",
-    "Preserve tokens. If nothing has changed since the last heartbeat,",
-    "your turn should be short.",
+    "No human is watching — do not ask clarifying questions.",
     "",
     "---",
     "",
@@ -472,8 +437,7 @@ export function formatStateChangeWakeText(opts: {
       "",
       `Child session ${shortId} (${opts.childSlug}) transitioned to complete at ${when}.`,
       "",
-      "Review its output via read_session and decide next steps per your CLAUDE.md. ",
-      "No human is watching this turn — do not ask clarifying questions.",
+      "No human is watching — do not ask clarifying questions.",
     ].join("\n");
   }
   const errLine = opts.errorMessage ? `\nError: ${opts.errorMessage}` : "";
@@ -482,9 +446,6 @@ export function formatStateChangeWakeText(opts: {
     "",
     `Child session ${shortId} (${opts.childSlug}) transitioned to failed at ${when}.${errLine}`,
     "",
-    "Review via read_session, write a post-mortem share (per the convention in CLAUDE.md), ",
-    "and decide whether to respawn with a narrower brief or defer. ",
-    "No human is watching this turn — if genuinely blocked on a human decision, emit a share titled ",
-    '"Needs human review: <summary>" and end the turn.',
+    "No human is watching — do not ask clarifying questions.",
   ].join("\n");
 }

@@ -82,29 +82,20 @@ For adapters that call remote APIs, stub the remote at this level. The contract 
 
 ## 5. Wire it into composition
 
-A provider isn't live until the composition root selects it. In `packages/api/src/composition/index.ts`:
+The composition root at `packages/api/src/composition/index.ts` constructs
+a single `AuthProvider` instance and passes it to `createAuthRoutes`. Today
+the only production adapter is `GoogleAuthProvider`; selection is implicit
+(no env switch yet).
 
-```ts
-const github = new GitHubAuthProvider({
-  clientId: env.githubClientId,
-  clientSecret: env.githubClientSecret,
-});
+Adding a second prod adapter is a ~3-line change:
 
-const authRoutes = createAuthRoutes({
-  authProvider: env.authProvider === "github" ? github : google,
-  ...
-});
-```
+1. Construct your adapter alongside `google`.
+2. Branch on a new env var (`AUTH_PROVIDER=github` or similar).
+3. Pass the chosen adapter to `createAuthRoutes({ authProvider, ... })`.
 
-In production, the selection is driven by Helm values:
-
-```yaml
-providers:
-  auth:
-    type: github
-    config:
-      clientId: "..."
-```
+A future `providers.auth.type` Helm key plus a chart-level switch is on
+the roadmap but not yet implemented; until then, prod selection lives in
+the api's environment.
 
 ## NATS-backed providers
 
@@ -116,6 +107,10 @@ For domains that use NATS (graph, files, messaging, etc.), the provider runs as 
 4. Package as an OCI image.
 5. Add a Helm value binding the domain to your provider type.
 
-The contract test pattern still applies — domains with NATS adapters include a contract suite that brings up an embedded NATS server and verifies the provider's subject handling.
+The same in-process contract test runs against the adapter that the NATS
+handler delegates to (e.g. `SlackMessagingProvider`). An embedded-NATS
+harness for end-to-end subject handling is on the roadmap; today the wire
+layer is exercised by integration tests against a real NATS instance in
+the dev cluster.
 
 See [Provider System](/providers/overview) for the full list of domains and their contracts.

@@ -22,11 +22,18 @@ Three reasons it is not optional:
 
 ## Deployment
 
+:::caution
+v1 ships a **dev-only** registry (`deploy/k8s/dev/registry.yaml`) deployed
+by devspace into OrbStack. There is no production Helm chart for the registry
+yet. The architectural notes below describe the design; production wiring
+is pending.
+:::
+
 v1 ships with `registry:2` (the official CNCF Distribution image). Minimal and sufficient.
 
 ```mermaid
 graph LR
-    subgraph ns[namespace: x1agent-infra]
+    subgraph ns[namespace: x1agent]
         reg[registry deployment<br/>image: registry:2<br/>replicas: 1]
         svc[Service: x1-registry<br/>ClusterIP :5000]
         pvc[PVC: x1-registry-data<br/>20Gi default]
@@ -46,10 +53,10 @@ Deployment shape:
 - One `Deployment` with `replicas: 1` (registry:2 does not support multi-replica scale-out without shared storage + coordination; single replica is fine for a single cluster).
 - One `PersistentVolumeClaim` for storage. Default 20Gi; sizing guidance below.
 - One `Service` (ClusterIP) exposing `:5000`.
-- One `ConfigMap` with the registry's `config.yml`, which configures pull-through mirrors for `docker.io`, `ghcr.io`, and `quay.io`.
+- One `ConfigMap` with the registry's `config.yml` (filesystem driver only in v1; pull-through cache is planned).
 - No `Ingress`. The registry is never exposed outside the cluster.
 
-The registry runs in a `x1agent-infra` namespace alongside Postgres and NATS. Helm values land under `deploy/helm/registry/` (see the repository's `deploy/` tree once Phase 1 is built). devspace picks it up automatically during `mise run dev`.
+v1 runs the registry in the `x1agent` namespace alongside Postgres and NATS. The dev manifest lives at `deploy/k8s/dev/registry.yaml`; devspace picks it up automatically during `mise run dev`. A production Helm chart with backing object storage and a larger PVC is planned alongside the first prod deployment.
 
 ## Storage
 
@@ -59,7 +66,7 @@ Images grow without bound unless actively managed. Sizing:
 - Workspace images: depend heavily on language. A python-django image FROM runtime-core is typically 250–400 MB compressed; a full-stack polyglot image can hit 800 MB. Expect 5–10 versions per image.
 - A 20-workspace cluster with 5 images per workspace at 5 versions each at 400 MB = 200 GB. Pick a PVC size that matches your expected scale; 20 GB is enough for single-workspace dev, 100+ GB is the right ballpark for a production cluster.
 
-Garbage collection runs as a weekly CronJob that invokes `registry garbage-collect` against the registry's config. Blob GC frees space by deleting blobs no longer referenced by any manifest. Before GC runs, the Job deletes manifests older than the per-image retention policy (retain last N versions, where N is configurable per workspace; default 5).
+Garbage collection is **planned**: a weekly CronJob would invoke `registry garbage-collect` and delete manifests older than the retention policy. v1 has no GC CronJob; PVC sizing must accommodate growth between manual cleanups.
 
 ## Namespacing
 
@@ -68,18 +75,18 @@ Images are named with a two-level namespace that maps to authorization:
 ```
 <service>/x1agent/<name>:<version>         — platform-maintained images
 <service>/ws/<workspace-id>/<name>:<version>  — workspace-authored images
-<service>/mirror/<upstream-registry>/<path>:<tag> — pull-through cache
+<service>/mirror/<upstream-registry>/<path>:<tag> — pull-through cache (planned)
 ```
 
-Where `<service>` is the in-cluster address (`x1-registry.x1agent-infra.svc.cluster.local:5000` internally; resolved via the cluster's DNS).
+Where `<service>` is the in-cluster address (`x1-registry.x1agent.svc.cluster.local:5000` internally; resolved via the cluster's DNS).
 
 **Platform images.** Written only by the platform's CI pipeline. Read by every session pod.
 
 **Workspace images.** Written only by the API's image build controller on behalf of admins of that workspace. Read only by session pods running in that workspace. Cross-workspace pull is blocked at the API/authz level; the registry itself treats workspaces as plain path prefixes. See [Access control](#access-control) below.
 
-**Pull-through mirror.** Public images (e.g. `postgres:16` declared as a sibling) are not re-pushed; they are fetched from their upstream registry by the in-cluster registry and cached at `<service>/mirror/docker.io/library/postgres:16`. The first session that uses a given public image pays the upstream pull cost; every subsequent session on the same cluster hits the cache.
+**Pull-through mirror (planned).** When implemented, public images (e.g. `postgres:16` declared as a sibling) would be fetched once from their upstream registry and cached at `<service>/mirror/docker.io/library/postgres:16`. v1's registry config does not enable this; sibling images today resolve directly against their upstream registry on every pull.
 
-The admin UI and the API always present the short form (`postgres:16`); the pod-spec translator rewrites it to the mirror form at pod-spec generation time so pulls stay in-cluster.
+The admin UI and the API always present the short form (`postgres:16`).
 
 ## Access control
 
@@ -125,7 +132,7 @@ Key properties:
 
 - **One Kaniko Job per build.** Jobs are not reused; each save spawns its own pod.
 - **ConfigMap holds the Dockerfile.** Created per-build, deleted on success. No build-context tarball — the Dockerfile is the entire context (admins cannot `COPY` from a local repo in v1). Build-context upload is a Phase 3 follow-up.
-- **NATS-triggered, async.** The API enqueues; a separate `image-builder` deployment consumes `x1.image.build` and runs the Kaniko Job. The HTTP request returns in milliseconds; the row goes from `pending` → `building` → `succeeded`/`failed` over the build's lifetime.
+- **NATS-triggered, async.** The API enqueues; the `image-builder` (running in-process inside the api Deployment in v1) consumes `x1.image.build` and runs the Kaniko Job. Extracting the builder to its own deployment is planned for when memory pressure justifies it. The HTTP request returns in milliseconds; the row goes from `pending` → `building` → `succeeded`/`failed` over the build's lifetime.
 - **Concurrency.** Per workspace, one build at a time, enforced by the application use case. Cluster-wide cap prevents runaway parallelism during mass rebuilds.
 - **Cache.** v1 runs Kaniko without cache (every build is clean). Cached builds are a follow-up optimization.
 - **Single-row schema.** v1 stores `dockerfile_source`, `build_status`, `built_ref` directly on `agent_images` — latest build wins, no version history. Versioning is a Phase 3 add when someone needs rollback.

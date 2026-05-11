@@ -35,7 +35,7 @@ GOOGLE_OAUTH_CLIENT_SECRET="<client secret from step 3>"
 GOOGLE_OAUTH_SCOPES="openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.modify"
 ```
 
-Then `mise run deploy:prod`. Operators sign in via Google → consent screen lists everything → grant captured in `user_oauth_tokens`.
+Then `mise run install`. Operators sign in via Google → consent screen lists everything → grant captured in `user_oauth_tokens`.
 
 If you're new to GCP / want the longer walkthrough, keep reading.
 
@@ -45,7 +45,7 @@ If you're new to GCP / want the longer walkthrough, keep reading.
 2. Configure the OAuth consent screen (this is what your users see when they sign in).
 3. Create an OAuth 2.0 Client ID and add your install's callback URL.
 4. Enable the Google APIs you want agents to be able to call.
-5. Add the scopes you want to request to your `installs/<base-domain>.local` and re-run `mise run configure:prod`.
+5. Add the scopes you want to request to your `installs/<base-domain>.local` and re-run `mise run install`.
 
 Scope of work: 30–60 minutes for the non-sensitive APIs (Sheets, Docs, drive.file). Restricted scopes (Drive full, Gmail) require Google's CASA audit before they work for users outside your Workspace org — plan weeks, not minutes.
 
@@ -180,19 +180,24 @@ Notes:
 
 **Quote the whole value** — it contains spaces, and unquoted whitespace will break the dotenv parser.
 
-After editing, re-run `mise run configure:prod` to validate the install file, then `mise run deploy:prod` to roll the new scopes out to the api. Users sign in once with the new scopes; their grants persist in the platform's `user_oauth_tokens` table and providers can act on their behalf going forward.
+After editing, re-run `mise run install` to validate the install file, then `mise run install` to roll the new scopes out to the api. Users sign in once with the new scopes; their grants persist in the platform's `user_oauth_tokens` table and providers can act on their behalf going forward.
 
 ## 6. Install the provider
 
-Set in your Helm values:
+:::caution
+**Implementation status.** The provider's runtime is shipped at
+`packages/providers/google-workspace/`, but a Helm chart that ships it
+to production is not yet wired in `deploy/helm/x1agent/templates/`.
+Today's install path: apply the dev manifest at
+`deploy/k8s/dev/google-workspace.yaml` (or equivalent) directly, with
+`GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` populated. A
+`providers.workspace.type` Helm key is on the roadmap.
+:::
 
-```yaml
-providers:
-  workspace:
-    type: google
-```
-
-The chart deploys the `google-workspace` Deployment, which subscribes to `x1.provider.{files,documents,calendar,email}.*` over NATS. If you skip this, sidecar requests to those subjects time out and agents see `not_configured` — no error in sign-in, just no Workspace tools surfaced.
+Once installed, the provider subscribes to
+`x1.provider.{files,documents,calendar,email}.*` over NATS. If you skip
+this, sidecar requests to those subjects time out and agents see
+`not_configured` — no error in sign-in, just no Workspace tools surfaced.
 
 ## What users see
 
@@ -202,7 +207,8 @@ If a user revokes access in their Google Account settings later, the next agent 
 
 ## What's in v1 (live)
 
-All five surfaces ship in PR #55 — the credential-proxy substrate, the provider deployment, the sidecar bridge, and the agent MCPs are all proven end-to-end:
+All five Workspace surfaces have working handlers in
+`packages/providers/google-workspace/src/`:
 
 - **Drive** (`files`) — list, get, download, upload, update content / metadata, create folder, trash
 - **Sheets** (`sheets`) — read range, update range, append row, create spreadsheet

@@ -13,30 +13,47 @@ The sidecar solves this by acting as a credential-injecting proxy.
 
 ```mermaid
 sequenceDiagram
-    participant P as Provider
+    participant A as Agent
     participant S as Sidecar
-    participant A as API Server
+    participant N as NATS
+    participant P as Provider deployment
+    participant API as API Server
     participant E as External API
 
-    P->>S: NATS request: proxy call<br/>target: graph.microsoft.com/...<br/>scope: files.read
-    S->>S: Check permission ledger<br/>(has user consented to files.read?)
-    S->>A: Fetch user token<br/>(provider=microsoft, scope=files.read)
-    A-->>S: access_token
-    S->>E: GET graph.microsoft.com/...<br/>Authorization: Bearer {token}
-    E-->>S: Response body
-    S->>S: Drop token from memory
-    S->>S: Write audit log entry
-    S-->>P: Response body (no token)
+    A->>S: HTTP /calendar/list_events<br/>(localhost:9090)
+    S->>S: Add TRIGGERING_USER_ID from env
+    S->>N: NATS publish<br/>x1.provider.calendar.list_events<br/>{user_id, ...}
+    N->>P: deliver
+    P->>API: GET /api/internal/user-oauth-token<br/>?user_id=...&provider=google&scope=calendar.read
+    API->>API: Check user's granted scopes
+    API-->>P: access_token (or 403 permission_required)
+    P->>E: GET .../calendar/events<br/>Authorization: Bearer {token}
+    E-->>P: Response body
+    P-->>S: NATS reply (no token)
+    S-->>A: HTTP 200 (response body)
 ```
 
-1. The provider sends a proxy request over NATS. The request contains the target URL, HTTP method, body, and the OAuth scope needed.
-2. The sidecar checks the permission ledger. If the user hasn't consented to this scope, the request is rejected.
-3. The sidecar fetches the user's OAuth token from the API server.
-4. The sidecar makes the external API call with the token injected as an `Authorization` header.
-5. The sidecar returns the response body to the provider. The token is dropped from memory.
-6. The sidecar writes an audit log entry: who, what scope, which external API, when.
+1. The agent calls a tool on its sidecar over localhost (e.g. `/calendar/list_events`).
+2. The sidecar attaches the active user's id (from `TRIGGERING_USER_ID` env, set by the api at session-launch) and forwards the request to the provider over NATS.
+3. The provider asks the api for a user-OAuth token via `/api/internal/user-oauth-token`, optionally including the scope being exercised.
+4. The api enforces scope: if the user hasn't granted this scope, it returns 403 `permission_required`. Otherwise it returns a fresh access token (refreshed if near expiry).
+5. The provider makes the external API call with the token in an `Authorization` header.
+6. The provider returns the response body via NATS. The sidecar relays it to the agent.
 
-The provider sees the data (file listings, calendar events, email bodies) but never sees the token.
+The token is held by the provider for the duration of one outbound call. The agent never sees it.
+
+### What this does not protect against
+
+- **Compromised provider.** The provider deployment holds the user's
+  access token transiently for each call it makes. A compromised provider
+  can exfiltrate every token it's asked to use. NATS subject ACLs limit
+  which providers can request which subjects but do not protect the token
+  payload itself.
+- **Sidecar-side scope check.** Per-tool sidecar handlers (calendar,
+  email, files, sheets, docs) do not currently re-check scope before
+  forwarding the agent's call. Scope enforcement lives at the api's
+  `/api/internal/user-oauth-token` endpoint. A future hardening adds
+  an in-pod ledger cache so the sidecar can fail-fast.
 
 ## Two classes of credentials
 

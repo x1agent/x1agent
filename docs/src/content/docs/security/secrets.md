@@ -5,6 +5,16 @@ sidebar:
   order: 2
 ---
 
+:::caution[Design target — partial implementation]
+The architecture described on this page is the v2 design. **v1 ships
+with a different implementation**: workspace secrets are AES-256-GCM
+ciphertext in Postgres, decrypted in-process by the api at session
+launch. The ESO + per-workspace-namespace + capture/bind modes
+described below are the design we're migrating toward; they are not
+what an install does today. See [Secrets — current implementation]()
+for the v1 reality.
+:::
+
 x1agent never owns secret values. It delegates storage, encryption, rotation, and audit to the Kubernetes cluster and — for enterprise deployments — to an external secrets backend via the [External Secrets Operator](https://external-secrets.io/). x1agent writes references, not bytes. The trust boundary is the api, and the window in which the api holds plaintext is as narrow as the code path can make it.
 
 This page documents the full model: the topology, the two interaction modes, how secrets are typed and scoped, and what changes (and what doesn't) when you move from local development to a production backend.
@@ -134,7 +144,12 @@ Scoping is enforced at **two layers**, each alone insufficient, together a defen
 
 **Explicit injection, no wildcards.** The job-watcher reads an agent's configured secret bindings from the database and injects only those specific secrets into the pod spec as `secretKeyRef` entries. No `envFrom: secretRef:` dumps, no volume mounts of secret directories. The pod sees exactly the environment variables we chose — nothing else.
 
-**Automount disabled.** Agent containers run with `automountServiceAccountToken: false`. The pod has no credential to call kube-apiserver, so even a compromised agent cannot `kubectl get secret` to list what else exists in its namespace.
+**Automount disabled.** Agent containers run with
+`automountServiceAccountToken: false` (TODO: not yet enforced —
+tracked as a follow-up). When this lands, a compromised agent has
+no credential to call kube-apiserver. Today, the default SA token
+is mounted; the only protection is that the SA has no RBAC bindings
+granting access to other Secrets in the namespace.
 
 **Per-MCP env filtering.** MCPs spawn as child processes inside the agent container. By default they inherit the parent's full environment — including secrets they don't need. x1agent's MCP launcher **explicitly filters the env per subprocess**: each MCP receives only the secrets its attachment declared. A Notion MCP never sees the Slack token; a Slack MCP never sees the Anthropic key.
 
@@ -157,7 +172,11 @@ For both modes, short-lived credentials are preferred over static ones wherever 
 
 ## What x1agent explicitly does not do
 
-- **Own an encryption key.** etcd encryption-at-rest (configured via the cluster's `EncryptionConfiguration`) is load-bearing for capture mode. The cluster operator is responsible for enabling it; x1agent assumes it.
+- **Generate or rotate the workspace-secrets master key.** x1agent
+  uses `WORKSPACE_SECRETS_MASTER_KEY` (32 bytes hex, set at install).
+  Rotation requires re-encrypting every row; we do not automate this.
+  etcd encryption-at-rest is operator-configured at the cluster
+  level — required for at-rest protection of per-session K8s Secrets.
 - **Run its own KMS.** When backed by Vault or a cloud KMS, cryptographic operations belong to the backend.
 - **Sync values between backends.** `PushSecret` is an explicit operator action, not an x1agent feature.
 - **Cache plaintext values.** The api reads the value exactly once per write — immediately passed to the k8s api, then dropped.

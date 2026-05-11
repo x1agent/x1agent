@@ -15,16 +15,31 @@ Run it any time you need to add or change a value. The wizard is idempotent: exi
 
 ### Required
 
-These four are checked by `mise run configure:check`, which is a `depends` of every prod task (`install:prod`, `deploy:prod`, `terraform:prod:*`, etc.). If they're missing, those tasks fail fast with a friendly message instead of a confusing boot error later.
+These are checked by `mise run configure:check`, which is a `depends` of every cluster-mutating prod task (`install:prod`, `install:prod:plan`, `install:prod:apply`, `install:prod:build-images`, `terraform:prod:plan`, `terraform:prod:apply:cluster`, `terraform:prod:apply`, `deploy:prod`, `logs:prod`, `psql:prod`). If anything is missing, those tasks fail fast with a friendly message instead of a confusing boot error later. Read-only tasks (`install:prod:status`, `terraform:prod:init`, `terraform:prod:destroy`) skip the check.
 
 | Variable | What | How |
 |---|---|---|
-| `JWT_SECRET` | Signing key for platform session tokens | Auto-generated (32 bytes hex) if you don't have one |
-| `API_INTERNAL_TOKEN` | Internal service-to-service token | Auto-generated (24 bytes hex) if you don't have one |
-| `ANTHROPIC_API_KEY` | The agent runtime's API key | You paste it (`sk-ant-...`) — masked input |
+| `CLOUD_PROVIDER` | Where this install lands (`gcp` is the only option today) | Picked from a menu |
+| `BASE_DOMAIN` | The base hostname for ingress (e.g. `x1agent.com`) | You type it; same as the deployment file name |
+| `JWT_SECRET` | Signing key for platform session tokens | Auto-generated (32 bytes hex) on confirmation if you don't have one |
+| `API_INTERNAL_TOKEN` | Internal service-to-service token | Auto-generated (24 bytes hex) silently if you don't have one |
 | `PLATFORM_ADMIN_EMAILS` | Comma-separated list of admin emails | You type them |
+| `ANTHROPIC_PROVIDER` | Source of the agent's Claude credential — `api_key` or `vertex` | Picked from a menu |
 
-If you pick GCP as the deployment target, two more become required:
+If `ANTHROPIC_PROVIDER=api_key`:
+
+| Variable | What | How |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic console API key (`sk-ant-...`) | You paste it — masked input |
+
+If `ANTHROPIC_PROVIDER=vertex` (only valid when `CLOUD_PROVIDER=gcp`):
+
+| Variable | What | How |
+|---|---|---|
+| `CLOUD_ML_REGION` | Vertex region (e.g. `us-central1`) | You type it |
+| `ANTHROPIC_VERTEX_PROJECT_ID` | GCP project hosting Vertex | You type it (defaults to `GCP_PROJECT_ID`) |
+
+If `CLOUD_PROVIDER=gcp`, two more become required:
 
 | Variable | What |
 |---|---|
@@ -35,9 +50,12 @@ If you pick GCP as the deployment target, two more become required:
 
 You're prompted for each block; skip with N. Keys not configured yet aren't blocking — they unlock specific features when you add them.
 
-- **Google OAuth** (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `ALLOWED_DOMAINS`) — for user sign-in
-- **GitHub App** (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) — for repo + agent integrations. The `GITHUB_APP_PRIVATE_KEY` is captured by hand-editing `.env.local` directly because multi-line paste in a terminal is unreliable.
-- **Slack** (`SLACK_BOT_TOKEN`) — for the messaging provider
+- **Provider selection** (`PROVIDER_GRAPH`, `PROVIDER_VECTOR`) — picks which graph/vector provider deployment this install runs (or `none`). The api echoes them through `GET /api/capabilities`; the frontend hides Collections etc. when set to `none`.
+- **Allowed sign-in domains** (`ALLOWED_DOMAINS`) — comma-separated; blank = any verified Google account.
+- **Google OAuth** (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`) — for user sign-in.
+- **GitHub App** (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) — for repo + agent integrations. The `GITHUB_APP_PRIVATE_KEY` is captured by hand-editing `installs/<base-domain>.local` directly (newlines escaped as `\n`) because multi-line paste in a terminal is unreliable.
+- **Slack** (`SLACK_BOT_TOKEN`) — for the messaging provider.
+- **Sentry DSNs** (`SENTRY_DSN_API`, `SENTRY_DSN_APP`, `SENTRY_DSN_SIDECAR`) — error reporting per runtime; SDKs no-op when unset.
 
 ## Picking a target
 
@@ -47,7 +65,7 @@ If `installs/` is empty, the wizard goes straight to the base-domain prompt for 
 
 ### Local development (`.env.local`)
 
-`mise run configure:prod` writes per-deployment files to `installs/`, never to `.env.local`. The local-dev path uses `.env.local` directly — small file, ~10 keys, see `.env.example`. Most operators edit it by hand. The local-dev cluster is OrbStack-only and uses hardcoded base domains (`*.local.x1agent.dev`); no wizard needed.
+`mise run configure:prod` opens with a "What are you configuring?" prompt that branches on `local` vs `deployment`. The deployment branch writes to `installs/<base-domain>.local`. The local branch writes `.env.local` (asks only about `AUTH_BYPASS`/`TEST_USER`/Claude credential paths). The local-dev cluster is OrbStack-only and uses hardcoded base domains (`*.local.x1agent.dev`); the wizard for it is optional — most operators edit `.env.local` by hand using `.env.example` as a template.
 
 ### Google Cloud (GKE)
 
@@ -80,9 +98,9 @@ To list what's configured: `mise run deployments`.
 
 ## Multiple cloud providers later
 
-x1agent is built so future operators can install on AWS, Azure, or other providers. The wizard's `provider` field is the single switch that abstracts this — `gcp` is the only option today. New providers add a section in the wizard for their cloud-specific bindings (project ID, account, secret store, etc.).
+x1agent is built so future operators can install on AWS, Azure, or other providers. The wizard's `provider` field is the single switch that abstracts this — `gcp` is the only option today, and the only target verified by the install path (`packages/cli/src/install/up.ts`, `deploy/terraform/gcp/`). New providers will add a section in the wizard for their cloud-specific bindings (project ID, account, secret store, etc.) and a sibling `deploy/terraform/<provider>/` module.
 
-The base-domain pattern is provider-agnostic: `app.<domain>`, `api.<domain>`, `*.preview.<domain>` works the same on any cloud, and the Helm chart will template ingress hostnames from `BASE_DOMAIN` regardless.
+The base-domain pattern is provider-agnostic by design: `app.<domain>`, `api.<domain>`, `*.preview.<domain>`. The Helm chart templates ingress hostnames from `BASE_DOMAIN`, so the chart itself is cloud-neutral; the cloud-specific work is in the Terraform module.
 
 ## Re-running
 
@@ -101,11 +119,14 @@ Switching deployment targets (e.g. `local` → `gcp`) prompts for the new fields
 
 ```
 $ mise run configure:check
+[configure:check] /Users/you/x1agent/installs/x1agent.com.local
 [configure:check] missing required values:
   - ANTHROPIC_API_KEY
   - PLATFORM_ADMIN_EMAILS
 
 [configure:check] run `mise run configure:prod` to fix.
 ```
+
+(The validator also prints the resolved deployment file path on the first line, so you can see which install file is being checked when multiple are configured.)
 
 Exit code is 1 if anything required is missing, 0 otherwise. Optional misses surface as informational warnings on stderr but never fail the check.

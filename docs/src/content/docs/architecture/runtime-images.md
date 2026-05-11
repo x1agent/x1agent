@@ -15,7 +15,7 @@ Three companion docs cover the related concerns:
 
 ## Design principles
 
-1. **One fat container for the agent.** The LLM's shell tools (Pi's `Bash`, Claude Code's `bash`) run in a real local shell with real PIDs, real TTYs, and real file descriptors. No RPC between the agent and its shell. Background jobs, pipes, REPLs, and TTY-aware tools work exactly as they do on a developer's laptop. This is non-negotiable — proxying shell access breaks every productivity pattern these agents rely on.
+1. **One fat container for the agent.** The LLM's shell tools (Claude Code's `bash` today; future runtimes' equivalents) run in a real local shell with real PIDs, real TTYs, and real file descriptors. No RPC between the agent and its shell. Background jobs, pipes, REPLs, and TTY-aware tools work exactly as they do on a developer's laptop. This is non-negotiable — proxying shell access breaks every productivity pattern these agents rely on.
 2. **Services co-run in the pod, not inside the agent container.** Postgres, Redis, and similar run as sibling containers in the same pod. They share the pod's network namespace; the agent connects to them at `localhost:<port>`. This is the K8s-native equivalent of `docker-compose up` and requires no privileged containers, no Docker socket mounts, and no DIND.
 3. **Admins author images with a Dockerfile.** The Dockerfile `FROM`s a platform-maintained base (`x1agent/runtime-core`) and adds whatever language toolchain and system packages the agent needs. Admins never have to think about the agent runtime bits themselves.
 4. **Secrets never transit the pod spec.** Every secret reference in a pod spec is a `valueFrom.secretKeyRef`. Plaintext is never materialized into the pod's declarative form. See [permission-grants](/security/permission-grants) and [MCP servers](/providers/mcp-servers) for the same rule applied in the other directions of the system.
@@ -152,9 +152,9 @@ A valid preset Dockerfile following the overlay pattern:
 9. `USER agent`.
 10. `ENTRYPOINT ["/x1/bin/entrypoint"]`.
 
-The `agent` convention is deliberate: it's runtime-agnostic (the same uid and home apply whether the container is running Claude Code, Codex, opencode, Gemini, or a future SDK), decoupled from base-image defaults, and makes home-directory-based platform artifacts (`/home/agent/.claude/`, `/home/agent/.codex/`, `/home/agent/bin/`, `/home/agent/.gitconfig`) predictable across the whole image catalog. The platform's hostPath mounts, credential injections, and `$HOME`-relative lookups all target `/home/agent` — a preset that diverges will silently fail those paths.
+The `agent` convention is deliberate: it's runtime-agnostic (the same uid and home apply whether the container is running Claude Code, Codex, opencode, Gemini, or a future SDK), decoupled from base-image defaults, and makes home-directory-based platform artifacts predictable across the whole image catalog. The platform's credential injections and `$HOME`-relative lookups all target `/home/agent` — a preset that diverges will silently fail those paths. Production pods receive credentials through the sidecar and the workspace-secrets store, not via in-pod files.
 
-The save-time validator rejects images that end `USER 0`, name their uid 1000 user anything other than `agent`, omit the `/x1/bin/entrypoint` entrypoint, or `RUN rm` against `/x1/`.
+The save-time validator (`packages/domains/image-catalog/src/domain/dockerfile-source.ts`) enforces a Dockerfile-directive whitelist: only `--from=` form of `COPY`, no `ADD`, 64 KB size cap, and the first directive must be `FROM` or `ARG`. The additional content checks above (USER 0, agent user name, entrypoint presence, no `RUN rm /x1`) are part of the runtime-image contract but **are not enforced today** — admins authoring presets must follow the contract by convention until the validator gains the post-build image-content check.
 
 ### libc compatibility
 
@@ -203,7 +203,7 @@ Each image has many versions; each version has a status, a content-hash of its D
 
 ### What an admin image must not do
 
-Validated at save time and at pod-spec generation. Violations reject the image:
+The runtime-image contract forbids the following. Today the save-time validator (`packages/domains/image-catalog/src/domain/dockerfile-source.ts`) only enforces the Dockerfile-directive rules above; the four content rules in this list are honoured by convention, not by code:
 
 - `USER 0` (running as root at pod start). The final `USER` directive must be `agent`.
 - Listening on privileged ports. Bind to anything `≥ 1024`.
@@ -212,7 +212,7 @@ Validated at save time and at pod-spec generation. Violations reject the image:
 
 ## Relationship to other runtimes
 
-runtime-core is intentionally runtime-agnostic above the node-plus-shell layer. It ships whichever LLM runtime the platform has adopted (currently the Claude Agent SDK; Pi is the planned successor — see the Next-pickups section of the project memory). Swapping runtimes is a runtime-core bump, not an admin-image change. Admins don't rewrite Dockerfiles when the platform changes LLM engines.
+runtime-core is intentionally runtime-agnostic above the node-plus-shell layer. It ships whichever LLM runtime the platform has adopted — today, the Claude Agent SDK (`packages/agent/src/run.ts`). Future runtimes are tracked in [Agent runtimes](/architecture/agent-runtimes) and slated under the per-runtime spec pages. Swapping runtimes is a runtime-image bump, not an admin-image change. Admins don't rewrite Dockerfiles when the platform changes LLM engines.
 
 Custom runtimes beyond the built-in set expose themselves the same way every runtime does: an SSE stream on `:3100` and an inject endpoint on `:8788`. See [Architecture Overview](/architecture/overview#runtime-interface) for the interface.
 

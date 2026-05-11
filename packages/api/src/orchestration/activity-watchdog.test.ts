@@ -51,9 +51,8 @@ describe("formatWatchdogWakeText", () => {
     expect(t).toContain("5 minutes");
     expect(t).toContain("hirer-app");
     expect(t).toContain("019d1111");
-    expect(t).toContain("cancel_session");
-    expect(t).toContain("post-mortem");
     expect(t).toContain("driverless");
+    expect(t).toContain("No human is watching");
   });
 
   it("subsequent attempts call out the escalating backoff", () => {

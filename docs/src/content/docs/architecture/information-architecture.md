@@ -47,12 +47,13 @@ Sign-in, accept-invitation, and the landing page live outside the shell. Everyth
 
 The body is a single `Platform` group with workspace-scoped nav items:
 
-| Item     | URL                              | Purpose                                  |
-|----------|----------------------------------|------------------------------------------|
-| Agents   | `/workspaces/:slug`              | Agent list (also the workspace home)     |
-| Sessions | `/workspaces/:slug/sessions`     | All sessions across all agents in the workspace, most recent first |
-| GitHub   | `/workspaces/:slug/github`       | Installed apps + attached repos inventory |
-| Settings | `/workspaces/:slug/settings`     | Workspace-level settings, members, invitations |
+| Item        | URL                                | Purpose                                                                 |
+|-------------|------------------------------------|-------------------------------------------------------------------------|
+| Agents      | `/workspaces/:slug`                | Agent list (also the workspace home). "View all sessions" links from here. |
+| Shares      | `/workspaces/:slug/shares`         | All `share` artifacts emitted by sessions in the workspace.             |
+| Collections | `/workspaces/:slug/collections`    | (Conditional — only rendered when a graph provider is wired.) Knowledge collections. |
+| GitHub      | `/workspaces/:slug/github`         | Installed apps + attached repos inventory.                              |
+| Settings    | `/workspaces/:slug/settings`       | Workspace-level settings, members, invitations, integrations.            |
 
 The sidebar never shows resources from a workspace the user isn't currently in. Switching workspace updates every URL the sidebar emits.
 
@@ -63,7 +64,7 @@ A user chip with avatar, name, and email. Clicking it opens a menu:
 - Linked accounts (switch between signed-in Google identities).
 - **Add account** — starts the account-linking flow.
 - **My account** — `/account` page.
-- **My permissions** — `/me/grants`, showing the user's own rows in `permission_grants` and their status.
+- **My permissions** — *(planned)* a per-user view of the current `permission_grants` rows for the signed-in user. Not implemented yet (no `/me/grants` page exists in `packages/app/src/pages/`); track in the proposals folder.
 - **Admin settings** (platform admins only) — `/admin`.
 - **Log out.**
 
@@ -72,21 +73,22 @@ A user chip with avatar, name, and email. Clicking it opens a menu:
 ### Workspace pages
 
 ```
-/workspaces/:slug                  Agents list + workspace overview
-/workspaces/:slug/sessions         All sessions in the workspace
-/workspaces/:slug/agents/new       Create agent (edit form, empty state)
-/workspaces/:slug/agents/:slug     Agent detail (high level)
-/workspaces/:slug/agents/:slug/edit Agent edit (nitty-gritty config)
-/workspaces/:slug/sessions/:id     Session detail (event stream)
-/workspaces/:slug/github           Installations + attached repos
-/workspaces/:slug/settings         Members, invitations, workspace config
+/workspaces/:slug                       Agents list + workspace overview
+/workspaces/:slug/sessions              All sessions in the workspace
+/workspaces/:slug/sessions/:id          Session detail (event stream)
+/workspaces/:slug/agents/new            Create agent (edit form, empty state)
+/workspaces/:slug/agents/:slug          Agent detail (high level)
+/workspaces/:slug/agents/:slug/edit     Agent edit (nitty-gritty config)
+/workspaces/:slug/github                Installations + attached repos
+/workspaces/:slug/collections           Knowledge collections (when graph provider wired)
+/workspaces/:slug/shares                Shares feed
+/workspaces/:slug/settings              Members, invitations, workspace config
 ```
 
 ### Cross-workspace pages
 
 ```
 /account         Platform-level account settings (linked identities, etc)
-/me/grants       The user's own permission grants
 /admin           Platform admin (gated on platformAdmins)
 /invite/:token   Invitation accept flow
 /                Landing page / sign-in
@@ -157,6 +159,6 @@ Every non-top-level page has breadcrumbs in the site header:
 
 - Shell: `packages/app/src/shell/AppShell.tsx` + `packages/app/src/shell/AppSidebar.tsx`.
 - Stores: `packages/app/src/stores/workspaceStore.ts` (active slug + list).
-- Pages: `packages/app/src/pages/workspaces/[slug]/*.astro`.
+- Pages: `packages/app/src/pages/workspaces/[slug]/**/*.astro`. Sub-routes (`agents/`, `sessions/`, `collections/`, `shares/`, `github/`, `settings/`) each have their own subdirectory; the doc's flat-glob hint will miss them.
 
 The shell is a single component. A page that bypasses it — setting its own layout inline, omitting the sidebar — is a bug against this doc.

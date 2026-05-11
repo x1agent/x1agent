@@ -6,6 +6,7 @@ import {
   type UserId,
   type WorkspaceId,
 } from "@x1agent/kernel";
+import type { AgentRepository } from "@x1agent/domain-agents";
 import type { SessionRepository } from "../../ports/session-repository.js";
 import type { SessionShareRepository } from "../../ports/session-share-repository.js";
 import { SessionId } from "../../domain/session.js";
@@ -20,6 +21,13 @@ import {
 export interface SessionShareRoutesConfig {
   sessions: SessionRepository;
   shares: SessionShareRepository;
+  /**
+   * Used to resolve a session's owning workspace by joining through the
+   * agent. `Session` itself doesn't carry `workspaceId` — the workspace
+   * lives on the agent. Without this we can't enforce cross-tenant
+   * isolation on the share routes.
+   */
+  agents: AgentRepository;
   /** Lookup the user record by email or id, used to resolve share targets. */
   findUserIdByEmail: (email: string) => Promise<UserId | null>;
   /** "Is this user a workspace admin/owner?" — bypass for non-owner shares. */
@@ -64,13 +72,20 @@ export function createSessionShareRoutes(
     return await cfg.resolveWorkspace(WorkspaceSlug(slug));
   };
 
+  // Resolve the session and confirm its agent is in the requested
+  // workspace. `Session` doesn't carry `workspaceId` directly — the
+  // workspace lives on the agent — so we re-check via an agent lookup.
+  // Returning null collapses both "no such session" and "session in a
+  // different workspace" to a 404, matching the cross-tenant isolation
+  // pattern used by sibling routes (see `routes.ts:loadScoped`).
   const ensureSessionInWs = async (
     sessionId: string,
     wsId: WorkspaceId,
   ) => {
     const s = await cfg.sessions.findById(SessionId(sessionId));
     if (!s) return null;
-    if (s.workspaceId !== wsId) return null;
+    const agent = await cfg.agents.findById(s.agentId);
+    if (!agent || agent.workspaceId !== wsId) return null;
     return s;
   };
 

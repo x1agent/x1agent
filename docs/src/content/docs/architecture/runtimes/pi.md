@@ -12,16 +12,16 @@ sidebar:
 > - The CLI's distribution channel (binary, npm, source).
 > - Confirmation that Pi exposes a non-interactive event stream the adapter can consume.
 >
-> This file is a placeholder so the runtime catalog stays internally consistent and so a future PR has a known location to land the spec.
+> This file is a placeholder so the runtime catalog stays internally consistent and so a future PR has a known location to land the spec. Most likely upstream candidate: [`badlogic/pi`](https://github.com/badlogic/pi) — confirm with the CEO before treating this as canonical.
 
 ## What we know going in
 
 The platform's existing docs already commit to supporting Pi:
 
-- [Runtime images — Design principles](/architecture/runtime-images#design-principles) names "Pi's `Bash`" alongside "Claude Code's `bash`" as examples of why the agent's shell must be local, not RPC-proxied.
-- [Runtime images — Relationship to other runtimes](/architecture/runtime-images#relationship-to-other-runtimes) names Pi as a planned successor to the current Claude Agent SDK at the runtime-core layer.
+- [Runtime images — Design principles](/architecture/runtime-images#design-principles) historically cited "Pi's `Bash`" as an example of why the agent's shell must be local, not RPC-proxied. (That citation is being narrowed in a parallel doc-cleanup pass; see [audit follow-ups](#).)
+- [Agent runtimes](/architecture/agent-runtimes) lists Pi in the runtime menu as _stub_ status pending an upstream pointer.
 
-So Pi is not a new idea here; the integration spec just needs grounding in the actual upstream rather than placeholder text.
+So Pi is on the runtime trajectory but not yet a concrete commitment; the integration spec needs grounding in the actual upstream rather than placeholder text before this page can be more than a stub.
 
 ## What this spec will look like once filled in
 
