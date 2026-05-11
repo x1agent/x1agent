@@ -401,27 +401,6 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                   },
                 ]
               : []),
-              ? [
-                  {
-                    hostPath: {
-                      type: "DirectoryOrCreate" as const,
-                    },
-                  },
-                  {
-                    hostPath: {
-                      type: "FileOrCreate" as const,
-                    },
-                  },
-                ]
-              : []),
-              ? [
-                  {
-                    hostPath: {
-                      type: "File" as const,
-                    },
-                  },
-                ]
-              : []),
           ],
           containers: [
             {
@@ -460,20 +439,6 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                         mountPath: "/workspace/session_history.md",
                         subPath: "session_history.md",
                         readOnly: true,
-                      },
-                    ]
-                  : []),
-                  ? [
-                      {
-                        mountPath: "/home/agent/.claude",
-                      },
-                      {
-                        mountPath: "/home/agent/.claude.json",
-                      },
-                    ]
-                  : []),
-                  ? [
-                      {
                       },
                     ]
                   : []),

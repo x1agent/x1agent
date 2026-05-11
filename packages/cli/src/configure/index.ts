@@ -10,7 +10,6 @@ import {
   text,
 } from "@clack/prompts";
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { EnvFile } from "./env-file.ts";
 import {
@@ -78,8 +77,6 @@ async function runConfigureLocal(): Promise<boolean> {
       `Pick "A deployment" mode for that.`,
     "Local development",
   );
-
-  const hostHome = process.env.HOME ?? homedir();
 
   const wantBypass = await confirm({
     message: "Enable dev auth bypass? (skips Google OAuth on /auth/dev-bypass)",
