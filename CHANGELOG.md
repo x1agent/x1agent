@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/x1agent/x1agent/compare/v1.18.0...v1.19.0) (2026-05-11)
+
+
+### Features
+
+* **auth:** account-level git identity for worker commits ([d6bef4f](https://github.com/x1agent/x1agent/commit/d6bef4fd4b98de3c169bc07f0f14659da7815df3))
+
 # [1.18.0](https://github.com/x1agent/x1agent/compare/v1.17.2...v1.18.0) (2026-05-11)
 
 
