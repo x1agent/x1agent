@@ -53,9 +53,15 @@ a dialog and can approve or deny.
 Tools:
 - list_spawnable_agents() → [{id, slug, name}]. Returns the children
   this session may spawn (resolved from active spawn grants).
-- spawn_session({child_agent_id}) → {session_id, status}. Starts a new
+- spawn_session({child_agent_id, model?}) → {session_id, status}. Starts a new
   session of an agent you're permitted to spawn. Use child_agent_id from
-  list_spawnable_agents.
+  list_spawnable_agents. Optional `model` overrides the child's default
+  Claude model for this spawn — pass a short name ("sonnet", "opus",
+  "haiku") or a full id (e.g. "claude-sonnet-4-5@20250929"); the value
+  must be in the deployment's enabled-models allowlist. Use as a cost
+  lever — sonnet for routine work, opus for migrations / auth /
+  tenant-isolation / cross-domain refactors. Omitting the field
+  inherits the child agent's configured model.
 - read_child_output({child_session_id, after_seq?, limit?}) →
   {child: {id, status}, events: [{seq, type, payload, timestamp}]}.
   Pulls the child's event log. Pass after_seq to read only newer events.
