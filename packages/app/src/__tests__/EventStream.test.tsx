@@ -253,7 +253,7 @@ describe("EventStream — platform wake pills", () => {
         sessionId="s1"
       />,
     );
-    const pill = queryByRole("button", { name: /scheduler wake/ });
+    const pill = queryByRole("button", { name: /scheduler tick/ });
     expect(pill).not.toBeNull();
     expect(pill?.getAttribute("aria-expanded")).toBe("false");
     // Full payload is hidden until expanded.
@@ -271,7 +271,7 @@ describe("EventStream — platform wake pills", () => {
         sessionId="s1"
       />,
     );
-    const pill = queryByRole("button", { name: /scheduler wake/ });
+    const pill = queryByRole("button", { name: /scheduler tick/ });
     if (!pill) throw new Error("expected wake pill");
     fireEvent.click(pill);
     expect(pill.getAttribute("aria-expanded")).toBe("true");

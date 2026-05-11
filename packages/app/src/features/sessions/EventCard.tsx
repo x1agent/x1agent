@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -8,6 +8,10 @@ import { SharePill } from "./SharePill";
 import { markdownComponents } from "./markdown-components";
 import { Button } from "../../components/ui/button";
 import { apiFetch } from "../../lib/api";
+import {
+  useSessionDetailStore,
+  type ChildRef,
+} from "../../stores/sessionDetailStore";
 
 interface Props {
   event: SessionEventDTO;
@@ -37,75 +41,225 @@ function isMermaid(content: string): boolean {
  * tell at a glance what drove a given turn. See
  * docs/architecture/orchestration.md § Server-driven wakes.
  */
-const WAKE_KIND_LABELS: Record<string, { label: string; tint: string }> = {
-  state_change: { label: "child finished", tint: "border-blue-700/60 bg-blue-950/40" },
-  heartbeat: { label: "scheduler heartbeat", tint: "border-purple-700/60 bg-purple-950/40" },
-  watchdog: { label: "watchdog — silent child", tint: "border-amber-700/60 bg-amber-950/40" },
-  checkup: { label: "platform checkup", tint: "border-border-strong/60 bg-bg-elevated/60" },
-  message: { label: "message from child", tint: "border-emerald-700/60 bg-emerald-950/40" },
+// Unified quiet treatment for all wake kinds — the pill is meant to
+// recede into the timeline, not announce itself with per-kind colors.
+// Theme-aware tokens: muted background + soft border, flips with the
+// surface ladder in both light and dark mode.
+const WAKE_PANEL_CLASS = "border-border-soft bg-bg-elevated/50";
+
+// Short bracketed tag rendered on the pill. Operator-facing copy —
+// jargon-y engineer terms ("watchdog", "scheduler heartbeat") get
+// translated to plain-language equivalents.
+const WAKE_KIND_LABELS: Record<string, string> = {
+  state_change: "child finished",
+  heartbeat: "scheduler tick",
+  watchdog: "child silent",
+  checkup: "checkup",
+  message: "message from child",
 };
 
+const EMPTY_CHILDREN: readonly ChildRef[] = [];
+
 /**
- * Platform wakes (scheduler heartbeats, watchdog pings, child
- * state-change notifications, etc.) carry the same shape as a
- * human-typed user message but are pure platform noise from an
- * operator's perspective — they shouldn't dominate the timeline.
- * Render them as a tiny one-line pill that expands on click to show
- * the full payload. Default state is collapsed; mirrors the
- * `ToolGroupPill` / `ToolCallCard` pattern already used elsewhere in
- * the timeline so we don't introduce new design tokens.
+ * Render a session-id short prefix as a clickable link when we can
+ * resolve it to a known child of the current session; otherwise as
+ * inert text. `stopPropagation` keeps the click from bubbling to the
+ * surrounding expand/collapse toggle.
+ */
+function SessionShortLink({
+  shortId,
+  childrenByShortId,
+  workspaceSlug,
+}: {
+  shortId: string;
+  childrenByShortId: Map<string, ChildRef>;
+  workspaceSlug: string;
+}) {
+  const child = childrenByShortId.get(shortId);
+  if (!child) {
+    return <code className="font-mono text-fg">{shortId}</code>;
+  }
+  return (
+    <a
+      href={`/workspaces/${workspaceSlug}/sessions/${child.id}`}
+      onClick={(e) => e.stopPropagation()}
+      className="font-mono text-fg underline decoration-dotted underline-offset-2 hover:text-fg hover:decoration-solid"
+      title={`${child.agent.name ?? child.agent.slug} · ${child.status}`}
+    >
+      {shortId}
+    </a>
+  );
+}
+
+/**
+ * Build an operator-readable one-line summary from a wake event's
+ * kind + text. Returns a fragment with embedded clickable links for
+ * any child-session short ids it can resolve.
+ *
+ * The platform's text format is the contract here; the regexes below
+ * track the literals emitted by `format*WakeText` in
+ * packages/api/src/orchestration/wake-publisher.ts.
+ */
+function WakeSummary({
+  kind,
+  text,
+  childrenByShortId,
+  workspaceSlug,
+}: {
+  kind: string;
+  text: string;
+  childrenByShortId: Map<string, ChildRef>;
+  workspaceSlug: string;
+}) {
+  switch (kind) {
+    case "watchdog": {
+      const m = text.match(
+        /Child session ([0-9a-f]{8})[^.]*emitted no events for (\d+) minutes/,
+      );
+      if (m) {
+        return (
+          <>
+            Session{" "}
+            <SessionShortLink
+              shortId={m[1]!}
+              childrenByShortId={childrenByShortId}
+              workspaceSlug={workspaceSlug}
+            />{" "}
+            has not emitted anything in {m[2]} minutes.
+          </>
+        );
+      }
+      return <>Child silent.</>;
+    }
+    case "state_change": {
+      const m = text.match(
+        /Child session ([0-9a-f]{8})[^.]*transitioned to (complete|failed)/,
+      );
+      if (m) {
+        const verb = m[2] === "complete" ? "completed" : "failed";
+        return (
+          <>
+            Session{" "}
+            <SessionShortLink
+              shortId={m[1]!}
+              childrenByShortId={childrenByShortId}
+              workspaceSlug={workspaceSlug}
+            />{" "}
+            {verb}.
+          </>
+        );
+      }
+      return <>Child transitioned.</>;
+    }
+    case "checkup": {
+      const m = text.match(/Active children \((\d+)\)/);
+      if (m) return <>{m[1]} children active.</>;
+      return <>No children currently in flight.</>;
+    }
+    case "heartbeat":
+      return <>Scheduler tick fired.</>;
+    case "message": {
+      const m = text.match(/Child session ([0-9a-f]{8})/);
+      if (m) {
+        return (
+          <>
+            Session{" "}
+            <SessionShortLink
+              shortId={m[1]!}
+              childrenByShortId={childrenByShortId}
+              workspaceSlug={workspaceSlug}
+            />{" "}
+            sent a signal.
+          </>
+        );
+      }
+      return <>Child sent a signal.</>;
+    }
+    default:
+      return <>System event.</>;
+  }
+}
+
+/**
+ * Platform-injected wake messages — the api server posts these as
+ * user.message events into orchestrator sessions when something
+ * happens that warrants the orchestrator's attention (a child
+ * finished, a child has gone silent, a scheduled tick fired, etc.).
+ *
+ * Rendered as a small pill that recedes into the timeline with an
+ * operator-readable one-line summary. Clicking expands the original
+ * platform-emitted prose. Any child-session id referenced in the
+ * summary is a link back to that child session for traversal.
+ *
+ * Wake-text content is generated by `format*WakeText` helpers in
+ * `packages/api/src/orchestration/wake-publisher.ts`; the regexes in
+ * `WakeSummary` track those literals.
  */
 function PlatformWakePill({
   event,
+  kind,
   label,
-  tint,
+  workspaceSlug,
 }: {
   event: SessionEventDTO;
+  kind: string;
   label: string;
-  tint: string;
+  workspaceSlug: string;
 }) {
   const [open, setOpen] = useState(false);
   const payload = p(event);
-  const fromSessionId = payload["from_session_id"] as string | undefined;
-  const fromAgent = payload["from_agent_slug"] as string | undefined;
-  const driverless = payload["driverless"] === true;
   const text = String(payload["text"] ?? "");
   const time = new Date(event.timestamp).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
   });
   const Icon = open ? ChevronDown : ChevronRight;
+
+  // Build a short-id → ChildRef map from the current session's
+  // children (already loaded by SessionRoot via sessionDetailStore).
+  // Wake-publisher renders short ids as the first 8 hex chars of the
+  // child's session UUID. Pre-dashed UUIDs start with 8 hex chars
+  // too, so `id.slice(0, 8)` matches both shapes.
+  const children = useSessionDetailStore(
+    (s) => s.childrenBySession[event.session_id] ?? EMPTY_CHILDREN,
+  );
+  const childrenByShortId = useMemo(() => {
+    const m = new Map<string, ChildRef>();
+    for (const c of children) m.set(c.id.slice(0, 8), c);
+    return m;
+  }, [children]);
+
   return (
     <div className="my-1">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border-soft px-2 py-1 text-[11px] text-fg-muted hover:border-border-strong hover:text-fg"
-      >
-        <Icon className="size-3" />
+      <div className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-soft bg-bg-elevated/30 px-2 py-1 text-[11px] text-fg-muted hover:border-border-strong">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} system event — ${label}`}
+          className="inline-flex items-center text-fg-faint hover:text-fg"
+        >
+          <Icon className="size-3" />
+        </button>
         <span className="rounded bg-bg-muted px-1.5 py-0.5 font-medium text-fg">
-          {driverless ? "scheduler wake" : "platform wake"}
+          [{label}]
         </span>
-        <span>{label}</span>
-        <span className="text-fg-faint">· {time}</span>
-      </button>
+        <span className="min-w-0 truncate text-fg">
+          <WakeSummary
+            kind={kind}
+            text={text}
+            childrenByShortId={childrenByShortId}
+            workspaceSlug={workspaceSlug}
+          />
+        </span>
+        <span className="shrink-0 text-fg-faint">· {time}</span>
+      </div>
       {open && (
-        <div className={`mt-1 rounded-md border ${tint} px-3 py-2 text-xs`}>
-          <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-fg-muted">
-            <span>{label}</span>
-            {driverless && (
-              <span className="text-fg-faint">· driverless</span>
-            )}
-            {fromSessionId && (
-              <span className="text-fg-faint">
-                · from {String(fromSessionId).slice(0, 8)}
-                {fromAgent ? ` (${fromAgent})` : ""}
-              </span>
-            )}
-          </div>
-          <p className="whitespace-pre-wrap text-fg">{text}</p>
-        </div>
+        <pre
+          className={`mt-1 whitespace-pre-wrap rounded-md border ${WAKE_PANEL_CLASS} px-3 py-2 font-mono text-[11px] leading-relaxed text-fg-muted`}
+        >
+          {text}
+        </pre>
       )}
     </div>
   );
@@ -138,7 +292,13 @@ function deriveWakeKindFromText(text: string): string | null {
   return null;
 }
 
-function UserBubble({ event }: { event: SessionEventDTO }) {
+function UserBubble({
+  event,
+  workspaceSlug,
+}: {
+  event: SessionEventDTO;
+  workspaceSlug: string;
+}) {
   const payload = p(event);
   const fromSessionId = payload["from_session_id"] as string | undefined;
   const fromAgent = payload["from_agent_slug"] as string | undefined;
@@ -153,13 +313,21 @@ function UserBubble({ event }: { event: SessionEventDTO }) {
   // historic rows that lack them: derive from the text header.
   const fallbackKind =
     !sourceField && !kindField ? deriveWakeKindFromText(text) : null;
-  const isPlatformWake =
-    (sourceField === "platform" && kindField && WAKE_KIND_LABELS[kindField]) ||
-    (fallbackKind && WAKE_KIND_LABELS[fallbackKind]);
-  if (isPlatformWake) {
-    const resolvedKind = (kindField ?? fallbackKind) as string;
-    const { label, tint } = WAKE_KIND_LABELS[resolvedKind];
-    return <PlatformWakePill event={event} label={label} tint={tint} />;
+  const resolvedKind =
+    sourceField === "platform" && kindField && WAKE_KIND_LABELS[kindField]
+      ? kindField
+      : fallbackKind && WAKE_KIND_LABELS[fallbackKind]
+        ? fallbackKind
+        : null;
+  if (resolvedKind) {
+    return (
+      <PlatformWakePill
+        event={event}
+        kind={resolvedKind}
+        label={WAKE_KIND_LABELS[resolvedKind]!}
+        workspaceSlug={workspaceSlug}
+      />
+    );
   }
 
   // User turns: subtle right-aligned bubble. Light tint distinguishes
@@ -554,7 +722,7 @@ export function EventCard({
       return <ResumedDivider />;
     case "user.message":
     case "user.input_response":
-      return <UserBubble event={event} />;
+      return <UserBubble event={event} workspaceSlug={workspaceSlug} />;
     case "agent.text":
       return <AgentText event={event} />;
     case "agent.status":
