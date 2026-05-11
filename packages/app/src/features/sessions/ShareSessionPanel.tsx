@@ -256,16 +256,19 @@ export function ShareSessionPanel({
             </Select>
           </div>
           {/* `size="default"` matches the h-9 of Input/SelectTrigger
-              so the button sits flush with the recipient + role
-              controls. `self-center` is defensive — if the button
-              ever grows past h-9 (size="lg", taller icon), it
-              centers in the row instead of extending past the input
-              tops. With identical heights the visual is unchanged. */}
+              by token, but visually the solid-filled button renders
+              about 1px taller than the bordered SelectTriggers — the
+              bordered controls absorb a pixel in their 1px border
+              that the button doesn't. `translate-y-px` is an
+              acknowledged one-off nudge to recenter against the
+              dropdowns; it shifts the button without changing the
+              flex layout. Drop if a future Button component fixes
+              the visual difference at the token level. */}
           <Button
             type="submit"
             size="default"
             disabled={busy || !recipientUserId}
-            className="self-center"
+            className="translate-y-px"
           >
             <UserPlus className="size-3.5" />
             <span className="ml-1">Share</span>
