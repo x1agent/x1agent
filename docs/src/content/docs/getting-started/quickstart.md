@@ -38,7 +38,7 @@ mise run quickstart
 
 ### What the wizard does, screen by screen
 
-**1. Preflight checks.** Verifies OrbStack is running, `kubectl` points at the `orbstack` context, and the Postgres + NATS pods are either up or can be stood up by `devspace`. If anything is red, it tells you what to run and stops. No partial installs.
+**1. Preflight checks.** Verifies that `~/.orbstack/k8s/config.yml` exists, the current kube context is `orbstack`, and `kubectl cluster-info` succeeds. If anything is red, the wizard tells you what to run and stops without touching the cluster. (Postgres/NATS readiness is checked later by `mise run dev`, not by the wizard.)
 
 **2. Admin account.** Email + password (masked). The wizard hashes the password with argon2id before it ever touches the database. You'll use these credentials to sign in to the web UI.
 
@@ -47,27 +47,43 @@ mise run quickstart
 **4. Optional secrets.** OpenAI and GitHub PAT are offered next. You can skip either and add them later through the web UI. The wizard flags which features won't work without each: "Vector collections will be inactive without OpenAI", "Agents can only clone public repos without GitHub".
 
 **5. Install + apply.** The wizard:
-- Installs the [External Secrets Operator](https://external-secrets.io/) via Helm.
-- Creates the `x1agent-secrets` namespace with a restrictive RBAC policy — only the x1agent api service account can read/write there.
-- Applies a `ClusterSecretStore` named `x1-local` using ESO's `kubernetes` provider. This makes ESO route every secret lookup through that privileged namespace.
-- Runs database migrations.
-- Seeds your admin user.
-- Brings up the api, app, and supporting deployments via `devspace`.
+- Creates the `x1agent` and `x1agent-secrets` namespaces.
+- Installs the [External Secrets Operator](https://external-secrets.io/) via Helm into the `external-secrets` namespace.
+- Writes the secrets you provided as `Secret` objects under `x1agent-secrets` (`x1-secret-anthropic-api-key`, `x1-secret-openai-api-key` if you supplied one, `x1-secret-github-pat` if you supplied one).
 
-**6. Finish.** Prints the login URL (`http://localhost:4322`) and the command to tail the cluster logs if something breaks.
+The wizard does NOT yet:
+- Apply a `ClusterSecretStore` (planned: a `x1-local` store using ESO's `kubernetes` provider).
+- Materialize per-workspace `ExternalSecret` resources (planned).
+- Seed your admin user (planned — for now sign in via the dev auth bypass).
+- Bring up the api/app — that is `mise run dev`, run separately in its own terminal.
+
+**6. Finish.** Prints the next-step instructions and the command to tail the cluster logs (`mise run dev:cluster:logs`) if something breaks.
+
+After the wizard completes, in another terminal:
+
+```bash
+mise run dev          # brings up postgres, nats, api, app via devspace
+```
+
+Then open `https://app.local.x1agent.dev`. The local CA created by `mise run dev:cert-manager` is trusted in your macOS keychain, so the cert is valid.
 
 Total time on a warm machine: about three minutes.
 
 ## Your first session
 
-1. Open `http://localhost:4322`, sign in with the email and password from step 2.
+1. Open `https://app.local.x1agent.dev`. Until the admin-seed step lands, sign in via the dev auth bypass at `/auth/dev-bypass` (set `AUTH_BYPASS=true` and `TEST_USER=you@example.com` in `.env.local` first — see `.env.example`).
 2. The first workspace (`default`) is seeded empty. Click **Agents** in the sidebar → **New agent**. Give it a name and runtime (`claude_code` is the only option today), leave the schedule as "Manual only", save.
 3. On the agent detail page, use the **Run** card at the top. Type something like "Write a markdown hello-world and share it" and hit **Run with prompt**.
 4. You should see events stream in as the agent thinks, writes a file under `/workspace`, and emits a share card inline.
 
 If no events arrive, see [Troubleshooting](#troubleshooting) below.
 
-## How secrets flow at runtime
+## How secrets flow at runtime (planned)
+
+> The flow below describes the intended end-state. Today the wizard writes
+> Secrets directly to `x1agent-secrets` via `kubectl`, and there is no
+> per-workspace `ExternalSecret` machinery yet. Track the gap in the
+> "wizard polish" milestone.
 
 The wizard's work ends when the stack is up. What the quickstart actually delivers is a loop that looks like this:
 
@@ -136,7 +152,7 @@ Then restart OrbStack (`orbctl stop && orbctl start`). Existing containers keep 
 
 This is an OrbStack-local workaround. Production Kubernetes with containerd has no such bug.
 
-**Postgres says "too many clients already".** Restart the api pod: `kubectl -n x1agent rollout restart deploy/api-devspace`. A known dev-mode issue when many hot reloads stack tick loops — the fix is a single restart.
+**Postgres says "too many clients already".** Restart the api pod: `kubectl -n x1agent rollout restart deploy/api`. A known dev-mode issue when many hot reloads stack tick loops — the fix is a single restart.
 
 **Pod stuck on `(Still waiting...)` after a cluster restart.** The `api-devspace` or `app-devspace` pod logs just repeat `(Still waiting...)` and never boot. Cause: devspace's `devspace-restart-helper` watches for a `/.devspace/start` marker that the devspace client writes once the initial file-sync completes. After an OrbStack / kubelet restart the helper is re-running inside the new container but devspace's client-side sync state has already flipped to "synced," so the marker never arrives. Fix: `kubectl -n x1agent delete pod <pod-name>` — devspace's watch reconciles against the fresh pod, the sync runs again, the marker lands, the app boots. Affects any deployment listed under `devspace.yaml`'s `dev:` block.
 
@@ -150,7 +166,6 @@ This is an OrbStack-local workaround. Production Kubernetes with containerd has 
 
 ## Next steps
 
-- [Create your first agent](/getting-started/first-agent) — set a schedule, attach a repo, connect a collection.
 - [Secrets management](/security/secrets) — the full model behind what the wizard just did.
 - [Production deployment](/deployment/kubernetes) — take this stack to a real cluster.
 - [Security model](/security/overview) — trust boundaries, credential isolation, permission grants.

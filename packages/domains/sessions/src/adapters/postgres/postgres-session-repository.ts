@@ -30,6 +30,9 @@ interface Row {
   completed_at: Date | string | null;
   error_message: string | null;
   created_at: Date | string;
+  summary: string | null;
+  summary_updated_at: Date | string | null;
+  summary_event_seq: number | string | null;
 }
 
 function toSession(r: Row): Session {
@@ -50,13 +53,22 @@ function toSession(r: Row): Session {
     completedAt: r.completed_at ? new Date(r.completed_at) : null,
     errorMessage: r.error_message,
     createdAt: new Date(r.created_at),
+    summary: r.summary,
+    summaryUpdatedAt: r.summary_updated_at
+      ? new Date(r.summary_updated_at)
+      : null,
+    summaryEventSeq:
+      r.summary_event_seq === null || r.summary_event_seq === undefined
+        ? null
+        : Number(r.summary_event_seq),
   };
 }
 
 const SELECT = `
   id, agent_id, triggered_by, triggered_by_user_id,
   parent_session_id, parent_agent_id, resumed_from,
-  triggered_at, status, completed_at, error_message, created_at
+  triggered_at, status, completed_at, error_message, created_at,
+  summary, summary_updated_at, summary_event_seq
 `;
 
 function isUniqueViolation(err: unknown): boolean {
@@ -234,5 +246,22 @@ export class PostgresSessionRepository implements SessionRepository {
     `;
     if (!rows[0]) throw new SessionNotFoundError(id);
     return toSession(rows[0]);
+  }
+
+  async updateSummary(
+    id: SessionId,
+    summary: string,
+    eventSeq: number,
+    updatedAt: Date,
+  ): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE sessions SET
+        summary            = ${summary},
+        summary_event_seq  = ${eventSeq},
+        summary_updated_at = ${updatedAt}
+      WHERE id = ${id}
+      RETURNING id
+    `;
+    return rows.length > 0;
   }
 }

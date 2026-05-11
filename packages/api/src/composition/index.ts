@@ -553,6 +553,7 @@ export function compose(env: CompositionEnv): Composition {
   const sessionShareRoutes = createSessionShareRoutes({
     sessions,
     shares: sessionShares,
+    agents,
     findUserIdByEmail: async (email) => {
       const u = await users.findByEmail(email as Email);
       return u?.id ?? null;

@@ -58,6 +58,13 @@ vars:
   ANTHROPIC_API_KEY:
     source: env
     default: ""
+  # Optional fallback for the session summarizer (and any future
+  # OpenAI-powered embedding work). When set in `.env.local` and
+  # ANTHROPIC_API_KEY is empty, the api will use this for periodic
+  # session-summary refreshes.
+  OPENAI_API_KEY:
+    source: env
+    default: ""
   # AES-256-GCM key for the workspace-secrets domain. Generate with
   # `openssl rand -hex 32`. Used by the api at boot to decrypt secrets
   # the operator pastes into workspace settings (e.g. Stripe key for
@@ -68,14 +75,6 @@ vars:
   API_INTERNAL_TOKEN:
     source: env
     default: "dev-internal-token-change-me"
-  # Dev-only: host home dir. On macOS this is /Users/<you>. The Job
-  # watcher passes this into agent containers as a hostPath mount of
-  # ~/.claude + ~/.claude.json so Claude Code picks up settings.
-    source: env
-    default: ""
-  # `mise run dev` automatically.
-    source: env
-    default: ""
   # Phase 1 messaging provider credential. Phase 2 replaces this with
   # per-workspace OAuth + credential proxy.
   SLACK_BOT_TOKEN:
@@ -302,6 +301,8 @@ dev:
         value: ${GITHUB_APP_WEBHOOK_SECRET}
       - name: ANTHROPIC_API_KEY
         value: ${ANTHROPIC_API_KEY}
+      - name: OPENAI_API_KEY
+        value: ${OPENAI_API_KEY}
       - name: WORKSPACE_SECRETS_MASTER_KEY
         value: ${WORKSPACE_SECRETS_MASTER_KEY}
       - name: NATS_URL

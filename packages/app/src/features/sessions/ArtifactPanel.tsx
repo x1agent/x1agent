@@ -68,6 +68,11 @@ export function ArtifactPanel() {
           workspaceSlug,
           sessionId,
           maximized: view === "fullscreen",
+          // Tell renderers (e.g. DocumentShare) to drop their bounded
+          // preview height and let this scroll region own the chrome —
+          // long markdown in particular was clipped into a 384px inner
+          // box otherwise (X1A-19).
+          fillParent: true,
         })}
       </div>
     </ArtifactSurface>

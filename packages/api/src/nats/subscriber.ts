@@ -2,11 +2,16 @@ import { connect, StringCodec, type NatsConnection } from "nats";
 import {
   SessionId,
   appendSessionEvent,
+  maybeUpdateSessionSummary,
+  DEFAULT_SUMMARY_CONFIG,
+  type MaybeUpdateSessionSummaryConfig,
   type SessionEventRepository,
   type SessionRepository,
+  type SessionSummarizer,
   type TokenUsageRepository,
 } from "@x1agent/domain-sessions";
 import type { AgentRepository } from "@x1agent/domain-agents";
+import { systemClock } from "@x1agent/kernel";
 import { recordTokenUsageMetric } from "@x1agent/observability";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
 import { publishStateChangeWake } from "../orchestration/wake-publisher.js";
@@ -41,7 +46,34 @@ export interface StartSubscriberOptions {
    * still ingest events without the subscriber crashing.
    */
   tokenUsage?: TokenUsageRepository;
+  /**
+   * LLM summarizer for periodic session-description refreshes. When
+   * absent, summary generation is skipped — session.summary stays
+   * NULL and the UI falls back to the session id hash. Composition
+   * wires AnthropicSessionSummarizer when ANTHROPIC_API_KEY is
+   * configured, StubSessionSummarizer otherwise.
+   */
+  summarizer?: SessionSummarizer;
+  /**
+   * Override the default cooldown thresholds (10 events / 5 min).
+   * Composition reads these from env so an operator can tune token
+   * spend without a code change. Optional — DEFAULT_SUMMARY_CONFIG
+   * applies when absent.
+   */
+  summaryConfig?: MaybeUpdateSessionSummaryConfig;
 }
+
+// Public events — types we want the summarizer to "see". `agent.usage`
+// is excluded because it's metering noise; tools-call/result are
+// excluded because they explode prompt size for little signal.
+const PUBLIC_EVENT_TYPES = new Set([
+  "user.message",
+  "user.input_response",
+  "agent.text",
+  "agent.tool_call",
+  "agent.input_request",
+  "session.started",
+]);
 
 export interface Subscriber {
   nc: NatsConnection;
@@ -54,6 +86,62 @@ interface WireMessage {
   type?: string;
   payload?: unknown;
   timestamp?: string;
+}
+
+/**
+ * Stopgap for X1A-43 until session_events grows real `source`,
+ * `kind`, `from_session_id` columns. Wake events published by
+ * wake-publisher.ts carry that metadata on the NATS .input envelope,
+ * but the sidecar→agent SSE round-trip only relays `text`, so the
+ * version that lands here (on .events) has just the text. We
+ * re-derive `source` and `kind` from the well-known text header so
+ * the UI's pill detection has something to match on.
+ *
+ * Format contract: text starts with `[driverless wake: <header>]`
+ * where header is one of the five literals emitted by
+ * `format*WakeText` in wake-publisher.ts. Keep this in sync with
+ * those literals.
+ *
+ * The proper fix (real columns + dual-write from wake-publisher) is
+ * tracked separately.
+ */
+export function deriveWakeKindFromText(text: string): string | null {
+  if (!text.startsWith("[driverless wake:")) return null;
+  const closingBracket = text.indexOf("]");
+  if (closingBracket < 0) return null;
+  const header = text
+    .slice("[driverless wake:".length, closingBracket)
+    .trim();
+  if (header.startsWith("watchdog")) return "watchdog";
+  if (header.startsWith("scheduler heartbeat")) return "heartbeat";
+  if (header.startsWith("platform checkup")) return "checkup";
+  if (header.startsWith("message from child")) return "message";
+  if (
+    header.startsWith("child finished") ||
+    header.startsWith("child failed") ||
+    header.startsWith("child completed") ||
+    header.startsWith("child transitioned")
+  )
+    return "state_change";
+  return null;
+}
+
+export function enrichWakePayload(
+  type: string,
+  payload: unknown,
+): Record<string, unknown> {
+  if (type !== "user.message") {
+    return (payload as Record<string, unknown>) ?? {};
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return {};
+  }
+  const p = payload as Record<string, unknown>;
+  if (p.source || p.kind) return p;
+  const text = typeof p.text === "string" ? p.text : "";
+  const kind = deriveWakeKindFromText(text);
+  if (!kind) return p;
+  return { ...p, source: "platform", kind, driverless: true };
 }
 
 export async function startSessionEventSubscriber(
@@ -99,7 +187,7 @@ export async function startSessionEventSubscriber(
             sessionId,
             seq: parsed.sequence,
             type: parsed.type,
-            payload: parsed.payload ?? {},
+            payload: enrichWakePayload(parsed.type, parsed.payload),
             timestamp: parsed.timestamp
               ? new Date(parsed.timestamp)
               : new Date(),
@@ -113,6 +201,39 @@ export async function startSessionEventSubscriber(
         console.warn(
           `[nats] failed to persist event type=${parsed.type} seq=${parsed.sequence}: ${(err as Error).message}`,
         );
+      }
+
+      // Periodic LLM summary refresh. Bounded by event count + wall
+      // clock so a chatty session doesn't generate one summary per
+      // turn. Best-effort — every error path inside the summarizer
+      // returns null/skipped, never throws. Skip noise events
+      // (agent.usage, agent.tool_result, etc.) to keep the trigger
+      // count honest.
+      if (opts.summarizer && PUBLIC_EVENT_TYPES.has(parsed.type)) {
+        try {
+          const result = await maybeUpdateSessionSummary(
+            {
+              sessions: opts.sessions,
+              events: opts.events,
+              summarizer: opts.summarizer,
+              clock: systemClock,
+            },
+            opts.summaryConfig ?? DEFAULT_SUMMARY_CONFIG,
+            { sessionId, currentSeq: parsed.sequence },
+          );
+          if (result.kind === "updated") {
+            console.log(
+              `[summarizer] session=${sessionId} seq=${result.eventSeq} summary="${result.summary}"`,
+            );
+          }
+        } catch (err) {
+          // maybeUpdateSessionSummary is supposed to swallow upstream
+          // errors. A throw means a bug in the persist path — log
+          // loudly but keep the subscriber alive.
+          console.warn(
+            `[summarizer] unexpected throw for session ${sessionId}: ${(err as Error).message}`,
+          );
+        }
       }
 
       // Token usage capture. The agent emits one `agent.usage` event

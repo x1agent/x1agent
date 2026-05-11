@@ -264,7 +264,7 @@ describe("publishStateChangeWake", () => {
     expect(body.payload.new_status).toBe("failed");
     expect(body.payload.error_message).toBe("exceeded activeDeadlineSeconds");
     expect(body.payload.text as string).toContain("exceeded activeDeadlineSeconds");
-    expect(body.payload.text as string).toContain("post-mortem");
+    expect(body.payload.text as string).toContain("failed");
   });
 });
 
@@ -281,8 +281,8 @@ describe("formatMessageWakeText", () => {
     expect(t).toContain("019d1111");
     expect(t).toContain("hirer-app");
     expect(t).toContain("feat/jobs-list ready at abc1234");
-    expect(t).toContain("does not need a response");
     expect(t).toContain("driverless");
+    expect(t).not.toContain("needs_response");
   });
 
   it("summary + body appended", async () => {
@@ -308,9 +308,9 @@ describe("formatMessageWakeText", () => {
       body: null,
       needsResponse: true,
     });
-    expect(t).toContain("needs_response=true");
-    expect(t).toContain("waiting for you to inject_message");
-    expect(t).toContain("post-mortem");
+    expect(t).toContain("Should I use Postgres or SQLite?");
+    expect(t).toContain("needs_response: true");
+    expect(t).toContain("driverless");
   });
 });
 
@@ -410,7 +410,7 @@ describe("USE_JETSTREAM_PUBLISH path", () => {
 });
 
 describe("formatStateChangeWakeText", () => {
-  it("complete variant references read_session and CLAUDE.md", () => {
+  it("complete variant carries terminal-status fact", () => {
     const t = formatStateChangeWakeText({
       childSessionId: "019d1111-aaaa-7000-8000-000000000000",
       childSlug: "child-worker",
@@ -421,12 +421,11 @@ describe("formatStateChangeWakeText", () => {
     expect(t).toContain("complete");
     expect(t).toContain("019d1111");
     expect(t).toContain("child-worker");
-    expect(t).toContain("read_session");
-    expect(t).toContain("CLAUDE.md");
     expect(t).toContain("driverless");
+    expect(t).toContain("No human is watching");
   });
 
-  it("failed variant names post-mortem discipline", () => {
+  it("failed variant includes the error message verbatim", () => {
     const t = formatStateChangeWakeText({
       childSessionId: "019d1111-aaaa-7000-8000-000000000000",
       childSlug: "child-worker",
@@ -436,7 +435,7 @@ describe("formatStateChangeWakeText", () => {
     });
     expect(t).toContain("failed");
     expect(t).toContain("OOMKilled");
-    expect(t).toContain("post-mortem");
-    expect(t).toContain("Needs human review");
+    expect(t).toContain("driverless");
+    expect(t).toContain("No human is watching");
   });
 });

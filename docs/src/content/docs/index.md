@@ -7,7 +7,7 @@ x1agent is a Kubernetes-native platform for running LLM agents in production. It
 
 ## Core ideas
 
-**Agents run in isolated pods.** Each agent session is a Kubernetes Job with two containers: an agent container (untrusted, runs the LLM) and a sidecar container (trusted, holds credentials, enforces permissions). The agent container receives zero secrets.
+**Agents run in isolated pods.** Each agent session is a Kubernetes Job with two containers: an agent container (untrusted, runs the LLM) and a sidecar container (trusted, holds credentials, enforces permissions). The agent container receives zero secrets — credentials live in the sidecar and are exchanged through the credential proxy. See [Quickstart](/getting-started/quickstart) for local-development setup.
 
 **Providers are swappable.** Authentication, knowledge graphs, file storage, messaging, calendars, email -- all pluggable. Providers are standalone services that communicate over NATS. Switch from Google Drive to OneDrive by changing a Helm value.
 
@@ -37,7 +37,7 @@ graph TB
     nats <--> providers
     api <--> nats
     api --> pg
-    api -- "creates Jobs" --> pod
+    api -- "creates Job" --> pod
 
     browser["Browser"] <-- "WebSocket" --> nats
     browser -- "REST" --> api

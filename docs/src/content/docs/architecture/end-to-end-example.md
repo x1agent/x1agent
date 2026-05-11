@@ -41,14 +41,14 @@ sequenceDiagram
     U->>O: start session
     Note over O: read own repo (charter,<br/>roadmap, prior sessions)
     O->>GH: commit+push R-N session spec<br/>to orchestrator/main
-    O->>API: spawn_session(hirer-app)
+    O->>API: list_spawnable_agents() / spawn_session(child_agent_id)
     API->>API: INSERT sessions<br/>(parent_session_id=orchestrator)
     JW->>API: poll pending sessions
     JW->>K: create Job<br/>(agent + sidecar containers)
     K->>H: boot agent container
     K->>S: boot sidecar, subscribe to NATS
     S->>GH: git clone hirer-co/app<br/>→ /workspace/app
-    O->>API: message_session(child_id, brief)
+    O->>API: inject_message(child_session_id, brief)
     API->>H: user.message event via NATS
     loop child works
         H->>H: scaffold Astro + React<br/>(writes to /workspace)
@@ -60,7 +60,7 @@ sequenceDiagram
         S-->>H: username + token
         H->>GH: git push origin feat/scaffold
     end
-    H->>API: report_to_parent(<br/>"feat/scaffold ready @ abc1234")
+    H->>API: message_caller("feat/scaffold ready @ abc1234")
     API->>O: user.message from hirer-app
     Note over U,IN: preview-deploy step<br/>(preview provider, not shown)
     O->>R: build + push image<br/>hirer-app:feat-scaffold
@@ -92,13 +92,14 @@ The orchestrator decides the next highest-ROI roadmap item and writes a session 
 ### 4. The orchestrator spawns the child
 
 ```
-spawn_session({
-  agent_slug: "hirer-app",
-  prompt: "Read orchestrator/sessions/2026-04-22-r1-scaffold.md for scope. Work on branch feat/scaffold. Do not merge."
+spawn_session({ child_agent_id: hirerApp.id })
+inject_message({
+  child_session_id: spawned.session_id,
+  text: "Read orchestrator/sessions/2026-04-22-r1-scaffold.md for scope. Work on branch feat/scaffold. Do not merge."
 })
 ```
 
-The sidecar translates this into `POST /api/internal/sessions`. The API checks the orchestrator has an active `spawn` grant naming `hirer-app`. If yes, it inserts a pending `sessions` row with `parent_session_id=<orchestrator's id>`, `triggered_by='orchestrator'`, and the spawn prompt.
+The sidecar translates this into `POST /api/internal/sessions`. The API checks the orchestrator has an active `spawn` grant naming `hirer-app`. If yes, it inserts a pending `sessions` row with `parent_session_id=<orchestrator's id>` and `triggered_by='agent'` (this is the third valid value of the trigger enum, alongside `'user'` and `'scheduler'`).
 
 ### 5. The job watcher materializes the child pod
 
@@ -121,8 +122,8 @@ Everything the agent writes emits an event on the session's NATS subject — too
 When the scaffold is green (build passes, acceptance criteria met, branch pushed), the child calls `report_to_parent`:
 
 ```
-report_to_parent({
-  text: "ready-for-deploy: hirer-co/app branch feat/scaffold @ abc1234. npm build passed. curl / returns HTTP 200 with the expected empty-state card."
+message_caller({
+  summary: "ready-for-deploy: hirer-co/app branch feat/scaffold @ abc1234. npm build passed. curl / returns HTTP 200 with the expected empty-state card."
 })
 ```
 
@@ -157,7 +158,7 @@ The orchestrator curls the preview URL, checks the HTTP status + body against th
 
 **Why same URL in browser and pod.** When the orchestrator curls the preview to verify, it has to hit the same URL that the operator will later click. If dev and prod URLs diverge, verification lies. Wildcard DNS + CoreDNS rewrite solves it with one address.
 
-**Why `report_to_parent` is push, not poll.** A busy orchestrator with several children can't afford to poll each one on a tight cadence. Children push signals at milestones; the parent reacts. The parent can still pull the full stream via `read_session` for inspection, but the normal control flow is event-driven.
+**Why `message_caller` is push, not poll.** A busy orchestrator with several children can't afford to poll each one on a tight cadence. Children push signals at milestones via `message_caller`; the parent reacts. The parent can still pull the full stream via `read_child_output` for inspection, but the normal control flow is event-driven.
 
 ## What's not shown here
 

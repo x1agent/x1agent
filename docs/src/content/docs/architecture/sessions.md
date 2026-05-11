@@ -33,16 +33,17 @@ A session never moves backwards. Once it reaches a terminal state (`complete` or
 
 Every session has a `triggered_by` discriminator:
 
-| triggered\_by | triggered\_by\_user\_id | Meaning                                   |
-|---------------|-------------------------|-------------------------------------------|
-| `user`        | populated               | Someone clicked Run now or hit the API.   |
-| `scheduler`   | null                    | The platform scheduler fired a cron tick. |
+| triggered_by | triggered_by_user_id | Meaning                                                         |
+|--------------|----------------------|-----------------------------------------------------------------|
+| `user`       | populated            | Someone clicked Run now or hit the API.                         |
+| `scheduler`  | null                 | The platform scheduler fired a cron tick.                       |
+| `agent`      | null                 | An orchestrator session called `spawn_session` (parent_session_id is set on the resulting row). |
 
 Storing the distinction explicitly lets the UI show who fired the run and lets the scheduler reason about its own history without guessing.
 
 ## The scheduler
 
-The scheduler is a single loop inside the API process. It ticks every 30 seconds and, for each active agent with a cron schedule, decides whether a new run is due.
+The scheduler is a single loop inside the API process. By default it ticks every 30 seconds (configurable via `SCHEDULER_INTERVAL_MS`, with a built-in 10% jitter to avoid thundering-herd across api replicas) and, for each active agent with a cron schedule, decides whether a new run is due. The scan cadence is independent of per-agent run cadence — an agent on `@hourly` still runs once an hour regardless of how often the scan ticks.
 
 ```mermaid
 sequenceDiagram
@@ -92,6 +93,24 @@ POST /api/workspaces/:slug/agents/:agentId/sessions/:sessionId/cancel
      Only valid while status=pending. Running sessions are cancelled through
      the execution layer, not here.
 ```
+
+## Reaper
+
+A periodic in-process job in the api walks for cleanup work:
+
+- **Stuck-pending reaper.** Sessions with `status='pending'` whose Job
+  never materialized are aged out and flipped to `failed`.
+- **Orphaned-pod reaper.** Children whose pod has been gone for more than
+  N minutes are flipped to `status='failed'` and emit a synthetic
+  `session.failed` event so wake-publishers can react.
+- **Per-session secret cleanup.** On session terminal state, the per-
+  session credentials Secret is deleted from the workspace namespace.
+- **Preview-claim release** (when preview-environments lands): walks
+  open claims whose owning session is terminal and releases them.
+
+The reaper lives at `packages/api/src/orchestration/` (and in the
+periodic-scheduler registrations in `packages/api/src/index.ts`). It is
+not a separate Deployment.
 
 ## Why it lives in a domain package
 

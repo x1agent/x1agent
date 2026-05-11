@@ -10,9 +10,10 @@ import { EventStream } from "./EventStream";
 import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
 import { ArtifactPanel } from "./ArtifactPanel";
+import { ChildWorkersCounter } from "./ChildWorkersCounter";
+import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
-import { Badge, type BadgeVariant } from "../../components/ui/badge";
 
 interface Props {
   workspaceSlug: string;
@@ -32,20 +33,12 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
   failed: "text-red-400",
 };
 
-const STATUS_VARIANT: Record<SessionStatus, BadgeVariant> = {
-  pending: "secondary",
-  running: "info",
-  complete: "success",
-  failed: "danger",
-};
-
 export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const { status: authStatus, fetchMe } = useAuthStore();
   const {
     sessionsById,
     agentsBySession,
     parentBySession,
-    childrenBySession,
     eventsBySession,
     errorBySession,
     loadInitial,
@@ -92,9 +85,14 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const session = sessionsById[sessionId];
   const agent = agentsBySession[sessionId];
   const parent = parentBySession[sessionId] ?? null;
-  const children = childrenBySession[sessionId] ?? [];
   const events = eventsBySession[sessionId] ?? [];
   const error = errorBySession[sessionId];
+  // Selector returns the cached array reference; `?? []` lives outside
+  // the selector per the project's zustand foot-gun rule (a default
+  // inside the selector would mint a new `[]` on every render and
+  // tank `React.memo` further down the tree).
+  const compactItems =
+    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? [];
 
   useEffect(() => {
     if (authStatus === "idle") fetchMe();
@@ -292,6 +290,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
+          <SessionTitle session={session ?? null} sessionId={sessionId} />
+        </div>
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs">
           {parent && (
             <a
@@ -314,12 +315,6 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 {session.resumed_from.slice(0, 8)}
               </span>
             </a>
-          )}
-          {children.length > 0 && (
-            <span className="text-fg-faint">
-              {children.length}{" "}
-              {children.length === 1 ? "child" : "children"}
-            </span>
           )}
           <div className="ml-auto flex items-center gap-3">
             {session && (
@@ -352,34 +347,6 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           </div>
         </div>
 
-        {children.length > 0 && (
-          <div className="border-b border-border-soft bg-bg px-4 py-2">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-fg-faint">
-              Children
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {children.map((ch) => (
-                <a
-                  key={ch.id}
-                  href={`/workspaces/${workspaceSlug}/sessions/${ch.id}`}
-                  className="inline-flex items-center gap-2 rounded-md border border-border-soft px-2 py-1 text-xs hover:border-border-strong hover:bg-bg-elevated/60"
-                >
-                  <Badge variant={STATUS_VARIANT[ch.status]}>
-                    {ch.status}
-                  </Badge>
-                  <span className="text-fg">{ch.agent.name}</span>
-                  <span className="text-fg-faint/70">
-                    {new Date(ch.triggered_at).toLocaleTimeString(undefined, {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
         {error && (
           <div className="border-b border-red-900/50 bg-red-950/30 px-4 py-2 text-sm text-red-300">
             {error}
@@ -388,6 +355,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
 
         <EventStream
           events={events}
+          compactItems={compactItems}
           verbose={verbose}
           onRespond={sendMessage}
           workspaceSlug={workspaceSlug}
@@ -421,6 +389,16 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                   : "Send a message to the agent…"
               }
             />
+            {/* Compact "N child sessions running" counter, mirroring
+                Claude Code's running-task affordance. The flyout
+                anchors to the upper-right of this row so it floats
+                above the composer rather than pushing it. */}
+            <div className="mt-2 flex justify-end">
+              <ChildWorkersCounter
+                workspaceSlug={workspaceSlug}
+                sessionId={sessionId}
+              />
+            </div>
           </div>
         </div>
         </div>

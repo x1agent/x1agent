@@ -5,9 +5,14 @@ sidebar:
   order: 2
 ---
 
-NATS is the trust boundary between session pods, the api, and any browser watching a session. In dev (OrbStack), NATS runs plaintext on `:4222` with an unauthenticated WebSocket gateway on `:8080` — acceptable because everything is on loopback. For any non-local deploy, NATS must run with mutual TLS and the browser WebSocket must be fronted by TLS with a bearer token.
-
-This page describes the target state and the migration path. The current code defaults to plaintext; mTLS is a flip of env flags and a set of mounted certificates.
+NATS is the trust boundary between session pods, the api, and any browser
+watching a session. The chart ships **mTLS on by default** for both dev
+(OrbStack) and prod — `mise run dev:setup` runs `bootstrap-nats-tls.sh`
+against OrbStack to provision the local CA + per-workload certs via
+cert-manager, and the prod chart's `templates/nats.yaml` always renders the
+TLS config. The browser WebSocket gateway uses TLS at the ingress; in v1 the
+inner WS listener is anonymous (mapped to the api identity) — see
+[Future: per-session browser JWTs](#future-per-session-browser-jwts).
 
 ## What mTLS buys
 
@@ -48,15 +53,7 @@ Whether each session gets its own client cert or all sessions share one is a tra
 
 ## NATS server config
 
-The dev `nats.conf` today:
-
-```
-port: 4222
-http_port: 8222
-websocket { port: 8080, no_tls: true }
-```
-
-The prod equivalent, once certs are mounted at `/etc/nats/tls/`:
+The chart-rendered `nats.conf` (matches dev and prod):
 
 ```
 port: 4222
@@ -65,52 +62,33 @@ http_port: 8222
 tls {
   cert_file: "/etc/nats/tls/server/tls.crt"
   key_file:  "/etc/nats/tls/server/tls.key"
-  ca_file:   "/etc/nats/tls/ca/ca.crt"
+  ca_file:   "/etc/nats/tls/server/ca.crt"
   verify:    true
   verify_and_map: true
 }
 
-# Derive NATS user identity from the client cert's Subject CN.
 authorization {
   users: [
-    {
-      user: "session-sidecar"
-      permissions: {
-        publish:   { allow: ["x1.session.{{session_id}}.events"] }
-        subscribe: { allow: ["x1.session.{{session_id}}.input",
-                             "x1.session.{{session_id}}.presence"] }
-      }
-    }
-    {
-      user: "x1agent-api"
-      permissions: {
-        subscribe: { allow: ["x1.session.*.events"] }
-        publish:   { allow: ["x1.session.*.input"] }
-      }
-    }
+    { user: "CN=x1agent-api"
+      permissions: { publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>", "$JS.API.>"] }
+                     subscribe: { allow: ["x1.session.*.events", "x1.session.*.audit", "_INBOX.>"] } } }
+    { user: "CN=session-sidecar"
+      permissions: { publish:   { allow: ["x1.session.*.events", "x1.session.*.audit", "$JS.API.>", "$JS.ACK.>"] }
+                     subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] } } }
+    { user: "CN=x1agent-provider"
+      permissions: { publish:   { allow: ["_INBOX.>", "x1.audit.>"] }
+                     subscribe: { allow: ["x1.provider.>", "_INBOX.>"] } } }
   ]
 }
 
 websocket {
   port: 8080
-  tls {
-    cert_file: "/etc/nats/tls/websocket/tls.crt"
-    key_file:  "/etc/nats/tls/websocket/tls.key"
-  }
-
-  # Browsers authenticate with a short-lived JWT the api mints when the
-  # session detail page loads. The token encodes the session ids the
-  # viewer is allowed to subscribe to.
-  authorization {
-    auth_callout {
-      issuer: "x1agent-api"
-      auth_users: ["browser"]
-    }
-  }
+  no_tls: true            # TLS terminates at the ingress (Let's Encrypt cert browsers trust)
+  no_auth_user: "CN=x1agent-api"   # v1: anonymous WS clients map to api identity
 }
 ```
 
-`verify_and_map: true` is the important line for sidecars. NATS extracts the client cert's CN and uses it as the authenticated user name, so the `authorization.users` block can grant per-subject permissions without a separate auth server. The `{{session_id}}` placeholder is NATS's built-in template substitution against the cert CN.
+`verify_and_map: true` extracts the full Subject DN from the client cert and uses it as the authenticated NATS user name. The chart issues certs with no email/URI SANs, so the username is the DN — for a cert with only `CN=x1agent-api`, that's literally `"CN=x1agent-api"` (matching the `users` block above).
 
 ## Sidecar changes
 
@@ -160,24 +138,11 @@ const nc = await connect({
 
 The api's `/api/nats/token` mints a JWT with the user's session ids in the `sub` claim set. NATS's `auth_callout` callback verifies the JWT signature and maps the session ids into subject-level permissions for that connection.
 
-## Migration path
+## Future: per-session browser JWTs
 
-Minimum viable switch to mTLS on a fresh cluster:
-
-1. Install cert-manager (`helm install cert-manager jetstack/cert-manager`).
-2. Apply the `ClusterIssuer` + `Certificate` manifests for the four certs above.
-3. Update the NATS deployment to mount the server cert + CA and switch to the TLS-enabled `nats.conf`.
-4. Set `NATS_TLS=true` + cert paths on the api and session pods (via the Job watcher's env builder).
-5. Mint browser JWTs from a new `/api/nats/token` endpoint; update the session detail page to request one before connecting.
-
-None of the above requires a data migration. The `x1.session.{id}.events` wire format is unchanged; only transport changes.
-
-## What stays plaintext
-
-OrbStack dev stays plaintext. The gate is `NATS_TLS` on the api and sidecar, plus a `nats-config` ConfigMap choice at deploy time. Developers who want to exercise the mTLS path locally can apply the production manifests against OrbStack — cert-manager runs there fine.
+v1 maps anonymous WebSocket clients to the api identity (`no_auth_user: "CN=x1agent-api"`). The follow-up uses NATS `auth_callout` with short-lived JWTs minted by a new `/api/nats/token` endpoint scoped to the session ids the viewer can see. Tracked but not yet implemented.
 
 ## Open questions
 
-- **Per-session vs shared sidecar cert.** Per-session is the purer model; shared is simpler to issue. Decide when the first real deploy happens.
-- **JWT expiry.** Browser tokens last how long? Probably the session's `activeDeadlineSeconds` — no reason to refresh mid-session. For orchestrators (no deadline), the browser re-fetches on expiry.
-- **NATS JetStream.** Not enabled today. When it is — for event replay or durable consumers — the mTLS setup still holds, but JetStream has its own account model that needs to be slotted in.
+- **Per-session vs shared sidecar cert.** v1 ships a single `CN=session-sidecar` cert shared across all session pods. Per-session certs would let NATS ACLs pin a sidecar's publish/subscribe to its own session subjects.
+- **Browser JWT expiry.** Likely scoped to the session's `activeDeadlineSeconds`; orchestrators (no deadline) re-fetch on expiry.

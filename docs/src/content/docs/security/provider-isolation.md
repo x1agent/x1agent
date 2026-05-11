@@ -28,29 +28,38 @@ With providers as separate pods communicating over NATS:
 | Access sidecar HTTP API | Yes (localhost) | No (different pod) |
 | Access databases | Depends on pod-level NetworkPolicy | Blocked by NetworkPolicy |
 | Snoop other sessions | Shares pod with one session | Blocked by NATS subject ACLs |
-| NetworkPolicy effective | No (intra-pod) | Yes (standard pod isolation) |
+| NetworkPolicy effective | No (intra-pod) | Yes if cluster CNI enforces and chart is rendered with NetworkPolicy enabled (today: not shipped in helm) |
 
 ## NATS subject ACLs
 
-Each provider's NATS credentials restrict which subjects it can publish and subscribe to:
+Today, every provider deployment shares one mTLS client cert with
+`CN=x1agent-provider`. That cert's NATS permissions are:
 
 ```
-# Graph provider permissions
-subscribe: x1.provider.graph.>
-publish:   x1.provider.graph.>
-publish:   x1.session.*.proxy.request
-
-# Graph provider CANNOT:
-# subscribe: x1.session.*.events       (agent output)
-# publish:   x1.session.*.input        (user injection)
-# subscribe: x1.provider.files.>       (other domains)
+publish:   ["_INBOX.>", "x1.audit.>"]
+subscribe: ["x1.provider.>", "_INBOX.>"]
 ```
 
-A compromised graph provider can only interact with graph-related subjects. It cannot read agent output, inject user messages, or interfere with other provider domains.
+So providers cannot publish to session subjects (no agent injection),
+cannot read session events (no agent output), and cannot inject user
+input. They CAN, however, subscribe to every other provider's domain
+— a compromised messaging-slack provider can sniff graph-provider
+traffic.
+
+**Per-provider certs (`CN=provider-graph`, `CN=provider-messaging`)**
+are the v2 tightening: each provider gets its own cert and the NATS
+ACLs narrow to its own domain. Tracked as a follow-up.
 
 ## Network policy
 
-Provider pods have restrictive egress rules:
+**Status: not enforced in the helm chart today.** A reference NetworkPolicy
+exists at `deploy/k8s/dev/networkpolicy.yaml` but is not part of any
+`helm install`. OrbStack's CNI doesn't enforce NetworkPolicy at all.
+Production CNIs (Calico / Cilium / GKE Dataplane v2 / etc.) will enforce
+the manifests below if you `kubectl apply` them yourself; ship-in-helm
+is a follow-up gated by `networkPolicy.enabled` (TODO).
+
+The intended shape:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -77,7 +86,11 @@ Providers can reach NATS and their own backing service. Nothing else. No direct 
 
 ## mTLS on NATS
 
-For deployments that require transport-level security, NATS supports mTLS. Each provider gets its own client certificate. The NATS server verifies the certificate and maps it to the provider's subject permissions.
+The chart-shipped NATS deployment requires mTLS — there is no token-auth
+path. cert-manager issues the server cert and per-component client certs
+(api, sidecar, providers) from an internal CA. The NATS server runs
+with `verify_and_map: true`, which extracts the client cert's CN and
+matches it against the `authorization.users` block.
 
 ```
 # nats-server.conf
@@ -97,6 +110,5 @@ authorization {
 }
 ```
 
-This eliminates shared token auth and provides cryptographic identity verification. See [Configuration: NATS mTLS](/configuration/nats-mtls) for setup details.
-
-The default deployment uses NATS token auth, which is simpler to set up. mTLS is recommended for production deployments with security-conscious operators.
+See [Configuration: NATS mTLS](/configuration/nats-mtls) for cert-manager
+wiring and the per-component cert layout.

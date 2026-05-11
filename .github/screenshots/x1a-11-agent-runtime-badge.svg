@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <style>
+      .bg { fill: #0a0a0b; }
+      .panel { fill: #16171a; stroke: #2a2c33; stroke-width: 1; rx: 12; }
+      .h2 { fill: #7a808c; font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+      .name { fill: #e7e9ee; font-size: 22px; font-weight: 600; }
+      .meta { fill: #7a808c; font-size: 12px; }
+      .meta-strong { fill: #aab0bc; font-size: 12px; }
+      .label { fill: #7a808c; font-size: 11px; }
+      .annot { fill: #aab0bc; font-size: 12px; }
+      .annot-strong { fill: #e7e9ee; font-size: 12px; font-weight: 600; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .badge-success-fill { fill: rgba(16,185,129,0.15); stroke: rgba(16,185,129,0.30); stroke-width: 1; }
+      .badge-success-text { fill: #34d399; font-size: 11px; font-weight: 500; }
+      .badge-secondary-fill { fill: #1f2024; stroke: none; }
+      .badge-secondary-text { fill: #e7e9ee; font-size: 11px; font-weight: 500; }
+      .badge-outline-fill { fill: none; stroke: #2a2c33; stroke-width: 1; }
+      .badge-outline-text { fill: #aab0bc; font-size: 11px; font-weight: 500; }
+      .title { fill: #e7e9ee; font-size: 18px; font-weight: 600; }
+      .lead { fill: #aab0bc; font-size: 13px; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1100" height="560" />
+
+  <!-- header -->
+  <text class="title" x="32" y="38">X1A-11 — agent detail "active" badge</text>
+  <text class="lead" x="32" y="62">Badge derives from runtime session state, not the schedule toggle.</text>
+
+  <!-- BEFORE panel -->
+  <g transform="translate(32,90)">
+    <rect class="panel" width="500" height="430" rx="12" />
+    <text class="h2" x="20" y="32">BEFORE</text>
+    <text class="name" x="20" y="68">scheduler-test</text>
+
+    <!-- header row -->
+    <g transform="translate(20,90)">
+      <text class="mono meta" x="0" y="14">scheduler-test</text>
+      <text class="meta" x="100" y="14">·</text>
+      <text class="meta-strong" x="115" y="14">claude</text>
+      <text class="meta" x="160" y="14">·</text>
+      <!-- badge: active (success) -->
+      <g transform="translate(175,2)">
+        <rect class="badge-success-fill" width="50" height="18" rx="5" />
+        <text class="badge-success-text" x="25" y="12.5" text-anchor="middle">active</text>
+      </g>
+    </g>
+
+    <!-- scenarios -->
+    <g transform="translate(20,140)">
+      <text class="label" x="0" y="14">Schedule on, zero running sessions</text>
+      <g transform="translate(0,22)">
+        <rect class="badge-success-fill" width="50" height="18" rx="5" />
+        <text class="badge-success-text" x="25" y="12.5" text-anchor="middle">active</text>
+      </g>
+    </g>
+
+    <g transform="translate(20,210)">
+      <text class="label" x="0" y="14">Schedule off</text>
+      <g transform="translate(0,22)">
+        <rect class="badge-secondary-fill" width="55" height="18" rx="5" />
+        <text class="badge-secondary-text" x="27.5" y="12.5" text-anchor="middle">paused</text>
+      </g>
+    </g>
+
+    <!-- annotation -->
+    <g transform="translate(20,310)">
+      <text class="annot-strong" x="0" y="14">Bug:</text>
+      <text class="annot" x="36" y="14">"active" is shown whenever is_active is true,</text>
+      <text class="annot" x="0" y="32">even when nothing is actually running.</text>
+    </g>
+  </g>
+
+  <!-- AFTER panel -->
+  <g transform="translate(568,90)">
+    <rect class="panel" width="500" height="430" rx="12" />
+    <text class="h2" x="20" y="32">AFTER</text>
+    <text class="name" x="20" y="68">scheduler-test</text>
+
+    <!-- header row -->
+    <g transform="translate(20,90)">
+      <text class="mono meta" x="0" y="14">scheduler-test</text>
+      <text class="meta" x="100" y="14">·</text>
+      <text class="meta-strong" x="115" y="14">claude</text>
+      <text class="meta" x="160" y="14">·</text>
+      <!-- badge: running -->
+      <g transform="translate(175,2)">
+        <rect class="badge-success-fill" width="58" height="18" rx="5" />
+        <text class="badge-success-text" x="29" y="12.5" text-anchor="middle">running</text>
+      </g>
+    </g>
+
+    <!-- scenarios -->
+    <g transform="translate(20,140)">
+      <text class="label" x="0" y="14">≥ 1 session in</text>
+      <text class="label mono" x="80" y="14">running</text>
+      <g transform="translate(0,22)">
+        <rect class="badge-success-fill" width="58" height="18" rx="5" />
+        <text class="badge-success-text" x="29" y="12.5" text-anchor="middle">running</text>
+      </g>
+    </g>
+
+    <g transform="translate(20,200)">
+      <text class="label" x="0" y="14">Schedule on, zero running sessions</text>
+      <g transform="translate(0,22)">
+        <rect class="badge-secondary-fill" width="38" height="18" rx="5" />
+        <text class="badge-secondary-text" x="19" y="12.5" text-anchor="middle">idle</text>
+      </g>
+    </g>
+
+    <g transform="translate(20,260)">
+      <text class="label" x="0" y="14">Schedule off</text>
+      <g transform="translate(0,22)">
+        <rect class="badge-outline-fill" width="55" height="18" rx="5" />
+        <text class="badge-outline-text" x="27.5" y="12.5" text-anchor="middle">paused</text>
+      </g>
+    </g>
+
+    <!-- annotation -->
+    <g transform="translate(20,340)">
+      <text class="annot-strong" x="0" y="14">Fix:</text>
+      <text class="annot" x="32" y="14">derived from session status — runtime activity</text>
+      <text class="annot" x="0" y="32">wins, then schedule toggle disambiguates idle vs. paused.</text>
+    </g>
+  </g>
+</svg>

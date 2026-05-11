@@ -1,3 +1,44 @@
+# [1.18.0](https://github.com/x1agent/x1agent/compare/v1.17.2...v1.18.0) (2026-05-11)
+
+
+### Bug Fixes
+
+* **api:** remove dangling fragments in pod-spec.ts ([6d64de9](https://github.com/x1agent/x1agent/commit/6d64de9da310cf9dafe3a2e919c54331901fbe31))
+* **api:** restore missing JSDoc opener in slack.ts ([ccb6ea8](https://github.com/x1agent/x1agent/commit/ccb6ea8d4e04258d999d79145b05c706c25e0155))
+* **app:** chronological compact timeline with status + tool grouping (X1A-41) ([37bfe8f](https://github.com/x1agent/x1agent/commit/37bfe8fb5112d232c9cf1e1f8e900728062a49f4))
+* **app:** derive agent detail badge from session state, not is_active ([2622f01](https://github.com/x1agent/x1agent/commit/2622f01c70025ea14eaed9a0e4c5b0048a032496))
+* **app:** share flyout document viewer fills viewport height (X1A-19) ([19292c1](https://github.com/x1agent/x1agent/commit/19292c1c933e4ad7cd1c414226db35061e10017d))
+* **ci:** close the pre-existing scheduler-test + workflow-coverage gap ([9cf6935](https://github.com/x1agent/x1agent/commit/9cf69358de06252521242a7e47ab7e8de6f66666))
+* clean up dangling fragments in dev manifests + agent pod-spec ([b2f64f7](https://github.com/x1agent/x1agent/commit/b2f64f7fda4c1e7dbfc6a91722363b9d17f96a7a))
+* **sessions:** make wake-pill detection actually fire end-to-end ([c202484](https://github.com/x1agent/x1agent/commit/c2024842c127ef488c06f57b43a04941cf6d6f85))
+* **sessions:** mb-[5px] one-off to vertically center share button ([4cc3957](https://github.com/x1agent/x1agent/commit/4cc39570f687de6c9af4bdbbd04cec846090ccb4))
+* **sessions:** one-off translate-y-px on share button for vertical centering ([7bee3cc](https://github.com/x1agent/x1agent/commit/7bee3cc5075dada12542587e6c486e3a0891ada3))
+* **sessions:** share dialog 404, recipient picker, light-mode, alignment (X1A-44) ([841b955](https://github.com/x1agent/x1agent/commit/841b955ce947f0b91223087cda4ace5d4bbedfc5))
+
+
+### Features
+
+* **app:** collapse platform wake messages into pills in session timeline ([fe24d1a](https://github.com/x1agent/x1agent/commit/fe24d1af9ca68d46cb33995f2034b5de6b6c8971))
+* **app:** collapse session timeline to latest public event in default mode ([#74](https://github.com/x1agent/x1agent/issues/74)) ([f43f090](https://github.com/x1agent/x1agent/commit/f43f0909ce30d5bb30a6aabc84eff5cdfcbd8888))
+* **app:** replace inline child-worker area with composer-side counter (X1A-34) ([#76](https://github.com/x1agent/x1agent/issues/76)) ([b627439](https://github.com/x1agent/x1agent/commit/b6274392f70f9a3d7cf2c3d0f791d2586b044259))
+* **mcp-catalog:** add 12 hosted SaaS + 3 coding-tool MCPs ([#73](https://github.com/x1agent/x1agent/issues/73)) ([056b867](https://github.com/x1agent/x1agent/commit/056b867938d00edb68300680d49f466f696bdb24))
+* **sessions:** LLM-generated session descriptions in detail header ([#75](https://github.com/x1agent/x1agent/issues/75)) ([591d9b2](https://github.com/x1agent/x1agent/commit/591d9b20a0a1817135f7f6478a3ae19f89c97c65))
+* **sessions:** natural-language wake pills + clickable child links ([b532172](https://github.com/x1agent/x1agent/commit/b5321729a0747b74f97648bc6fb615330000ffa8))
+* **sessions:** OpenAI summarizer fallback ([74b1e3a](https://github.com/x1agent/x1agent/commit/74b1e3a835386809fc193ea173d6bdcc672b65fe))
+* **sessions:** share dialog UX — show owner, filter self, gated revoke ([54f82a5](https://github.com/x1agent/x1agent/commit/54f82a5ecb4e097c56c5cebffe80b6f82126ccee))
+
+
+### Performance Improvements
+
+* **app:** cache compactTimeline in sessionDetailStore ([0c09cce](https://github.com/x1agent/x1agent/commit/0c09cce1cc45a468a08f50edf813b5041160a5bd))
+
+## [1.17.2](https://github.com/x1agent/x1agent/compare/v1.17.1...v1.17.2) (2026-05-10)
+
+
+### Bug Fixes
+
+* **app:** session timeline groups status + tool runs (X1A-41) ([#80](https://github.com/x1agent/x1agent/issues/80)) ([f374dab](https://github.com/x1agent/x1agent/commit/f374dabff7aa92275e116c43c8f2d04edc1ba456)), closes [#75](https://github.com/x1agent/x1agent/issues/75) [#73](https://github.com/x1agent/x1agent/issues/73) [#74](https://github.com/x1agent/x1agent/issues/74) [#76](https://github.com/x1agent/x1agent/issues/76)
+
 ## [1.17.1](https://github.com/x1agent/x1agent/compare/v1.17.0...v1.17.1) (2026-05-09)
 
 
