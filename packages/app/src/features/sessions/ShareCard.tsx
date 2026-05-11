@@ -139,6 +139,16 @@ export interface SubProps {
   workspaceSlug: string;
   sessionId: string;
   maximized?: boolean;
+  /**
+   * Caller is a flex/grid parent that already provides full available
+   * height and its own scroll region (e.g. the right-rail
+   * ArtifactPanel). Renderers that would otherwise impose a fixed
+   * `max-h-*` should drop that cap and let the parent scroll, so long
+   * content isn't truncated inside a tiny inner box. The inline
+   * `ShareCard` in the chat stream omits this and keeps its bounded
+   * preview height.
+   */
+  fillParent?: boolean;
 }
 
 function ShareHeader({
@@ -464,7 +474,12 @@ function CodeShare({ payload, workspaceSlug, sessionId }: SubProps) {
 
 // ── Document (markdown) ──────────────────────────────────────────
 
-function DocumentShare({ payload, workspaceSlug, sessionId }: SubProps) {
+function DocumentShare({
+  payload,
+  workspaceSlug,
+  sessionId,
+  fillParent,
+}: SubProps) {
   const [content, setContent] = useState<string | null>(null);
   const src = shareUrl(
     workspaceSlug,
@@ -482,8 +497,18 @@ function DocumentShare({ payload, workspaceSlug, sessionId }: SubProps) {
 
   if (content === null)
     return <div className="text-xs text-fg-faint">Loading…</div>;
+  // In the flyout (ArtifactPanel) the wrapper is already a
+  // `flex-1 overflow-auto` scroll region that fills the viewport, so a
+  // local 384px scroller here just clipped long markdown into a tiny
+  // inner box — X1A-19. With `fillParent` we render a plain block and
+  // let the parent own the scroll: short docs sit naturally, long docs
+  // scroll the full viewport with a visible scrollbar. The inline
+  // ShareCard (no fillParent) keeps its bounded preview.
+  const cls = fillParent
+    ? "text-sm text-fg"
+    : "max-h-96 overflow-auto text-sm text-fg";
   return (
-    <div className="max-h-96 overflow-auto text-sm text-fg">
+    <div className={cls} data-testid="document-share">
       <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {content}
       </Markdown>
