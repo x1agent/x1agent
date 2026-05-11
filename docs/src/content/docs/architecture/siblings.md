@@ -5,6 +5,8 @@ sidebar:
   order: 7
 ---
 
+> **Status — proposed, not implemented as of 2026-05-10.** No `siblings_yaml`, `siblings_spec`, or `agent_image_versions` exists in the schema. The compose translator, the allowlist enforcer, and the pod-spec assembly are not wired. This page is the binding *design* the implementation should target; track work in [TICKET-LINK].
+
 Siblings are the service containers that run alongside the agent container in a session pod — headless chromium for scraping, MailHog for capturing outbound email during tests, a fake S3 for test fixtures, a disposable Postgres an agent wants to wipe on every session. They are declared in the image catalog and optionally overridden at the agent level. This doc specifies the authoring format, the merge rules, the validation boundaries, and the field allowlist.
 
 For **stateful engines that should persist across sessions** (the Postgres a coding agent iterates migrations against, the Redis that accumulates cache across turns), use [Shared agent resources](/architecture/shared-agent-resources) instead. Siblings are ephemeral; shared agent resources survive session teardown and are isolated per branch. Siblings are the right call for fixtures and mocks; shared agent resources are the right call for the database the agent's application actually uses.

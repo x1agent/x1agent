@@ -88,6 +88,62 @@ interface WireMessage {
   timestamp?: string;
 }
 
+/**
+ * Stopgap for X1A-43 until session_events grows real `source`,
+ * `kind`, `from_session_id` columns. Wake events published by
+ * wake-publisher.ts carry that metadata on the NATS .input envelope,
+ * but the sidecar→agent SSE round-trip only relays `text`, so the
+ * version that lands here (on .events) has just the text. We
+ * re-derive `source` and `kind` from the well-known text header so
+ * the UI's pill detection has something to match on.
+ *
+ * Format contract: text starts with `[driverless wake: <header>]`
+ * where header is one of the five literals emitted by
+ * `format*WakeText` in wake-publisher.ts. Keep this in sync with
+ * those literals.
+ *
+ * The proper fix (real columns + dual-write from wake-publisher) is
+ * tracked separately.
+ */
+export function deriveWakeKindFromText(text: string): string | null {
+  if (!text.startsWith("[driverless wake:")) return null;
+  const closingBracket = text.indexOf("]");
+  if (closingBracket < 0) return null;
+  const header = text
+    .slice("[driverless wake:".length, closingBracket)
+    .trim();
+  if (header.startsWith("watchdog")) return "watchdog";
+  if (header.startsWith("scheduler heartbeat")) return "heartbeat";
+  if (header.startsWith("platform checkup")) return "checkup";
+  if (header.startsWith("message from child")) return "message";
+  if (
+    header.startsWith("child finished") ||
+    header.startsWith("child failed") ||
+    header.startsWith("child completed") ||
+    header.startsWith("child transitioned")
+  )
+    return "state_change";
+  return null;
+}
+
+export function enrichWakePayload(
+  type: string,
+  payload: unknown,
+): Record<string, unknown> {
+  if (type !== "user.message") {
+    return (payload as Record<string, unknown>) ?? {};
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return {};
+  }
+  const p = payload as Record<string, unknown>;
+  if (p.source || p.kind) return p;
+  const text = typeof p.text === "string" ? p.text : "";
+  const kind = deriveWakeKindFromText(text);
+  if (!kind) return p;
+  return { ...p, source: "platform", kind, driverless: true };
+}
+
 export async function startSessionEventSubscriber(
   opts: StartSubscriberOptions,
 ): Promise<Subscriber> {
@@ -131,7 +187,7 @@ export async function startSessionEventSubscriber(
             sessionId,
             seq: parsed.sequence,
             type: parsed.type,
-            payload: parsed.payload ?? {},
+            payload: enrichWakePayload(parsed.type, parsed.payload),
             timestamp: parsed.timestamp
               ? new Date(parsed.timestamp)
               : new Date(),

@@ -87,13 +87,21 @@ Until all three are populated, the workspace settings UI shows the bot creation 
    - Client Secret
    - Signing Secret
 
-5. Hand them to the installer:
+5. Populate the GSM secrets the chart binds:
 
    ```sh
-   mise run slack:configure
+   gcloud secrets versions add x1agent-slack-platform-client-id \
+     --project=$GCP_PROJECT --data-file=- <<<"$CLIENT_ID"
+   gcloud secrets versions add x1agent-slack-platform-client-secret \
+     --project=$GCP_PROJECT --data-file=- <<<"$CLIENT_SECRET"
+   gcloud secrets versions add x1agent-slack-platform-signing-secret \
+     --project=$GCP_PROJECT --data-file=- <<<"$SIGNING_SECRET"
    ```
 
-   The configurator writes them to your secret store under the keys `slack/platform/client_id`, `slack/platform/client_secret`, `slack/platform/signing_secret`. Restart the api deployment so it picks them up.
+   External Secrets Operator syncs them into the api as
+   `SLACK_PLATFORM_CLIENT_ID`, `SLACK_PLATFORM_CLIENT_SECRET`,
+   `SLACK_PLATFORM_SIGNING_SECRET`. Restart the api deployment so it
+   picks them up: `kubectl rollout restart deploy/x1agent-api`.
 
 That's the entire platform setup. You do it once per x1agent install. End users never touch this.
 

@@ -51,12 +51,12 @@ The first is simpler if the binary is statically linked. Verify in [Open questio
 
 OpenAI is the only provider Codex talks to. Wiring is correspondingly simple:
 
-- Codex's `OPENAI_BASE_URL` env points at the sidecar's AI-proxy port (`http://localhost:11432`).
+- Codex's `OPENAI_BASE_URL` env will point at the sidecar's AI-proxy port (port TBD; see [Agent runtimes — Open extensions](/architecture/agent-runtimes#open-extensions) for the unlanded sidecar work this depends on).
 - The sidecar holds the workspace's `OPENAI_API_KEY` in its secret store and adds it to outbound calls.
 - Codex's `OPENAI_MODEL` env (or whatever the upstream env-var name is) is set per session by the orchestrator.
 - No `OPENAI_API_KEY` is set in the agent container.
 
-Permission gating: a session must have the `ai.openai` scope (and optionally `ai.openai:<model>`) for the sidecar to forward.
+Permission gating: a session must have the `ai.openai` scope (and optionally `ai.openai:<model>`) for the sidecar to forward. The `ai.*` scope class is itself a planned addition — see [Agent runtimes — Permission ledger entries for AI providers](/architecture/agent-runtimes#permission-ledger-entries-for-ai-providers).
 
 If Codex requires a real OpenAI org+project ID at startup (it sometimes does, depending on auth mode), that lookup belongs in the sidecar too — never in the agent container's env.
 
@@ -73,21 +73,15 @@ OpenAI's tool-use protocol is well-documented, so the event mapping is largely m
 
 ## What the operator sees
 
-```yaml
-workspaces:
-  acme:
-    agentRuntime:
-      image: x1agent/runtime-codex:v1
-    aiProviders:
-      openai:
-        secretRef:
-          name: openai-key
-          key: api-key
-        org: org-xxxxx        # optional, depending on Codex auth mode
-    permissionGrants:
-      - scope: ai.openai
-        models: ["gpt-5", "gpt-5-mini"]
-```
+An admin in the `acme` workspace:
+
+1. Stores their `OPENAI_API_KEY` (and optionally `OPENAI_ORG_ID`) as
+   [workspace secrets](/providers/mcp-servers#workspace-secrets).
+2. Switches the workspace's agent runtime image to `x1agent/runtime-codex:v1`
+   on the agent-config page.
+3. Grants the session the `ai.openai` scope with optional model filters
+   through the [permission grants](/security/permission-grants) flow,
+   once the `ai.*` scope class lands.
 
 Cleaner than the opencode example because there's only one provider section. The operator gets a Codex-shaped session with the same workspace, sidecar, and permissions wrapper.
 

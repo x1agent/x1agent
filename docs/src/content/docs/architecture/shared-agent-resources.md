@@ -66,7 +66,7 @@ The workspace admin opens **Settings -> Shared agent resources**. The first scre
 
 Each entry in the catalog is a **kind** with one or more **versions** and a selected **provider** (the adapter that implements the actual provisioning). v1 ships Postgres and Redis, each with a single `statefulset` provider that works out of the box on OrbStack and any CNI-backed cluster.
 
-The catalog is code-embedded for v1 (`packages/domains/agent-resources/catalog.ts`). A future release may allow operators to register additional kinds via a ConfigMap; that change is additive.
+The catalog is code-embedded for v1 (`packages/domains/agent-resources/src/catalog.ts`). A future release may allow operators to register additional kinds via a ConfigMap; that change is additive.
 
 ### Installing a resource
 
@@ -178,44 +178,39 @@ Plus a two-paragraph block appended to the agent's system prompt:
 Three tables in the control-plane database track state; none of them hold secrets.
 
 ```sql
--- one row per resource an admin has installed
+-- See deploy/migrations/012_shared_agent_resources.sql for the binding schema.
+
 CREATE TABLE workspace_shared_resources (
-  id              UUID PRIMARY KEY,
-  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  kind            TEXT NOT NULL,            -- 'postgres' | 'redis' | ...
-  version         TEXT NOT NULL,            -- '16', '7', ...
-  config          JSONB NOT NULL,           -- storage_size, resource limits, etc.
-  provider        TEXT NOT NULL,            -- adapter id, e.g. 'statefulset'
-  admin_secret_ref TEXT NOT NULL,           -- K8s Secret name, NOT the value
-  status          TEXT NOT NULL,            -- 'provisioning' | 'running' | 'failed'
-  installed_by    UUID NOT NULL REFERENCES users(id),
-  installed_at    TIMESTAMPTZ NOT NULL,
+  id               UUID PRIMARY KEY DEFAULT uuidv7(),
+  workspace_id     UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL,
+  version          TEXT NOT NULL,
+  provider         TEXT NOT NULL,
+  config           JSONB NOT NULL DEFAULT '{}'::jsonb,
+  admin_secret_ref TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'provisioning',  -- provisioning | running | failed
+  status_reason    TEXT,
+  installed_by     UUID REFERENCES users(id) ON DELETE SET NULL,  -- nullable
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (workspace_id, kind)
 );
 
--- per-branch postgres metadata
+-- agent_repos has a composite PK (agent_id, repo_full_name), so per-branch
+-- rows scope by repo_full_name (not a synthetic repo id) — this lets the
+-- branch DB follow a repo across agents.
 CREATE TABLE workspace_postgres_branches (
-  id                UUID PRIMARY KEY,
-  resource_id       UUID NOT NULL REFERENCES workspace_shared_resources(id) ON DELETE CASCADE,
-  repo_id           UUID NOT NULL REFERENCES agent_repos(id) ON DELETE CASCADE,
-  branch_name       TEXT NOT NULL,
-  branch_id         TEXT NOT NULL,         -- sanitized+hashed; used as db and role name
-  last_used_at      TIMESTAMPTZ NOT NULL,
-  reaped_at         TIMESTAMPTZ,
-  UNIQUE (resource_id, repo_id, branch_name)
+  id              UUID PRIMARY KEY DEFAULT uuidv7(),
+  resource_id     UUID NOT NULL REFERENCES workspace_shared_resources(id) ON DELETE CASCADE,
+  repo_full_name  TEXT NOT NULL,
+  branch_name     TEXT NOT NULL,
+  branch_id       TEXT NOT NULL,
+  last_used_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reaped_at       TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (resource_id, repo_full_name, branch_name)
 );
-
--- per-branch redis metadata
-CREATE TABLE workspace_redis_branches (
-  id                UUID PRIMARY KEY,
-  resource_id       UUID NOT NULL REFERENCES workspace_shared_resources(id) ON DELETE CASCADE,
-  repo_id           UUID NOT NULL REFERENCES agent_repos(id) ON DELETE CASCADE,
-  branch_name       TEXT NOT NULL,
-  branch_id         TEXT NOT NULL,
-  last_used_at      TIMESTAMPTZ NOT NULL,
-  reaped_at         TIMESTAMPTZ,
-  UNIQUE (resource_id, repo_id, branch_name)
-);
+-- Mirror shape for workspace_redis_branches.
 ```
 
 Per-engine tables on purpose; a single generic `workspace_branch_resources` table would lose information every engine wants at query time.

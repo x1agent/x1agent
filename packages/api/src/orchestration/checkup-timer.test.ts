@@ -8,9 +8,9 @@ describe("formatCheckupWakeText", () => {
   it("empty snapshot — zero-child checkup prompt", () => {
     const t = formatCheckupWakeText([]);
     expect(t).toContain("no active children");
-    expect(t).toContain("If there's work to do");
-    expect(t).toContain("end the turn");
+    expect(t).toContain("No children are currently in flight");
     expect(t).toContain("driverless");
+    expect(t).toContain("No human is watching");
   });
 
   it("one child — renders a one-line summary", () => {
@@ -70,19 +70,4 @@ describe("formatCheckupWakeText", () => {
     expect(t).not.toContain(' — "');
   });
 
-  it("includes governance guidance (read/cancel/end-turn)", () => {
-    const t = formatCheckupWakeText([
-      {
-        sessionId: "019d1111-aaaa-7000-8000-000000000000",
-        agentSlug: "agent",
-        status: "running",
-        secondsSinceLastEvent: 30,
-        lastStatus: "working",
-      },
-    ]);
-    expect(t).toContain("read_session");
-    expect(t).toContain("cancel_session");
-    expect(t).toContain("post-mortem");
-    expect(t).toContain("end the turn");
-  });
 });

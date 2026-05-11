@@ -209,6 +209,76 @@ describe("EventStream — default (compact) mode", () => {
   });
 });
 
+describe("EventStream — platform wake pills", () => {
+  function platformWakeEvents(): SessionEventDTO[] {
+    return [
+      {
+        id: "1",
+        session_id: "s1",
+        seq: 1,
+        type: "session.started",
+        payload: {},
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "2",
+        session_id: "s1",
+        seq: 2,
+        type: "user.message",
+        payload: {
+          source: "platform",
+          kind: "heartbeat",
+          driverless: true,
+          text: "[driverless wake: heartbeat] Active children (1): worker-7. Glance at the snapshot. If there's work to do, do it. Otherwise end the turn.",
+        },
+        timestamp: "2026-01-01T00:00:01Z",
+      },
+      {
+        id: "3",
+        session_id: "s1",
+        seq: 3,
+        type: "user.message",
+        payload: { text: "Hello, agent." },
+        timestamp: "2026-01-01T00:00:02Z",
+      },
+    ];
+  }
+
+  it("renders a scheduler-wake pill collapsed by default — full payload is hidden", () => {
+    const { container, queryByRole } = render(
+      <EventStream
+        events={platformWakeEvents()}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    const pill = queryByRole("button", { name: /scheduler tick/ });
+    expect(pill).not.toBeNull();
+    expect(pill?.getAttribute("aria-expanded")).toBe("false");
+    // Full payload is hidden until expanded.
+    expect(container.textContent ?? "").not.toContain("Active children");
+    // Real user message still renders normally.
+    expect(container.textContent ?? "").toContain("Hello, agent.");
+  });
+
+  it("expands the wake pill on click and reveals the full payload", () => {
+    const { container, queryByRole } = render(
+      <EventStream
+        events={platformWakeEvents()}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    const pill = queryByRole("button", { name: /scheduler tick/ });
+    if (!pill) throw new Error("expected wake pill");
+    fireEvent.click(pill);
+    expect(pill.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent ?? "").toContain("Active children");
+  });
+});
+
 describe("EventStream — verbose mode", () => {
   it("renders the full event stream including internal tool calls and results", () => {
     const events = mixedEvents();

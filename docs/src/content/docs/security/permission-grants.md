@@ -216,20 +216,31 @@ sequenceDiagram
     participant UI as Browser
     participant API as api
 
-    A->>S: request_grant(type, details, scope, justification)
-    S->>N: publish agent.permission_request
+    A->>S: POST /event {type: agent.permission_request, ...}
+    S->>N: publish session event (agent.permission_request)
     N->>UI: stream event
     UI->>UI: render modal
     UI->>API: POST /grants  (Approve)
     API->>API: INSERT permission_grants
-    API->>N: publish permission.granted
+    API->>N: publish permission decision (as a user message into session input)
     N->>S: stream event
-    S->>A: tool result: { status: "granted", grant_id }
+    S->>A: HTTP /inject (delivers the user message)
+    A->>A: reads outcome from message channel; can retry the gated tool
 ```
 
-The flow is one round-trip of "agent asks → user approves → agent is told." Deny follows the same shape with `permission.denied`. The agent sees the decision as the tool call's return value.
+The MCP tool returns immediately with "request sent" and the
+`request_id`. The decision arrives as a user-channel message, not as
+a synchronous return value. The agent must continue and read the
+outcome on its next turn. Deny follows the same shape; the agent
+observes denial as a message and proceeds (typically by emitting an
+error to the user).
 
-Workspaces can disable this flow for stricter postures via a workspace setting `allow_runtime_permission_requests = false`. When off, the MCP tools return `runtime_requests_disabled`; grants can only be created through the agent edit screen, the workspace settings page, or a user hitting the api directly.
+**Future**: a workspace setting `allow_runtime_permission_requests = false`
+will disable runtime grant requests entirely for stricter postures.
+When off, the runtime MCP tools will return `runtime_requests_disabled`
+and grants will only be creatable through the agent edit screen, the
+workspace settings page, or a user hitting the api directly. Tracked
+as a follow-up; not implemented today.
 
 ## Audit
 
@@ -240,7 +251,11 @@ SELECT
   g.grant_type,
   g.details,
   g.scope,
-  g.subject_type, g.subject_id,
+  CASE
+    WHEN g.user_subject_id  IS NOT NULL THEN 'user'
+    WHEN g.agent_subject_id IS NOT NULL THEN 'agent'
+  END AS subject_type,
+  COALESCE(g.user_subject_id, g.agent_subject_id) AS subject_id,
   g.revoked_at, g.consumed_at,
   g.reason
 FROM permission_grants g

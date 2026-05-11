@@ -49,7 +49,7 @@ The image follows [Runtime images — Preset contract](/architecture/runtime-ima
 
 The platform passes inference through the sidecar, not directly to the provider — this is non-negotiable per [Agent runtimes — The runtime contract](/architecture/agent-runtimes#the-runtime-contract). For opencode, that translates to:
 
-- The sidecar exposes a local AI-proxy listener at `localhost:11432` (see [Agent runtimes — Open extensions](/architecture/agent-runtimes#open-extensions)).
+- The sidecar will expose a local AI-proxy listener (port TBD; see [Agent runtimes — Open extensions](/architecture/agent-runtimes#open-extensions) for the unlanded sidecar work this depends on).
 - opencode's provider config lives in `/x1/app/config/opencode.json` (or whatever the upstream config name turns out to be) and points each enabled provider's base URL at `http://localhost:11432`.
 - opencode is started with `OPENCODE_PROVIDER=<name>` and `OPENCODE_MODEL=<id>` set per session (or whatever the upstream env-var names are — see [Open questions](#open-questions)).
 - The sidecar receives the request, looks up the workspace secret for the named provider, adds the auth header, forwards to the real upstream, returns the response.
@@ -79,27 +79,18 @@ The adapter is small (target: under 500 lines) and lives in `/x1/app/adapter/` i
 
 ## What the operator sees
 
-```yaml
-# Helm values that switch a workspace from Claude Code to opencode
-workspaces:
-  acme:
-    agentRuntime:
-      image: x1agent/runtime-opencode:v1
-    aiProviders:
-      anthropic:
-        secretRef:
-          name: anthropic-key
-          key: api-key
-      openai:
-        secretRef:
-          name: openai-key
-          key: api-key
-    permissionGrants:
-      - scope: ai.anthropic
-        models: ["claude-sonnet-4-5", "claude-haiku-4-5"]
-      - scope: ai.openai
-        models: ["gpt-5", "gpt-5-mini"]
-```
+An admin in the `acme` workspace:
+
+1. Stores their `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as
+   [workspace secrets](/providers/mcp-servers#workspace-secrets).
+2. Switches the workspace's agent runtime image to `x1agent/runtime-opencode:v1`
+   on the agent-config page (workspace-scoped setting, not a Helm value —
+   the install-wide chart never names a specific workspace).
+3. Grants the session the `ai.anthropic` and `ai.openai` scopes (with
+   optional model filters) through the existing
+   [permission grants](/security/permission-grants) flow, once the new
+   scope class lands per
+   [Agent runtimes — Open extensions](/architecture/agent-runtimes#open-extensions).
 
 When the agent runs, the user's choice of provider in the opencode TUI is gated by which providers are configured at the workspace level and which the session has been granted.
 

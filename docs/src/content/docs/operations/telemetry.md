@@ -39,9 +39,7 @@ Install the OpenTelemetry Operator — this manages `OpenTelemetryCollector` CRs
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 helm install opentelemetry-operator open-telemetry/opentelemetry-operator \
   --namespace opentelemetry-operator-system --create-namespace \
-  --set "manager.collectorImage.repository=otel/opentelemetry-collector-contrib" \
-  --set admissionWebhooks.certManager.enabled=false \
-  --set admissionWebhooks.autoGenerateCert.enabled=true
+  --set admissionWebhooks.certManager.enabled=true   # we already ship cert-manager via the chart
 ```
 
 (Same one-time-per-cluster pattern as ESO.)
@@ -105,7 +103,10 @@ The collector pod needs `roles/cloudtrace.agent`, `roles/monitoring.metricWriter
 | provider-preview | nats, undici, k8s | none yet |
 | provider-messaging-slack | nats | none yet |
 | provider-graph-surrealdb | nats | none yet |
+| provider-google-workspace | nats, undici | none yet |
 | app | (not bootstrapped — env vars set, init follow-up) | n/a |
+
+The chart only renders an `OpenTelemetryCollector` resource when `monitoring.opentelemetry.enabled=true`, and only sets `OTEL_EXPORTER_OTLP_ENDPOINT` env on the api + app + graph-surrealdb provider Deployments. If you enable preview / messaging-slack / google-workspace providers, verify those Deployment templates also project the OTel env (they may live under `deploy/helm/providers/` rather than the main chart — file a chart bug if not).
 
 Disabled by default in auto-instrumentations: `fs` and `dns` (too noisy in production). Override via `OTEL_NODE_DISABLED_INSTRUMENTATIONS` env if you need them for a specific debug session.
 

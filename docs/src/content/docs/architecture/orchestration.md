@@ -51,15 +51,18 @@ grant_type='spawn' and the child_agent_id you want. The user will see
 a dialog and can approve or deny.
 
 Tools:
-- spawn_session(agent_slug, prompt) → session_id. Starts a new session
-  of an agent you're permitted to spawn.
-- read_session(session_id, after_seq?) → { events, status, last_seq }.
-  Pulls the child's event log. Pass after_seq to read only newer
-  events.
-- message_session(session_id, text). Sends text to a child as if it
-  were a user message.
-- cancel_session(session_id). Terminates a child you spawned. Must be
-  followed by a `share` with a structured post-mortem in the same turn.
+- list_spawnable_agents() → [{id, slug, name}]. Returns the children
+  this session may spawn (resolved from active spawn grants).
+- spawn_session({child_agent_id}) → {session_id, status}. Starts a new
+  session of an agent you're permitted to spawn. Use child_agent_id from
+  list_spawnable_agents.
+- read_child_output({child_session_id, after_seq?, limit?}) →
+  {child: {id, status}, events: [{seq, type, payload, timestamp}]}.
+  Pulls the child's event log. Pass after_seq to read only newer events.
+- inject_message({child_session_id, text}). Sends text to a child as
+  if it were a user message.
+- expect_quiet_for({seconds, reason?}). Tell the platform you'll be
+  silent so the activity watchdog doesn't escalate you as stuck.
 
 Control flow:
 - You do not need to poll or block for child progress. The platform
@@ -225,11 +228,7 @@ Everything an orchestrator-flavored action reduces to five MCP tool calls. The s
 ### 1. Spawn a child
 
 ```
-spawn_session({
-  agent_slug: "code-writer",
-  prompt: "Refactor the checkout module to extract the validation logic",
-  request_id: "t_042"
-})
+spawn_session({ child_agent_id: "<uuid from list_spawnable_agents>" })
 ```
 
 The sidecar POSTs:
@@ -269,9 +268,10 @@ sequenceDiagram
 ### 2. Read a child's events
 
 ```
-read_session({
-  session_id: "019d...",
-  after_seq: 42       // optional cursor
+read_child_output({
+  child_session_id: "019d...",
+  after_seq: 42,
+  limit: 500
 })
 ```
 
@@ -298,9 +298,9 @@ Permission: the parent can read any session in its own workspace whose `parent_s
 The child agent calls:
 
 ```
-report_to_parent({
-  text: "I found three call sites that use the old validator. Should I update all of them?",
-  options: ["yes, update all", "list them first"]
+message_caller({
+  summary: "I found three call sites that use the old validator. Should I update all of them?",
+  ...
 })
 ```
 
@@ -323,8 +323,8 @@ The parent sidecar injects the message into its agent. The orchestrator sees it 
 ### 4. Message a child
 
 ```
-message_session({
-  session_id: "019d...",
+inject_message({
+  child_session_id: "019d...",
   text: "Yes, update all three. Commit after each file so we can review."
 })
 ```
@@ -333,7 +333,14 @@ The sidecar POSTs to the api's internal endpoint, which publishes to `x1.session
 
 Permission check is the same as `read_session`: the target session must have `parent_session_id = orchestrator's session id`.
 
-### 5. Cancel a child
+### 5. Cancellation (today: operator-side only)
+
+There is no `cancel_session` MCP tool today. To stop a child mid-flight,
+an operator uses `POST /api/workspaces/:slug/agents/:agentId/sessions/:id/cancel`
+or the cancel button on the session detail page. An orchestrator that
+needs cancellation as a primitive should file a request_grant for an
+operator to act, or end its turn and surface a `share` titled
+"Needs cancellation: <child slug>".
 
 ```
 cancel_session({ session_id: "019d..." })
@@ -367,10 +374,10 @@ Orchestrator pods use per-session PVCs:
 volumes:
   - name: workspace
     persistentVolumeClaim:
-      claimName: x1-session-{sessionId}
+      claimName: x1-session-{shortSessionId}   # first 12 chars of the session UUID
 ```
 
-The PVC is created by the Job watcher when the agent has any active persistent `spawn` grant. The `restartPolicy: OnFailure` + `backoffLimit: 6` combination lets the pod come back on node failure without the watcher noticing.
+The PVC is created by the Job watcher when the agent's `kind` is `orchestrator`. Whether the agent currently holds any `spawn` grants is independent — the PVC backs the SDK transcript's resume-on-restart contract that all orchestrators rely on. The `restartPolicy: OnFailure` + `backoffLimit: 6` combination lets the pod come back on node failure without the watcher noticing.
 
 Worker pods do not use PVCs. They're short-lived; a crashed worker is a failed session, not a restart.
 
