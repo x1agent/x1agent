@@ -111,19 +111,54 @@ function PlatformWakePill({
   );
 }
 
+// Stopgap until session_events rows carry real `source`, `kind`,
+// `from_session_id` columns. Historic rows (and rows persisted by an
+// older api before the .events subscriber learned to enrich) only
+// have `text`. We re-derive the wake kind from the well-known text
+// header so the pill renders. Stays in sync with the literals in
+// `format*WakeText` in packages/api/src/orchestration/wake-publisher.ts.
+function deriveWakeKindFromText(text: string): string | null {
+  if (!text.startsWith("[driverless wake:")) return null;
+  const closingBracket = text.indexOf("]");
+  if (closingBracket < 0) return null;
+  const header = text
+    .slice("[driverless wake:".length, closingBracket)
+    .trim();
+  if (header.startsWith("watchdog")) return "watchdog";
+  if (header.startsWith("scheduler heartbeat")) return "heartbeat";
+  if (header.startsWith("platform checkup")) return "checkup";
+  if (header.startsWith("message from child")) return "message";
+  if (
+    header.startsWith("child finished") ||
+    header.startsWith("child failed") ||
+    header.startsWith("child completed") ||
+    header.startsWith("child transitioned")
+  )
+    return "state_change";
+  return null;
+}
+
 function UserBubble({ event }: { event: SessionEventDTO }) {
   const payload = p(event);
   const fromSessionId = payload["from_session_id"] as string | undefined;
   const fromAgent = payload["from_agent_slug"] as string | undefined;
-  const source = payload["source"] as string | undefined;
-  const kind = payload["kind"] as string | undefined;
+  const sourceField = payload["source"] as string | undefined;
+  const kindField = payload["kind"] as string | undefined;
+  const text = typeof payload["text"] === "string"
+    ? (payload["text"] as string)
+    : "";
 
-  // Platform-originated wake: collapse to a pill so server-driven
-  // heartbeats and child state-change notifications don't look like
-  // multi-paragraph human messages cluttering the timeline. The full
-  // payload is one click away.
-  if (source === "platform" && kind && WAKE_KIND_LABELS[kind]) {
-    const { label, tint } = WAKE_KIND_LABELS[kind];
+  // Source-of-truth: explicit `source` / `kind` fields on the payload
+  // (set by the api's .events enricher for new rows). Fallback for
+  // historic rows that lack them: derive from the text header.
+  const fallbackKind =
+    !sourceField && !kindField ? deriveWakeKindFromText(text) : null;
+  const isPlatformWake =
+    (sourceField === "platform" && kindField && WAKE_KIND_LABELS[kindField]) ||
+    (fallbackKind && WAKE_KIND_LABELS[fallbackKind]);
+  if (isPlatformWake) {
+    const resolvedKind = (kindField ?? fallbackKind) as string;
+    const { label, tint } = WAKE_KIND_LABELS[resolvedKind];
     return <PlatformWakePill event={event} label={label} tint={tint} />;
   }
 
