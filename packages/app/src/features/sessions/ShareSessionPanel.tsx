@@ -257,18 +257,20 @@ export function ShareSessionPanel({
           </div>
           {/* `size="default"` matches the h-9 of Input/SelectTrigger
               by token, but visually the solid-filled button renders
-              about 1px taller than the bordered SelectTriggers — the
-              bordered controls absorb a pixel in their 1px border
-              that the button doesn't. `translate-y-px` is an
-              acknowledged one-off nudge to recenter against the
-              dropdowns; it shifts the button without changing the
-              flex layout. Drop if a future Button component fixes
-              the visual difference at the token level. */}
+              taller than the bordered SelectTriggers (the bordered
+              controls absorb pixels in their 1px border that the
+              button doesn't, plus inline-flex rhythm differences).
+              `mb-[5px]` is an empirically-tuned one-off — with
+              `items-end` on the form parent, the margin lifts the
+              button content so it visually centers against the
+              dropdowns instead of extending past their tops. Drop
+              if a future Button component fixes the visual
+              difference at the token level. */}
           <Button
             type="submit"
             size="default"
             disabled={busy || !recipientUserId}
-            className="translate-y-px"
+            className="mb-[5px]"
           >
             <UserPlus className="size-3.5" />
             <span className="ml-1">Share</span>
