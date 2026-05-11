@@ -7,7 +7,7 @@ x1agent is a Kubernetes-native platform for running LLM agents in production. It
 
 ## Core ideas
 
-**Agents run in isolated pods.** Each agent session is a Kubernetes Job with two containers: an agent container (untrusted, runs the LLM) and a sidecar container (trusted, holds credentials, enforces permissions). In production the agent container receives zero secrets — credentials live in the sidecar and are exchanged through the credential proxy. The local-dev path (OrbStack) currently mounts a Claude Code Max credentials file into the agent container as a hostPath for solo-developer convenience; see [Quickstart](/getting-started/quickstart) and `.env.example` for the dev-only `HOST_CLAUDE_CREDENTIALS_FILE` flow.
+**Agents run in isolated pods.** Each agent session is a Kubernetes Job with two containers: an agent container (untrusted, runs the LLM) and a sidecar container (trusted, holds credentials, enforces permissions). The agent container receives zero secrets — credentials live in the sidecar and are exchanged through the credential proxy. See [Quickstart](/getting-started/quickstart) for local-development setup.
 
 **Providers are swappable.** Authentication, knowledge graphs, file storage, messaging, calendars, email -- all pluggable. Providers are standalone services that communicate over NATS. Switch from Google Drive to OneDrive by changing a Helm value.
 
