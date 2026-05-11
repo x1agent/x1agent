@@ -4,6 +4,7 @@ import type { UserRepository } from "../../ports/user-repository.js";
 import type { User } from "../../domain/user.js";
 import type { AuthProfile } from "../../domain/auth-profile.js";
 import type { WorkspaceMembership } from "../../domain/auth-session.js";
+import type { GitIdentity } from "../../domain/git-identity.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -13,6 +14,8 @@ interface UserRow {
   name: string;
   avatar_url: string | null;
   is_active: boolean;
+  git_name: string | null;
+  git_email: string | null;
 }
 
 interface MembershipRow {
@@ -23,12 +26,21 @@ interface MembershipRow {
 }
 
 function toUser(r: UserRow): User {
+  // git_name / git_email are independent columns; we only surface a
+  // GitIdentity when both are populated. A half-set row (one column
+  // null, the other populated) is treated as "unset" — the api won't
+  // generate that shape (the form requires both), but be defensive.
+  const gitIdentity: GitIdentity | null =
+    r.git_name && r.git_email
+      ? { name: r.git_name, email: r.git_email }
+      : null;
   return {
     id: UserId(r.id),
     email: Email(r.email),
     name: r.name,
     avatarUrl: r.avatar_url,
     isActive: r.is_active,
+    gitIdentity,
   };
 }
 
@@ -37,14 +49,15 @@ export class PostgresUserRepository implements UserRepository {
 
   async findById(id: UserId): Promise<User | null> {
     const rows = await this.sql<UserRow[]>`
-      SELECT id, email, name, avatar_url, is_active FROM users WHERE id = ${id}
+      SELECT id, email, name, avatar_url, is_active, git_name, git_email
+      FROM users WHERE id = ${id}
     `;
     return rows[0] ? toUser(rows[0]) : null;
   }
 
   async findByEmail(email: Email): Promise<User | null> {
     const rows = await this.sql<UserRow[]>`
-      SELECT id, email, name, avatar_url, is_active
+      SELECT id, email, name, avatar_url, is_active, git_name, git_email
       FROM users WHERE lower(email) = ${email}
     `;
     return rows[0] ? toUser(rows[0]) : null;
@@ -62,9 +75,27 @@ export class PostgresUserRepository implements UserRepository {
         google_sub = COALESCE(users.google_sub, EXCLUDED.google_sub),
         last_login_at = now(),
         updated_at = now()
-      RETURNING id, email, name, avatar_url, is_active
+      RETURNING id, email, name, avatar_url, is_active, git_name, git_email
     `;
     return toUser(rows[0]!);
+  }
+
+  async setGitIdentity(
+    userId: UserId,
+    identity: GitIdentity | null,
+  ): Promise<void> {
+    // Single UPDATE so a clear (NULL on both columns) and a set (both
+    // columns) ride the same code path. The DB CHECK constraints from
+    // migration 046 reject control characters / oversized values
+    // defensively; the application layer's parseGitIdentity is the
+    // primary gate.
+    await this.sql`
+      UPDATE users
+         SET git_name = ${identity?.name ?? null},
+             git_email = ${identity?.email ?? null},
+             updated_at = now()
+       WHERE id = ${userId}
+    `;
   }
 
   async listMemberships(

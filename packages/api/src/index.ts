@@ -221,6 +221,7 @@ try {
 
 const {
   authRoutes,
+  meRoutes,
   workspaceInvitationRoutes,
   workspaceCreateRoutes,
   publicInvitationRoutes,
@@ -272,6 +273,7 @@ const {
   mcpAttachments: composedMcpAttachments,
   mcpCatalog: composedMcpCatalog,
   userTokenService: composedUserTokenService,
+  users: composedUsers,
   tickScheduler,
   quietHints: composedQuietHints,
 } = compose({
@@ -389,6 +391,7 @@ app.get("/auth/github/config", (c) =>
 );
 
 app.route("/auth", authRoutes);
+app.route("/api/me", meRoutes);
 app.route("/auth/github", githubInstallRoutes);
 app.route("/oauth/slack", slackOAuthRoutes);
 app.route("/api/workspaces/:slug/slack", slackBotApiRoutes);
@@ -687,6 +690,12 @@ if (process.env.JOB_WATCHER !== "disabled") {
       userTokenService: composedUserTokenService,
       mcpOAuthProxyImage:
         process.env.MCP_OAUTH_PROXY_IMAGE || "x1agent-mcp-oauth-proxy:latest",
+      // X1A-42: per-user git identity lookup at session-launch. The
+      // job-watcher reads this user's stored identity (set on the
+      // account page) and forwards it as GIT_AUTHOR_* / GIT_COMMITTER_*
+      // env on the agent container, so worker commits attribute to the
+      // human rather than `x1agent[bot]`.
+      users: composedUsers,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,
