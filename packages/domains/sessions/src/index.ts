@@ -43,6 +43,15 @@ export * from "./application/resume-session.js";
 export * from "./application/reconcile-session-status.js";
 export * from "./application/manage-session-shares.js";
 export {
+  resolveSessionVisibility,
+  pickSessionListMode,
+  type SessionVisibilityReason,
+  type SessionVisibilityResult,
+  type SessionVisibilityDeps,
+  type SessionListMode,
+  type PickSessionListModeDeps,
+} from "./application/session-visibility.js";
+export {
   maybeUpdateSessionSummary,
   DEFAULT_SUMMARY_CONFIG,
   type MaybeUpdateSessionSummaryConfig,

@@ -1,7 +1,6 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type postgres from "postgres";
 import {
-  DomainError,
   WorkspaceSlug,
   type Email,
   type UserId,
@@ -10,8 +9,11 @@ import {
 import type { AgentRepository } from "@x1agent/domain-agents";
 import {
   SessionId,
+  resolveSessionVisibility,
+  pickSessionListMode,
   type SessionEventRepository,
   type SessionRepository,
+  type SessionShareRepository,
   type AdminGuard,
 } from "@x1agent/domain-sessions";
 import { getMimeType, readShareFile } from "./storage.js";
@@ -33,6 +35,13 @@ export interface WorkspaceShareRoutesConfig {
   events: SessionEventRepository;
   agents: AgentRepository;
   adminGuard: AdminGuard;
+  /**
+   * Per-user share grants — used by the visibility check so a non-admin
+   * sharee can fetch the artefacts of a session granted to them. Without
+   * this the route degrades to admin+owner only (still secure, just
+   * less useful).
+   */
+  shares?: SessionShareRepository;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -80,7 +89,7 @@ export function createWorkspaceShareRoutes(
           Awaited<ReturnType<SessionRepository["findById"]>>
         >;
       }
-    | { error: "workspace_not_found" | "session_not_found" | "forbidden"; raised?: unknown }
+    | { error: "workspace_not_found" | "session_not_found" }
   > => {
     let wsId: WorkspaceId | null = null;
     try {
@@ -94,19 +103,18 @@ export function createWorkspaceShareRoutes(
     const agent = await cfg.agents.findById(session.agentId);
     if (!agent || agent.workspaceId !== wsId)
       return { error: "session_not_found" };
-    try {
-      await cfg.adminGuard.assertAdmin(actorId, agent.workspaceId);
-    } catch (err) {
-      return { error: "forbidden", raised: err };
-    }
+    // Owner ∪ admin ∪ sharee — the same primitive as
+    // createWorkspaceSessionRoutes. Pre-fix, this route was admin-only,
+    // which meant a session owner could see the event stream but not
+    // the share artefacts that the session emitted (X1A-9).
+    const decision = await resolveSessionVisibility(
+      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      actorId,
+      session,
+      agent.workspaceId,
+    );
+    if (!decision.visible) return { error: "session_not_found" };
     return { session };
-  };
-
-  const forbidBody = (raised: unknown) => {
-    if (raised instanceof DomainError) {
-      return { error: raised.code, message: raised.message };
-    }
-    return { error: "forbidden" };
   };
 
   // List every share published in this session. Derived from
@@ -122,8 +130,6 @@ export function createWorkspaceShareRoutes(
       actor.userId,
     );
     if ("error" in scope) {
-      if (scope.error === "forbidden")
-        return c.json(forbidBody(scope.raised), 403);
       return c.json({ error: scope.error }, 404);
     }
     // 5000 is the max allowed by the domain layer; shares are sparse
@@ -155,8 +161,6 @@ export function createWorkspaceShareRoutes(
       actor.userId,
     );
     if ("error" in scope) {
-      if (scope.error === "forbidden")
-        return c.json(forbidBody(scope.raised), 403);
       return c.json({ error: scope.error }, 404);
     }
 
@@ -220,6 +224,13 @@ export function createWorkspaceShareRoutes(
  * UI paginates client-side.
  *
  * Mount point: `/api/workspaces/:slug/shares`.
+ *
+ * Visibility (X1A-9): an admin sees every share in the workspace; a
+ * non-admin sees only shares from sessions visible to them — sessions
+ * they own (`triggered_by_user_id = actor`) or were explicitly granted
+ * via `session_user_shares`. The two branches share everything but the
+ * `WHERE` clause; the rule itself is decided by `pickSessionListMode`
+ * so adding group-share support later is a single-site change.
  */
 export interface WorkspaceSharesIndexConfig {
   sql: postgres.Sql<Record<string, unknown>>;
@@ -255,30 +266,57 @@ export function createWorkspaceSharesIndexRoutes(
       return c.json({ error: "workspace_not_found" }, 404);
     }
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
-    try {
-      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
-    } catch (err) {
-      if (err instanceof DomainError)
-        return c.json({ error: err.code, message: err.message }, 403);
-      return c.json({ error: "forbidden" }, 403);
-    }
-    const rows = await cfg.sql<SharesIndexRow[]>`
-      SELECT
-        se.session_id,
-        s.agent_id,
-        a.slug AS agent_slug,
-        a.name AS agent_name,
-        s.triggered_at AS session_triggered_at,
-        se.payload,
-        se.created_at
-      FROM session_events se
-      JOIN sessions s ON s.id = se.session_id
-      JOIN agents a ON a.id = s.agent_id
-      WHERE a.workspace_id = ${wsId}
-        AND se.type = 'agent.share'
-      ORDER BY se.created_at DESC
-      LIMIT 500
-    `;
+    // Admin → full workspace list. Non-admin → join through
+    // session_user_shares and OR with owner-of-session. The unique
+    // index on (session_id, user_id) means the LEFT JOIN cannot fan
+    // out, so DISTINCT isn't needed.
+    const listMode = await pickSessionListMode(
+      { adminGuard: cfg.adminGuard },
+      actor.userId,
+      wsId,
+    );
+    const rows =
+      listMode.mode === "all"
+        ? await cfg.sql<SharesIndexRow[]>`
+            SELECT
+              se.session_id,
+              s.agent_id,
+              a.slug AS agent_slug,
+              a.name AS agent_name,
+              s.triggered_at AS session_triggered_at,
+              se.payload,
+              se.created_at
+            FROM session_events se
+            JOIN sessions s ON s.id = se.session_id
+            JOIN agents a ON a.id = s.agent_id
+            WHERE a.workspace_id = ${wsId}
+              AND se.type = 'agent.share'
+            ORDER BY se.created_at DESC
+            LIMIT 500
+          `
+        : await cfg.sql<SharesIndexRow[]>`
+            SELECT
+              se.session_id,
+              s.agent_id,
+              a.slug AS agent_slug,
+              a.name AS agent_name,
+              s.triggered_at AS session_triggered_at,
+              se.payload,
+              se.created_at
+            FROM session_events se
+            JOIN sessions s ON s.id = se.session_id
+            JOIN agents a ON a.id = s.agent_id
+            LEFT JOIN session_user_shares us
+              ON us.session_id = s.id AND us.user_id = ${listMode.userId}
+            WHERE a.workspace_id = ${wsId}
+              AND se.type = 'agent.share'
+              AND (
+                s.triggered_by_user_id = ${listMode.userId}
+                OR us.id IS NOT NULL
+              )
+            ORDER BY se.created_at DESC
+            LIMIT 500
+          `;
     const shares = rows.map((r) => {
       const payload =
         typeof r.payload === "string"
