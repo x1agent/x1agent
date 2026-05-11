@@ -37,6 +37,7 @@ export interface ComposeSlackEnv {
   /** Same key used by workspace_secrets — slack tokens use the same key
    *  to keep key management to a single concern. */
   workspaceSecretsKey: MasterKey;
+  /** Per-platform Slack secrets — pull from .env. All three must be set
    *  for `configured` to be true; absent values turn the routes into
    *  stubs that report `slack_not_configured`. */
   platformClientId?: string;
