@@ -5,6 +5,20 @@ sidebar:
   order: 4
 ---
 
+:::caution
+**Implementation status — read this first.**
+
+Today's preview provider implements `provision` only (subscribes to
+`x1.providers.preview.provision`). The `sync`, `introspect`, `validate`,
+and `debug` capabilities and the per-preview sidecar routes are
+design — not shipped. The provider supports `entrypoint.kind:
+dockerfile` only; compose / helm / kustomize / manifest are accepted by
+the schema but raise typed errors. `share_type: preview` and the
+resurrect flow are also not yet implemented. Use this page as the
+architectural intent; cross-check with the running cluster before
+writing client code against any of the routes below.
+:::
+
 A **Preview Provider** gives a coding agent a safe, isolated environment to *run* the code it just wrote. Generated code has to execute somewhere to be verified — unit tests in the agent's workspace only get you so far. End-to-end testing needs real dependencies: a database, a cache, maybe a sibling service. The Preview Provider is the contract that says "spin up those dependencies, sync the agent's code into them, give the agent a way to observe results, and make sure a prompt-injected agent cannot turn this into a shell on your production cluster."
 
 ## The problem it solves
@@ -45,15 +59,27 @@ The loop is the point. The agent writes, deploys, tests, reads diagnostics, iter
 
 Three required capabilities plus one optional. Any provider that implements the required three is a valid Preview Provider regardless of target (Kubernetes, EC2, serverless, Nomad, bare metal).
 
-### Required
+### Required (target)
 
-**`sync`** — Move code from the agent's workspace into the preview environment, unidirectionally. Agent writes files; provider pushes them. The provider MUST NOT read environment state back into the agent's workspace. This direction is deliberate: one-way sync prevents a compromised agent from using the channel to exfiltrate preview-environment state (like test database contents).
+**`provision`** *(implemented in v1)* — Spin up the preview environment
+based on a declarative spec. The provider subscribes to
+`x1.providers.preview.provision` (note: subject will rename to
+`x1.provider.preview.provision` to match the convention used by other
+providers).
 
-**`provision`** — Spin up and tear down the preview environment based on a declarative spec. The canonical spec format is [`.x1agent/preview.yaml`](/reference/preview-spec) at the repo root — a small JSONSchema-backed file with five `entrypoint.kind` values (dockerfile, compose, helm, kustomize, manifest). Providers MUST accept this format; individual `kind`s may be unsupported per provider and will surface in validation.
+**`sync`** *(design)* — Move code from the agent's workspace into the
+preview environment, unidirectionally.
 
-**`validate`** — Dry-run the spec against the repo without deploying, returning `{ ok, errors, warnings }` with structured field paths pointing at problems. The orchestrator agent calls this before handing work to a coding agent so bad config gets caught before an expensive build. The same validator runs again as step zero of every `provision`; a repo can drift between dry-run and deploy.
+**`validate`** *(design)* — Dry-run the spec without deploying.
 
-**`introspect`** — Return read-only diagnostic data about the running environment: pod/container status, logs, service endpoints, recent events. Introspection is never mutation — no exec, no patch, no delete. If an agent needs to mutate the environment, it does it by calling `provision` again with a new spec.
+**`introspect`** *(design)* — Return read-only diagnostic data about
+the running environment.
+
+The canonical spec format is [`.x1agent/preview.yaml`](/reference/preview-spec)
+at the repo root. The schema names five `entrypoint.kind` values
+(dockerfile, compose, helm, kustomize, manifest); the v1 reference
+provider accepts only `dockerfile` and rejects the others with a typed
+error.
 
 ### Optional
 
@@ -180,16 +206,21 @@ This is the motivation for every constraint below. If it looks paranoid, that's 
 
 No kubectl in the agent container. Not even an RBAC-gated one. Installing kubectl as a second line of defense is a single line-of-defense in practice — once an agent has kubectl, the full K8s api surface is in reach and the only thing between the agent and damage is whatever RBAC you configured, which will be wrong in a subtle way sooner or later.
 
-Instead, kubectl-equivalent operations are wrapped by the sidecar as narrow, purpose-specific APIs:
+The intended sidecar surface — **none of these are implemented today**:
 
 ```
 GET  /preview/:slug/logs?container=&tail=500&follow=false
 GET  /preview/:slug/status
 GET  /preview/:slug/events
-POST /preview/:slug/sync           # trigger a workspace sync
-POST /preview/:slug/redeploy       # trigger a fresh provision
-POST /preview/:slug/debug/run      # debug capability, gated
+POST /preview/:slug/sync
+POST /preview/:slug/redeploy
+POST /preview/:slug/debug/run
 ```
+
+The only agent-facing entry point in v1 is the `preview_deploy` MCP
+tool, which calls `POST /api/internal/preview/deploy` on the api,
+which forwards to the provider over NATS. There is no logs / status /
+events read path.
 
 Each route enforces the slug belongs to a preview the calling agent owns, rate-limits, and logs audit entries. The agent calls JSON; the sidecar calls kubectl.
 
@@ -241,7 +272,11 @@ The agent is untrusted. The code the agent *writes* and deploys into a preview i
 
 The effect: a compromised preview (either an agent-authored bug or a prompt-injected exploit stage-2 trying to pivot from the preview) can mess up its own environment and nothing else. It cannot reach out of its namespace, cannot read secrets it wasn't explicitly given, cannot escalate privileges, cannot talk to the cloud-provider metadata endpoint to grab IAM credentials.
 
-The Preview Provider enforces these constraints at admission time — its `provision` implementation applies a [Pod Security Standards `restricted`](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile label on the preview namespace, and kubernetes rejects any pod spec that violates it. Operators can run a stricter policy engine (Kyverno, OPA Gatekeeper) on top; the provider's defaults are compatible.
+These constraints are the design target. The v1 provider does **not**
+yet apply the `pod-security.kubernetes.io/enforce: restricted` label
+on the preview namespace; operators who need this should set it
+manually on the preview namespace until the provider does it
+automatically.
 
 ## Preview persistence and session resurrection
 

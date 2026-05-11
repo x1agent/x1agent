@@ -5,6 +5,15 @@ sidebar:
   order: 7
 ---
 
+:::caution[Status: trajectory, not shipping reality]
+Today the platform ships **one** runtime: the Claude Agent SDK, baked into
+the image labelled `runtime-core` (see [Runtime images](/architecture/runtime-images)).
+This page describes the contract every future runtime will satisfy and the
+work needed to land the second one. Sections marked _Planned_ are not yet
+implemented in code; the trajectory is tracked in
+[`ROADMAP.md`](https://github.com/x1agent/x1agent/blob/main/ROADMAP.md).
+:::
+
 x1agent runs LLM coding agents inside isolated pods. The agent CLI itself — Claude Code, opencode, Codex, Pi — is the **agent runtime**. The platform is deliberately runtime-plural: an admin picks which CLI runs in their session, and the same workspace, sidecar, and permission model wraps any of them.
 
 This doc specifies why that plurality exists, what each runtime must implement to integrate, and how the platform-maintained runtime images relate.
@@ -80,10 +89,10 @@ The platform ships these images. New ones are added by writing the corresponding
 
 | Runtime | Image | License | Models supported | Status |
 |---|---|---|---|---|
-| Claude Code | `x1agent/runtime-claude-code:v1` | Anthropic, source-available | Anthropic only (api.anthropic.com or Vertex) | shipping (rename of current `runtime-core`) |
-| opencode | `x1agent/runtime-opencode:v1` | Apache 2.0 | Anthropic, OpenAI, Bedrock, Vertex, local Ollama, others | spec in [runtimes/opencode](/architecture/runtimes/opencode), implementation pending |
-| Codex CLI | `x1agent/runtime-codex:v1` | Apache 2.0 | OpenAI only | spec in [runtimes/codex](/architecture/runtimes/codex), implementation pending |
-| Pi | `x1agent/runtime-pi:v1` | TBD | TBD | spec stub in [runtimes/pi](/architecture/runtimes/pi) — needs upstream pointer |
+| Claude Code | `x1agent/runtime-core:v1` _(rename to `runtime-claude-code` planned)_ | Anthropic, source-available | Anthropic only (api.anthropic.com or Vertex) | **shipping** |
+| opencode | `x1agent/runtime-opencode:v1` | Apache 2.0 | Anthropic, OpenAI, Bedrock, Vertex, local Ollama, others | _spec only_ — see [runtimes/opencode](/architecture/runtimes/opencode); no image, no adapter |
+| Codex CLI | `x1agent/runtime-codex:v1` | Apache 2.0 | OpenAI only | _spec only_ — see [runtimes/codex](/architecture/runtimes/codex); no image, no adapter |
+| Pi | `x1agent/runtime-pi:v1` | TBD | TBD | _stub_ — see [runtimes/pi](/architecture/runtimes/pi); upstream pointer needed |
 
 The choice of which to ship first is opinionated. The first non-Claude runtime should be **opencode**, because it is the only candidate that is itself runtime-plural at the model layer. Adopting opencode gives an x1agent operator access to every major commercial model and any local Ollama-compatible model from one runtime image. That's the strongest single answer to the "single point of provider failure" problem motivated above.
 
@@ -106,9 +115,9 @@ Two pieces of the platform need to grow before the second runtime is fully integ
 
 ### AI-inference proxy in the sidecar
 
-Today the sidecar terminates OAuth-token-bearing requests over NATS. To keep AI provider keys out of the agent container, the sidecar also needs to terminate AI inference HTTPS:
+_Planned, not implemented._ Today the sidecar (`packages/sidecar/`) terminates OAuth-token-bearing requests over NATS and exposes only `:9090` to the agent container. To keep AI provider keys out of the agent container, the sidecar will also need to terminate AI inference HTTPS:
 
-- A local TCP listener inside the pod (e.g. `localhost:11432`).
+- A local TCP listener inside the pod (port TBD; `:11432` is a placeholder until the sidecar lands a route).
 - The agent CLI is configured with `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `BEDROCK_BASE_URL` pointing at that listener.
 - The sidecar adds the actual provider key from the workspace's secret store and forwards to the real upstream.
 - Audit log entry per call (provider, model, token counts, scope).
@@ -117,7 +126,7 @@ This is a **proper extension** of the credential-proxy pattern, not a new mechan
 
 ### Permission ledger entries for AI providers
 
-Provider scopes today are OAuth scopes (`files.read`, `calendar.write`). The same ledger needs entries for AI inference: `ai.anthropic`, `ai.openai`, `ai.bedrock`, `ai.vertex`, with optional model filters (`ai.anthropic:claude-sonnet-4-5`, `ai.openai:gpt-*`). Operators control which sessions can call which models. This makes "we accidentally burned $5k on opus while testing a haiku-grade task" preventable rather than postmortem material.
+_Planned, not implemented._ Today the registered grant types are `spawn` and `tool_scope` (see `packages/domains/permissions/src/domain/details/registry.ts`). The ledger needs new entries for AI inference: `ai.anthropic`, `ai.openai`, `ai.bedrock`, `ai.vertex`, with optional model filters (`ai.anthropic:claude-sonnet-4-5`, `ai.openai:gpt-*`). Operators would then control which sessions can call which models. This makes "we accidentally burned $5k on opus while testing a haiku-grade task" preventable rather than postmortem material.
 
 ### Existing code that's Claude-coupled
 
@@ -125,22 +134,22 @@ The save-time validators, the agent SDK at `packages/agent/`, and the entrypoint
 
 - `packages/agent/Dockerfile` becomes the Claude-Code-specific runtime image. The shared overlay scaffolding (gitconfig, gh shim, entrypoint contract) lifts into a smaller `x1agent/runtime-base` image that all runtimes COPY from.
 - The entrypoint script's `exec node /x1/app/src/run.ts` is Claude-Code-specific. Each runtime's `/x1/app/` provides its own entrypoint binary; the shared script becomes a 5-line dispatcher.
-- The image-save validator's check for `@anthropic-ai/claude-code` in `package.json` is replaced with "image declares a valid runtime label, e.g. `org.x1agent.runtime=opencode`".
+- The image-save validator (`packages/domains/image-catalog/src/domain/dockerfile-source.ts`) does not currently inspect image contents — it validates Dockerfile directives only. A new check is added: the resulting image must carry an `org.x1agent.runtime=<known>` label (e.g. `org.x1agent.runtime=opencode`).
 
 None of these are big refactors. They're each contained changes, but the work is real and lives under [Implementation arc](#implementation-arc).
 
 ## Implementation arc
 
-A roughly-ordered sequence to land the second runtime. Each step is independently mergeable.
+A roughly-ordered sequence to land the second runtime. Each step is independently mergeable. **All steps are currently in status _not started_.**
 
-1. **Rename `runtime-core` to `runtime-claude-code`** (and split out `runtime-base` as the shared overlay scaffolding). The current image keeps shipping under the old tag for one minor version to avoid breakage.
-2. **Sidecar AI proxy.** Implement the `localhost:11432` listener, the workspace-secret-backed provider lookup, and the audit log entry. Write the contract tests.
-3. **Permission ledger AI entries.** Add the new scope class, plumb it through the consent UI, gate the proxy on it.
-4. **Build `runtime-opencode:v1`.** New Dockerfile, opencode CLI installed, adapter that translates opencode's session events to `:3100` SSE. Validate the contract end-to-end against a real session.
-5. **Validator updates.** Accept any image with `org.x1agent.runtime=<name>` where `<name>` is in the supported list; reject hard-coded Claude assumptions.
-6. **Build `runtime-codex:v1`.** Same pattern as opencode, narrower in model scope.
-7. **`runtime-pi:v1`.** Pending an upstream pointer (see [runtimes/pi](/architecture/runtimes/pi)).
-8. **Docs and the admin UI.** Make the runtime choice visible in the admin agent-config screen. Default to Claude Code; opencode is one click away.
+1. **Rename `runtime-core` to `runtime-claude-code`** _(not started)_ — and split out `runtime-base` as the shared overlay scaffolding. The current image keeps shipping under the old tag for one minor version to avoid breakage.
+2. **Sidecar AI proxy** _(not started)_ — implement the local listener, the workspace-secret-backed provider lookup, and the audit log entry. Write the contract tests.
+3. **Permission ledger AI entries** _(not started)_ — add the new scope class, plumb it through the consent UI, gate the proxy on it.
+4. **Build `runtime-opencode:v1`** _(not started)_ — new Dockerfile, opencode CLI installed, adapter that translates opencode's session events to `:3100` SSE. Validate the contract end-to-end against a real session.
+5. **Validator updates** _(not started)_ — accept any image with `org.x1agent.runtime=<name>` where `<name>` is in the supported list; reject hard-coded Claude assumptions.
+6. **Build `runtime-codex:v1`** _(not started)_ — same pattern as opencode, narrower in model scope.
+7. **`runtime-pi:v1`** _(not started)_ — pending an upstream pointer (see [runtimes/pi](/architecture/runtimes/pi)).
+8. **Docs and the admin UI** _(not started)_ — make the runtime choice visible in the admin agent-config screen. Default to Claude Code; opencode is one click away.
 
 ## What this doc does not cover
 

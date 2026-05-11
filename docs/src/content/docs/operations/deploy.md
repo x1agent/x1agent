@@ -5,10 +5,11 @@ sidebar:
   order: 2
 ---
 
-`x1agent install` sets up the cluster the first time — Terraform, ESO,
-cert-manager, ingress, GSM secrets, the chart. After that runs once,
-**`x1agent deploy` is what ships code**: build images, push to Artifact
-Registry, run migrations, helm-upgrade.
+`mise run install:prod` sets up the cluster the first time — Terraform,
+ESO, cert-manager, ingress, GSM secrets, the chart. After that runs once,
+**`mise run deploy:prod` is what ships code**: build images, push to
+Artifact Registry, helm-upgrade (which runs the migration as a
+post-upgrade hook).
 
 ## The contract
 
@@ -16,22 +17,27 @@ Every deploy:
 
 1. Tags every image with the same string (default: `git rev-parse --short HEAD`).
 2. Pushes those images to the deployment's Artifact Registry.
-3. Helm-upgrades the chart. A `pre-upgrade` Job runs the migrator
-   against in-cluster Postgres before any api or app pod cycles.
-4. Only after the Job succeeds does helm roll the workloads.
+3. Helm-upgrades the chart. The chart's regular templates apply first
+   (api/app Deployments may briefly start against the old schema and
+   crash-loop if the new image references a not-yet-applied column).
+4. After the regular apply, a `post-install,post-upgrade` Job runs the
+   migrator against in-cluster Postgres. The api stabilizes once the
+   schema lands.
 
-This means the image and its migrations always ship together. A new
-column the api expects is in place before any pod that reads it starts.
+This means the image and its migrations ship together but apply in the
+order: workloads → migration → workloads heal. Plan migrations
+backwards-compatible against the previous deployed image until the
+release after the rollout is in production. (See [migrate-job.yaml](https://github.com/x1agent/x1agent/blob/main/deploy/helm/x1agent/templates/migrate-job.yaml) for the hook config.)
 
 ## Manual deploy
 
 ```sh
-# from a checkout, with the active deployment selected via
-# installs/<basedomain>.local
+# From a monorepo checkout. The active deployment is selected via
+# installs/<base-domain>.local — see `mise run deployments` to list.
 mise run deploy:prod
 
-# or directly
-cd packages/cli && bun run src/index.ts deploy
+# Or directly:
+cd packages/cli && bun run src/index.ts deploy [flags]
 ```
 
 Flags:
@@ -44,7 +50,7 @@ Flags:
 
 ```sh
 # rollback to a previous build
-x1 deploy --yes --tag a1b2c3d --skip-build
+mise run deploy:prod -- --yes --tag a1b2c3d --skip-build
 ```
 
 ## CI/CD
@@ -151,3 +157,7 @@ Two paths:
 These are intentional: `deploy` should be safe to run from CI on every
 green main. Anything that touches IAM, DNS, or persistent state stays
 behind the bigger `install` command.
+
+`deploy` also does not update the `OpenTelemetryCollector` resource
+(still gated by `monitoring.opentelemetry.enabled`) or NATS stream
+definitions (those need `mise run install:prod:apply` to re-render).

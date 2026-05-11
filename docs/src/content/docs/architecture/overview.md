@@ -73,21 +73,24 @@ sequenceDiagram
 | NATS | Deployment | Event bus. Session events, user input, provider communication. |
 | PostgreSQL | StatefulSet | Relational state. Users, agents, sessions, workspaces. |
 | Frontend | Deployment | Astro + React SPA. Agent management, session viewer, admin. |
-| Provider services | Deployments | Pluggable integrations. Graph, files, messaging, calendar, etc. |
+| Provider services | Deployments | Pluggable NATS-subscribed integrations. Today: graph-surrealdb (graph + vector), google-workspace (files, docs, sheets, calendar, email), messaging-slack, preview. |
 | Session pods | Jobs (dynamic) | One per active session. Agent + sidecar, short-lived. |
-| Operator (optional) | Deployment | Reconciles X1Session CRDs into Jobs. |
+| Job watcher | In-process loop in api | Polls pending sessions and creates Kubernetes Jobs. (No CRDs / operator today; see proposals/operator.md if and when one lands.) |
 
 ## NATS subject conventions
 
 All session messages use a standard subject hierarchy:
 
 ```
-x1.session.{session_id}.events    -- sidecar publishes, clients subscribe
-x1.session.{session_id}.input     -- clients publish, sidecar subscribes
-x1.session.{session_id}.proxy.*   -- provider credential proxy requests
+x1.session.{session_id}.events    -- sidecar publishes, clients subscribe (X1Message envelope)
+x1.session.{session_id}.input     -- clients publish, sidecar subscribes (user input)
+x1.session.{session_id}.audit     -- sidecar publishes, api persists (privileged HTTP audit log)
+x1.session.{session_id}.presence  -- browser publishes, sidecar tracks (keepalive)
 
-x1.provider.{domain}.*            -- provider request/reply (graph, files, etc.)
-x1.session.{id}.lifecycle.*       -- session lifecycle events (started, completed)
+x1.provider.{domain}.*            -- provider request/reply (graph, vector, files, docs, sheets, calendar, email)
+x1.providers.preview.provision    -- preview provider (note: plural "providers" — a known inconsistency)
+
+x1.image.build                    -- image-builder consumes for in-cluster Kaniko builds
 ```
 
 ## Agent runtimes
@@ -101,6 +104,6 @@ The platform treats agent runtimes as pluggable. A runtime must expose two HTTP 
 
 Built-in runtimes:
 
-- **claude_code** -- Claude Agent SDK (TypeScript). Multi-turn via `streamInput()`. MCP servers for tools and proactive emission.
+- **claude_code** -- Claude Agent SDK (TypeScript). Multi-turn via `streamInput()`. MCP servers for tools and proactive emission. **This is the only runtime accepted by `agents.runtime_type` today** (see `packages/domains/agents/src/domain/runtime.ts`).
 
-Custom runtimes can be added by implementing these two endpoints in any language.
+Other runtimes (Codex, Gemini, opencode, Pi) are documented under `architecture/runtimes/` as forward-looking shapes; adding one requires extending `RUNTIME_TYPES` and shipping a runtime image. Custom runtimes will be supported by implementing the two HTTP endpoints in any language.

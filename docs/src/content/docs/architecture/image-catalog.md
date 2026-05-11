@@ -90,16 +90,13 @@ packages/domains/image-catalog/
         image-status.ts               # the state-machine enum
         image-ref.ts                  # registry/path@sha256:digest
     application/
-      list-images.ts
-      get-image.ts
-      create-workspace-image.ts
-      update-dockerfile.ts
-      request-rebuild.ts
-      delete-workspace-image.ts
+      image-catalog-service.ts          # methods: listImages, getImage,
+                                        # createWorkspaceImage, updateDockerfile,
+                                        # requestRebuild, deleteWorkspaceImage
     ports/
       agent-image-repository.ts
-      build-queue.ts                  # publishes x1.image.build.<id>
-      agent-reader.ts                 # cross-domain workspace check
+      build-queue.ts
+      agent-image-usage-reader.ts       # cross-domain workspace check
     adapters/
       postgres/
         postgres-agent-image-repository.ts
@@ -111,7 +108,7 @@ packages/domains/image-catalog/
 
 ## API surface
 
-All routes are workspace-scoped under `/workspaces/:slug/images`. Every handler resolves the workspace from the URL slug and the actor's membership ([workspace tenant isolation](/security/workspace-isolation)). Mutations operate only on rows where `workspace_id` matches.
+All routes are workspace-scoped under `/workspaces/:slug/images`. Every handler resolves the workspace from the URL slug and the actor's membership ([workspace tenant isolation — a load-bearing rule from CLAUDE.md, principle 7]). Mutations operate only on rows where `workspace_id` matches.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -234,9 +231,9 @@ The Kaniko Job pushes both `:latest` and resolves the digest. Digest goes in `bu
 - Per-row actions on workspace rows: **Edit**, **Rebuild**, **Delete**. Edit reopens the drawer pre-filled. Rebuild fires `POST /:id/rebuild`. Delete confirms first; rejects with the agent list if any agent references the image.
 - Polling: while any row is `pending` or `building`, the page polls `GET /` every 2 seconds. Stops polling when no rows are transient.
 
-State management: a new `useImageCatalogStore` (zustand) following the [zustand pattern](/architecture/frontend-state). Selectors:
+State management: a new `useImageCatalogStore` (zustand) following the established frontend-state pattern (normalized cache, async actions, selector referential stability — see CLAUDE.md "Frontend state management"). Selectors:
 
-- `s.byWorkspaceSlug[slug] ?? []` — list, with referential stability ([selector foot-gun](/architecture/frontend-state#selector-stability)).
+- `s.byWorkspaceSlug[slug] ?? []` — list, with referential stability so React doesn't tear on every render.
 - Actions: `load`, `create`, `update`, `rebuild`, `delete`. Each hits `apiFetch` and writes the result back.
 
 Real Monaco editor with Dockerfile syntax highlighting is Slice D polish, not v1.
@@ -247,7 +244,7 @@ Real Monaco editor with Dockerfile syntax highlighting is Slice D polish, not v1
 
 ## Workspace tenant isolation
 
-This feature is a [tenant-isolation](/security/workspace-isolation) load-bearing path. The cross-tenant attack surface:
+This feature is a [tenant-isolation — a load-bearing rule from CLAUDE.md, principle 7] path. The cross-tenant attack surface:
 
 - A workspace admin in workspace A submits a `dockerfile_source` that builds in workspace A's namespace but somehow references workspace B's registry path. Mitigated: the destination is computed server-side from the URL workspace, not from the Dockerfile body.
 - A user in workspace A asks to read or modify an image owned by workspace B. Mitigated: every API handler resolves the URL workspace, then verifies the row's `workspace_id` matches before any read or write. Rows with `is_preset=true` are read-only to everyone.

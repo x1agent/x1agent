@@ -7,7 +7,25 @@ sidebar:
 
 Agents need to edit code. Some agents need to push it. Most don't. This page describes how x1agent gives an agent a writable checkout of a repository, and how push capability is gated independently — without relying on GitHub's own scope model to do the gating.
 
-This is design-level; the push-gating flag is not yet implemented. Today every attached repo is implicitly push-enabled. The fix is tracked in the follow-ups section below.
+`allow_push` ships. New attachments default to `false` (safe-by-default).
+Pre-migration attachments were backfilled to `true` to avoid breaking
+running sessions. Operators flip per-repo via the agent edit screen or
+the api. Sidecar enforces in `git.rs` — when no attached repo on the
+session has `allow_push=true`, the credential helper returns
+`403 push_denied`.
+
+### Caveat: today's gate is per-session, not per-repo
+
+The sidecar's check (`packages/sidecar/src/git.rs`) is coarse: if ANY
+attached repo on the session has `allow_push=true`, the credential
+helper hands out a token for ALL repos on the session. An agent with
+one push-enabled repo and one read-only repo can use the minted token
+to push to either.
+
+Per-repo enforcement requires parsing the git credential-helper stdin
+to identify the target remote URL. Tracked as a follow-up. Until it
+lands, treat `allow_push` as "this session can push to its repos" —
+not "this session can push to this specific repo only."
 
 ## Why not gate at GitHub
 
@@ -76,6 +94,27 @@ What changes with `allow_push = false` is the final step: `git push` fails becau
 
 This matters because agents do a lot of useful work — scaffolding, refactoring, bug hunting — whose value doesn't require pushing anywhere. Write access to the filesystem is not the same as write access to the remote.
 
+### What `allow_push = true` actually grants
+
+When push is allowed, the credential helper returns a real GitHub
+installation token (`ghs_...`) to `git`. That token is:
+
+- Visible in the agent process's memory for the duration of the push.
+- Visible in `git`'s own subprocess argv / env briefly while the helper
+  protocol is exchanging it.
+- Scoped to the GitHub App install's full set of repos — not narrowed
+  to the requesting attachment.
+
+A prompt-injection that gains shell access during the push window
+can read this token. Treat `allow_push=true` as "this agent's bash
+can push" rather than "this agent can push only via git push."
+
+Token lifetime is short (GitHub App installation tokens expire in 1h)
+so persistence is bounded, but exfiltration during the window is a real
+risk. This is inherent to handing the agent a credential at all; the
+mitigation is keeping `allow_push=false` for agents that don't actually
+need to push.
+
 ## The attachment shape
 
 Each agent-repo attachment carries policy. The shape:
@@ -119,6 +158,11 @@ For the first pass, simplest-working: when `allow_push = false`, the credential 
 
 ## Follow-ups
 
-- **Implement `allow_push` on attachments.** Schema, UI, sidecar enforcement. Default is `false`.
-- **Sidecar runs as uid 1000.** Currently the sidecar runs as root, drops `CAP_CHOWN`, and tries to `chown` the cloned tree to 1000 — which silently fails because the capability is gone. Agents work around this by re-cloning into an agent-owned subdirectory, wasting tokens and disk. Fix: add a uid 1000 user to `packages/sidecar/Dockerfile` and set `runAsUser: 1000` on the sidecar container in the session pod spec. This is the follow-up the Apr 19 PodSecurityContext commit called out; doing it closes the perm gap and removes the agent's need to route around the platform.
-- **Fetch refresh from the sidecar.** Periodic `git fetch` in the sidecar keeps the checkout up to date without the agent needing egress credentials.
+- **Per-repo (not per-session) push gating.** The sidecar coarse-gates
+  on "any attached repo allows push." Per-repo would require parsing
+  the credential-helper protocol's remote URL.
+- **Fetch refresh from the sidecar.** Periodic `git fetch` so the
+  checkout stays up to date without the agent needing egress creds
+  every time.
+- **GitLab / Gitea / Bitbucket credential mint.** Same shape, different
+  endpoint.
