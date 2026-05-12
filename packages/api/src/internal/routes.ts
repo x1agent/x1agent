@@ -3,8 +3,10 @@ import { DomainError, systemClock } from "@x1agent/kernel";
 import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
 import { AgentId, type AgentRepository } from "@x1agent/domain-agents";
 import type {
+  AgentCostWindow,
   SessionEventRepository,
   SessionRepository,
+  TokenUsageRepository,
 } from "@x1agent/domain-sessions";
 import {
   SessionId,
@@ -30,6 +32,14 @@ export interface InternalRoutesConfig {
   sessions: SessionRepository;
   agents: AgentRepository;
   grants: PermissionGrantRepository;
+  /**
+   * Cost rollups exposed to the agent via the `/cost/*` internal
+   * routes. Forwarded by the sidecar to the agent's MCP tools
+   * (`get_session_cost`, `get_session_tree_cost`, `get_agent_cost`).
+   * Optional only for symmetry with the rest of the config; in
+   * practice the composition root always wires it.
+   */
+  tokenUsage?: TokenUsageRepository;
   githubClient: GitHubAppClient | null;
   internalToken: string;
   /**
@@ -694,6 +704,67 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         502,
       );
     }
+  });
+
+  // ── Cost surfacing (X1A-37). Internal routes the sidecar forwards
+  // the agent's MCP tools to. The agent never sees workspace_id —
+  // we resolve it from session_id here so the tool surface is
+  // "what's MY cost right now" with no cross-tenant arguments.
+
+  // GET /sessions/:sessionId/cost — sidecar forwards from /cost/session.
+  app.get("/sessions/:sessionId/cost", async (c) => {
+    if (!cfg.tokenUsage) return c.json({ error: "cost_disabled" }, 503);
+    const sessionId = c.req.param("sessionId")!;
+    const session = await cfg.sessions.findById(sessionId as never);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+    const agent = await cfg.agents.findById(session.agentId);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    const rollup = await cfg.tokenUsage.rollupForSession({
+      sessionId,
+      workspaceId: agent.workspaceId,
+    });
+    return c.json(rollup);
+  });
+
+  // GET /sessions/:sessionId/cost-tree — sidecar forwards from
+  // /cost/session-tree.
+  app.get("/sessions/:sessionId/cost-tree", async (c) => {
+    if (!cfg.tokenUsage) return c.json({ error: "cost_disabled" }, 503);
+    const sessionId = c.req.param("sessionId")!;
+    const session = await cfg.sessions.findById(sessionId as never);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+    const agent = await cfg.agents.findById(session.agentId);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    const rollup = await cfg.tokenUsage.rollupForSessionTree({
+      sessionId,
+      workspaceId: agent.workspaceId,
+    });
+    return c.json(rollup);
+  });
+
+  // GET /sessions/:sessionId/agent-cost?window=24h|7d|30d|all —
+  // resolves agent_id + workspace_id from the session so the agent's
+  // MCP tool can self-roll-up without ever naming a workspace.
+  // Sidecar forwards from /cost/agent.
+  app.get("/sessions/:sessionId/agent-cost", async (c) => {
+    if (!cfg.tokenUsage) return c.json({ error: "cost_disabled" }, 503);
+    const sessionId = c.req.param("sessionId")!;
+    const session = await cfg.sessions.findById(sessionId as never);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+    const agent = await cfg.agents.findById(session.agentId);
+    if (!agent) return c.json({ error: "agent_not_found" }, 404);
+    const windowRaw = c.req.query("window") ?? "7d";
+    const ok: readonly AgentCostWindow[] = ["24h", "7d", "30d", "all"];
+    const window = (ok as readonly string[]).includes(windowRaw)
+      ? (windowRaw as AgentCostWindow)
+      : "7d";
+    const rollup = await cfg.tokenUsage.rollupForAgent({
+      agentId: agent.id,
+      workspaceId: agent.workspaceId,
+      window,
+      now: new Date(),
+    });
+    return c.json(rollup);
   });
 
   return app;

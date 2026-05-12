@@ -75,6 +75,19 @@ export {
 export { createSessionShareRoutes } from "./adapters/hono/share-routes.js";
 export type { SessionShareRoutesConfig } from "./adapters/hono/share-routes.js";
 export { createWorkspaceTokenUsageRoutes } from "./adapters/hono/token-usage-routes.js";
+export { createWorkspaceCostRoutes } from "./adapters/hono/cost-routes.js";
+export type { CostRoutesConfig } from "./adapters/hono/cost-routes.js";
+export type {
+  AgentCostWindow,
+  AgentSessionCost,
+  AgentTokenUsageRollup,
+  SessionTokenUsageRollup,
+  SessionTreeChildCost,
+  SessionTreeRollup,
+  TokenUsageByDay,
+  TokenUsageByModel,
+  TokenUsageTotals,
+} from "./ports/token-usage-repository.js";
 
 // Fakes
 export * from "./application/fakes.js";

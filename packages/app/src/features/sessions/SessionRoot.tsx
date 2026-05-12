@@ -11,6 +11,7 @@ import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { ChildWorkersCounter } from "./ChildWorkersCounter";
+import { SessionCostBlock } from "./SessionCostBlock";
 import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
@@ -290,8 +291,22 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
-          <SessionTitle session={session ?? null} sessionId={sessionId} />
+        <div className="flex min-w-0 items-start gap-3 border-b border-border-soft px-4 py-2.5">
+          <div className="min-w-0 flex-1">
+            <SessionTitle session={session ?? null} sessionId={sessionId} />
+          </div>
+          {/* X1A-37 — live cost block + transitive tree breakdown.
+              Inline in the header (not a separate tab) per the
+              greenlit mockup. live=true so the pulsing dot shows on
+              the "this session" amount. */}
+          <div className="hidden w-[18rem] shrink-0 md:block">
+            <SessionCostBlock
+              workspaceSlug={workspaceSlug}
+              sessionId={sessionId}
+              live={session?.status === "running" || session?.status === "pending"}
+              lastEventSeq={events.length > 0 ? (events[events.length - 1]?.seq ?? 0) : 0}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs">
           {parent && (

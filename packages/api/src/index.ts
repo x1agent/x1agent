@@ -229,6 +229,7 @@ const {
   sessionRoutes,
   workspaceSessionRoutes,
   workspaceTokenUsageRoutes,
+  workspaceCostRoutes,
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
   sessionShareRoutes,
@@ -403,6 +404,11 @@ app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
+// X1A-37 — mounts:
+//   GET /api/workspaces/:slug/sessions/:sessionId/cost
+//   GET /api/workspaces/:slug/sessions/:sessionId/cost-tree
+//   GET /api/workspaces/:slug/agents/:agentId/cost?window=…
+app.route("/api/workspaces/:slug", workspaceCostRoutes);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/shares",
   workspaceShareRoutes,

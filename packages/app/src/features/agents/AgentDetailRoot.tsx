@@ -19,6 +19,7 @@ import { useGrantsStore } from "../../stores/grantsStore";
 import { useMcpStore, mcpAgentKey } from "../../stores/mcpStore";
 import { useAgentEnvBindingsStore } from "../../stores/agentEnvBindingsStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
+import { AgentCostCard } from "./AgentCostCard";
 import { RecentRunsSection } from "../sessions/RecentRunsSection";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
 
@@ -152,6 +153,13 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
         </div>
 
         <SpawnSessionCard workspaceSlug={workspaceSlug} agentId={agent.id} />
+
+        {/* X1A-37 — agent cost across every session in window.
+            Admin-only on the server side; rendered for everyone but
+            shows an empty state if the API 403s. 7d default locked. */}
+        {canManage ? (
+          <AgentCostCard workspaceSlug={workspaceSlug} agentId={agent.id} />
+        ) : null}
 
         <Card>
           <CardHeader>
