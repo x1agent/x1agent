@@ -29,6 +29,16 @@ const MAX_TOTAL_SIZE: u64 = 200 * 1024 * 1024; // 200 MB per share
 pub struct ShareRequest {
     pub path: String,
     pub title: Option<String>,
+    /// When present, this share is an UPDATE to an existing share id
+    /// rather than a fresh publish. The bytes are written to the same
+    /// storage prefix, a fresh `agent.share` event is emitted carrying
+    /// the SAME `share_id`, and the frontend renders the latest payload
+    /// in place of the prior pill. Comments attached to this share by
+    /// share_id stay attached — that's the whole point of the update
+    /// path. The orchestrator should use this whenever it revises an
+    /// artifact the operator has already commented on, so the comment
+    /// thread doesn't orphan onto a stale version.
+    pub share_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -279,7 +289,19 @@ pub async fn handle_share(
 
     let (share_type, entry_point) = detect_share_type(&file_entries, is_dir);
     let total_size: u64 = file_entries.iter().map(|f| f.size).sum();
-    let share_id = uuid::Uuid::new_v4().to_string();
+    // Update path: when share_id is supplied, reuse it so the new
+    // bytes land at the same storage prefix and the frontend renders
+    // the latest payload in place of the prior pill. We don't
+    // server-side verify the share belongs to this session because
+    // (a) the storage prefix is already session-scoped — sessions/
+    // <our session>/shares/<share_id>/ — so a foreign share_id just
+    // creates an empty record under our session, not a write to
+    // someone else's data, and (b) every comment/IDOR check is
+    // re-run on the comments side at the api layer anyway.
+    let share_id = req
+        .share_id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let title = req.title.unwrap_or_else(|| {
         abs_path
             .file_name()

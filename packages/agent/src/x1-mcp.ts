@@ -138,7 +138,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "share",
       description:
-        "Share a file or folder from /workspace with the user. The content is uploaded to persistent storage and displayed inline in the session UI. Use this for any output the user should see or download.\n\nSupported types and how they render:\n- HTML (.html or folder with index.html) → interactive iframe. Relative CSS/JS/image refs work.\n- Images (.png, .jpg, .svg, .gif, .webp) → inline image preview\n- CSV (.csv) → interactive data table\n- JSON/JSONL (.json, .jsonl) → expandable JSON tree viewer\n- Markdown (.md) → rendered document\n- Code (.ts, .py, .rs, etc.) → syntax-highlighted code block\n- ZIP (.zip) → download link\n\nThe file must already exist at /workspace/{path} before calling share. Typical flow: write the file with the Write tool, then call share. Shares are persistent — they survive past the session and show up on the workspace Shares page.",
+        "Share a file or folder from /workspace with the user. The content is uploaded to persistent storage and displayed inline in the session UI. Use this for any output the user should see or download.\n\nSupported types and how they render:\n- HTML (.html or folder with index.html) → interactive iframe. Relative CSS/JS/image refs work.\n- Images (.png, .jpg, .svg, .gif, .webp) → inline image preview\n- CSV (.csv) → interactive data table\n- JSON/JSONL (.json, .jsonl) → expandable JSON tree viewer\n- Markdown (.md) → rendered document\n- Code (.ts, .py, .rs, etc.) → syntax-highlighted code block\n- ZIP (.zip) → download link\n\nThe file must already exist at /workspace/{path} before calling share. Typical flow: write the file with the Write tool, then call share. Shares are persistent — they survive past the session and show up on the workspace Shares page.\n\n**Update mode** — when revising an artifact the user has commented on, pass the existing `share_id` so the same pill updates in place. The comment thread stays attached. NEVER create a fresh share for a v2 when v1 has comments — the comments would orphan onto the stale version. Use update mode for every iteration on a draft, mockup, doc, or report that already has a `share_comment_added` wake history.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -150,6 +150,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           title: {
             type: "string",
             description: "Short display title for the share card.",
+          },
+          share_id: {
+            type: "string",
+            description:
+              "UPDATE MODE — when present, overwrites the existing share at this id with the new bytes. Same pill renders in place; comments stay attached. Use this whenever you're revising a share that has comments on it (you saw them via a `share_comment_added` wake). Omit to publish a brand-new share.",
           },
         },
         required: ["path"],
@@ -608,11 +613,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "share": {
       const path = String(a?.path ?? "");
       const title = a?.title;
+      const shareId =
+        typeof a?.share_id === "string" && a.share_id.trim() !== ""
+          ? a.share_id
+          : undefined;
       try {
         const res = await fetch(`${sidecarUrl}/share`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, title }),
+          body: JSON.stringify({ path, title, share_id: shareId }),
         });
         // Read as text first so we can surface a useful message even
         // when the sidecar returns an empty body — that happens when
