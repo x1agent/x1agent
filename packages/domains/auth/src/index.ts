@@ -4,6 +4,7 @@ export * from "./domain/auth-session.js";
 export * from "./domain/errors.js";
 export * from "./domain/platform-admin.js";
 export * from "./domain/user.js";
+export * from "./domain/git-identity.js";
 export * from "./domain/person.js";
 export * from "./domain/link-attempt.js";
 export * from "./domain/oauth-grant.js";
@@ -41,4 +42,5 @@ export { PostgresPasswordCredentialStore } from "./adapters/postgres/postgres-pa
 export { PostgresAccessGate } from "./adapters/postgres/postgres-access-gate.js";
 export { PostgresUserOAuthTokenStore } from "./adapters/postgres/postgres-user-oauth-token-store.js";
 export { createAuthRoutes } from "./adapters/hono/routes.js";
+export { createMeRoutes } from "./adapters/hono/me-routes.js";
 export { createRequireAuth } from "./adapters/hono/require-auth.js";

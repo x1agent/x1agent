@@ -20,17 +20,77 @@ export interface OpenArtifact {
 interface ArtifactPanelState {
   open: OpenArtifact | null;
   view: "panel" | "fullscreen";
+  /**
+   * Whether the right-side comments sidebar is collapsed inside the
+   * fullscreen view. Persists across show/close so an operator who
+   * prefers focus mode doesn't have to re-collapse it every time.
+   * Has no URL representation — copy-paste-shared links open with
+   * the recipient's own collapse preference.
+   */
+  commentsCollapsed: boolean;
   show: (input: OpenArtifact) => void;
   close: () => void;
   maximize: () => void;
   restore: () => void;
+  toggleCommentsCollapsed: () => void;
 }
 
-export const useArtifactPanelStore = create<ArtifactPanelState>((set) => ({
+// Sync the artifact-panel's open share + view-mode into the URL as
+// query params so the URL is shareable across operators ("here's the
+// session I'm looking at, with share X open and maximized in the
+// rail"). `replaceState` instead of `pushState` because the panel is
+// page-state, not a navigable history step — closing it shouldn't add
+// a back-button entry.
+function syncUrl(
+  shareId: string | null,
+  mode: "panel" | "fullscreen" = "panel",
+) {
+  if (typeof window === "undefined") return; // SSR safety
+  const url = new URL(window.location.href);
+  let dirty = false;
+  if (shareId) {
+    if (url.searchParams.get("share") !== shareId) {
+      url.searchParams.set("share", shareId);
+      dirty = true;
+    }
+  } else if (url.searchParams.has("share")) {
+    url.searchParams.delete("share");
+    dirty = true;
+  }
+  if (mode === "fullscreen") {
+    if (url.searchParams.get("mode") !== "fullscreen") {
+      url.searchParams.set("mode", "fullscreen");
+      dirty = true;
+    }
+  } else if (url.searchParams.has("mode")) {
+    url.searchParams.delete("mode");
+    dirty = true;
+  }
+  if (dirty) window.history.replaceState({}, "", url.toString());
+}
+
+export const useArtifactPanelStore = create<ArtifactPanelState>((set, get) => ({
   open: null,
   view: "panel",
-  show: (input) => set({ open: input, view: "panel" }),
-  close: () => set({ open: null, view: "panel" }),
-  maximize: () => set({ view: "fullscreen" }),
-  restore: () => set({ view: "panel" }),
+  commentsCollapsed: false,
+  show: (input) => {
+    syncUrl(input.artifact.share_id ?? null, "panel");
+    set({ open: input, view: "panel" });
+  },
+  close: () => {
+    syncUrl(null, "panel");
+    set({ open: null, view: "panel" });
+  },
+  maximize: () => {
+    const shareId = get().open?.artifact.share_id ?? null;
+    syncUrl(shareId, "fullscreen");
+    set({ view: "fullscreen" });
+  },
+  restore: () => {
+    const shareId = get().open?.artifact.share_id ?? null;
+    syncUrl(shareId, "panel");
+    set({ view: "panel" });
+  },
+  toggleCommentsCollapsed: () =>
+    set((s) => ({ commentsCollapsed: !s.commentsCollapsed })),
 }));

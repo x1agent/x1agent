@@ -17,6 +17,7 @@ import { getSql } from "./db/client.js";
 import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import { startCommentWakeSubscriber } from "./nats/comment-wake-subscriber.js";
 import {
   AnthropicSessionSummarizer,
   OpenAISessionSummarizer,
@@ -221,6 +222,7 @@ try {
 
 const {
   authRoutes,
+  meRoutes,
   workspaceInvitationRoutes,
   workspaceCreateRoutes,
   publicInvitationRoutes,
@@ -231,6 +233,8 @@ const {
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
   sessionShareRoutes,
+  shareCommentRoutes,
+  internalShareCommentRoutes,
   internalRoutes,
   githubInstallRoutes,
   installationApiRoutes,
@@ -252,6 +256,7 @@ const {
   workspaceMembersRoutes,
   adminAnthropicModelsRoutes,
   adminWorkspacesRoutes,
+  platformSecretsRoutes,
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
@@ -266,12 +271,14 @@ const {
   sql: composedSql,
   agents: composedAgents,
   sessions: composedSessions,
+  shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
   mcpAttachments: composedMcpAttachments,
   mcpCatalog: composedMcpCatalog,
   userTokenService: composedUserTokenService,
+  users: composedUsers,
   tickScheduler,
   quietHints: composedQuietHints,
 } = compose({
@@ -363,6 +370,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
 app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
 app.route("/api/admin/workspaces", adminWorkspacesRoutes);
+app.route("/api/admin/platform-secrets", platformSecretsRoutes);
 
 // Sentry verify route — throws so the SDK captures the first event
 // during the onboarding flow. Gated to non-production OR by token so
@@ -389,6 +397,7 @@ app.get("/auth/github/config", (c) =>
 );
 
 app.route("/auth", authRoutes);
+app.route("/api/me", meRoutes);
 app.route("/auth/github", githubInstallRoutes);
 app.route("/oauth/slack", slackOAuthRoutes);
 app.route("/api/workspaces/:slug/slack", slackBotApiRoutes);
@@ -400,6 +409,16 @@ app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
+// Doc commenting v1 (X1A-52) must mount BEFORE the broader
+// `/sessions/:sessionId/shares` route, whose `/:shareId/*` binary-fetch
+// handler otherwise eats requests at `/shares/:shareId/comments` and
+// returns `{"error":"not_found"}` 404 before this handler can run.
+// Hono matches the first registered prefix; specific paths win when
+// registered first.
+app.route(
+  "/api/workspaces/:slug/sessions/:sessionId/shares/:shareId/comments",
+  shareCommentRoutes,
+);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/shares",
   workspaceShareRoutes,
@@ -409,6 +428,7 @@ app.route(
   "/api/workspaces/:slug/sessions/:sessionId/user-shares",
   sessionShareRoutes,
 );
+app.route("/api/internal/share-comments", internalShareCommentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);
@@ -526,6 +546,23 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
+    );
+  }
+
+  // X1A-55 — comment-wake subscriber. Listens for
+  // `agent.share_comment_added` + `agent.share_comment_thread_resolved`
+  // and injects a user.message wake into the share's producing
+  // session, closing the two-way doc-commenting loop.
+  try {
+    const sub = await startCommentWakeSubscriber({
+      natsUrl,
+      sessions: composedSessions,
+      comments: composedShareComments,
+    });
+    registerCleanup(() => sub.close());
+  } catch (err) {
+    console.warn(
+      `[comment-wake] subscriber failed to start: ${(err as Error).message} — orchestrator will not be woken on new comments`,
     );
   }
 
@@ -687,6 +724,12 @@ if (process.env.JOB_WATCHER !== "disabled") {
       userTokenService: composedUserTokenService,
       mcpOAuthProxyImage:
         process.env.MCP_OAUTH_PROXY_IMAGE || "x1agent-mcp-oauth-proxy:latest",
+      // X1A-42: per-user git identity lookup at session-launch. The
+      // job-watcher reads this user's stored identity (set on the
+      // account page) and forwards it as GIT_AUTHOR_* / GIT_COMMITTER_*
+      // env on the agent container, so worker commits attribute to the
+      // human rather than `x1agent[bot]`.
+      users: composedUsers,
       postgresMinter: composedPostgresMinter,
       postgresBranches: composedPostgresBranches,
       redisMinter: composedRedisMinter,

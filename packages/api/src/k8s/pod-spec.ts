@@ -150,6 +150,22 @@ export interface SessionPodSpec {
    */
   sessionCredentialsSecretName?: string;
   /**
+   * Account-level git identity for worker commits (X1A-42). When set,
+   * pod-spec injects GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL /
+   * GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL into the agent container's
+   * env so commits attribute to the human who triggered the session
+   * rather than the platform's GitHub App push principal
+   * (`x1agent[bot]`). Resolved by the job-watcher from the triggering
+   * user's stored identity at session-launch.
+   *
+   * Leave undefined when the user has no identity set; the env vars
+   * are simply not emitted and git falls back to its `user.name` /
+   * `user.email` config defaults — preserving the prior "x1agent[bot]"
+   * attribution path with zero regression for users who haven't opted
+   * in yet.
+   */
+  gitIdentity?: { name: string; email: string };
+  /**
    * Image ref for the per-attachment OAuth proxy sibling container.
    * One container is added per remote_oauth attachment (Zone 3); each
    * holds a per-user bearer in its own env (mounted via
@@ -233,6 +249,21 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // come later via the agent.model column.
     ...(spec.anthropicModel
       ? [{ name: "ANTHROPIC_MODEL", value: spec.anthropicModel }]
+      : []),
+    // Account-level git identity (X1A-42). When the triggering user
+    // has filled in their account-page form, the four standard git
+    // env vars land here. git(1) honors GIT_AUTHOR_* / GIT_COMMITTER_*
+    // ahead of repo / global config, so this overrides whatever
+    // identity the agent image's git config might have. When the
+    // user hasn't set an identity, all four are omitted and the
+    // existing "x1agent[bot]" fallback path stands.
+    ...(spec.gitIdentity
+      ? [
+          { name: "GIT_AUTHOR_NAME", value: spec.gitIdentity.name },
+          { name: "GIT_AUTHOR_EMAIL", value: spec.gitIdentity.email },
+          { name: "GIT_COMMITTER_NAME", value: spec.gitIdentity.name },
+          { name: "GIT_COMMITTER_EMAIL", value: spec.gitIdentity.email },
+        ]
       : []),
     // Zone-3 remote_oauth attachments. Agent reads this JSON and adds
     // each entry to its mcpServers map as { type: "http", url: localhost }.

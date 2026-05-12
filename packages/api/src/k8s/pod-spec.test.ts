@@ -208,4 +208,83 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       );
     });
   });
+
+  describe("X1A-42 — git identity env on the agent container", () => {
+    function agentEnvFor(
+      spec: SessionPodSpec,
+    ): Array<{ name: string; value?: string }> {
+      const job = buildSessionJob(spec);
+      const agent = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "agent",
+      )!;
+      return agent.env ?? [];
+    }
+
+    it("emits no GIT_AUTHOR_* / GIT_COMMITTER_* when gitIdentity is unset (preserves x1agent[bot] fallback)", () => {
+      const env = agentEnvFor(baseSpec("worker"));
+      for (const name of [
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+      ]) {
+        expect(env.find((e) => e.name === name)).toBeUndefined();
+      }
+    });
+
+    it("emits all four GIT_* env vars on the agent container when gitIdentity is set", () => {
+      const spec: SessionPodSpec = {
+        ...baseSpec("worker"),
+        gitIdentity: { name: "Jane Doe", email: "jane@github.com" },
+      };
+      const env = agentEnvFor(spec);
+      expect(env.find((e) => e.name === "GIT_AUTHOR_NAME")?.value).toBe(
+        "Jane Doe",
+      );
+      expect(env.find((e) => e.name === "GIT_AUTHOR_EMAIL")?.value).toBe(
+        "jane@github.com",
+      );
+      // committer pair must match — git uses author for the human, committer
+      // for who applied the commit. With an automated worker, both are the
+      // same user; this is the standard pattern (matches `git commit
+      // --author=…` while letting the env stand in for both).
+      expect(env.find((e) => e.name === "GIT_COMMITTER_NAME")?.value).toBe(
+        "Jane Doe",
+      );
+      expect(env.find((e) => e.name === "GIT_COMMITTER_EMAIL")?.value).toBe(
+        "jane@github.com",
+      );
+    });
+
+    it.each<AgentKind>(["worker", "orchestrator", "scheduled"])(
+      "applies git identity uniformly across %s agents — sidecar/orchestrator commits attribute too",
+      (kind) => {
+        const spec: SessionPodSpec = {
+          ...baseSpec(kind),
+          gitIdentity: { name: "Bot Person", email: "bot+tests@example.com" },
+        };
+        const env = agentEnvFor(spec);
+        expect(env.find((e) => e.name === "GIT_AUTHOR_NAME")?.value).toBe(
+          "Bot Person",
+        );
+      },
+    );
+
+    it("places GIT_* env on the AGENT container, not the sidecar (the agent is the process running git commit)", () => {
+      const spec: SessionPodSpec = {
+        ...baseSpec("worker"),
+        gitIdentity: { name: "Jane", email: "j@e.com" },
+      };
+      const job = buildSessionJob(spec);
+      const sidecar = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "sidecar",
+      )!;
+      expect(
+        (sidecar.env ?? []).find((e) => e.name === "GIT_AUTHOR_NAME"),
+      ).toBeUndefined();
+      expect(
+        (sidecar.env ?? []).find((e) => e.name === "GIT_COMMITTER_EMAIL"),
+      ).toBeUndefined();
+    });
+  });
 });

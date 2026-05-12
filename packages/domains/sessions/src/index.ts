@@ -5,6 +5,7 @@ export * from "./domain/trigger.js";
 export * from "./domain/event.js";
 export * from "./domain/session-history.js";
 export * from "./domain/share.js";
+export * from "./domain/share-comment.js";
 
 // Ports
 export type {
@@ -12,6 +13,16 @@ export type {
   CreateSessionInput,
   UpdateSessionStatusInput,
 } from "./ports/session-repository.js";
+export type {
+  ShareCommentRepository,
+  AppendShareCommentInput,
+  ThreadLocator,
+} from "./ports/share-comment-repository.js";
+export type {
+  ShareCommentPublisher,
+  ShareCommentAddedEvent,
+  ShareCommentThreadResolvedEvent,
+} from "./ports/share-comment-publisher.js";
 export type {
   SessionEventRepository,
   AppendSessionEventInput,
@@ -60,6 +71,14 @@ export {
   type PriceOverride,
 } from "./adapters/postgres/postgres-token-usage-repository.js";
 export { PostgresSessionShareRepository } from "./adapters/postgres/postgres-session-share-repository.js";
+export { PostgresShareCommentRepository } from "./adapters/postgres/postgres-share-comment-repository.js";
+export {
+  NatsShareCommentPublisher,
+  RecordingShareCommentPublisher,
+  SUBJECT_COMMENT_ADDED,
+  SUBJECT_THREAD_RESOLVED,
+  type NatsPublishPort,
+} from "./adapters/nats/nats-share-comment-publisher.js";
 export {
   AnthropicSessionSummarizer,
   type AnthropicSessionSummarizerOptions,
@@ -74,6 +93,34 @@ export {
 } from "./adapters/hono/routes.js";
 export { createSessionShareRoutes } from "./adapters/hono/share-routes.js";
 export type { SessionShareRoutesConfig } from "./adapters/hono/share-routes.js";
+export {
+  createShareCommentRoutes,
+  createInternalShareCommentRoutes,
+} from "./adapters/hono/share-comment-routes.js";
+export type {
+  ShareCommentRoutesConfig,
+  InternalShareCommentRoutesConfig,
+} from "./adapters/hono/share-comment-routes.js";
+export {
+  postShareComment,
+  type PostShareCommentInput,
+  type PostShareCommentDeps,
+  type PostShareCommentResult,
+} from "./application/post-share-comment.js";
+export {
+  resolveShareThread,
+  resolveShare,
+  type ResolveShareThreadDeps,
+  type ResolveShareThreadResult,
+  type ResolveShareDeps,
+} from "./application/resolve-share-thread.js";
+export {
+  resolveSessionVisibility,
+  findShareInSession,
+  type ShareVisibilityDeps,
+  type SessionVisibilityResult,
+  type FindShareInSessionDeps,
+} from "./application/share-visibility.js";
 export { createWorkspaceTokenUsageRoutes } from "./adapters/hono/token-usage-routes.js";
 
 // Fakes

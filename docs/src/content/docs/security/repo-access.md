@@ -150,6 +150,21 @@ Detecting a push vs. a fetch from the git credential protocol is straightforward
 
 For the first pass, simplest-working: when `allow_push = false`, the credential helper returns 403 for everything. The agent can't `git fetch` either — but the sidecar handles fetch itself via a periodic refresh loop, so the agent doesn't need to. That's consistent with treating the agent container as untrusted for network egress.
 
+## Commit attribution
+
+Push principal vs. commit author are two different things on GitHub:
+
+- The **push principal** is the platform's GitHub App install. The credential the sidecar mints belongs to that App, so every push is recorded as the App.
+- The **commit author** is whatever name + email is stamped onto the commit object itself, either via repo `user.name` / `user.email` or via the standard `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables. GitHub renders the commit's author avatar against this email.
+
+Without an account-level identity, agent commits arrive at GitHub as "x1agent[bot] (via the platform's App)". That's anonymous bot output, not a person.
+
+To attribute a worker's commits to the human who triggered the session, each user can set their own git identity (display name + email) on the account page. The api forwards the four standard env vars (`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) into the agent container at pod-creation time. git then stamps those values onto every commit the agent makes during the session.
+
+The email must be **verified on the user's GitHub account** for GitHub to render the avatar and link the commit to a person; unverified addresses still produce commits but show up as anonymous. The recommended choice is the GitHub `noreply` form (`<id>+<login>@users.noreply.github.com`), which is verified by default and doesn't expose a personal address.
+
+When a user has nothing set, the env vars are simply not emitted and the existing "x1agent[bot]" attribution path is preserved — there's no regression for users who haven't opted in.
+
 ## What this does not cover
 
 - **Non-GitHub hosts.** GitLab, Gitea, Bitbucket — same model, different credential endpoint. The policy layer is identical; only the token-mint call changes.
@@ -158,11 +173,10 @@ For the first pass, simplest-working: when `allow_push = false`, the credential 
 
 ## Follow-ups
 
-- **Per-repo (not per-session) push gating.** The sidecar coarse-gates
-  on "any attached repo allows push." Per-repo would require parsing
-  the credential-helper protocol's remote URL.
-- **Fetch refresh from the sidecar.** Periodic `git fetch` so the
-  checkout stays up to date without the agent needing egress creds
-  every time.
-- **GitLab / Gitea / Bitbucket credential mint.** Same shape, different
-  endpoint.
+- **Implement `allow_push` on attachments.** Schema, UI, sidecar enforcement. Default is `false`.
+- **Per-repo (not per-session) push gating.** The sidecar coarse-gates on "any attached repo allows push." Per-repo would require parsing the credential-helper protocol's remote URL.
+- **Sidecar runs as uid 1000.** Currently the sidecar runs as root, drops `CAP_CHOWN`, and tries to `chown` the cloned tree to 1000 — which silently fails because the capability is gone. Agents work around this by re-cloning into an agent-owned subdirectory, wasting tokens and disk. Fix: add a uid 1000 user to `packages/sidecar/Dockerfile` and set `runAsUser: 1000` on the sidecar container in the session pod spec. This is the follow-up the Apr 19 PodSecurityContext commit called out; doing it closes the perm gap and removes the agent's need to route around the platform.
+- **Fetch refresh from the sidecar.** Periodic `git fetch` so the checkout stays up to date without the agent needing egress creds every time.
+- **GitHub-OAuth-driven git identity discovery.** The current account-page form is manual entry — the user types their display name and verified email by hand. A future slice will add an OAuth-driven flow that pulls the user's verified email list from the GitHub API and lets them pick from it, removing the typo surface.
+- **GitLab / Gitea / Bitbucket credential mint.** Same shape, different endpoint.
+- **GPG-signed commits.** Out of scope for the identity work above. Mounting a signing key into the agent container puts a credential inside the trust boundary we're defending; if signed-commit support lands it'll be sidecar-resident and gated through the credential proxy like git's HTTPS tokens.
