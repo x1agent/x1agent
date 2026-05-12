@@ -400,6 +400,135 @@ export async function publishHeartbeatWake(
 }
 
 /**
+ * Comment → producing-session wake (X1A-55). Fires when a comment lands
+ * on a share whose producing session is still alive. The producing
+ * session is the one the share was originally created in — that
+ * session's agent is the one we wake. v1 routing per the X1A-55
+ * ticket; multi-session fan-out + per-agent `@mention` routing are
+ * future extensions.
+ *
+ * Anti-loop is enforced one layer up (in the subscriber) by skipping
+ * the publish entirely when author_session_id === producing_session_id
+ * — we don't want an agent to wake itself on its own reply.
+ *
+ * The wake text inlines the structured `share_comment` /
+ * `share_comment_resolve` MCP-tool instructions so an agent without
+ * a system-prompt addendum still knows how to react.
+ */
+export interface CommentAddedWakeOpts {
+  shareId: string;
+  threadId: string;
+  commentId: string;
+  authorDisplay: string;
+  scope: "passage" | "share";
+  anchorQuote: string | null;
+  body: string;
+}
+
+export async function publishCommentAddedWake(
+  nc: import("nats").NatsConnection,
+  producingSessionId: string,
+  opts: CommentAddedWakeOpts,
+): Promise<void> {
+  const envelope = {
+    session_id: producingSessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: formatCommentAddedWakeText(opts),
+      kind: "comment_added",
+      share_id: opts.shareId,
+      thread_id: opts.threadId,
+      comment_id: opts.commentId,
+      author_display: opts.authorDisplay,
+      scope: opts.scope,
+      anchor_quote: opts.anchorQuote,
+      body: opts.body,
+      source: "platform",
+    },
+  };
+  // Each comment has a unique comment_id; using it as the dedup key
+  // collapses any subscriber-side retries to a single wake.
+  const msgId = `wake.comment_added.${opts.commentId}`;
+  await publishInputEnvelope(nc, producingSessionId, envelope, msgId);
+}
+
+export interface CommentResolvedWakeOpts {
+  shareId: string;
+  threadId: string;
+  resolverDisplay: string;
+  resolved: boolean;
+}
+
+export async function publishCommentResolvedWake(
+  nc: import("nats").NatsConnection,
+  producingSessionId: string,
+  opts: CommentResolvedWakeOpts,
+): Promise<void> {
+  const envelope = {
+    session_id: producingSessionId,
+    timestamp: new Date().toISOString(),
+    type: "user.message",
+    payload: {
+      text: formatCommentResolvedWakeText(opts),
+      kind: "comment_resolved",
+      share_id: opts.shareId,
+      thread_id: opts.threadId,
+      resolver_display: opts.resolverDisplay,
+      resolved: opts.resolved,
+      source: "platform",
+    },
+  };
+  // Resolve toggles, so (thread_id, resolved-flag) is the dedup key —
+  // re-resolving / unresolving fires distinct wakes; redelivery of
+  // the same transition is collapsed.
+  const msgId = `wake.comment_resolved.${opts.threadId}.${opts.resolved ? "1" : "0"}`;
+  await publishInputEnvelope(nc, producingSessionId, envelope, msgId);
+}
+
+export function formatCommentAddedWakeText(
+  opts: CommentAddedWakeOpts,
+): string {
+  const shortShare = opts.shareId.slice(0, 8);
+  const lines = [
+    `[wake: new comment on share ${shortShare}]`,
+    "",
+    `Author: ${opts.authorDisplay}`,
+    `Thread id: ${opts.threadId}`,
+    `Scope: ${opts.scope}`,
+  ];
+  if (opts.scope === "passage" && opts.anchorQuote) {
+    lines.push(`Anchor: "${opts.anchorQuote}"`);
+  } else {
+    lines.push("Anchor: On this share");
+  }
+  lines.push("", "Body:", opts.body);
+  lines.push(
+    "",
+    `To reply, call: share_comment(share_id="${opts.shareId}", thread_id="${opts.threadId}", text="...")`,
+    `To resolve, call: share_comment_resolve(thread_id="${opts.threadId}")`,
+  );
+  return lines.join("\n");
+}
+
+export function formatCommentResolvedWakeText(
+  opts: CommentResolvedWakeOpts,
+): string {
+  const shortShare = opts.shareId.slice(0, 8);
+  const verb = opts.resolved ? "resolved" : "reopened";
+  return [
+    `[wake: comment thread ${verb} on share ${shortShare}]`,
+    "",
+    `Thread id: ${opts.threadId}`,
+    `${opts.resolved ? "Resolved" : "Reopened"} by: ${opts.resolverDisplay}`,
+    "",
+    opts.resolved
+      ? "Nothing required — informational. The human (or another agent) marked this thread done."
+      : "Thread was previously resolved and is now reopened. The human (or another agent) may want a fresh look.",
+  ].join("\n");
+}
+
+/**
  * Wrap the agent's heartbeat_md with a preamble that tells it this is
  * a scheduler-driven wake. Exported for testability. The preamble is
  * the standard driverless-mode framing described in

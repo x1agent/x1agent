@@ -17,6 +17,7 @@ import { getSql } from "./db/client.js";
 import { seedIfDev, seedPlatformPresets } from "./seed.js";
 import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
+import { startCommentWakeSubscriber } from "./nats/comment-wake-subscriber.js";
 import {
   AnthropicSessionSummarizer,
   OpenAISessionSummarizer,
@@ -541,6 +542,22 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[audit] subscriber failed to start: ${(err as Error).message} — sidecar audit events will not land in DB`,
+    );
+  }
+
+  // X1A-55 — comment-wake subscriber. Listens for
+  // `agent.share_comment_added` + `agent.share_comment_thread_resolved`
+  // and injects a user.message wake into the share's producing
+  // session, closing the two-way doc-commenting loop.
+  try {
+    const sub = await startCommentWakeSubscriber({
+      natsUrl,
+      sessions: composed.sessions,
+    });
+    registerCleanup(() => sub.close());
+  } catch (err) {
+    console.warn(
+      `[comment-wake] subscriber failed to start: ${(err as Error).message} — orchestrator will not be woken on new comments`,
     );
   }
 
