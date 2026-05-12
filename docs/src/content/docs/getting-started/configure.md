@@ -2,8 +2,11 @@
 title: Configure
 description: Capture install values into .env.local and (if deploying to GCP) set up the gcloud configuration
 sidebar:
-  order: 0
+  order: 2
 ---
+
+> See [Lifecycle](/getting-started/lifecycle) for how `configure → plan → install → deploy` fit together and how multiple deployments coexist on one machine. This page focuses on the `configure:prod` step.
+
 
 `mise run configure:prod` is the pre-flight step that runs before any cluster work. It captures everything x1agent needs to install — cloud target, base domain, secrets — into a per-deployment file at `installs/<base-domain>.local`. It does not touch the cluster.
 
@@ -15,7 +18,7 @@ Run it any time you need to add or change a value. The wizard is idempotent: exi
 
 ### Required
 
-These are checked by `mise run configure:check`, which is a `depends` of every cluster-mutating prod task (`install:prod`, `install:prod:plan`, `install:prod:apply`, `install:prod:build-images`, `terraform:prod:plan`, `terraform:prod:apply:cluster`, `terraform:prod:apply`, `deploy:prod`, `logs:prod`, `psql:prod`). If anything is missing, those tasks fail fast with a friendly message instead of a confusing boot error later. Read-only tasks (`install:prod:status`, `terraform:prod:init`, `terraform:prod:destroy`) skip the check.
+These are checked by `mise run configure:check`, which is a `depends` of every cluster-mutating prod task (`install:prod`, `plan:prod`, `deploy:prod`, `destroy:prod`, `logs:prod`, `psql:prod`, and the underlying `install:prod:*` / `terraform:prod:*` tasks they wrap). If anything is missing, those tasks fail fast with a friendly message instead of a confusing boot error later. Read-only tasks (`status:prod`, `terraform:prod:init`) skip the check.
 
 | Variable | What | How |
 |---|---|---|
@@ -85,7 +88,7 @@ If the requested account isn't logged in yet, the wizard tells you to run `gclou
 
 ## Picking which deployment to act on
 
-Every prod task (`install:prod`, `deploy:prod`, `logs:prod`, `psql:prod`, `terraform:prod:*`) reads one file from `installs/`. With one file present it picks that one silently. With multiple, the resolver picks in this order:
+Every prod task (`plan:prod`, `install:prod`, `deploy:prod`, `status:prod`, `destroy:prod`, `logs:prod`, `psql:prod`) reads one file from `installs/`. With one file present it picks that one silently. With multiple, the resolver picks in this order:
 
 1. `X1AGENT_DEPLOYMENT=<base-domain>` — explicit env var (CI / scripted)
 2. Single `installs/*.local` file → use it

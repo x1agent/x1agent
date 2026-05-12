@@ -2,7 +2,7 @@
 title: Quickstart
 description: Run x1agent locally in under five minutes
 sidebar:
-  order: 1
+  order: 0
 ---
 
 This guide stands up a fully functional x1agent stack on your laptop using OrbStack Kubernetes. You'll end up with a running cluster, one seeded admin account, the secrets your sessions need, and a browser tab showing your first agent session.

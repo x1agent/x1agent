@@ -26,6 +26,9 @@ CM_NS="cert-manager"
 CM_VERSION="${CM_VERSION:-v1.16.2}"
 CA_SECRET="x1agent-local-ca-tls"
 DEV_K8S_DIR="$(cd "$SCRIPT_DIR/../k8s/dev" && pwd)"
+# macOS login keychain. The trust step (step 4) operates on this one
+# unless the operator overrides it. Required under `set -u`.
+KEYCHAIN="${KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 
 # ─── 1. Install cert-manager (idempotent) ──────────────────────────
 if ! kc get crd certificates.cert-manager.io >/dev/null 2>&1; then

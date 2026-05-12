@@ -199,6 +199,38 @@ depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = "deploy/scripts/psql-prod.sh"
 
+# ----------------------------------------------------------------------------
+# Intent-first operator verbs. The mental model is plan → install → deploy,
+# plus housekeeping (status, destroy, logs, psql). Always `:prod` suffixed so
+# prod intent is unambiguous in shell history. These wrap the underlying
+# `terraform:prod:*` and `install:prod:*` tasks below; operators shouldn't
+# need to know which tool owns which step.
+# ----------------------------------------------------------------------------
+
+[tasks."plan:prod"]
+description = "Preview what would change on the active deployment (terraform plan + helm template, side by side)"
+depends = ["configure:check"]
+env = { KUBECONFIG = "" }
+run = """
+mise run terraform:prod:plan
+echo
+echo "─── helm chart delta ──────────────────────────────────────"
+mise run install:prod:plan
+"""
+
+[tasks."status:prod"]
+description = "Read-only snapshot of the active deployment (pods, ingress IP, managed cert state)"
+env = { KUBECONFIG = "" }
+run = "mise run install:prod:status"
+
+[tasks."destroy:prod"]
+description = "Type-to-confirm teardown of the active deployment (helm uninstall + terraform destroy)"
+env = { KUBECONFIG = "" }
+run = """
+mise run install:prod:destroy
+mise run terraform:prod:destroy
+"""
+
 # Terraform tasks — provision the GCP-side infra (cluster, IAM, GSM
 # placeholders, AR, DNS, static IP) before the chart goes in. Two-step
 # apply because the ESO ClusterSecretStore needs ESO's CRDs first.

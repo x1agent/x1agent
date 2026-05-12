@@ -179,7 +179,22 @@ export async function startSessionEventSubscriber(
         console.warn(`[nats] malformed event on ${m.subject}`);
         continue;
       }
-      const sessionId = SessionId(parsed.session_id);
+      // Derive session_id from the NATS subject, not the body — body
+      // is attacker-controllable by any authenticated bus client. The
+      // subject is the *routing* identifier and is constrained by the
+      // publisher's mTLS cert (today only sidecars publish here, and
+      // each sidecar publishes only on its own session's subject).
+      // Subject format: `x1.session.<id>.events`. Drop rows where the
+      // body claims a different session than the subject routed.
+      // See project_nats_subscriber_trust_audit.md.
+      const subjectSessionId = m.subject.split(".")[2];
+      if (!subjectSessionId || subjectSessionId !== parsed.session_id) {
+        console.warn(
+          `[nats] subject/body session_id mismatch on ${m.subject} — dropped`,
+        );
+        continue;
+      }
+      const sessionId = SessionId(subjectSessionId);
       try {
         await appendSessionEvent(
           { events: opts.events },
