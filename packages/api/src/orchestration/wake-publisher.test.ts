@@ -11,7 +11,11 @@ import {
   publishMessageWake,
   publishCheckupWake,
   publishHeartbeatWake,
+  publishCommentAddedWake,
+  publishCommentResolvedWake,
   formatStateChangeWakeText,
+  formatCommentAddedWakeText,
+  formatCommentResolvedWakeText,
 } from "./wake-publisher.js";
 
 /**
@@ -437,5 +441,179 @@ describe("formatStateChangeWakeText", () => {
     expect(t).toContain("OOMKilled");
     expect(t).toContain("driverless");
     expect(t).toContain("No human is watching");
+  });
+});
+
+// ── X1A-55 — comment-added / comment-resolved wakes ─────────────────────
+
+describe("formatCommentAddedWakeText", () => {
+  it("renders share-scoped comment with inline mcp tool instructions", () => {
+    const t = formatCommentAddedWakeText({
+      shareId: "abcd1234-5678-7000-8000-000000000000",
+      threadId: "thread-xyz",
+      commentId: "comment-1",
+      authorDisplay: "human 019e0d79",
+      scope: "share",
+      anchorQuote: null,
+      body: "the H2 wording needs softening",
+    });
+    expect(t).toContain("[wake: new comment on share abcd1234]");
+    expect(t).toContain("Author: human 019e0d79");
+    expect(t).toContain("Thread id: thread-xyz");
+    expect(t).toContain("Scope: share");
+    expect(t).toContain("Anchor: On this share");
+    expect(t).toContain("Body:");
+    expect(t).toContain("the H2 wording needs softening");
+    expect(t).toContain(
+      `share_comment(share_id="abcd1234-5678-7000-8000-000000000000", thread_id="thread-xyz"`,
+    );
+    expect(t).toContain(`share_comment_resolve(thread_id="thread-xyz")`);
+  });
+
+  it("renders passage-scoped comment with the quoted anchor", () => {
+    const t = formatCommentAddedWakeText({
+      shareId: "abcd1234-5678-7000-8000-000000000000",
+      threadId: "thread-xyz",
+      commentId: "comment-2",
+      authorDisplay: "human 019e0d79",
+      scope: "passage",
+      anchorQuote: "We aim to redefine collaboration.",
+      body: "drop the buzzword pls",
+    });
+    expect(t).toContain("Scope: passage");
+    expect(t).toContain('Anchor: "We aim to redefine collaboration."');
+    expect(t).toContain("drop the buzzword pls");
+  });
+});
+
+describe("formatCommentResolvedWakeText", () => {
+  it("uses verb 'resolved' and informational copy for resolved=true", () => {
+    const t = formatCommentResolvedWakeText({
+      shareId: "abcd1234-5678-7000-8000-000000000000",
+      threadId: "thread-xyz",
+      resolverDisplay: "human",
+      resolved: true,
+    });
+    expect(t).toContain("[wake: comment thread resolved on share abcd1234]");
+    expect(t).toContain("Resolved by: human");
+    expect(t).toContain("Nothing required");
+  });
+
+  it("uses verb 'reopened' when resolved=false", () => {
+    const t = formatCommentResolvedWakeText({
+      shareId: "abcd1234-5678-7000-8000-000000000000",
+      threadId: "thread-xyz",
+      resolverDisplay: "human",
+      resolved: false,
+    });
+    expect(t).toContain("[wake: comment thread reopened on share abcd1234]");
+    expect(t).toContain("Reopened by: human");
+    expect(t).toContain("now reopened");
+  });
+});
+
+describe("publishCommentAddedWake / publishCommentResolvedWake", () => {
+  it("publishes a user.message envelope with kind=comment_added", async () => {
+    const fake = new FakeNats();
+    await publishCommentAddedWake(fake as never, uuid(0xAA01), {
+      shareId: "share-1",
+      threadId: "thread-1",
+      commentId: "comment-1",
+      authorDisplay: "human 019e0d79",
+      scope: "share",
+      anchorQuote: null,
+      body: "looks good but check H2",
+    });
+    const all = fake.published;
+    expect(all.length).toBe(1);
+    const env = all[0]!.body as {
+      type: string;
+      payload: { kind: string; share_id: string; thread_id: string };
+    };
+    expect(env.type).toBe("user.message");
+    expect(env.payload.kind).toBe("comment_added");
+    expect(env.payload.share_id).toBe("share-1");
+    expect(env.payload.thread_id).toBe("thread-1");
+    expect(all[0]!.subject).toContain(uuid(0xAA01));
+    expect(all[0]!.subject).toContain(".input");
+  });
+
+  it("deduplicates by comment_id across retries (JetStream msgId)", async () => {
+    process.env.USE_JETSTREAM_PUBLISH = "true";
+    try {
+      const fake = new FakeNats();
+      await publishCommentAddedWake(fake as never, uuid(0xAA02), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        commentId: "comment-1",
+        authorDisplay: "human",
+        scope: "share",
+        anchorQuote: null,
+        body: "x",
+      });
+      await publishCommentAddedWake(fake as never, uuid(0xAA02), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        commentId: "comment-1",
+        authorDisplay: "human",
+        scope: "share",
+        anchorQuote: null,
+        body: "x",
+      });
+      // Both publishes record locally — the dedup happens server-side
+      // inside JetStream's duplicate window. We assert the msgId is
+      // identical between the two so dedup is actually possible.
+      expect(fake.publishedJs.length).toBe(2);
+      expect(fake.publishedJs[0]!.msgId).toBe(fake.publishedJs[1]!.msgId);
+      expect(fake.publishedJs[0]!.msgId).toBe(
+        "wake.comment_added.comment-1",
+      );
+    } finally {
+      delete process.env.USE_JETSTREAM_PUBLISH;
+    }
+  });
+
+  it("resolve wake distinguishes resolved-true vs resolved-false in msgId, and includes the transitioned_at discriminator so a toggle within the dedup window doesn't collapse", async () => {
+    process.env.USE_JETSTREAM_PUBLISH = "true";
+    try {
+      const fake = new FakeNats();
+      await publishCommentResolvedWake(fake as never, uuid(0xAA03), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        resolverDisplay: "human",
+        resolved: true,
+        transitionedAt: "2026-05-12T10:00:00.000Z",
+      });
+      await publishCommentResolvedWake(fake as never, uuid(0xAA03), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        resolverDisplay: "human",
+        resolved: false,
+        transitionedAt: "2026-05-12T10:00:05.000Z",
+      });
+      await publishCommentResolvedWake(fake as never, uuid(0xAA03), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        resolverDisplay: "human",
+        resolved: true,
+        transitionedAt: "2026-05-12T10:00:10.000Z",
+      });
+      expect(fake.publishedJs[0]!.msgId).toBe(
+        "wake.comment_resolved.thread-1.1.2026-05-12T10:00:00.000Z",
+      );
+      expect(fake.publishedJs[1]!.msgId).toBe(
+        "wake.comment_resolved.thread-1.0.2026-05-12T10:00:05.000Z",
+      );
+      // The third publish is a re-resolve of the same thread. Without
+      // the transitioned_at discriminator, this msgId would equal the
+      // first publish and JetStream would drop it — and the
+      // orchestrator would never hear the second resolve.
+      expect(fake.publishedJs[2]!.msgId).toBe(
+        "wake.comment_resolved.thread-1.1.2026-05-12T10:00:10.000Z",
+      );
+      expect(fake.publishedJs[2]!.msgId).not.toBe(fake.publishedJs[0]!.msgId);
+    } finally {
+      delete process.env.USE_JETSTREAM_PUBLISH;
+    }
   });
 });

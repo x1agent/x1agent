@@ -29,6 +29,7 @@ mod messaging;
 mod nats_bridge;
 mod orchestration;
 mod sheets;
+mod share_comments;
 mod shares;
 mod stream;
 mod user_tokens;
@@ -275,6 +276,19 @@ async fn main() {
         .route("/email/send", routing::post(email::handle_send))
         .route("/email/trash", routing::post(email::handle_trash))
         .route("/share", routing::post(shares::handle_share))
+        // Doc commenting v1 (X1A-52). Sidecar is the trust boundary —
+        // the MCP `share_comment` + `share_comment_resolve` tools POST
+        // here, the sidecar adds X-Internal-Token and forwards to
+        // /api/internal/share-comments. IDOR + NATS publication live on
+        // the api side.
+        .route(
+            "/share_comment",
+            routing::post(share_comments::handle_share_comment),
+        )
+        .route(
+            "/share_comment_resolve",
+            routing::post(share_comments::handle_share_comment_resolve),
+        )
         .route(
             "/collections",
             routing::get(collections::handle_list_collections),
