@@ -1,3 +1,10 @@
+# [1.21.0](https://github.com/x1agent/x1agent/compare/v1.20.0...v1.21.0) (2026-05-12)
+
+
+### Features
+
+* **cost:** surface per-session, per-tree, per-agent cost (X1A-37) ([bcd86a6](https://github.com/x1agent/x1agent/commit/bcd86a610b039ac9f5577db31bdad8fd26927b40))
+
 # [1.20.0](https://github.com/x1agent/x1agent/compare/v1.19.0...v1.20.0) (2026-05-12)
 
 

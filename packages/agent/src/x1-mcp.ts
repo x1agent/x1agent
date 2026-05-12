@@ -552,6 +552,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "get_session_cost",
+      description:
+        "Return the running cost of THIS session — USD plus a per-model token breakdown (input, output, cache reads, cache writes). The orchestrator uses this during standup to self-report spend without scraping the UI. Updates within ~2s of an LLM/tool emission. Returns { sessionId, totals, byModel }. Workspace-scoped on the server side — the agent never names a workspace or session.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "get_session_tree_cost",
+      description:
+        "Return the aggregate cost of THIS session plus every session it has transitively spawned (orchestrator + all worker chains, recursively). Returns { rootSessionId, parent: { totals, byModel }, children: [{ sessionId, depth, summary, agentSlug, … }], totals }. Standup-grade — answers 'how much has this whole tree cost so far'.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "get_agent_cost",
+      description:
+        "Return THIS agent's total cost across every session it has ever run within a window. Returns { agentId, window, totals, byModel, byDay, topSessions }. Default window is '7d' (matches the standup cadence — 'last week cost X, what's the envelope this week?'). Pass `window`: '24h' | '7d' | '30d' | 'all' to slice differently.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          window: {
+            type: "string",
+            enum: ["24h", "7d", "30d", "all"],
+            description: "Time window. Defaults to '7d'.",
+          },
+        },
+      },
+    },
+    {
       name: "message_caller",
       description:
         "Push an explicit signal up to the session that spawned you. Use when you want to notify your parent orchestrator of a milestone, an ask, or a blocker — not for every progress update (use emit_status for cheap heartbeats). The platform routes this as a driverless wake into the parent's turn so the parent reasons about your signal without polling. Only works when this session has a parent (was spawned by another agent). Returns { ok, delivered }. delivered=false with reason='parent_not_orchestrator' means your parent is a worker and platform wakes aren't routed there; the call still succeeded as a no-op.",
@@ -1140,6 +1173,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `expect_quiet_for failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "get_session_cost":
+    case "get_session_tree_cost":
+    case "get_agent_cost": {
+      // The sidecar already knows our session_id (env var at boot)
+      // and resolves workspace on the api side, so the MCP surface
+      // is "no arguments needed" for session + tree, and just the
+      // window for agent. Keeps the tool surface honest — agents can't
+      // probe other sessions' or workspaces' cost.
+      const path =
+        name === "get_session_cost"
+          ? "/cost/session"
+          : name === "get_session_tree_cost"
+            ? "/cost/session-tree"
+            : "/cost/agent";
+      const qs =
+        name === "get_agent_cost" && typeof a?.window === "string"
+          ? `?window=${encodeURIComponent(String(a.window))}`
+          : "";
+      try {
+        const res = await fetch(`${sidecarUrl}${path}${qs}`);
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `${name} failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
