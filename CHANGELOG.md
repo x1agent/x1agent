@@ -1,3 +1,16 @@
+## [1.24.6](https://github.com/x1agent/x1agent/compare/v1.24.5...v1.24.6) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** gate scheduled-run-as default on workspaceMembers load ([57308b8](https://github.com/x1agent/x1agent/commit/57308b894963cba7c97d3f6dfb9deace3100fe22))
+* **migrate:** fail loudly on duplicate numeric prefixes ([47cba20](https://github.com/x1agent/x1agent/commit/47cba20e3f5a4765e7316e667c7a1bf06bf0f6be))
+
+
+### Reverts
+
+* Revert "fix(app): minimal two-step create form for new agents" ([3a83b20](https://github.com/x1agent/x1agent/commit/3a83b20bdb9e6026d85826d58b35fbe26ecf5c7a))
+
 ## [1.24.5](https://github.com/x1agent/x1agent/compare/v1.24.4...v1.24.5) (2026-05-12)
 
 
