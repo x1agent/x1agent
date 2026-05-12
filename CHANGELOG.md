@@ -1,3 +1,16 @@
+# [1.23.0](https://github.com/x1agent/x1agent/compare/v1.22.0...v1.23.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **sessions:** adapter writes subject_kind/subject_id on session_user_shares upsert ([a21f26f](https://github.com/x1agent/x1agent/commit/a21f26f2684c561d17b6831d34955b33885c7127)), closes [#89](https://github.com/x1agent/x1agent/issues/89)
+* **sessions:** drop duplicate resolveSessionVisibility re-export from index ([3c50fa7](https://github.com/x1agent/x1agent/commit/3c50fa77bd7d2d6d33d8a45ce2a7ef9643b67b25))
+
+
+### Features
+
+* **sessions:** unify session+share visibility under one primitive ([606db10](https://github.com/x1agent/x1agent/commit/606db10746e17682cbc9dc292428381a8e4e8e90))
+
 # [1.22.0](https://github.com/x1agent/x1agent/compare/v1.21.0...v1.22.0) (2026-05-12)
 
 
