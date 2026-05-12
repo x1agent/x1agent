@@ -8,6 +8,7 @@ import type {
   WorkspaceMembership,
 } from "../domain/auth-session.js";
 import type { User } from "../domain/user.js";
+import type { GitIdentity } from "../domain/git-identity.js";
 import { InvalidAuthCodeError } from "../domain/errors.js";
 
 export class InMemoryAuthProvider implements AuthProvider {
@@ -63,6 +64,7 @@ export class InMemoryUserRepository implements UserRepository {
       name: profile.name,
       avatarUrl: profile.avatarUrl,
       isActive: true,
+      gitIdentity: null,
     };
     this.users.set(id, user);
     return user;
@@ -71,6 +73,14 @@ export class InMemoryUserRepository implements UserRepository {
     userId: UserId,
   ): Promise<readonly WorkspaceMembership[]> {
     return this.memberships.get(userId) ?? [];
+  }
+  async setGitIdentity(
+    userId: UserId,
+    identity: GitIdentity | null,
+  ): Promise<void> {
+    const u = this.users.get(userId);
+    if (!u) return;
+    this.users.set(userId, { ...u, gitIdentity: identity });
   }
 
   seedMembership(userId: UserId, slug: string, name: string, role: Role) {

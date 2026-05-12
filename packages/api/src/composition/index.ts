@@ -11,6 +11,7 @@ import {
   PostgresAccessGate,
   PostgresUserOAuthTokenStore,
   createAuthRoutes,
+  createMeRoutes,
   createRequireAuth,
   isPlatformAdmin as isEmailPlatformAdmin,
   type AuthProvider,
@@ -150,9 +151,16 @@ import {
   listEnabledOverrides,
 } from "../capabilities/admin-routes.js";
 import { createAdminWorkspacesRoutes } from "../admin/workspaces-routes.js";
+import { createPlatformSecretsRoutes } from "../admin/platform-secrets/routes.js";
+import {
+  K8sPlatformSecretsStore,
+  NoopPlatformSecretsStore,
+} from "../admin/platform-secrets/store.js";
 
 export interface Composition {
   authRoutes: Hono;
+  /** /api/me — per-user account-management routes (X1A-42 git identity). */
+  meRoutes: Hono;
   workspaceInvitationRoutes: Hono;
   publicInvitationRoutes: Hono;
   /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
@@ -198,6 +206,12 @@ export interface Composition {
   adminAnthropicModelsRoutes: Hono;
   /** /api/admin/workspaces — platform-admin cross-workspace list. */
   adminWorkspacesRoutes: Hono;
+  /**
+   * /api/admin/platform-secrets — platform-admin LLM provider keys
+   * (X1A-46). Writes go through a K8s Secret + Deployment rollout when
+   * the api is running in-cluster; routes 503 otherwise.
+   */
+  platformSecretsRoutes: Hono;
   sharedResources: SharedResourceRepository;
   postgresBranches: PostgresBranchRepository;
   postgresProvisioner: PostgresAdminProvisioner | null;
@@ -405,6 +419,11 @@ export function compose(env: CompositionEnv): Composition {
   });
 
   const requireAuth = createRequireAuth(tokenizer);
+  // Per-user self-management surface — currently only the X1A-42 git
+  // identity. Mounted at /api/me; every route in here scopes to the
+  // authenticated session's own userId. See domains/auth/.../me-routes.ts
+  // for the scope guardrail rationale.
+  const meRoutes = createMeRoutes({ users, requireAuth });
   const getActor = (c: Context) => {
     const session = c.get("session");
     if (!session) return null;
@@ -1099,8 +1118,29 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
   });
 
+  // Platform LLM-keys store. When the api is running in-cluster we
+  // wire the real K8s-backed store (patches Secret/x1agent-platform-secrets
+  // + restarts the api deployment). Out-of-cluster boots get the noop
+  // store, which routes turn into a clear 503 instead of a silent
+  // success — operators see "platform_secrets_unavailable" rather than
+  // a fake-OK with no effect.
+  const platformSecretsStore = env.kubeConfig
+    ? new K8sPlatformSecretsStore({
+        kubeConfig: env.kubeConfig,
+        namespace: env.sharedResourcesNamespace ?? "x1agent",
+        secretName: "x1agent-platform-secrets",
+        deploymentName: "api",
+      })
+    : new NoopPlatformSecretsStore();
+  const platformSecretsRoutes = createPlatformSecretsRoutes({
+    platformAdmins: env.platformAdmins,
+    requireAuth,
+    store: platformSecretsStore,
+  });
+
   return {
     authRoutes,
+    meRoutes,
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     workspaceCreateRoutes,
@@ -1132,6 +1172,7 @@ export function compose(env: CompositionEnv): Composition {
     workspaceMembersRoutes,
     adminAnthropicModelsRoutes,
     adminWorkspacesRoutes,
+    platformSecretsRoutes,
     sharedResources,
     postgresBranches,
     postgresProvisioner,

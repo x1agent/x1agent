@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "../../stores/authStore";
 import { useAccountsStore } from "../../stores/accountsStore";
 import { Plus, X } from "lucide-react";
+import { GitIdentitySection } from "./GitIdentitySection";
 
 export function AccountRoot() {
   const { status, fetchMe } = useAuthStore();
@@ -104,6 +105,8 @@ export function AccountRoot() {
         <Button onClick={() => startAddAccount()}>
           <Plus className="h-4 w-4" /> Add Google account
         </Button>
+
+        <GitIdentitySection />
       </div>
     </AppShell>
   );
