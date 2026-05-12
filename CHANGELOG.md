@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/x1agent/x1agent/compare/v1.21.0...v1.22.0) (2026-05-12)
+
+
+### Features
+
+* **spawn:** add optional model arg to spawn_session for per-spawn override ([266451b](https://github.com/x1agent/x1agent/commit/266451be324311811baffd9033339affb893cbc4))
+
 # [1.21.0](https://github.com/x1agent/x1agent/compare/v1.20.0...v1.21.0) (2026-05-12)
 
 
