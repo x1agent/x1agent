@@ -33,6 +33,7 @@ interface Row {
   summary: string | null;
   summary_updated_at: Date | string | null;
   summary_event_seq: number | string | null;
+  model_override: string | null;
 }
 
 function toSession(r: Row): Session {
@@ -61,6 +62,7 @@ function toSession(r: Row): Session {
       r.summary_event_seq === null || r.summary_event_seq === undefined
         ? null
         : Number(r.summary_event_seq),
+    modelOverride: r.model_override,
   };
 }
 
@@ -68,7 +70,8 @@ const SELECT = `
   id, agent_id, triggered_by, triggered_by_user_id,
   parent_session_id, parent_agent_id, resumed_from,
   triggered_at, status, completed_at, error_message, created_at,
-  summary, summary_updated_at, summary_event_seq
+  summary, summary_updated_at, summary_event_seq,
+  model_override
 `;
 
 function isUniqueViolation(err: unknown): boolean {
@@ -89,13 +92,14 @@ export class PostgresSessionRepository implements SessionRepository {
         INSERT INTO sessions
           (agent_id, triggered_by, triggered_by_user_id,
            parent_session_id, parent_agent_id, resumed_from,
-           triggered_at)
+           triggered_at, model_override)
         VALUES
           (${input.agentId}, ${input.triggeredBy},
            ${input.triggeredByUserId},
            ${input.parentSessionId}, ${input.parentAgentId},
            ${input.resumedFromSessionId},
-           ${input.triggeredAt})
+           ${input.triggeredAt},
+           ${input.modelOverride ?? null})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;
       return toSession(rows[0]!);

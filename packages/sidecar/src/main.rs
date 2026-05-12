@@ -20,6 +20,7 @@ use std::sync::Arc;
 mod audit;
 mod calendar;
 mod channel;
+mod cost;
 mod docs;
 mod email;
 mod files;
@@ -319,6 +320,16 @@ async fn main() {
             "/vector/delete",
             routing::post(collections::handle_vector_delete),
         )
+        // X1A-37 — cost surfacing. Three GETs forwarded to the api's
+        // internal /sessions/:id/cost{,-tree,-agent} endpoints with
+        // the agent's session_id supplied here (the agent never names
+        // a session in its MCP tool args).
+        .route("/cost/session", routing::get(cost::handle_session_cost))
+        .route(
+            "/cost/session-tree",
+            routing::get(cost::handle_session_tree_cost),
+        )
+        .route("/cost/agent", routing::get(cost::handle_agent_cost))
         .route("/health", routing::get(|| async { "ok" }))
         // Audit middleware emits one NATS message per request (denylist
         // for /health and /event). The api side persists those into

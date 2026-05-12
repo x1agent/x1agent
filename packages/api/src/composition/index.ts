@@ -43,6 +43,7 @@ import {
   NatsShareCommentPublisher,
   RecordingShareCommentPublisher,
   createSessionRoutes,
+  createWorkspaceCostRoutes,
   createWorkspaceSessionRoutes,
   createWorkspaceTokenUsageRoutes,
   createSessionShareRoutes,
@@ -177,6 +178,12 @@ export interface Composition {
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
   workspaceTokenUsageRoutes: Hono;
+  /**
+   * X1A-37 cost surfacing — workspace-scoped read routes for the
+   * per-session, per-session-tree, and per-agent rollups consumed by
+   * the session-detail and agent-detail pages.
+   */
+  workspaceCostRoutes: Hono;
   workspaceShareRoutes: Hono;
   /** /api/workspaces/:slug/sessions/:sessionId/user-shares — per-user share grants. */
   sessionShareRoutes: Hono;
@@ -519,6 +526,22 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
+  // X1A-37 — per-session, per-tree, per-agent cost surfacing. Mounted
+  // at /api/workspaces/:slug below; session-scoped paths require
+  // owner / sharee / admin, agent-scoped path requires admin (same
+  // policy as the workspace-wide token-usage dashboard).
+  const workspaceCostRoutes = createWorkspaceCostRoutes({
+    sessions,
+    agents,
+    tokenUsage,
+    shares: sessionShares,
+    adminGuard: new WorkspaceAdminGuard(memberships),
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+    clock: systemClock,
+  });
+
   // POST /api/workspaces — platform-admin-only. Used by NoAccessRoot's
   // "Create your first workspace" CTA on a fresh install. Auth gating
   // (platform admin check) lives inside createWorkspace, not here.
@@ -696,6 +719,12 @@ export function compose(env: CompositionEnv): Composition {
     sessions,
     agents,
     grants: permissionGrants,
+    // tokenUsage powers the agent-facing cost MCP tools — see X1A-37.
+    // The agent's sidecar forwards /cost/* to the api's internal
+    // /sessions/:id/cost{,-tree,-agent} endpoints; both ends pivot on
+    // (session_id → agent_id → workspace_id) so the agent surface
+    // never names a workspace.
+    tokenUsage,
     githubClient,
     internalToken: env.internalToken ?? "",
     natsConnection: env.natsConnection,
@@ -712,6 +741,11 @@ export function compose(env: CompositionEnv): Composition {
       decrypt: decryptOAuthToken,
       refreshers: { google },
     },
+    // X1A-40: same enabled-models gate the agent-edit form enforces on
+    // agents.model. The /sessions/spawn route uses this to reject
+    // per-spawn model overrides that aren't admin-enabled — otherwise
+    // the orchestrator could side-channel around /admin/anthropic-models.
+    enabledModels: async () => listEnabledOverrides(env.sql),
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -1246,6 +1280,7 @@ export function compose(env: CompositionEnv): Composition {
     sessionRoutes,
     workspaceSessionRoutes,
     workspaceTokenUsageRoutes,
+    workspaceCostRoutes,
     workspaceShareRoutes,
     sessionShareRoutes,
     shareCommentRoutes,
