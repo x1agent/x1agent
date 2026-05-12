@@ -44,6 +44,7 @@ COPY --chown=agent:agent packages/shared/ ./packages/shared/
 COPY --chown=agent:agent packages/observability/ ./packages/observability/
 COPY --chown=agent:agent packages/api/ ./packages/api/
 COPY --chown=agent:agent packages/domains/ ./packages/domains/
+COPY --chown=agent:agent packages/infrastructure/ ./packages/infrastructure/
 COPY --chown=agent:agent deploy/migrations/ ./deploy/migrations/
 COPY --chown=agent:agent deploy/images/ ./deploy/images/
 COPY --chown=agent:agent packages/agent/Dockerfile ./deploy/images/runtime-core/Dockerfile
