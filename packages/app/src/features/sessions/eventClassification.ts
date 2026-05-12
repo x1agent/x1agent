@@ -101,15 +101,42 @@ const itemKey = (e: SessionEventDTO) => `${e.session_id}-${e.seq}`;
  * Walk events in order, emitting compact rows. Hidden events are
  * dropped. Adjacent status/tools entries are merged with the *first*
  * group's key — so the row's identity sticks to where the run started.
+ *
+ * `agent.share` events with a duplicate `share_id` collapse onto the
+ * original pill's slot — the latest payload wins, the timeline
+ * position doesn't jump. This is the consumer side of the sidecar's
+ * update-mode contract: when the agent re-shares with an existing
+ * share_id, the operator sees the same pill update in place, comments
+ * stay attached (they're keyed by share_id, which didn't move), and
+ * the chat reads naturally instead of growing a fresh pill for each
+ * revision.
  */
 export function compactTimeline(
   events: readonly SessionEventDTO[],
 ): CompactItem[] {
   const out: CompactItem[] = [];
+  const sharePillIdxByShareId = new Map<string, number>();
   for (const ev of events) {
     const k = compactKind(ev.type);
     if (k === "hidden") continue;
     if (k === "event") {
+      if (ev.type === "agent.share") {
+        const shareId = (ev.payload as { share_id?: string } | null)
+          ?.share_id;
+        if (shareId) {
+          const priorIdx = sharePillIdxByShareId.get(shareId);
+          if (priorIdx !== undefined) {
+            const prior = out[priorIdx]!;
+            if (prior.kind === "event") {
+              // Keep the original React key so the pill subtree
+              // doesn't unmount/remount on update.
+              out[priorIdx] = { kind: "event", key: prior.key, event: ev };
+            }
+            continue;
+          }
+          sharePillIdxByShareId.set(shareId, out.length);
+        }
+      }
       out.push({ kind: "event", key: itemKey(ev), event: ev });
       continue;
     }

@@ -42,6 +42,15 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # X1A-46 — Admin Settings → LLM Provider Keys writes to a K8s Secret
+  # and rolls the api Deployment to pick up new envFrom values. The
+  # secret verbs are already granted above; the deployments verb here
+  # is the new bit — `patch` lets the api annotate the pod template
+  # with kubectl.kubernetes.io/restartedAt, the same mechanism
+  # `kubectl rollout restart deploy/api` uses.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -220,6 +229,30 @@ spec:
             # remaps tls.* → client.* via Secret items projection.
             - name: SESSION_NATS_TLS_SECRET
               value: nats-session-client-tls
+            # X1A-46 — LLM provider keys. Explicit env entries (in
+            # addition to the envFrom blocks below) make the contract
+            # visible: the api reads ANTHROPIC_API_KEY and
+            # OPENAI_API_KEY from the ESO-synced bundle by default,
+            # and the admin-edited platform-secrets Secret can shadow
+            # either via its own envFrom below.
+            #
+            # `optional: true` on the secretKeyRef means a fresh
+            # install without an OpenAI key (or a Vertex install
+            # without ANTHROPIC_API_KEY) still boots — the env var
+            # simply isn't projected. Same posture as the existing
+            # envFrom: secretRef.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: x1agent-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: x1agent-secrets
+                  key: OPENAI_API_KEY
+                  optional: true
             {{- if .Values.monitoring.opentelemetry.enabled }}
             # OTel collector wiring. The OpenTelemetry Operator creates
             # a Service named "<name>-collector" for the OpenTelemetryCollector
@@ -236,11 +269,22 @@ spec:
           # everything in. Pod restarts on Secret value change are
           # handled by the reloader sidecar (deferred — for now, manually
           # `kubectl rollout restart deploy/api` after a secret rotation).
+          #
+          # X1A-46: x1agent-platform-secrets is the admin-edited
+          # overlay. It's listed AFTER x1agent-secrets so envFrom
+          # last-wins semantics let an admin shadow an ESO-synced
+          # value (e.g. set OPENAI_API_KEY from the UI without
+          # touching GSM). `optional: true` so a fresh install
+          # without the bootstrap Secret still rolls cleanly — the
+          # api writes the Secret on first save via the K8s API.
           envFrom:
             - secretRef:
                 name: x1agent-secrets
             - secretRef:
                 name: postgres-credentials
+            - secretRef:
+                name: x1agent-platform-secrets
+                optional: true
           resources: {{- toYaml .Values.api.resources | nindent 12 }}
           readinessProbe:
             httpGet: { path: /health, port: {{ .Values.api.port }} }

@@ -10,8 +10,10 @@ import {
   type AgentSharePayload,
   type ShareType,
 } from "./ShareCard";
+import { ArtifactCommentsSidebar } from "./ArtifactCommentsSidebar";
 
 const FULLSCREEN_TYPES: ShareType[] = ["site", "csv", "json", "document"];
+const COMMENTABLE_TYPES = new Set<ShareType>(["document", "site"]);
 
 /**
  * Right-rail artifact viewer. Mounted once in SessionRoot, but the
@@ -51,6 +53,8 @@ export function ArtifactPanel() {
   if (!open) return null;
 
   const { artifact, workspaceSlug, sessionId } = open;
+  const showCommentsSidebar =
+    view === "fullscreen" && COMMENTABLE_TYPES.has(artifact.share_type);
   return (
     <ArtifactSurface view={view} onClose={close}>
       <ArtifactHeader
@@ -62,18 +66,28 @@ export function ArtifactPanel() {
         onRestore={restore}
         onClose={close}
       />
-      <div className="flex-1 overflow-auto p-4">
-        {renderShareBody({
-          payload: artifact,
-          workspaceSlug,
-          sessionId,
-          maximized: view === "fullscreen",
-          // Tell renderers (e.g. DocumentShare) to drop their bounded
-          // preview height and let this scroll region own the chrome —
-          // long markdown in particular was clipped into a 384px inner
-          // box otherwise (X1A-19).
-          fillParent: true,
-        })}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col overflow-auto p-4">
+          {renderShareBody({
+            payload: artifact,
+            workspaceSlug,
+            sessionId,
+            maximized: view === "fullscreen",
+            // Tell renderers (e.g. DocumentShare) to drop their bounded
+            // preview height and let this scroll region own the chrome —
+            // long markdown in particular was clipped into a 384px inner
+            // box otherwise (X1A-19).
+            fillParent: true,
+          })}
+        </div>
+        {showCommentsSidebar && (
+          <ArtifactCommentsSidebar
+            workspaceSlug={workspaceSlug}
+            sessionId={sessionId}
+            shareId={artifact.share_id}
+            shareType={artifact.share_type}
+          />
+        )}
       </div>
     </ArtifactSurface>
   );

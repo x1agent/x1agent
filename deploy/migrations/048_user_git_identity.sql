@@ -40,5 +40,5 @@ ALTER TABLE users
   ADD CONSTRAINT users_git_email_len_chk
     CHECK (git_email IS NULL OR char_length(git_email) BETWEEN 3 AND 200);
 
-INSERT INTO schema_migrations (version) VALUES ('046_user_git_identity')
+INSERT INTO schema_migrations (version) VALUES ('048_user_git_identity')
   ON CONFLICT DO NOTHING;

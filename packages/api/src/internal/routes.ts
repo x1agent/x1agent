@@ -212,7 +212,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           status as 400,
         );
       }
-      return c.json({ error: "internal_error" }, 500);
+      // Unknown error — bubble to app.onError → Sentry.
+      throw err;
     }
   });
 
@@ -290,6 +291,13 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
   // production the sidecar uploads straight to GCS and skips this
   // path. The session must exist; files are written under
   // X1_SHARES_DIR/sessions/{id}/shares/{share_id}/.
+  //
+  // Cross-session share_id ownership check: when an agent re-shares
+  // with a share_id, the id MUST already belong to THIS session (i.e.
+  // an earlier `agent.share` event in this session emitted it). A
+  // foreign id would let a workspace-B agent collide with a workspace-A
+  // share — comment routing keys on share_id globally and would
+  // misroute. Fresh ids (no prior event anywhere) are always allowed.
   app.post("/sessions/:sessionId/shares", async (c) => {
     const sessionId = c.req.param("sessionId")! as SessionId;
     const session = await cfg.sessions.findById(sessionId);
@@ -304,6 +312,24 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         400,
       );
     }
+
+    if (cfg.sql) {
+      const rows = await cfg.sql<{ session_id: string }[]>`
+        SELECT session_id
+        FROM session_events
+        WHERE type = 'agent.share'
+          AND (payload->>'share_id') = ${body.share_id}
+        LIMIT 1
+      `;
+      const existingOwner = rows[0]?.session_id;
+      if (existingOwner && existingOwner !== sessionId) {
+        return c.json(
+          { error: "share_id_owned_by_other_session" },
+          403,
+        );
+      }
+    }
+
     const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
     return c.json({ ok: true, total_size: totalSize });
   });

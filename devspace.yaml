@@ -80,6 +80,26 @@ vars:
   SLACK_BOT_TOKEN:
     source: env
     default: ""
+  # Sentry. Per-deployment install puts these in installs/<base>.local;
+  # for local dev, copy the values into .env.local so mise loads them
+  # into devspace's process env. Empty default keeps SDK init a no-op
+  # (instrument.ts skips Sentry.init when DSN is unset) so contributors
+  # who don't want Sentry chatter don't need any config.
+  SENTRY_DSN_API:
+    source: env
+    default: ""
+  PUBLIC_SENTRY_DSN_APP:
+    source: env
+    default: ""
+  SENTRY_DSN_SIDECAR:
+    source: env
+    default: ""
+  SENTRY_ENVIRONMENT:
+    source: env
+    default: "local-dev"
+  SENTRY_TRACES_SAMPLE_RATE:
+    source: env
+    default: "0.1"
 
 images:
   api:
@@ -343,6 +363,12 @@ dev:
         value: "true"
       - name: USE_JETSTREAM_CONSUME
         value: "true"
+      - name: SENTRY_DSN_API
+        value: ${SENTRY_DSN_API}
+      - name: SENTRY_ENVIRONMENT
+        value: ${SENTRY_ENVIRONMENT}
+      - name: SENTRY_TRACES_SAMPLE_RATE
+        value: ${SENTRY_TRACES_SAMPLE_RATE}
 
   messaging-slack:
     labelSelector:
@@ -514,6 +540,12 @@ dev:
         value: development
       - name: HOST
         value: "0.0.0.0"
+      # Astro/Vite picks PUBLIC_*-prefixed vars from process env at
+      # runtime in dev (no prebuild step). Empty value = no SDK init.
+      - name: PUBLIC_SENTRY_DSN_APP
+        value: ${PUBLIC_SENTRY_DSN_APP}
+      - name: SENTRY_ENVIRONMENT
+        value: ${SENTRY_ENVIRONMENT}
 
 pipelines:
   dev: |-

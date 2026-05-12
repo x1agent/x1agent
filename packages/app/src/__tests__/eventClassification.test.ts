@@ -186,4 +186,54 @@ describe("compactTimeline", () => {
     ]);
     expect(items.map((i) => i.kind)).toEqual(["tools", "status", "tools"]);
   });
+
+  it("agent.share with a repeated share_id replaces the original event at its slot", () => {
+    // First share — v1 of the mockup at seq=1.
+    const v1 = {
+      ...ev("agent.share", 1),
+      payload: { share_id: "s-abc", title: "X1A-59 mockup v1" },
+    };
+    // Two intervening events so the timeline has shape.
+    const between = [ev("agent.text", 2), ev("agent.text", 3)];
+    // v2 of the same mockup at seq=4 — same share_id.
+    const v2 = {
+      ...ev("agent.share", 4),
+      payload: { share_id: "s-abc", title: "X1A-59 mockup v2" },
+    };
+    const items = compactTimeline([v1, ...between, v2]);
+    // Three items: the share pill at slot 0 (unchanged position) plus
+    // the two text events. The v2 event does NOT add a fourth slot.
+    expect(items.length).toBe(3);
+    if (items[0]!.kind !== "event")
+      throw new Error("share pill should be an event item");
+    // Latest payload wins.
+    expect(items[0]!.event.seq).toBe(4);
+    expect(
+      (items[0]!.event.payload as { title: string }).title,
+    ).toBe("X1A-59 mockup v2");
+    // Key sticks to the v1 slot so React mutates the same subtree.
+    expect(items[0]!.key).toBe("s1-1");
+  });
+
+  it("distinct share_ids each get their own slot — no cross-share collapse", () => {
+    const a = {
+      ...ev("agent.share", 1),
+      payload: { share_id: "s-aaa", title: "A" },
+    };
+    const b = {
+      ...ev("agent.share", 2),
+      payload: { share_id: "s-bbb", title: "B" },
+    };
+    const items = compactTimeline([a, b]);
+    expect(items.length).toBe(2);
+    expect(items.map((i) => i.kind)).toEqual(["event", "event"]);
+  });
+
+  it("agent.share with no share_id falls through to default per-event rendering", () => {
+    const a = { ...ev("agent.share", 1), payload: { title: "no id" } };
+    const b = { ...ev("agent.share", 2), payload: { title: "still no id" } };
+    const items = compactTimeline([a, b]);
+    // Two distinct rows because there's no share_id to dedupe by.
+    expect(items.length).toBe(2);
+  });
 });
