@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronsLeft, ChevronsRight, MessageSquare } from "lucide-react";
-import { Button } from "../../components/ui/button";
 import {
   useShareCommentsStore,
   groupThreads,
 } from "../../stores/shareCommentsStore";
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
+import { ComposerShell } from "./ComposerShell";
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -169,37 +169,18 @@ export function ArtifactCommentsSidebar({
         })}
       </div>
 
-      <form
-        className="shrink-0 border-t border-border-soft p-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <textarea
+      <div className="shrink-0 border-t border-border-soft px-3 pb-3 pt-3">
+        <ComposerShell
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
+          onSubmit={submit}
+          busy={posting}
+          canSend={!!draft.trim() && !posting}
           placeholder="Comment on this share…"
-          rows={2}
-          className="w-full resize-none rounded-md border border-border-soft bg-bg px-2 py-1.5 text-[13px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent-soft"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              submit();
-            }
-          }}
+          showAttachButton={false}
+          hint={null}
         />
-        <div className="mt-2 flex items-center justify-between">
-          <div className="text-[11px] text-fg-faint">⌘↵ to post</div>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={!draft.trim() || posting}
-          >
-            {posting ? "Posting…" : "Post"}
-          </Button>
-        </div>
-      </form>
+      </div>
     </aside>
   );
 }
@@ -227,9 +208,55 @@ function CommentRow({
           {formatRelativeTime(comment.created_at)}
         </span>
       </div>
-      <div className="leading-snug text-fg whitespace-pre-wrap">
-        {comment.body}
+      <ClippableBody body={comment.body} />
+    </div>
+  );
+}
+
+/**
+ * Long comments (multi-paragraph rants, agent-generated essays) crush
+ * the sidebar's scannability when they render at full height. Clip to
+ * a max height; expose a "Show more" toggle. State is local per row
+ * because expansion is a transient UI concern, not server state.
+ *
+ * The max-height is in CSS units (a content-relative line-clamp
+ * doesn't work with `whitespace-pre-wrap` once line wrapping is
+ * involved). A ResizeObserver-based "is this overflowing?" check
+ * keeps the toggle from appearing on bodies that fit anyway.
+ */
+const CLIP_MAX_PX = 200;
+
+function ClippableBody({ body }: { body: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setOverflows(el.scrollHeight > CLIP_MAX_PX + 4);
+  }, [body]);
+
+  return (
+    <div>
+      <div
+        ref={ref}
+        className="leading-snug text-fg whitespace-pre-wrap overflow-hidden"
+        style={{
+          maxHeight: expanded ? "none" : `${CLIP_MAX_PX}px`,
+        }}
+      >
+        {body}
       </div>
+      {overflows && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[11px] text-accent hover:opacity-80"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
     </div>
   );
 }

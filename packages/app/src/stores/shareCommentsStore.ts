@@ -133,14 +133,13 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
   applyServerEvent(payload) {
     set((s) => {
       const existing = s.byShareId[payload.share_id] ?? [];
-      // Dedup by (thread_id, seq) — NATS redelivery + optimistic-append
-      // can both reach this code path.
-      if (
-        existing.some(
-          (c) =>
-            c.thread_id === payload.thread_id && c.seq === payload.seq,
-        )
-      ) {
+      // Dedup by id (UUID, globally unique). NATS redelivery,
+      // optimistic-append after POST, and a fresh REST refresh can
+      // all reach this path; id is the only key present and unique
+      // across all three. The previous (thread_id, seq) dedup broke
+      // for NATS-only deliveries because the
+      // agent.share_comment_added NATS payload doesn't carry seq.
+      if (existing.some((c) => c.id === payload.id)) {
         return s;
       }
       return {
@@ -149,7 +148,7 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
           [payload.share_id]: [...existing, payload].sort((a, b) =>
             a.thread_id === b.thread_id
               ? a.seq - b.seq
-              : a.thread_id.localeCompare(b.thread_id),
+              : a.created_at.localeCompare(b.created_at),
           ),
         },
       };

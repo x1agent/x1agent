@@ -11,7 +11,9 @@ import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
+import { useShareCommentsStore } from "../../stores/shareCommentsStore";
 import type { AgentSharePayload } from "./ShareCard";
+import type { ShareCommentDTO } from "@x1agent/shared";
 import { ChildWorkersCounter } from "./ChildWorkersCounter";
 import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
@@ -142,6 +144,62 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 timestamp: msg.timestamp,
               };
               appendEvent(sessionId, ev);
+            } catch {
+              // drop malformed
+            }
+          }
+        })().catch(() => {});
+
+        // Live comment updates — subscribe to the platform-wide
+        // share-comment NATS subjects so the comments sidebar reflects
+        // new threads/replies/resolves without a refresh. The subjects
+        // are cluster-wide, not per-session, so a single subscription
+        // covers any share the user is viewing. The store's
+        // applyServerEvent is idempotent on (thread_id, seq) so this
+        // is safe even if a comment also arrives via the local POST
+        // (optimistic append).
+        const commentAddedSub = nc.subscribe("agent.share_comment_added");
+        (async () => {
+          for await (const m of commentAddedSub) {
+            if (cancelled) break;
+            try {
+              const p = JSON.parse(sc.decode(m.data)) as {
+                share_id?: string;
+                thread_id?: string;
+                comment_id?: string;
+                actor_user_id?: string | null;
+                actor_session_id?: string | null;
+                comment_scope?: "passage" | "share";
+                anchor?: ShareCommentDTO["anchor"];
+                comment_body?: string;
+                workspace_id?: string;
+                session_id?: string;
+                share_type?: string;
+              };
+              if (!p.share_id || !p.thread_id || !p.comment_id) continue;
+              // The NATS payload doesn't carry seq or resolved-state —
+              // applyServerEvent dedupes by `id` (UUID), so a partial
+              // DTO is fine. seq=0 is a placeholder; when the operator
+              // posts locally the optimistic-append uses the real seq.
+              const now = new Date().toISOString();
+              const dto: ShareCommentDTO = {
+                id: p.comment_id,
+                share_id: p.share_id,
+                thread_id: p.thread_id,
+                seq: 0,
+                session_id: p.session_id ?? "",
+                share_type: p.share_type ?? "site",
+                scope: p.comment_scope ?? "share",
+                anchor: p.anchor ?? null,
+                body: p.comment_body ?? "",
+                author_user_id: p.actor_user_id ?? null,
+                author_session_id: p.actor_session_id ?? null,
+                resolved_at: null,
+                resolved_by_user_id: null,
+                created_at: now,
+                updated_at: now,
+              };
+              useShareCommentsStore.getState().applyServerEvent(dto);
             } catch {
               // drop malformed
             }
