@@ -215,3 +215,16 @@ This matters because:
 - Tests can reset the store between cases instead of mocking `fetch`.
 
 When you find a feature that uses raw `useState` + `apiFetch` for server state, treat it as tech debt — refactor opportunistically when you next touch it.
+
+## Adding a new env var / secret dependency
+
+A new `*_API_KEY` / `*_TOKEN` / `*_SECRET` env var that the api or any other pod reads has to be wired in **four** places. Skipping any one breaks `mise run install:prod` for everyone — usually with a useless error message that only surfaces hours into the deploy. Sync them in the same PR:
+
+1. **Terraform**: add the GSM secret name to `gsm_secret_names` in `deploy/terraform/gcp/variables.tf`. Creates the empty secret resource.
+2. **Installer**: add `{ envName, gsmName }` to the `bindings` array in `packages/cli/src/install/up.ts:phaseGsmSecrets`. This is what populates a placeholder version when the operator didn't set a value — without it ESO blocks on "Secret does not exist" and helm's post-upgrade hook times out.
+3. **Helm chart**: add the secret to the ESO ExternalSecret + the consuming pod's envFrom in `deploy/helm/x1agent/templates/`. The chart binds the K8s Secret key into the container env.
+4. **Configure wizard** (optional): add a prompt in `packages/cli/src/configure/steps/secrets.ts` if it's something the operator pastes. Skip if the value comes from one of the manifest flows (X1A-81 GitHub App, X1A-82 Google Drive) — those write to GSM directly from inside the running install.
+
+This drift bit prod on 2026-05-12: `OPENAI_API_KEY` was in (1) and (3) but missing from (2). Terraform created the empty secret resource, no placeholder version was ever pushed, ESO failed to sync, helm's post-upgrade hook timed out after ten minutes. Same class of bug as the "Dockerfile workspace-manifest drift" noted elsewhere.
+
+Test before you push: `mise run plan:prod` on a fresh deployment should show terraform creating the new resource AND the installer plan adding the placeholder version. If you only see one side, you missed a step.

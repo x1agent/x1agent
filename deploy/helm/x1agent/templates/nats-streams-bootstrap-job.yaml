@@ -29,6 +29,37 @@ helm.sh/hook-weight: 6  -- runs after the migrate-job (weight 5) so a
 {{- $streams := default (dict) $nats.streams -}}
 {{- $x1Session := default (dict) $streams.x1Session -}}
 {{- if $x1Session.enabled }}
+{{- /*
+  Convert a human-readable duration ("24h", "2m", "30s") to nanoseconds
+  for JSON consumption. NATS server's StreamConfig uses Go's
+  time.Duration which JSON-unmarshals as an int64 nanosecond count, not
+  a string — passing "24h" makes nats CLI explode with
+  `cannot unmarshal string into Go struct field StreamConfig.max_age`.
+  Newer nats CLI versions added a string-tolerant unmarshaler, but
+  v0.3.0 still requires the integer form, so do the conversion here.
+*/ -}}
+{{- $maxAgeStr := default "24h" $x1Session.maxAge -}}
+{{- $maxAgeNs := "0" -}}
+{{- if hasSuffix "h" $maxAgeStr -}}
+  {{- $maxAgeNs = mul (trimSuffix "h" $maxAgeStr | int) 3600000000000 -}}
+{{- else if hasSuffix "m" $maxAgeStr -}}
+  {{- $maxAgeNs = mul (trimSuffix "m" $maxAgeStr | int) 60000000000 -}}
+{{- else if hasSuffix "s" $maxAgeStr -}}
+  {{- $maxAgeNs = mul (trimSuffix "s" $maxAgeStr | int) 1000000000 -}}
+{{- else -}}
+  {{- $maxAgeNs = $maxAgeStr | int -}}
+{{- end -}}
+{{- $dupWinStr := default "2m" $x1Session.duplicateWindow -}}
+{{- $dupWinNs := "0" -}}
+{{- if hasSuffix "h" $dupWinStr -}}
+  {{- $dupWinNs = mul (trimSuffix "h" $dupWinStr | int) 3600000000000 -}}
+{{- else if hasSuffix "m" $dupWinStr -}}
+  {{- $dupWinNs = mul (trimSuffix "m" $dupWinStr | int) 60000000000 -}}
+{{- else if hasSuffix "s" $dupWinStr -}}
+  {{- $dupWinNs = mul (trimSuffix "s" $dupWinStr | int) 1000000000 -}}
+{{- else -}}
+  {{- $dupWinNs = $dupWinStr | int -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -47,13 +78,13 @@ data:
       "max_consumers": -1,
       "max_msgs": -1,
       "max_bytes": {{ int (default 134217728 $x1Session.maxBytes) }},
-      "max_age": {{ default "24h" $x1Session.maxAge | quote }},
+      "max_age": {{ $maxAgeNs }},
       "max_msgs_per_subject": -1,
       "max_msg_size": -1,
       "discard": "old",
       "storage": "file",
       "num_replicas": {{ int (default 1 $x1Session.replicas) }},
-      "duplicate_window": {{ default "2m" $x1Session.duplicateWindow | quote }},
+      "duplicate_window": {{ $dupWinNs }},
       "sealed": false,
       "deny_delete": false,
       "deny_purge": false,
@@ -83,7 +114,13 @@ spec:
       # async with respect to this hook on a fresh install.
       initContainers:
         - name: wait-for-nats
-          image: natsio/nats-box:0.14.5
+          # nats-box 0.14.5 shipped nats CLI v0.1.5 which couldn't
+          # unmarshal string durations ("24h", "2m") into JSON-loaded
+          # StreamConfig — it required nanosecond integers, which is
+          # classic Go time.Duration JSON behavior. 0.19.0 ships nats
+          # CLI v0.3.0 with a custom UnmarshalJSON that accepts string
+          # durations. Bumping here keeps the values.yaml human-friendly.
+          image: natsio/nats-box:0.19.0
           env:
             - { name: NATS_URL,  value: "tls://nats.{{ .Release.Namespace }}.svc.cluster.local:4222" }
             - { name: NATS_CA,   value: "/tls/ca.crt" }
@@ -94,28 +131,53 @@ spec:
             - -c
             - |
               set -eu
+              # `nats rtt` opens a real client-protocol connection (uses
+              # NATS_URL + the TLS env vars) and measures round-trip. We
+              # previously used `nats server check connection` here, but
+              # that's a Nagios-style HTTP monitoring probe that hits
+              # nats-server's :8222 monitoring endpoint — not exposed by
+              # this chart's Service. It then falls through to :8080 (the
+              # WebSocket port) and gets rejected with `websocket
+              # handshake error: invalid value for header 'Upgrade'`,
+              # which the silent redirect (>/dev/null 2>&1) hid. We never
+              # actually reached :4222.
+              # `if cmd_substitution` is the bullet-proof shape under
+              # `set -eu`: the assignment always runs (so ${err} is
+              # defined), the `if` consumes the exit code so -e doesn't
+              # bail, and -u doesn't trip on an unset var.
               for i in $(seq 1 60); do
-                if nats server check connection >/dev/null 2>&1; then
-                  echo "nats reachable"; exit 0
+                if err=$(nats rtt 2>&1); then
+                  echo "nats reachable ($err)"
+                  exit 0
                 fi
-                echo "waiting for nats ($i/60)…"; sleep 2
+                echo "waiting for nats ($i/60): ${err}"
+                sleep 2
               done
-              echo "ERROR: nats never became reachable" >&2; exit 1
+              echo "ERROR: nats never became reachable" >&2
+              exit 1
           volumeMounts:
             - { name: tls, mountPath: /tls, readOnly: true }
       containers:
         - name: bootstrap
-          image: natsio/nats-box:0.14.5
+          # nats-box 0.14.5 shipped nats CLI v0.1.5 which couldn't
+          # unmarshal string durations ("24h", "2m") into JSON-loaded
+          # StreamConfig — it required nanosecond integers, which is
+          # classic Go time.Duration JSON behavior. 0.19.0 ships nats
+          # CLI v0.3.0 with a custom UnmarshalJSON that accepts string
+          # durations. Bumping here keeps the values.yaml human-friendly.
+          image: natsio/nats-box:0.19.0
           env:
             - { name: NATS_URL,  value: "tls://nats.{{ .Release.Namespace }}.svc.cluster.local:4222" }
             - { name: NATS_CA,   value: "/tls/ca.crt" }
             - { name: NATS_CERT, value: "/tls/tls.crt" }
             - { name: NATS_KEY,  value: "/tls/tls.key" }
-          # `--replace` makes this idempotent: first install creates
-          # the stream, every helm upgrade applies any changes from
-          # values.yaml without losing message data. Loop covers all
-          # *.json files in /streams so adding a new stream is a
-          # values.yaml + ConfigMap edit, no template change.
+          # Idempotent upsert: if the stream exists, `nats stream edit`
+          # applies the config changes in place (no data loss); if it
+          # doesn't, `nats stream add` creates it. The `--replace` flag
+          # would have been cleaner but doesn't exist in nats CLI v0.1.5
+          # (which is what nats-box:0.14.5 ships). Loop covers every
+          # *.json in /streams so adding a new stream is a values.yaml
+          # + ConfigMap edit, no template change.
           command:
             - sh
             - -c
@@ -123,8 +185,13 @@ spec:
               set -eu
               for f in /streams/*.json; do
                 name=$(basename "$f" .json)
-                echo "+ nats stream add --replace --config $f ($name)"
-                nats stream add --replace --config "$f"
+                if nats stream info "$name" >/dev/null 2>&1; then
+                  echo "+ nats stream edit $name (from $f)"
+                  nats stream edit --force --config "$f"
+                else
+                  echo "+ nats stream add $name (from $f)"
+                  nats stream add --config "$f"
+                fi
               done
               echo "all streams reconciled."
           volumeMounts:

@@ -214,8 +214,8 @@ data:
     # in the bootstrap Job apply within these.
     jetstream {
       store_dir: "/data/jetstream"
-      max_memory_store: {{ $js.maxMemoryStore | default "256Mi" | quote }}
-      max_file_store:   {{ $js.maxFileStore   | default "8Gi"   | quote }}
+      max_memory_store: {{ $js.maxMemoryStore | default "256M" | quote }}
+      max_file_store:   {{ $js.maxFileStore   | default "8G"   | quote }}
     }
     {{- end }}
 

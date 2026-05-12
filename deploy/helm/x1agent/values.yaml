@@ -397,8 +397,12 @@ infra:
       # `maxFileStore` plus a small headroom; outgrowing the PV silently
       # back-pressures publishes (max-bytes already caps the streams).
       fileStorageSize: 10Gi
-      maxMemoryStore: 256Mi
-      maxFileStore: 8Gi
+      # NATS uses SI suffixes (M / G / K), NOT Kubernetes binary (Mi / Gi).
+      # Writing `256Mi` here makes nats-server die with
+      # `max_mem_store strconv.ParseInt: parsing "256M": invalid syntax`
+      # because it strips the `i` and then fails to parse the remainder.
+      maxMemoryStore: 256M
+      maxFileStore: 8G
     # Stream definitions bootstrapped by the post-upgrade Job. Adding a
     # stream here + helm upgrade is the only way to provision new
     # JetStream streams; never `nats stream add` against a customer
