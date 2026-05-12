@@ -1,0 +1,15 @@
+---
+import Layout from "../../../../../../../layouts/Layout.astro";
+import { ShareFullscreenRoot } from "../../../../../../../features/sessions/ShareFullscreenRoot";
+
+const { slug, id, shareId } = Astro.params;
+---
+
+<Layout title={`share · comments · x1agent`}>
+  <ShareFullscreenRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+    sessionId={id ?? ""}
+    shareId={shareId ?? ""}
+  />
+</Layout>

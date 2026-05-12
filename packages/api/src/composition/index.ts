@@ -39,13 +39,20 @@ import {
   PostgresSessionEventRepository,
   PostgresTokenUsageRepository,
   PostgresSessionShareRepository,
+  PostgresShareCommentRepository,
+  NatsShareCommentPublisher,
+  RecordingShareCommentPublisher,
   createSessionRoutes,
   createWorkspaceSessionRoutes,
   createWorkspaceTokenUsageRoutes,
   createSessionShareRoutes,
+  createShareCommentRoutes,
+  createInternalShareCommentRoutes,
   scheduleDueSessions,
   type ScheduleDueSessionsResult,
   type SessionEventRepository,
+  type ShareCommentPublisher,
+  type SessionId,
 } from "@x1agent/domain-sessions";
 import {
   PostgresPermissionGrantRepository,
@@ -130,6 +137,7 @@ import {
   WorkspaceSlug,
   type Email,
   type UserId,
+  type WorkspaceId,
 } from "@x1agent/kernel";
 import type postgres from "postgres";
 import type { Context, Hono } from "hono";
@@ -167,6 +175,10 @@ export interface Composition {
   workspaceShareRoutes: Hono;
   /** /api/workspaces/:slug/sessions/:sessionId/user-shares — per-user share grants. */
   sessionShareRoutes: Hono;
+  /** /api/workspaces/:slug/sessions/:sessionId/shares/:shareId/comments — doc commenting v1 (X1A-52). */
+  shareCommentRoutes: Hono;
+  /** /api/internal/share-comments — sidecar-fronted MCP `share_comment` writes. */
+  internalShareCommentRoutes: Hono;
   workspaceSharesIndexRoutes: Hono;
   internalRoutes: Hono;
   githubInstallRoutes: Hono;
@@ -565,6 +577,82 @@ export function compose(env: CompositionEnv): Composition {
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
+  });
+
+  // ── Document commenting v1 (X1A-52) ─────────────────────────────
+  //
+  // share_comments table + REST routes + internal sidecar routes +
+  // NATS publishers. The publisher emits two subjects:
+  //   - agent.share_comment_added
+  //   - agent.share_comment_thread_resolved
+  // Both payloads carry `producing_session_id` + `producing_agent_id`
+  // which X1A-55 (comment-handler spawn) requires — see PRD-0005
+  // § "Session lifecycle and context reconstruction." Subjects + field
+  // names are stable contracts; do not rename without coordinating
+  // with the X1A-55 worker.
+  //
+  // When NATS isn't wired (tests, local dev without a broker) we fall
+  // back to a RecordingShareCommentPublisher so DB writes still
+  // succeed; events are dropped to memory. Production deploys always
+  // have `env.natsConnection` set.
+  const shareComments = new PostgresShareCommentRepository(env.sql);
+  const shareCommentPublisher: ShareCommentPublisher = env.natsConnection
+    ? new NatsShareCommentPublisher({
+        publish: async (subject, payload) => {
+          // Hono ESM doesn't expose StringCodec on the typed
+          // NatsConnection here — encode JSON and pass bytes, matching
+          // the platform's existing `nats.publish(subject, Buffer)`
+          // convention used in NatsMessageInjector.
+          env.natsConnection!.publish(
+            subject,
+            new TextEncoder().encode(JSON.stringify(payload)),
+          );
+        },
+      })
+    : new RecordingShareCommentPublisher();
+
+  // Producing-context resolver: maps a session_id to the
+  // (producing_session_id, producing_agent_id) tuple that lands in the
+  // NATS event. v1 — the producing session IS the supplied session
+  // (every share is created by an agent inside its own session), and
+  // the producing agent is the session's agent_id. X1A-55's
+  // comment-handler reads these to spawn the right agent's
+  // comment-handler session.
+  const resolveProducingContext = async (sessionId: SessionId) => {
+    const s = await sessions.findById(sessionId);
+    return {
+      producingSessionId: sessionId,
+      producingAgentId: s?.agentId ?? "",
+    };
+  };
+
+  const shareCommentVisibility = {
+    sessions,
+    agents,
+    sessionShares,
+    isWorkspaceMember: async (userId: UserId, workspaceId: WorkspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m !== null;
+    },
+  };
+
+  const shareCommentRoutes = createShareCommentRoutes({
+    comments: shareComments,
+    events: sessionEvents,
+    publisher: shareCommentPublisher,
+    visibility: shareCommentVisibility,
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    resolveProducingContext,
+    requireAuth,
+    getActor,
+  });
+
+  const internalShareCommentRoutes = createInternalShareCommentRoutes({
+    comments: shareComments,
+    events: sessionEvents,
+    publisher: shareCommentPublisher,
+    visibility: shareCommentVisibility,
+    resolveProducingContext,
   });
 
   const tickScheduler = () =>
@@ -1119,6 +1207,8 @@ export function compose(env: CompositionEnv): Composition {
     workspaceTokenUsageRoutes,
     workspaceShareRoutes,
     sessionShareRoutes,
+    shareCommentRoutes,
+    internalShareCommentRoutes,
     workspaceSharesIndexRoutes,
     internalRoutes,
     githubInstallRoutes,

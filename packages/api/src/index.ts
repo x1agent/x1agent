@@ -232,6 +232,8 @@ const {
   workspaceShareRoutes,
   workspaceSharesIndexRoutes,
   sessionShareRoutes,
+  shareCommentRoutes,
+  internalShareCommentRoutes,
   internalRoutes,
   githubInstallRoutes,
   installationApiRoutes,
@@ -412,6 +414,14 @@ app.route(
   "/api/workspaces/:slug/sessions/:sessionId/user-shares",
   sessionShareRoutes,
 );
+// Doc commenting v1 (X1A-52). Workspace-scoped REST under the existing
+// session-shares pattern; an internal-token-fronted twin under
+// /api/internal for the sidecar to forward `share_comment` MCP calls.
+app.route(
+  "/api/workspaces/:slug/sessions/:sessionId/shares/:shareId/comments",
+  shareCommentRoutes,
+);
+app.route("/api/internal/share-comments", internalShareCommentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
 app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);

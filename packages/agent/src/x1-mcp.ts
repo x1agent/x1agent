@@ -156,6 +156,58 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "share_comment",
+      description:
+        "Post a comment on a share you (or another agent) previously published with the `share` tool. Symmetric to `share` — adds a thread (or replies to an existing one) on a markdown or HTML share so the user sees your follow-up alongside the artifact in the timeline pill or the fullscreen flyout.\n\nTwo modes:\n- **Reply to an existing thread:** pass `thread_id` only (plus `text`). The server resolves the thread → share and posts your reply as the next seq in that thread. Use this when the wake plumbing handed you a `thread_id` to respond to.\n- **Open a new thread:** pass `share_id` + `scope` (and `anchor` if scope=passage) + `text`. v1 commentable types are markdown (`document`) and HTML (`site`). For markdown you can anchor to a passage; for HTML threads are share-scoped only.\n\nIDOR is enforced server-side: a `thread_id` from a foreign workspace returns `403 thread_not_visible`. You cannot leak content by guessing ids.\n\nDoes NOT wake the producing agent on your own reply (anti-loop). Comments authored by users will wake the agent of the share via X1A-55.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          thread_id: {
+            type: "string",
+            description:
+              "Reply mode: id of an existing thread (the wake event hands this to you). Mutually exclusive with share_id+scope.",
+          },
+          share_id: {
+            type: "string",
+            description:
+              "New-thread mode: id of the share to comment on. Pair with `scope` (and `anchor` for passage scope).",
+          },
+          scope: {
+            type: "string",
+            enum: ["passage", "share"],
+            description:
+              "passage = anchored to a selection (markdown only). share = thread on the whole share (any commentable type).",
+          },
+          anchor: {
+            type: "object",
+            description:
+              "Selection metadata for scope=passage. { selection: { start_line, start_col, end_line, end_col, quoted_text } }",
+          },
+          text: {
+            type: "string",
+            description: "Markdown body of the comment.",
+          },
+        },
+        required: ["text"],
+      },
+    },
+    {
+      name: "share_comment_resolve",
+      description:
+        "Mark a comment thread as resolved. Same IDOR check as `share_comment` — a foreign thread_id returns `403 thread_not_visible`. Soft resolve, not delete — `share_comment_resolve` with `unresolve: true` reverses it.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          thread_id: { type: "string" },
+          unresolve: {
+            type: "boolean",
+            description: "true to reverse a previous resolve. Default false.",
+          },
+        },
+        required: ["thread_id"],
+      },
+    },
+    {
       name: "request_permission",
       description:
         "Ask the active user to grant one or more permission scopes (e.g. 'git.write', 'calendar.read').\n\nUse only when a gated tool has already failed with a `permission_required` error, or when you know up front you'll need a scope. The user sees a dialog and clicks Allow or Deny; a system message tells you the outcome.\n\nAfter calling this, END YOUR TURN and wait — do not retry the gated operation immediately. When approved a synthetic user message starts a fresh turn. Write justifications from the user's perspective.",
@@ -618,6 +670,146 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `Share failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "share_comment": {
+      // Forwards to the sidecar's /share_comment route, which in turn
+      // POSTs to /api/internal/share-comments with the X-Internal-Token
+      // header. The sidecar — not the agent container — is the trust
+      // boundary; this MCP tool only relays the JSON payload.
+      //
+      // Sidecar Rust route is tracked as a follow-up; see PR description.
+      // Until that lands the tool returns a `sidecar_route_missing`
+      // error so calls fail loudly instead of silently dropping.
+      try {
+        const res = await fetch(`${sidecarUrl}/share_comment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            thread_id: a?.thread_id,
+            share_id: a?.share_id,
+            scope: a?.scope,
+            anchor: a?.anchor,
+            body: a?.text,
+          }),
+        });
+        const bodyText = await res.text();
+        if (res.status === 404) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Share comment failed: sidecar route /share_comment is not yet implemented in this build (X1A-52 follow-up). Open a Linear issue if you need this end-to-end before the sidecar PR lands.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        let result: {
+          ok?: boolean;
+          comment?: unknown;
+          thread_id?: string;
+          error?: string;
+        } = {};
+        if (bodyText) {
+          try {
+            result = JSON.parse(bodyText);
+          } catch {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Share comment failed: non-JSON response (${res.status}): ${bodyText.slice(0, 200)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+        if (!res.ok) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Share comment failed (${res.status}): ${result.error ?? bodyText.slice(0, 200) ?? "unknown error"}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Comment posted on thread ${result.thread_id ?? "(new)"}.`,
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Share comment failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "share_comment_resolve": {
+      try {
+        const res = await fetch(`${sidecarUrl}/share_comment_resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            thread_id: a?.thread_id,
+            unresolve: Boolean(a?.unresolve),
+          }),
+        });
+        if (res.status === 404) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Share comment resolve failed: sidecar route /share_comment_resolve is not yet implemented in this build (X1A-52 follow-up).",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const text = await res.text();
+        if (!res.ok) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Share comment resolve failed (${res.status}): ${text.slice(0, 200)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: a?.unresolve ? "Thread re-opened." : "Thread resolved.",
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Share comment resolve failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
