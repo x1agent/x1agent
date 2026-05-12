@@ -1,3 +1,10 @@
+## [1.24.4](https://github.com/x1agent/x1agent/compare/v1.24.3...v1.24.4) (2026-05-12)
+
+
+### Bug Fixes
+
+* **helm:** pass stream name positional to nats stream edit/add ([8c3902d](https://github.com/x1agent/x1agent/commit/8c3902dc0a75b9530c2fab4dbbe3a9817a779e62)), closes [#101](https://github.com/x1agent/x1agent/issues/101)
+
 ## [1.24.3](https://github.com/x1agent/x1agent/compare/v1.24.2...v1.24.3) (2026-05-12)
 
 
