@@ -253,6 +253,7 @@ const {
   workspaceMembersRoutes,
   adminAnthropicModelsRoutes,
   adminWorkspacesRoutes,
+  platformSecretsRoutes,
   sharedResources: composedSharedResources,
   postgresBranches: composedPostgresBranches,
   postgresMinter: composedPostgresMinter,
@@ -365,6 +366,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
 app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
 app.route("/api/admin/workspaces", adminWorkspacesRoutes);
+app.route("/api/admin/platform-secrets", platformSecretsRoutes);
 
 // Sentry verify route — throws so the SDK captures the first event
 // during the onboarding flow. Gated to non-production OR by token so
