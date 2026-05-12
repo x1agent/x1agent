@@ -612,6 +612,69 @@ export function createInternalShareCommentRoutes(
     }
   });
 
+  /**
+   * POST /resolve  — agent resolves (or un-resolves) a thread it can see.
+   *
+   * Body: `{ author_session_id, thread_id, unresolve? }`.
+   *
+   * Same IDOR gate as the create path — the agent's session must be in
+   * the same workspace as the share that owns the supplied thread. A
+   * foreign `thread_id` returns `403 thread_not_visible` without
+   * leaking existence.
+   */
+  app.post("/resolve", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      author_session_id?: string;
+      thread_id?: string;
+      unresolve?: boolean;
+    };
+    if (!body.author_session_id) {
+      return c.json({ error: "missing_author_session_id" }, 400);
+    }
+    if (!body.thread_id) {
+      return c.json({ error: "missing_thread_id" }, 400);
+    }
+    const authorSessionId = SessionId(body.author_session_id);
+    const threadId = ShareThreadId(body.thread_id);
+    const located = await cfg.comments.findThread(threadId);
+    if (!located) return c.json({ error: "thread_not_found" }, 404);
+
+    const authorVis = await resolveSessionVisibility(
+      cfg.visibility,
+      authorSessionId,
+      await deriveActorForAgentSession(cfg.visibility, authorSessionId),
+    );
+    if (
+      "error" in authorVis ||
+      authorVis.ok.workspaceId !== located.workspaceId
+    ) {
+      return c.json({ error: "thread_not_visible" }, 403);
+    }
+
+    const unresolve = body.unresolve === true;
+    const stamp = unresolve ? null : new Date();
+    // Agent resolves don't carry a user_id — `resolved_by_user_id` is
+    // null when the agent (re-)resolves. The wake-router on X1A-55
+    // reads `resolved` to decide whether to skip the wake.
+    await cfg.comments.setResolved(threadId, null, stamp);
+    const producing = await cfg.resolveProducingContext(located.sessionId);
+    await cfg.publisher.threadResolved({
+      shareId: located.shareId,
+      threadId,
+      resolvedByUserId: null,
+      workspaceId: located.workspaceId,
+      sessionId: located.sessionId,
+      shareType: located.shareType,
+      resolved: !unresolve,
+      producingSessionId: producing.producingSessionId,
+      producingAgentId: producing.producingAgentId,
+    });
+    return c.json({
+      thread_id: threadId,
+      resolved_at: stamp ? stamp.toISOString() : null,
+    });
+  });
+
   return app;
 }
 
