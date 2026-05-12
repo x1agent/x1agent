@@ -39,14 +39,28 @@ export class PostgresSessionShareRepository implements SessionShareRepository {
   constructor(private readonly sql: Sql) {}
 
   async upsert(input: CreateSessionShareInput): Promise<SessionShare> {
+    // Migration 024 added (subject_kind, subject_id) plus a CHECK that
+    // requires subject_id IS NOT NULL when subject_kind IN ('user','group').
+    // It also dropped the legacy UNIQUE (session_id, user_id) constraint
+    // in favour of the partial index
+    // idx_session_user_shares_unique_subject (session_id, subject_kind,
+    // subject_id) WHERE subject_id IS NOT NULL.
+    //
+    // Write both the legacy user_id and the generalised (subject_kind,
+    // subject_id) columns so the CHECK passes; aim ON CONFLICT at the new
+    // partial index. The migration's comment explicitly calls for this:
+    // "the adapter writes both for any subject_kind='user' row".
     const rows = await this.sql<Row[]>`
       INSERT INTO session_user_shares
-        (session_id, user_id, role, shared_by)
+        (session_id, user_id, subject_kind, subject_id, role, shared_by)
       VALUES
-        (${input.sessionId}, ${input.userId}, ${input.role}, ${input.sharedBy})
-      ON CONFLICT (session_id, user_id) DO UPDATE
-        SET role      = EXCLUDED.role,
-            shared_by = EXCLUDED.shared_by
+        (${input.sessionId}, ${input.userId}, 'user', ${input.userId},
+         ${input.role}, ${input.sharedBy})
+      ON CONFLICT (session_id, subject_kind, subject_id)
+        WHERE subject_id IS NOT NULL
+        DO UPDATE
+          SET role      = EXCLUDED.role,
+              shared_by = EXCLUDED.shared_by
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
     return toShare(rows[0]!);
