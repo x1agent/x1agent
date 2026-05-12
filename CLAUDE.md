@@ -197,6 +197,19 @@ When adding or modifying documentation:
 - Security features (mTLS, NetworkPolicy, pod security contexts) are **first-class**, not afterthoughts.
 - The default path must work out of the box. The hardened path must be well-documented and CI-tested.
 
+## Integration onboarding: no copy-paste credentials
+
+Third-party integrations (GitHub Apps, Slack, Google Workspace, MCP servers) wire in via a dynamic flow — operator clicks a button, provider hands credentials back to our api, we write them to the operator's own secret store. Operator pastes nothing.
+
+Pick the first that applies:
+
+1. **First-party manifest / app-creation flow** (GitHub App Manifest, Slack App Manifest).
+2. **Per-user OAuth with offline access** for user-scoped data (Drive, Notion, Calendar).
+3. **Dynamic Client Registration (RFC 7591)** when the provider supports it (some MCP servers).
+4. **Marketplace listing** when the integration is meant to be broadly distributed.
+
+A paste-the-private-key onboarding step is a defect — file a ticket. The only legitimate paste path is **install-time bootstrap secrets** (JWT signing key, api↔sidecar shared secret, workspace-secrets master key) — values with no provider to register with.
+
 ## Frontend state management
 
 **Use zustand for any state that crosses a component boundary or backs an API call.** The `packages/app` codebase has a consistent pattern of zustand stores in `packages/app/src/stores/` — `useAgentsStore`, `useCollectionsStore`, `useGitHubStore`, `useGrantsStore`, `useAuthStore`, `useCapabilitiesStore` all follow the same shape: a normalized cache keyed by workspace/agent, plus async actions (`load`, `attach`, `detach`, `update`) that hit `apiFetch` and write the result back into the cache.

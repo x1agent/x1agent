@@ -52,10 +52,13 @@ You're prompted for each block; skip with N. Keys not configured yet aren't bloc
 
 - **Provider selection** (`PROVIDER_GRAPH`, `PROVIDER_VECTOR`) — picks which graph/vector provider deployment this install runs (or `none`). The api echoes them through `GET /api/capabilities`; the frontend hides Collections etc. when set to `none`.
 - **Allowed sign-in domains** (`ALLOWED_DOMAINS`) — comma-separated; blank = any verified Google account.
-- **Google OAuth** (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`) — for user sign-in.
-- **GitHub App** (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`) — for repo + agent integrations. The `GITHUB_APP_PRIVATE_KEY` is captured by hand-editing `installs/<base-domain>.local` directly (newlines escaped as `\n`) because multi-line paste in a terminal is unreliable.
-- **Slack** (`SLACK_BOT_TOKEN`) — for the messaging provider.
 - **Sentry DSNs** (`SENTRY_DSN_API`, `SENTRY_DSN_APP`, `SENTRY_DSN_SIDECAR`) — error reporting per runtime; SDKs no-op when unset.
+
+The wizard intentionally **does not** prompt for GitHub App credentials, Google Drive OAuth, MCP server tokens, or Slack credentials. Those integrations are wired in from the admin UI **after** the install is running — operator clicks a button, gets bounced to the provider, lands back connected. No paste, no multi-line PEM, no Cloud Console clicks. See [Integration onboarding](/architecture/integration-onboarding) for the rule and the four flows we support.
+
+### Migration fallback: pre-existing credentials
+
+If you're migrating an install that already has a manually-registered GitHub App or OAuth Client and want to reuse it, you can hand-edit `installs/<base-domain>.local` directly to populate the matching variables. The api respects pre-populated values and skips the in-product registration flow for that integration. This is a fallback, not the recommended path — new installs should leave these blank during configure and register from the admin UI.
 
 ## Picking a target
 
