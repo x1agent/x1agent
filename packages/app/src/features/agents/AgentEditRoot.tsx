@@ -193,11 +193,23 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
   // On create, default scheduled-run-as to the current user (= creator).
   // Edit mode loads the existing value below.
+  //
+  // Gated on workspaceMembers being populated AND containing the
+  // current user. Setting the value before the SelectItem with that
+  // value mounts trips a Radix Select infinite-render bug when other
+  // controlled Selects on the page are mid-mount — see X1A-85 / Sentry
+  // X1AGENT-APP-C. The cheapest fix is to never put a value into the
+  // Select that doesn't have a matching <SelectItem> at the same render.
   useEffect(() => {
-    if (isCreate && currentUser && !scheduledRunAsUserId) {
+    if (
+      isCreate &&
+      currentUser &&
+      !scheduledRunAsUserId &&
+      workspaceMembers.some((m) => m.user_id === currentUser.id)
+    ) {
       setScheduledRunAsUserId(currentUser.id);
     }
-  }, [isCreate, currentUser, scheduledRunAsUserId]);
+  }, [isCreate, currentUser, scheduledRunAsUserId, workspaceMembers]);
 
   // Workspace members for the "Run as" picker on the Schedule card.
   // Only fetched when this user has admin/owner role — non-admins
@@ -342,104 +354,6 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   // save independently via their own cards and don't go through this
   // form submit.
   const showSaveBar = tab === "general" || tab === "prompts";
-
-  // Create mode renders a stripped-down form (name + slug + kind only).
-  // The full editor — schedule, image picker, model picker, run-as,
-  // prompts, connections, permissions — opens on the edit page after
-  // the agent is created. The edit page mounts fine; the full create
-  // form was crashing the page with React error #185 (an unstable
-  // selector / ref-callback somewhere in the create-only render path).
-  // Two-step create unblocks the page and isolates the crash so we
-  // can hunt it without prod being broken. Tracking the real fix in
-  // X1A-85.
-  if (isCreate) {
-    return (
-      <AppShell breadcrumbs={breadcrumbs}>
-        <div className="max-w-2xl space-y-6 p-6">
-          <form onSubmit={onSubmit} className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>New agent</CardTitle>
-                <CardDescription>
-                  Set the basics here. Schedule, prompts, image, model,
-                  and connections are configured on the agent page
-                  after you create it.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-name">Name</Label>
-                  <Input
-                    id="agent-name"
-                    required
-                    value={name}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setName(v);
-                      if (!slugDirty) setSlugInput(slugify(v));
-                    }}
-                    placeholder="Researcher"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-slug">Slug</Label>
-                  <Input
-                    id="agent-slug"
-                    required
-                    value={slugInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setSlugInput(v);
-                      setSlugDirty(v !== "" && v !== slugify(name));
-                    }}
-                    placeholder="researcher"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-kind">Kind</Label>
-                  <select
-                    id="agent-kind"
-                    value={kind}
-                    onChange={(e) =>
-                      setKind(
-                        e.target.value as
-                          | "worker"
-                          | "orchestrator"
-                          | "scheduled",
-                      )
-                    }
-                    className="block w-full rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm"
-                  >
-                    <option value="worker">worker</option>
-                    <option value="orchestrator">orchestrator</option>
-                    <option value="scheduled">scheduled</option>
-                  </select>
-                  <p className="text-xs text-fg-faint">
-                    {kind === "worker"
-                      ? "Short-lived, one session per trigger."
-                      : kind === "orchestrator"
-                        ? "Long-lived singleton with platform-driven wakes."
-                        : "Cron-triggered worker."}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {error && <div className="text-sm text-red-400">{error}</div>}
-
-            <div className="flex items-center gap-2">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "Creating…" : "Create agent"}
-              </Button>
-              <Button type="button" variant="outline" asChild>
-                <a href={cancelHref}>Cancel</a>
-              </Button>
-            </div>
-          </form>
-        </div>
-      </AppShell>
-    );
-  }
 
   return (
     <AppShell breadcrumbs={breadcrumbs}>
