@@ -60,12 +60,23 @@ export async function startSessionAuditSubscriber(
       ) {
         continue;
       }
+      // Derive session_id from the NATS subject — the body field is
+      // attacker-controllable by any authenticated bus client (mTLS
+      // ACLs don't narrow per-subject today). Subject format is
+      // `x1.session.<id>.audit`; segment [2] is the routed id. Drop
+      // rows where the body claims a different session than the
+      // subject names — that's a spoofing attempt, not legitimate
+      // traffic. See project_nats_subscriber_trust_audit.md.
+      const subjectSessionId = m.subject.split(".")[2];
+      if (!subjectSessionId || subjectSessionId !== parsed.session_id) {
+        continue;
+      }
       try {
         await opts.sql`
           INSERT INTO audit_events
             (session_id, ts, method, route, status, caller, metadata)
           VALUES
-            (${parsed.session_id},
+            (${subjectSessionId},
              ${parsed.ts ? new Date(parsed.ts) : new Date()},
              ${parsed.method},
              ${parsed.route},
