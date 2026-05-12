@@ -1,3 +1,27 @@
+# [1.20.0](https://github.com/x1agent/x1agent/compare/v1.19.0...v1.20.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **agent:** route gh CLI through sidecar shim ([434923b](https://github.com/x1agent/x1agent/commit/434923bd641d817d97c802d81143565fce1d333b)), closes [x1/libexec/#real](https://github.com/x1/libexec//issues/real)
+* **api:** rethrow unknown errors so app.onError → Sentry fires ([aaccc33](https://github.com/x1agent/x1agent/commit/aaccc330a516e76a0f67359d8c2a33ed999a6114))
+* **comments:** live update on new comments + clip long bodies ([f7554a3](https://github.com/x1agent/x1agent/commit/f7554a3f2ba5443fc35dcbadf1ddb6d62076cbb9))
+* **comments:** unblock doc-commenting v1 smoke ([14e415e](https://github.com/x1agent/x1agent/commit/14e415ec2e5874f2760cf15ec66867f18e04ad5d)), closes [#92](https://github.com/x1agent/x1agent/issues/92) [#185](https://github.com/x1agent/x1agent/issues/185)
+* **comments:** use destructured composedSessions in wake subscriber wiring ([f2fed23](https://github.com/x1agent/x1agent/commit/f2fed23426540e09ae54726b92a7228d5a924d96))
+* **security:** harden comment-wake routing + mutable share + share fullscreen selector ([a49b490](https://github.com/x1agent/x1agent/commit/a49b4904271226037b564a0213bfd9ed441e0445)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+* **sessions:** inherit triggered_by_user_id on agent-spawned children ([0b53314](https://github.com/x1agent/x1agent/commit/0b53314b750c99d39cf8f4f42176f87501bf98cc))
+* **sessions:** relax sessions_trigger_source_shape for agent spawns ([c3c4ede](https://github.com/x1agent/x1agent/commit/c3c4ede05aaf4f946dbb9f8eaa5908728fea0bc4)), closes [#61](https://github.com/x1agent/x1agent/issues/61)
+
+
+### Features
+
+* **admin:** admin settings + LLM provider keys (X1A-46) ([ddcc7f6](https://github.com/x1agent/x1agent/commit/ddcc7f67fd5f352e1ab1fcae0065cf71063dd375))
+* **comments:** document commenting v1 (X1A-52/53/54) ([59f623d](https://github.com/x1agent/x1agent/commit/59f623d49a660fc579e296d8395040ea75d16bf9))
+* **comments:** mandate brevity in share_comment replies ([2290e2f](https://github.com/x1agent/x1agent/commit/2290e2f453cdecf10492137549995e3d4703ef56))
+* **comments:** wake producing session on comment add + resolve ([1ac1037](https://github.com/x1agent/x1agent/commit/1ac10372470769b8f2bde3e07d22286d7ca33875))
+* **share:** mutable share — agent re-shares with same id, pill updates in place ([65355c3](https://github.com/x1agent/x1agent/commit/65355c337e72d234132385419133114dbefb3af1))
+* **sidecar:** /share_comment + /share_comment_resolve routes (X1A-52) ([00af2d5](https://github.com/x1agent/x1agent/commit/00af2d52cd765258d998a67804d9ac7367ab39a6))
+
 # [1.19.0](https://github.com/x1agent/x1agent/compare/v1.18.0...v1.19.0) (2026-05-11)
 
 
