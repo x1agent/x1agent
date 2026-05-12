@@ -41,6 +41,8 @@ COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/
 COPY packages/providers/preview/package.json packages/providers/preview/tsconfig.json ./packages/providers/preview/
+COPY packages/infrastructure/kaniko/package.json packages/infrastructure/kaniko/tsconfig.json ./packages/infrastructure/kaniko/
+COPY packages/domains/image-catalog/package.json packages/domains/image-catalog/tsconfig.json ./packages/domains/image-catalog/
 COPY docs/package.json ./docs/
 
 RUN bun install --frozen-lockfile --ignore-scripts
