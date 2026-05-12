@@ -123,11 +123,13 @@ function readCookie(
   return m ? m[1]! : null;
 }
 
+// Maps known domain errors to HTTP status. Unknown errors are
+// rethrown so Hono's app.onError fires (→ Sentry.captureException).
 function domainErrorStatus(err: unknown): number {
   if (err instanceof NoWorkspaceMembershipError) return 403;
   if (err instanceof SessionVerificationError) return 401;
   if (err instanceof DomainError) return 400;
-  return 500;
+  throw err;
 }
 
 function domainErrorBody(err: unknown) {

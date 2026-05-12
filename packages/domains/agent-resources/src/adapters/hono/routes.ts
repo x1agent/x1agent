@@ -89,6 +89,10 @@ function serialize(r: SharedResource) {
   };
 }
 
+// Maps known domain errors to HTTP status. Unknown errors are
+// rethrown so Hono's app.onError fires (→ Sentry.captureException).
+// Returning 500 here would swallow real bugs into a generic JSON
+// response with no telemetry trail.
 function errStatus(err: unknown): number {
   if (err instanceof DomainError) {
     if (err.code === "resource_kind_already_installed") return 409;
@@ -102,7 +106,7 @@ function errStatus(err: unknown): number {
       return 403;
     return 400;
   }
-  return 500;
+  throw err;
 }
 
 function errBody(err: unknown) {

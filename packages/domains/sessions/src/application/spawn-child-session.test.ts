@@ -122,13 +122,14 @@ describe("spawnChildSession", () => {
     expect(out.modelOverride).toBeNull();
   });
 
-  it("creates a child session linked to the parent", async () => {
+  it("creates a child session linked to the parent and inheriting its user attribution", async () => {
     const parent = await seedAgent({ slug: "orchestrator" });
     const child = await seedAgent({ slug: "writer" });
+    const rootUserId = "019da258-70a0-7efa-98a1-000000000001";
     const parentSession = await sessions.create({
       agentId: parent.id,
       triggeredBy: "user",
-      triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
+      triggeredByUserId: rootUserId as never,
       parentSessionId: null,
       parentAgentId: null,
       resumedFromSessionId: null,
@@ -150,9 +151,74 @@ describe("spawnChildSession", () => {
 
     expect(out.agentId).toBe(child.id);
     expect(out.triggeredBy).toBe("agent");
-    expect(out.triggeredByUserId).toBeNull();
+    // Inherited attribution — without this, any child whose agent has a
+    // remote_oauth (zone-3) MCP fails pod creation in job-watcher.
+    expect(out.triggeredByUserId).toBe(rootUserId);
     expect(out.parentSessionId).toBe(parentSession.id);
     expect(out.parentAgentId).toBe(parent.id);
+  });
+
+  it("inherits null triggeredByUserId when the parent has none (system-triggered chain)", async () => {
+    // If the chain root was never user-attributed (e.g. a scheduled run
+    // with no run-as user), the child stays null too. The downstream
+    // zone-3 OAuth check in job-watcher then refuses the pod with a
+    // loud error — no silent regression.
+    const parent = await seedAgent({ slug: "orchestrator" });
+    const child = await seedAgent({ slug: "writer" });
+    const parentSession = await sessions.create({
+      agentId: parent.id,
+      triggeredBy: "scheduled",
+      triggeredByUserId: null,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: new Date("2026-04-19T11:00:00Z"),
+    });
+
+    const out = await spawnChildSession(
+      {
+        agents,
+        sessions,
+        permission: new AllowEverything(),
+        clock,
+      },
+      {
+        parentSessionId: parentSession.id,
+        childAgentId: child.id,
+      },
+    );
+
+    expect(out.triggeredByUserId).toBeNull();
+  });
+
+  it("propagates user attribution across a grandchild spawn chain", async () => {
+    const rootUserId = "019da258-70a0-7efa-98a1-000000000042";
+    const top = await seedAgent({ slug: "top-orch", kind: "orchestrator" });
+    const mid = await seedAgent({ slug: "mid-orch", kind: "orchestrator" });
+    const leaf = await seedAgent({ slug: "leaf-worker" });
+
+    const topSession = await sessions.create({
+      agentId: top.id,
+      triggeredBy: "user",
+      triggeredByUserId: rootUserId as never,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: clock.now(),
+    });
+
+    const midSession = await spawnChildSession(
+      { agents, sessions, permission: new AllowEverything(), clock },
+      { parentSessionId: topSession.id, childAgentId: mid.id },
+    );
+    expect(midSession.triggeredByUserId).toBe(rootUserId);
+
+    const leafSession = await spawnChildSession(
+      { agents, sessions, permission: new AllowEverything(), clock },
+      { parentSessionId: midSession.id, childAgentId: leaf.id },
+    );
+    expect(leafSession.triggeredByUserId).toBe(rootUserId);
+    expect(leafSession.parentSessionId).toBe(midSession.id);
   });
 
   it("rejects when parent session is terminal", async () => {

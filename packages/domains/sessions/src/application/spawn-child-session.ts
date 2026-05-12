@@ -116,10 +116,19 @@ export async function spawnChildSession(
     if (existing) return existing;
   }
 
+  // Inherit triggered_by_user_id from the parent so the child carries
+  // the same user attribution as the chain root. triggered_by stays
+  // "agent" because the orchestrator did the spawning — this is
+  // inherited attribution, not impersonation. Without this, any child
+  // whose agent has a remote_oauth (zone-3) MCP attached fails pod
+  // creation in job-watcher with "remote_oauth MCPs require a
+  // user-triggered session — no triggered_by_user_id set", and the
+  // session surfaces as "failed, zero events" because no pod is ever
+  // spawned.
   return deps.sessions.create({
     agentId: childAgent.id,
     triggeredBy: "agent",
-    triggeredByUserId: null,
+    triggeredByUserId: parent.triggeredByUserId,
     parentSessionId: parent.id,
     parentAgentId: parent.agentId,
     resumedFromSessionId: null,

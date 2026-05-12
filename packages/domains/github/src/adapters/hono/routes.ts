@@ -75,6 +75,8 @@ function safeReturnTo(raw: string | undefined | null): string | null {
   return raw;
 }
 
+// Maps known domain errors to HTTP status. Unknown errors are
+// rethrown so Hono's app.onError fires (→ Sentry.captureException).
 function errStatus(err: unknown): number {
   if (err instanceof DomainError) {
     switch (err.code) {
@@ -90,7 +92,7 @@ function errStatus(err: unknown): number {
         return 400;
     }
   }
-  return 500;
+  throw err;
 }
 
 function errBody(err: unknown) {
