@@ -555,7 +555,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   try {
     const sub = await startCommentWakeSubscriber({
       natsUrl,
-      sessions: composed.sessions,
+      sessions: composedSessions,
     });
     registerCleanup(() => sub.close());
   } catch (err) {
