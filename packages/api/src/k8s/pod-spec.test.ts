@@ -133,6 +133,28 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
     );
   });
 
+  describe("ANTHROPIC_MODEL propagation (X1A-40)", () => {
+    function agentEnv(spec: SessionPodSpec): Array<{ name: string; value?: string }> {
+      const job = buildSessionJob(spec);
+      const agent = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "agent",
+      )!;
+      return agent.env ?? [];
+    }
+
+    it("renders anthropicModel into the agent container's ANTHROPIC_MODEL env", () => {
+      const spec = { ...baseSpec("worker"), anthropicModel: "claude-opus-4-1@20250101" };
+      const env = agentEnv(spec);
+      const m = env.find((e) => e.name === "ANTHROPIC_MODEL");
+      expect(m?.value).toBe("claude-opus-4-1@20250101");
+    });
+
+    it("omits ANTHROPIC_MODEL when the spec leaves it undefined — SDK picks its own default", () => {
+      const env = agentEnv(baseSpec("worker"));
+      expect(env.find((e) => e.name === "ANTHROPIC_MODEL")).toBeUndefined();
+    });
+  });
+
   describe("USE_JETSTREAM_* propagation", () => {
     function sidecarEnv(): Array<{ name: string; value?: string }> {
       const job = buildSessionJob(baseSpec("worker"));

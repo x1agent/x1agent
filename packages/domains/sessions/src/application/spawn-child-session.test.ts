@@ -76,6 +76,52 @@ async function expectCode(p: Promise<unknown>, code: string) {
 }
 
 describe("spawnChildSession", () => {
+  it("persists modelOverride when the caller passes one (X1A-40)", async () => {
+    const parent = await seedAgent({ slug: "orchestrator" });
+    const child = await seedAgent({ slug: "writer" });
+    const parentSession = await sessions.create({
+      agentId: parent.id,
+      triggeredBy: "user",
+      triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: new Date("2026-04-19T11:00:00Z"),
+    });
+
+    const out = await spawnChildSession(
+      { agents, sessions, permission: new AllowEverything(), clock },
+      {
+        parentSessionId: parentSession.id,
+        childAgentId: child.id,
+        modelOverride: "claude-sonnet-4-5@20250929",
+      },
+    );
+
+    expect(out.modelOverride).toBe("claude-sonnet-4-5@20250929");
+  });
+
+  it("leaves modelOverride null when the caller omits it", async () => {
+    const parent = await seedAgent({ slug: "orchestrator" });
+    const child = await seedAgent({ slug: "writer" });
+    const parentSession = await sessions.create({
+      agentId: parent.id,
+      triggeredBy: "user",
+      triggeredByUserId: "019da258-70a0-7efa-98a1-000000000001" as never,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: new Date("2026-04-19T11:00:00Z"),
+    });
+
+    const out = await spawnChildSession(
+      { agents, sessions, permission: new AllowEverything(), clock },
+      { parentSessionId: parentSession.id, childAgentId: child.id },
+    );
+
+    expect(out.modelOverride).toBeNull();
+  });
+
   it("creates a child session linked to the parent and inheriting its user attribution", async () => {
     const parent = await seedAgent({ slug: "orchestrator" });
     const child = await seedAgent({ slug: "writer" });

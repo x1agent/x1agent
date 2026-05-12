@@ -55,6 +55,7 @@ export class InMemorySessionRepository implements SessionRepository {
       summary: null,
       summaryUpdatedAt: null,
       summaryEventSeq: null,
+      modelOverride: input.modelOverride ?? null,
     };
     this.rows.push(session);
     return session;

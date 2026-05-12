@@ -54,6 +54,15 @@ export * from "./application/resume-session.js";
 export * from "./application/reconcile-session-status.js";
 export * from "./application/manage-session-shares.js";
 export {
+  resolveSessionVisibility,
+  pickSessionListMode,
+  type SessionVisibilityReason,
+  type SessionVisibilityResult,
+  type SessionVisibilityDeps,
+  type SessionListMode,
+  type PickSessionListModeDeps,
+} from "./application/session-visibility.js";
+export {
   maybeUpdateSessionSummary,
   DEFAULT_SUMMARY_CONFIG,
   type MaybeUpdateSessionSummaryConfig,
@@ -114,14 +123,32 @@ export {
   type ResolveShareThreadResult,
   type ResolveShareDeps,
 } from "./application/resolve-share-thread.js";
+// `resolveSessionVisibility` + `SessionVisibilityResult` are NOT re-exported
+// from share-visibility.js — they intentionally shadow the X1A-9 primitive
+// in `./application/session-visibility.js` with a temporary inline shape
+// (`{ok}|{error}` vs `{visible,reason}`). Callers inside the sessions
+// package that need the share-comment-routes shape import directly from
+// `../../application/share-visibility.js`. Package consumers always get
+// the X1A-9 primitive via the session-visibility.js re-export above.
 export {
-  resolveSessionVisibility,
   findShareInSession,
   type ShareVisibilityDeps,
-  type SessionVisibilityResult,
   type FindShareInSessionDeps,
 } from "./application/share-visibility.js";
 export { createWorkspaceTokenUsageRoutes } from "./adapters/hono/token-usage-routes.js";
+export { createWorkspaceCostRoutes } from "./adapters/hono/cost-routes.js";
+export type { CostRoutesConfig } from "./adapters/hono/cost-routes.js";
+export type {
+  AgentCostWindow,
+  AgentSessionCost,
+  AgentTokenUsageRollup,
+  SessionTokenUsageRollup,
+  SessionTreeChildCost,
+  SessionTreeRollup,
+  TokenUsageByDay,
+  TokenUsageByModel,
+  TokenUsageTotals,
+} from "./ports/token-usage-repository.js";
 
 // Fakes
 export * from "./application/fakes.js";

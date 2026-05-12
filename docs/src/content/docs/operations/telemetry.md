@@ -27,6 +27,32 @@ Costs use Anthropic's published prices for the major Claude 4.x models. Rates dr
 
 The underlying API is `GET /api/workspaces/:slug/token-usage?since=YYYY-MM-DD&until=YYYY-MM-DD`, admin-only. Default range is the current UTC month. Use it for custom dashboards or billing exports.
 
+### Per-session, per-tree, per-agent cost
+
+Beyond the workspace-wide rollup there are three drill-down surfaces, each rendered in the in-app UI and exposed as a JSON endpoint for scripting + agent self-reporting:
+
+| Surface | UI location | HTTP endpoint |
+|---|---|---|
+| This session — live USD + per-model breakdown | Session detail page, header block | `GET /api/workspaces/:slug/sessions/:sessionId/cost` |
+| Session tree — parent + transitively-spawned children | Session detail page, inline under the cost block | `GET /api/workspaces/:slug/sessions/:sessionId/cost-tree` |
+| Agent rollup — all sessions in window (24h / 7d / 30d / All) | Agent detail page | `GET /api/workspaces/:slug/agents/:agentId/cost?window=7d` |
+
+Session-scoped endpoints are visible to the session owner, any user the session has been shared with, and workspace admins/owners. The agent rollup is admin-only — it aggregates sessions the caller may not personally own. All three are workspace-scoped at the SQL layer; an agent in workspace A cannot see cost data from workspace B even with a stolen id.
+
+Cost data uses the same per-model price table as the workspace rollup, with the same per-model override surface under `/admin/anthropic/models`. The "live" indicator on the session detail page updates within ~2 seconds of an LLM/tool emission — it subscribes to the durable session-event stream rather than polling.
+
+### Agent self-reporting (MCP tools)
+
+The orchestrator agent has three built-in MCP tools so it can quote its own spend during standup without scraping the UI:
+
+| Tool | Returns |
+|---|---|
+| `get_session_cost()` | `{ sessionId, totals, byModel }` for the current session |
+| `get_session_tree_cost()` | `{ rootSessionId, parent, children: [...], totals }` for the current session-tree |
+| `get_agent_cost(window)` | `{ agentId, window, totals, byModel, byDay, topSessions }` — default window is `7d` |
+
+The agent never names a session or workspace — the sidecar resolves both from pod env, and the api enforces tenant scope. `window` accepts `"24h" | "7d" | "30d" | "all"`; unknown values fall back to `"7d"`.
+
 ## OpenTelemetry
 
 Off by default. Enable with two operator steps + one Helm value flip.

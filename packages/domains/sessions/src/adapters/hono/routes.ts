@@ -33,6 +33,10 @@ import {
   resumeSession,
   SessionNotTerminalError,
 } from "../../application/resume-session.js";
+import {
+  pickSessionListMode,
+  resolveSessionVisibility,
+} from "../../application/session-visibility.js";
 
 // Lazy import keeps the adapters import surface small.
 import type { SessionShareRepository } from "../../ports/session-share-repository.js";
@@ -301,17 +305,20 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
-    let isAdmin = true;
-    try {
-      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
-    } catch {
-      isAdmin = false;
-    }
+    // Visibility split: admins see the full workspace list; everyone
+    // else sees only what they own + what's explicitly shared with
+    // them. See `session-visibility.ts` for the rule + extension point.
+    const listMode = await pickSessionListMode(
+      { adminGuard: cfg.adminGuard },
+      actor.userId,
+      wsId,
+    );
     const limitRaw = c.req.query("limit");
     const limit = Math.max(1, Math.min(500, Number(limitRaw ?? 100)));
-    const sessions = isAdmin
-      ? await cfg.sessions.listByWorkspace(wsId, limit)
-      : await cfg.sessions.listForUser(wsId, actor.userId, limit);
+    const sessions =
+      listMode.mode === "all"
+        ? await cfg.sessions.listByWorkspace(wsId, limit)
+        : await cfg.sessions.listForUser(wsId, listMode.userId, limit);
     // Enrich each row with the agent slug + name so the UI table can
     // render "which agent ran this" without a second fetch.
     const agentIds = Array.from(new Set(sessions.map((s) => s.agentId)));
@@ -395,20 +402,18 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     const agent = await cfg.agents.findById(session.agentId);
     if (!agent || agent.workspaceId !== wsId)
       return { error: "session_not_found" as const };
-    // Owner always passes — they triggered it.
-    if (session.triggeredByUserId === actorId) return { session, agent };
-    // Workspace admin/owner passes — they see everything in the ws.
-    try {
-      await cfg.adminGuard.assertAdmin(actorId, agent.workspaceId);
-      return { session, agent };
-    } catch (err) {
-      // Not admin — try the share table.
-      if (cfg.shares) {
-        const share = await cfg.shares.findForUser(session.id, actorId);
-        if (share) return { session, agent };
-      }
-      return { error: "forbidden" as const, raised: err };
-    }
+    // Single visibility primitive — see `session-visibility.ts`. Add
+    // group-share support there, not here.
+    const decision = await resolveSessionVisibility(
+      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      actorId,
+      session,
+      agent.workspaceId,
+    );
+    if (decision.visible) return { session, agent };
+    // Match the previous behaviour: a non-admin/non-owner/non-sharee
+    // gets a 404 (not 403) so we don't leak that the session exists.
+    return { error: "session_not_found" as const };
   };
 
   app.get("/:sessionId", async (c) => {
@@ -420,8 +425,6 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       actor.userId,
     );
     if ("error" in scope) {
-      if (scope.error === "forbidden")
-        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
       return c.json({ error: scope.error }, 404);
     }
     return c.json({
@@ -443,8 +446,6 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       actor.userId,
     );
     if ("error" in scope) {
-      if (scope.error === "forbidden")
-        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
       return c.json({ error: scope.error }, 404);
     }
     const afterRaw = c.req.query("after_seq");
@@ -525,8 +526,6 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       actor.userId,
     );
     if ("error" in scope) {
-      if (scope.error === "forbidden")
-        return c.json(errBody(scope.raised), errStatus(scope.raised) as 400);
       return c.json({ error: scope.error }, 404);
     }
     try {

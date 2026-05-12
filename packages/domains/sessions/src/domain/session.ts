@@ -53,6 +53,18 @@ export interface Session {
    * events have arrived since the last summary.
    */
   summaryEventSeq: number | null;
+  /**
+   * Per-spawn Claude model override (X1A-40). Set by the orchestrator
+   * when it calls `spawn_session` with a `model` argument; null on
+   * user-triggered and scheduler-triggered sessions, which inherit the
+   * child agent's `model` column (then the deployment-wide
+   * ANTHROPIC_MODEL env). Pod-spec precedence:
+   *   session.modelOverride > agent.model > cfg.anthropicModel.
+   * The admin-curated enabled-models allowlist is enforced at the
+   * spawn route before the value lands on the row, so this field can
+   * be trusted to hold a model the platform admin has enabled.
+   */
+  modelOverride: string | null;
 }
 
 export class SessionNotFoundError extends DomainError {

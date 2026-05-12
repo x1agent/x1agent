@@ -19,6 +19,14 @@ export interface CreateSessionInput {
    */
   resumedFromSessionId: SessionId | null;
   triggeredAt: Date;
+  /**
+   * Per-spawn Claude model override (X1A-40). Only set on
+   * agent-triggered sessions where the orchestrator's spawn_session
+   * MCP call passed a `model` argument. Null otherwise — the
+   * job-watcher then falls back to the child agent's `model` column
+   * and finally the deployment-wide ANTHROPIC_MODEL env.
+   */
+  modelOverride?: string | null;
 }
 
 export interface UpdateSessionStatusInput {
