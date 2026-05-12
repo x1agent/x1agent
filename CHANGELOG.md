@@ -1,3 +1,10 @@
+## [1.24.2](https://github.com/x1agent/x1agent/compare/v1.24.1...v1.24.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **install:** unblock end-to-end mise run install:prod against a fresh prod cluster ([ff92d1b](https://github.com/x1agent/x1agent/commit/ff92d1bcd4a35f4ee42c148e0add360a1be1b861))
+
 ## [1.24.1](https://github.com/x1agent/x1agent/compare/v1.24.0...v1.24.1) (2026-05-12)
 
 
