@@ -114,10 +114,14 @@ beforeAll(async () => {
   bobSession = sessions.find((s) => s.triggered_by_user_id === bobId)!.id;
   daveSession = sessions.find((s) => s.triggered_by_user_id === daveId)!.id;
 
-  // Bob shares his session with Alice as viewer.
+  // Bob shares his session with Alice as viewer. Migration 024 added
+  // (subject_kind, subject_id) + a CHECK that requires subject_id NOT NULL
+  // when subject_kind IN ('user','group'); write both legacy + new columns.
   await dbSql`
-    INSERT INTO session_user_shares (session_id, user_id, role, shared_by)
-    VALUES (${bobSession}, ${aliceId}, 'viewer', ${bobId})
+    INSERT INTO session_user_shares
+      (session_id, user_id, subject_kind, subject_id, role, shared_by)
+    VALUES
+      (${bobSession}, ${aliceId}, 'user', ${aliceId}, 'viewer', ${bobId})
   `;
 
   // One agent.share event per session that emits a share.
