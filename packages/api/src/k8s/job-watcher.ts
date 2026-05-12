@@ -46,6 +46,32 @@ import {
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
+/**
+ * Pick the Claude model the launching pod runs under (X1A-40).
+ * Precedence — first non-null/non-empty wins:
+ *
+ *   1. session.modelOverride — set by the orchestrator's
+ *      spawn_session MCP call with a `model` argument. Only ever
+ *      non-null on agent-triggered children whose parent declared a
+ *      per-spawn choice; the admin-curated enabled-models allowlist
+ *      was already enforced at the /sessions/spawn route.
+ *   2. agent.model — per-child-agent default set in the edit UI.
+ *      Subject to the same allowlist at write time.
+ *   3. deployment fallback — the ANTHROPIC_MODEL env on the api.
+ *      Helm flips this cluster-wide so a fresh install doesn't have
+ *      to manually pick a model before spawning a session.
+ *
+ * Undefined return leaves the SDK on its built-in default — fine when
+ * the operator has chosen not to pin a model anywhere.
+ */
+export function selectSessionModel(
+  session: { modelOverride: string | null },
+  agent: { model: string | null },
+  fallback: string | undefined,
+): string | undefined {
+  return session.modelOverride ?? agent.model ?? fallback;
+}
+
 export interface JobWatcherConfig {
   sql: Sql;
   agents: AgentRepository;
@@ -465,10 +491,8 @@ async function launchSession(
     imagePullPolicy: cfg.imagePullPolicy,
     anthropicApiKey: cfg.anthropicApiKey,
     anthropicProvider: cfg.anthropicProvider,
-    // Per-agent override (agent.model) wins over the deployment-wide
-    // default (cfg.anthropicModel from ANTHROPIC_MODEL env). NULL on
-    // both sides leaves the SDK to pick its built-in default.
-    anthropicModel: agent.model ?? cfg.anthropicModel,
+    // X1A-40 precedence — see selectSessionModel below.
+    anthropicModel: selectSessionModel(session, agent, cfg.anthropicModel),
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,
     serviceAccountName: cfg.sessionServiceAccount,

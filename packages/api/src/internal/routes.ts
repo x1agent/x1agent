@@ -56,6 +56,16 @@ export interface InternalRoutesConfig {
    */
   quietHints?: import("../orchestration/quiet-hints.js").QuietHintStore;
   /**
+   * Returns the set of admin-enabled Claude model ids, or null when
+   * the deployment isn't curating (resolver not wired). When set, the
+   * `/sessions/spawn` route rejects per-spawn `model` overrides that
+   * aren't in it — closes the side-channel around the platform admin's
+   * model gate at /admin/anthropic-models.
+   *
+   * X1A-40: same gate the agent-write path enforces on `agents.model`.
+   */
+  enabledModels?: () => Promise<Set<string> | null>;
+  /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
    * the preview-deploy route returns 503. Narrow escape hatch until
@@ -89,6 +99,55 @@ export interface InternalRoutesConfig {
       }
     >;
   };
+}
+
+/**
+ * Resolve a per-spawn `model` request against the admin-enabled
+ * allowlist (X1A-40).
+ *
+ * Accepts two shapes:
+ *   1. A short name — "sonnet" / "opus" / "haiku" (case-insensitive).
+ *      We pick the first enabled model id whose base name (the part
+ *      before any "@" version tag) matches, preferring GA over
+ *      "@default" preview aliases.
+ *   2. A full model id — "claude-sonnet-4-5@20250929" or whatever
+ *      the upstream catalog returned. We accept it iff it appears
+ *      verbatim in the enabled set.
+ *
+ * Returns null on any of: short name with no match, full id not in
+ * the set, an enabled set that's the empty set (admin curated to
+ * "nothing enabled"). When `enabled` is itself null — i.e. no
+ * resolver wired, typically in tests — we accept any non-empty
+ * string verbatim so the test surface still works.
+ */
+export function resolveSpawnModel(
+  raw: string,
+  enabled: Set<string> | null,
+): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  if (enabled === null) {
+    // Resolver not wired — accept short names as-is so tests don't
+    // need an allowlist mock. Production composition wires
+    // listEnabledOverrides; this branch should not run there.
+    return trimmed;
+  }
+  const lower = trimmed.toLowerCase();
+  const isShortName = /^(sonnet|opus|haiku)$/.test(lower);
+  if (isShortName) {
+    // Prefer a GA id (date-versioned) over an "@default" alias.
+    const candidates = Array.from(enabled).filter((id) => {
+      const base = id.split("@")[0]?.toLowerCase() ?? "";
+      return base.includes(lower);
+    });
+    if (candidates.length === 0) return null;
+    const ga = candidates.filter((id) => !id.endsWith("@default"));
+    const pool = ga.length > 0 ? ga : candidates;
+    // Newest first by string sort on the version tag (yyyymmdd).
+    pool.sort((a, b) => b.localeCompare(a));
+    return pool[0] ?? null;
+  }
+  return enabled.has(trimmed) ? trimmed : null;
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -143,12 +202,44 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     const body = (await c.req.json().catch(() => ({}))) as {
       parent_session_id?: string;
       child_agent_id?: string;
+      model?: string | null;
     };
     if (!body.parent_session_id || !body.child_agent_id) {
       return c.json(
         { error: "missing_fields", need: ["parent_session_id", "child_agent_id"] },
         400,
       );
+    }
+
+    // X1A-40: optional per-spawn Claude model override. Short names
+    // ("sonnet" / "opus" / "haiku") resolve against the admin-curated
+    // enabled set; full ids (e.g. "claude-sonnet-4-5@20250929") pass
+    // through. Same allowlist enforced on agent.model — without this
+    // re-check the spawn path is a side-channel around the platform
+    // admin's model gate.
+    let modelOverride: string | null = null;
+    if (
+      body.model !== undefined &&
+      body.model !== null &&
+      typeof body.model === "string" &&
+      body.model.trim() !== ""
+    ) {
+      const enabled = cfg.enabledModels
+        ? await cfg.enabledModels()
+        : null;
+      const resolved = resolveSpawnModel(body.model, enabled);
+      if (!resolved) {
+        return c.json(
+          {
+            error: "model_not_enabled",
+            message:
+              "The requested Claude model is not enabled for this deployment. Ask a platform admin to enable it at /admin/anthropic-models, or pass a model id that appears in the enabled list.",
+            requested: body.model,
+          },
+          403,
+        );
+      }
+      modelOverride = resolved;
     }
 
     const permission = {
@@ -182,6 +273,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         {
           parentSessionId: body.parent_session_id as never,
           childAgentId: AgentId(body.child_agent_id),
+          modelOverride,
         },
       );
       return c.json(

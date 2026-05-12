@@ -54,6 +54,13 @@ export interface SpawnChildSessionDeps {
 export interface SpawnChildSessionCommand {
   parentSessionId: SessionId;
   childAgentId: AgentId;
+  /**
+   * Optional per-spawn Claude model override (X1A-40). The route layer
+   * has already resolved any short-name ("sonnet" / "opus") to a full
+   * Claude model id and re-checked the admin-curated enabled-models
+   * allowlist; here we just persist whatever it hands us.
+   */
+  modelOverride?: string | null;
 }
 
 /**
@@ -97,6 +104,13 @@ export async function spawnChildSession(
   // return that session rather than creating a second one. Matches the
   // trigger-session contract; defends the 018 DB trigger from firing on
   // the expected happy-path.
+  //
+  // Note: a per-spawn `modelOverride` requested for an already-live
+  // orchestrator is intentionally a no-op. Orchestrator pods are
+  // long-lived singletons whose model was fixed at first spawn — we
+  // can't swap mid-flight, and re-creating the session would defeat
+  // the singleton contract. Callers asking for opus on a child that
+  // already has a live session get the existing model.
   if (isOrchestratorKind(childAgent.kind)) {
     const existing = await deps.sessions.findLiveSessionForAgent(childAgent.id);
     if (existing) return existing;
@@ -119,6 +133,7 @@ export async function spawnChildSession(
     parentAgentId: parent.agentId,
     resumedFromSessionId: null,
     triggeredAt: deps.clock.now(),
+    modelOverride: cmd.modelOverride ?? null,
   });
 }
 

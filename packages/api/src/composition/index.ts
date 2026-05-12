@@ -737,6 +737,11 @@ export function compose(env: CompositionEnv): Composition {
       decrypt: decryptOAuthToken,
       refreshers: { google },
     },
+    // X1A-40: same enabled-models gate the agent-edit form enforces on
+    // agents.model. The /sessions/spawn route uses this to reject
+    // per-spawn model overrides that aren't admin-enabled — otherwise
+    // the orchestrator could side-channel around /admin/anthropic-models.
+    enabledModels: async () => listEnabledOverrides(env.sql),
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so

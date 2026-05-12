@@ -19,6 +19,13 @@ use crate::{AppState, SessionMessage};
 #[derive(Deserialize)]
 pub struct SpawnRequest {
     pub child_agent_id: String,
+    /// Optional per-spawn Claude model override (X1A-40). The agent
+    /// passes a short name ("sonnet" / "opus" / "haiku") or a full
+    /// model id; the api resolves and re-checks against the admin-
+    /// curated enabled-models allowlist. We forward verbatim — the
+    /// sidecar is not the policy authority.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -73,6 +80,7 @@ pub async fn handle_spawn(
     let body = serde_json::json!({
         "parent_session_id": state.session_id,
         "child_agent_id": req.child_agent_id,
+        "model": req.model,
     });
     let res = client
         .post(&url)

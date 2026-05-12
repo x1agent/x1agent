@@ -487,13 +487,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "spawn_session",
       description:
-        "Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child's progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.",
+        "Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child's progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.\n\nOptionally pass `model` to override the Claude model the spawned session runs under — useful as a cost lever (`\"sonnet\"` for cheap routine work, `\"opus\"` for migrations / auth / tenant-isolation / cross-domain refactors). The platform admin curates the enabled-models allowlist at /admin/anthropic-models; passing a model that isn't enabled returns 403 model_not_enabled. Omitting `model` falls back to the child agent's configured `model`, then the deployment-wide ANTHROPIC_MODEL default.",
       inputSchema: {
         type: "object" as const,
         properties: {
           child_agent_id: {
             type: "string",
             description: "UUID of the child agent to spawn",
+          },
+          model: {
+            type: "string",
+            description:
+              'Optional per-spawn Claude model override. Short names ("sonnet", "opus", "haiku") resolve against the deployment\'s enabled-models allowlist (the api picks the newest GA id whose base name matches); full model ids (e.g. "claude-sonnet-4-5@20250929") pass through verbatim and must appear in the allowlist as well. Omit to inherit the child agent\'s configured model.',
           },
         },
         required: ["child_agent_id"],
@@ -1082,11 +1087,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "spawn_session": {
       try {
+        const modelArg =
+          typeof a?.model === "string" && a.model.trim() !== ""
+            ? String(a.model).trim()
+            : undefined;
         const res = await fetch(`${sidecarUrl}/spawn`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             child_agent_id: String(a?.child_agent_id ?? ""),
+            ...(modelArg !== undefined ? { model: modelArg } : {}),
           }),
         });
         const result = await res.json();
