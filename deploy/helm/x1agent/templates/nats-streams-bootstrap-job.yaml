@@ -183,14 +183,21 @@ spec:
             - -c
             - |
               set -eu
+              # `nats stream add --config <file>` derives the stream name
+              # from the JSON. `nats stream edit` does NOT — it reads the
+              # name only from the positional arg, even when --config is
+              # supplied. Without `$name` here the CLI prints
+              # `cannot pick a Stream without a terminal and no Stream
+              # name supplied` and exits non-zero, failing the post-
+              # upgrade hook. Pass the name explicitly to both branches.
               for f in /streams/*.json; do
                 name=$(basename "$f" .json)
                 if nats stream info "$name" >/dev/null 2>&1; then
                   echo "+ nats stream edit $name (from $f)"
-                  nats stream edit --force --config "$f"
+                  nats stream edit "$name" --force --config "$f"
                 else
                   echo "+ nats stream add $name (from $f)"
-                  nats stream add --config "$f"
+                  nats stream add "$name" --config "$f"
                 fi
               done
               echo "all streams reconciled."
