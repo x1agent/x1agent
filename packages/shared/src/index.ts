@@ -134,6 +134,58 @@ export interface SessionEventDTO {
   timestamp: string;
 }
 
+/**
+ * Document commenting v1 (X1A-52). One comment row on a share. Comments
+ * are grouped client-side by `thread_id`; the server returns rows
+ * ordered by (thread_id, seq). `anchor` is non-null only when
+ * `scope === "passage"` (markdown shares only); for HTML / share-scoped
+ * threads it's null and the UI renders "On this share" as the anchor
+ * label instead.
+ */
+export type CommentScope = "passage" | "share";
+
+export interface ShareCommentAnchor {
+  selection: {
+    start_line: number;
+    start_col: number;
+    end_line: number;
+    end_col: number;
+    quoted_text: string;
+  };
+}
+
+export interface ShareCommentDTO {
+  id: string;
+  share_id: string;
+  thread_id: string;
+  seq: number;
+  session_id: string;
+  share_type: string;
+  scope: CommentScope;
+  anchor: ShareCommentAnchor | null;
+  body: string;
+  author_user_id: string | null;
+  author_session_id: string | null;
+  resolved_at: string | null;
+  resolved_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShareCommentListResponse {
+  comments: ShareCommentDTO[];
+  share_id: string;
+  share_type: string;
+}
+
+export interface ShareCommentThread {
+  thread_id: string;
+  scope: CommentScope;
+  anchor: ShareCommentAnchor | null;
+  comments: ShareCommentDTO[];
+  resolved_at: string | null;
+}
+
 export interface SessionEventListResponse {
   session: SessionDTO;
   agent: { id: string; slug: string; name: string };

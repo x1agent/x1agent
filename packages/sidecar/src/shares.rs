@@ -29,6 +29,16 @@ const MAX_TOTAL_SIZE: u64 = 200 * 1024 * 1024; // 200 MB per share
 pub struct ShareRequest {
     pub path: String,
     pub title: Option<String>,
+    /// When present, this share is an UPDATE to an existing share id
+    /// rather than a fresh publish. The bytes are written to the same
+    /// storage prefix, a fresh `agent.share` event is emitted carrying
+    /// the SAME `share_id`, and the frontend renders the latest payload
+    /// in place of the prior pill. Comments attached to this share by
+    /// share_id stay attached — that's the whole point of the update
+    /// path. The orchestrator should use this whenever it revises an
+    /// artifact the operator has already commented on, so the comment
+    /// thread doesn't orphan onto a stale version.
+    pub share_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -219,12 +229,52 @@ pub async fn handle_share(
     Json(req): Json<ShareRequest>,
 ) -> Result<Json<ShareResponse>, (StatusCode, Json<ShareResponse>)> {
     let workspace = PathBuf::from(WORKSPACE_ROOT);
+
+    // Reject `..` components up-front. A path containing parent-dir
+    // traversal cannot be a legitimate workspace-relative reference,
+    // and we must not rely on canonicalize() catching it because
+    // canonicalize() fails (no fall-open) on non-existent paths.
+    if Path::new(&req.path)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ShareResponse {
+                ok: false,
+                share_id: String::new(),
+                share_type: String::new(),
+                title: String::new(),
+                files: vec![],
+                total_size: 0,
+                entry_point: None,
+                error: Some("Path must not contain '..' components".into()),
+            }),
+        ));
+    }
+
     let abs_path = workspace.join(&req.path);
 
-    // canonicalize() resolves symlinks and `..` segments; if the result
-    // climbs out of /workspace the agent is trying to exfiltrate
-    // something it shouldn't touch. Block with 400.
-    let canonical = abs_path.canonicalize().unwrap_or(abs_path.clone());
+    // canonicalize() resolves symlinks and `..` segments; if it fails
+    // (path does not exist, broken symlink, permission denied) we
+    // refuse rather than falling back to the un-canonicalized path —
+    // a fall-back would let a non-existent traversal target pass the
+    // prefix check.
+    let canonical = abs_path.canonicalize().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ShareResponse {
+                ok: false,
+                share_id: String::new(),
+                share_type: String::new(),
+                title: String::new(),
+                files: vec![],
+                total_size: 0,
+                entry_point: None,
+                error: Some(format!("Path not accessible: {}", e)),
+            }),
+        )
+    })?;
     if !canonical.starts_with(WORKSPACE_ROOT) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -279,7 +329,19 @@ pub async fn handle_share(
 
     let (share_type, entry_point) = detect_share_type(&file_entries, is_dir);
     let total_size: u64 = file_entries.iter().map(|f| f.size).sum();
-    let share_id = uuid::Uuid::new_v4().to_string();
+    // Update path: when share_id is supplied, reuse it so the new
+    // bytes land at the same storage prefix and the frontend renders
+    // the latest payload in place of the prior pill. We don't
+    // server-side verify the share belongs to this session because
+    // (a) the storage prefix is already session-scoped — sessions/
+    // <our session>/shares/<share_id>/ — so a foreign share_id just
+    // creates an empty record under our session, not a write to
+    // someone else's data, and (b) every comment/IDOR check is
+    // re-run on the comments side at the api layer anyway.
+    let share_id = req
+        .share_id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let title = req.title.unwrap_or_else(|| {
         abs_path
             .file_name()
