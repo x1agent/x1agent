@@ -167,38 +167,18 @@ if (prompt) {
 
 // ── Wait for the sidecar before any POST/GET to it ─────
 
-// Both the credential bootstrap below and `session.started` immediately
-// after the system-prompt block need the sidecar's :9090 to be listening.
-// The sidecar's startup includes git clones + NATS connect before the
-// HTTP listener binds, so it lands later than the agent on most starts.
+// `session.started` immediately after the system-prompt block needs the
+// sidecar's :9090 to be listening. The sidecar's startup includes git
+// clones + NATS connect before the HTTP listener binds, so it lands
+// later than the agent on most starts.
+//
+// `gh` and `git` no longer need a bootstrap here — both go through
+// shims (/usr/local/bin/gh, /usr/local/bin/git-credential-x1) that hit
+// the sidecar per call, so a stale long-lived token can't accumulate.
 const sidecarReady = await waitForSidecar();
 if (!sidecarReady) {
   console.warn(
-    "[agent] sidecar did not become ready within 30s — gh CLI will be unauthenticated and session.started may be lost",
-  );
-}
-
-// ── Sidecar credential bootstrap for gh CLI ────────────
-
-// The sidecar exposes /git/credential — pull a token once at startup so
-// the `gh` CLI works inside the container. Subsequent `git` calls go
-// through the credential helper on every request.
-try {
-  const credResp = await fetch(`${sidecarUrl}/git/credential?format=token`);
-  if (credResp.ok) {
-    const body = (await credResp.json()) as { token?: string };
-    if (body.token) {
-      process.env.GH_TOKEN = body.token;
-      console.log("[agent] gh CLI configured via sidecar credential");
-    }
-  } else {
-    console.warn(
-      `[agent] gh credential bootstrap got HTTP ${credResp.status} — gh CLI will be unauthenticated`,
-    );
-  }
-} catch (err) {
-  console.warn(
-    `[agent] gh credential bootstrap failed: ${(err as Error).message}`,
+    "[agent] sidecar did not become ready within 30s — session.started may be lost",
   );
 }
 

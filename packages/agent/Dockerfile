@@ -18,8 +18,9 @@
 #
 #    Everything the agent runtime needs is bundled under `/x1/`:
 #      /x1/bin/entrypoint         launcher script
-#      /x1/bin/gh                 gh CLI (on PATH via `ENV PATH`)
+#      /x1/bin/gh                 gh CLI shim (mints fresh token per call, execs gh-real)
 #      /x1/bin/git-credential-x1  sidecar credential shim
+#      /x1/libexec/gh-real        real gh CLI binary (called by /x1/bin/gh shim)
 #      /x1/app/                   agent SDK (src + node_modules)
 #      /x1/runtime/               bundled Node 22 (bin + lib/node_modules)
 #      /x1/etc/gitconfig          git config to link to /etc/gitconfig
@@ -74,6 +75,10 @@ COPY --from=builder /app/package.json ./
 
 COPY git-credential-x1.sh /usr/local/bin/git-credential-x1
 RUN chmod +x /usr/local/bin/git-credential-x1
+# gh CLI shim — intercepts /usr/bin/gh by sitting earlier on PATH.
+# Mints a fresh installation token from the sidecar on every invocation.
+COPY gh-x1.sh /usr/local/bin/gh
+RUN chmod +x /usr/local/bin/gh
 COPY gitconfig /etc/gitconfig
 
 RUN mkdir -p /workspace && chmod 777 /workspace
@@ -83,11 +88,12 @@ RUN mkdir -p /workspace && chmod 777 /workspace
 # dependency on runtime-core. Everything in /x1 is self-contained and
 # PATH-independent — the entrypoint uses absolute paths into /x1.
 RUN set -e \
-  && mkdir -p /x1/bin /x1/app /x1/runtime/bin /x1/runtime/lib /x1/etc \
+  && mkdir -p /x1/bin /x1/libexec /x1/app /x1/runtime/bin /x1/runtime/lib /x1/etc \
   && cp -L /usr/local/bin/node /x1/runtime/bin/node \
   && cp -rL /usr/local/lib/node_modules /x1/runtime/lib/node_modules \
   && cp -r /app/. /x1/app/ \
-  && cp /usr/bin/gh /x1/bin/gh \
+  && cp /usr/bin/gh /x1/libexec/gh-real \
+  && cp /usr/local/bin/gh /x1/bin/gh \
   && cp /usr/local/bin/git-credential-x1 /x1/bin/git-credential-x1 \
   && cp /etc/gitconfig /x1/etc/gitconfig
 
