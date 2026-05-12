@@ -1,3 +1,10 @@
+## [1.24.5](https://github.com/x1agent/x1agent/compare/v1.24.4...v1.24.5) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** minimal two-step create form for new agents ([ecb725a](https://github.com/x1agent/x1agent/commit/ecb725af80bb4525175088031ea63eac2cca4390)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+
 ## [1.24.4](https://github.com/x1agent/x1agent/compare/v1.24.3...v1.24.4) (2026-05-12)
 
 
