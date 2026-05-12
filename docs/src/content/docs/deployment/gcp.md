@@ -19,6 +19,21 @@ Everything else (cluster, IAM, GSM placeholders, Artifact Registry, static IP, D
 
 ## Sequence
 
+For most operators the four-verb lifecycle is enough — see [Lifecycle](/getting-started/lifecycle) for the operator's-eye view:
+
+```bash
+mise run configure:prod      # capture cloud target, base domain, admin emails
+mise run plan:prod           # preview terraform + helm changes (read-only)
+mise run install:prod        # one-shot bootstrap — terraform → ESO → secrets → images → helm
+mise run status:prod         # confirm pods + ingress + cert
+```
+
+`install:prod` runs the two-pass Terraform apply, installs ESO + cert-manager, populates GSM placeholders, builds + pushes images, and `helm install`s the chart. There are a couple of manual steps it doesn't do (no platform should: you need to set DNS records and, depending on chart version, paste a few secrets into GSM). They're laid out in detail below.
+
+### What the one-shot actually does, expanded
+
+If you'd rather drive the phases yourself (or need to recover from a partial install), here's what `install:prod` runs under the hood:
+
 ```bash
 # 1. Capture install values
 mise run configure:prod
@@ -52,7 +67,7 @@ mise run install:prod:plan
 mise run install:prod:apply
 
 # 7. Watch status until ingress IP + cert are ready
-mise run install:prod:status
+mise run status:prod
 
 # 8. Set NS records at your registrar pointing at the Cloud DNS zone
 #    (terraform output: dns_nameservers)
@@ -110,7 +125,7 @@ TLS provisioning is async — the chart creates `Certificate` CRs that cert-mana
 ## Status
 
 ```
-mise run install:prod:status
+mise run status:prod
 ```
 
 Prints:
@@ -123,10 +138,10 @@ Run it on a loop while waiting for first-time cert provisioning.
 ## Destroy
 
 ```
-mise run install:prod:destroy
+mise run destroy:prod
 ```
 
-Double-confirms, then `helm uninstall`. The in-cluster Postgres PVC is deleted with the StatefulSet — there are no GSM-backed backups in v1, so this is a one-way operation. Take a `pg_dump` first if you care about the data.
+Double-confirms, then `helm uninstall` + `terraform destroy`. The in-cluster Postgres PVC is deleted with the StatefulSet — there are no GSM-backed backups in v1, so this is a one-way operation. Take a `pg_dump` first if you care about the data.
 
 ## What's templated from `.env.local`
 

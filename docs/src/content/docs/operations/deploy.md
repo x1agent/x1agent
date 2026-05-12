@@ -147,17 +147,17 @@ Two paths:
    any chart changes. Use when a chart-level change broke things, not
    just the image.
 
-## What `deploy` does NOT do
+## What `deploy:prod` does NOT do
 
-- No Terraform changes. Run `mise run terraform:prod:apply` for those.
-- No GSM rotation. Run `mise run install:prod:apply` (or update GSM out of band).
+- No Terraform changes. Run `mise run install:prod` for those (or `mise run plan:prod` first to see what would change).
+- No GSM rotation. Run `mise run install:prod` (or update GSM out of band).
 - No operator-chart upgrades (ESO, cert-manager, ingress-nginx). Those
   upgrade independently with `helm upgrade <name>` in their own namespaces.
 
-These are intentional: `deploy` should be safe to run from CI on every
+These are intentional: `deploy:prod` should be safe to run from CI on every
 green main. Anything that touches IAM, DNS, or persistent state stays
-behind the bigger `install` command.
+behind the bigger `install:prod` command.
 
-`deploy` also does not update the `OpenTelemetryCollector` resource
+`deploy:prod` also does not update the `OpenTelemetryCollector` resource
 (still gated by `monitoring.opentelemetry.enabled`) or NATS stream
-definitions (those need `mise run install:prod:apply` to re-render).
+definitions (those need `mise run install:prod` to re-render).

@@ -15,7 +15,7 @@ This page covers (1) and (2). Cluster health needs no setup beyond a GKE cluster
 
 ## Token-usage dashboard
 
-After `mise run install:prod:apply`, every workspace gets a "Token usage — this month" card visible to admins on the workspace home page. It shows:
+After `mise run install:prod`, every workspace gets a "Token usage — this month" card visible to admins on the workspace home page. It shows:
 
 - Estimated cost in USD (input + output + cache, computed from a baked-in model price table)
 - Total input / output tokens
@@ -80,7 +80,7 @@ monitoring:
     enabled: true
 ```
 
-Re-run `mise run install:prod:apply`. This:
+Re-run `mise run install:prod`. This:
 
 - Creates an `OpenTelemetryCollector` resource in the install namespace
 - Adds `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` env vars to api + app

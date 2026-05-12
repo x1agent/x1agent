@@ -98,9 +98,24 @@ function normalizeTab(raw: string): TabKey {
 }
 
 export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
-  const { status, memberships, fetchMe, isPlatformAdmin, user: currentUser } =
-    useAuthStore();
-  const { bySlug, load, create, update, remove } = useAgentsStore();
+  // Subscribe to one field at a time. Destructuring the whole store
+  // (`useAuthStore()` / `useAgentsStore()` with no selector) re-renders
+  // this component on every set() against either store — and during the
+  // mount sequence each store ticks 2-3 times (status: idle → loading →
+  // authenticated; bySlug: empty → populated). The extra renders shake
+  // any unstable selector / memo / ref-callback identity downstream,
+  // which is exactly how the agents/new page kept tripping React error
+  // #185 (see fadab8c — same shape, different selector).
+  const status = useAuthStore((s) => s.status);
+  const memberships = useAuthStore((s) => s.memberships);
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+  const isPlatformAdmin = useAuthStore((s) => s.isPlatformAdmin);
+  const currentUser = useAuthStore((s) => s.user);
+  const bySlug = useAgentsStore((s) => s.bySlug);
+  const load = useAgentsStore((s) => s.load);
+  const create = useAgentsStore((s) => s.create);
+  const update = useAgentsStore((s) => s.update);
+  const remove = useAgentsStore((s) => s.remove);
   const isCreate = !agentSlug;
 
   const [name, setName] = useState("");
