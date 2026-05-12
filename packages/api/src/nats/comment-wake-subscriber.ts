@@ -1,6 +1,9 @@
 import { connect, StringCodec, type NatsConnection } from "nats";
-import type { SessionRepository } from "@x1agent/domain-sessions";
-import { SessionId } from "@x1agent/domain-sessions";
+import type {
+  SessionRepository,
+  ShareCommentRepository,
+} from "@x1agent/domain-sessions";
+import { SessionId, ShareThreadId } from "@x1agent/domain-sessions";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
 import {
   publishCommentAddedWake,
@@ -33,6 +36,15 @@ import {
 export interface StartCommentWakeSubscriberOptions {
   natsUrl: string;
   sessions: SessionRepository;
+  /**
+   * Re-verifies routing fields against the DB before publishing a wake.
+   * Without this, the subscriber would trust the NATS payload's
+   * `producing_session_id` — which an authenticated bus client could
+   * spoof to deliver attacker-chosen `comment_body` text into another
+   * workspace's running session. Looking up the thread by `thread_id`
+   * yields the authoritative session and share that own this comment.
+   */
+  comments: ShareCommentRepository;
 }
 
 export interface CommentWakeSubscriberHandle {
@@ -70,6 +82,14 @@ interface ThreadResolvedPayload {
   share_type?: string;
   producing_session_id?: string;
   producing_agent_id?: string;
+  /**
+   * Server-stamped transition timestamp. Used to discriminate the
+   * msgId for resolve toggles — without it, JetStream's dedup window
+   * would collapse resolve→unresolve→re-resolve on the same thread
+   * back to a single message and the orchestrator never hears the
+   * later transition.
+   */
+  transitioned_at?: string;
 }
 
 export async function startCommentWakeSubscriber(
@@ -82,12 +102,18 @@ export async function startCommentWakeSubscriber(
     `[comment-wake] subscribed to ${SUBJECT_COMMENT_ADDED} + ${SUBJECT_THREAD_RESOLVED}`,
   );
 
-  const addedSub = nc.subscribe(SUBJECT_COMMENT_ADDED);
+  // Queue group "comment-wake": when the api scales to multiple
+  // replicas, NATS delivers each message to exactly one subscriber in
+  // the group. Without this, every replica would publish its own wake
+  // for every comment.
+  const addedSub = nc.subscribe(SUBJECT_COMMENT_ADDED, {
+    queue: "comment-wake",
+  });
   void (async () => {
     for await (const m of addedSub) {
       try {
         const payload = JSON.parse(sc.decode(m.data)) as CommentAddedPayload;
-        await handleCommentAdded(nc, opts.sessions, payload);
+        await handleCommentAdded(nc, opts.sessions, opts.comments, payload);
       } catch (err) {
         console.warn(
           `[comment-wake] added handler failed: ${(err as Error).message}`,
@@ -96,12 +122,14 @@ export async function startCommentWakeSubscriber(
     }
   })();
 
-  const resolvedSub = nc.subscribe(SUBJECT_THREAD_RESOLVED);
+  const resolvedSub = nc.subscribe(SUBJECT_THREAD_RESOLVED, {
+    queue: "comment-wake",
+  });
   void (async () => {
     for await (const m of resolvedSub) {
       try {
         const payload = JSON.parse(sc.decode(m.data)) as ThreadResolvedPayload;
-        await handleThreadResolved(nc, opts.sessions, payload);
+        await handleThreadResolved(nc, opts.sessions, opts.comments, payload);
       } catch (err) {
         console.warn(
           `[comment-wake] resolved handler failed: ${(err as Error).message}`,
@@ -134,22 +162,36 @@ export async function startCommentWakeSubscriber(
 async function handleCommentAdded(
   nc: NatsConnection,
   sessions: SessionRepository,
+  comments: ShareCommentRepository,
   p: CommentAddedPayload,
 ): Promise<void> {
-  if (!p.producing_session_id || !p.share_id || !p.thread_id || !p.comment_id) {
-    return;
-  }
+  if (!p.share_id || !p.thread_id || !p.comment_id) return;
+
+  // Re-verify against the DB before publishing the wake. The NATS
+  // payload's `producing_session_id` + `share_id` are routing inputs
+  // we MUST NOT trust — an authenticated bus client could otherwise
+  // forge a payload that delivers attacker-chosen `comment_body` text
+  // into any session id it names. `findThread` returns the comment's
+  // authoritative share + session as committed by `postShareComment`.
+  const thread = await comments.findThread(
+    ShareThreadId(p.thread_id),
+  );
+  if (!thread) return;
+  if (thread.shareId !== p.share_id) return;
+
+  const producingSessionId = thread.sessionId;
+
   // Anti-loop: don't wake the agent on its own reply.
   if (
     p.actor_session_id &&
-    p.actor_session_id === p.producing_session_id
+    p.actor_session_id === producingSessionId
   ) {
     return;
   }
-  if (await isTerminal(sessions, p.producing_session_id)) return;
+  if (await isTerminal(sessions, producingSessionId)) return;
 
-  await publishCommentAddedWake(nc, p.producing_session_id, {
-    shareId: p.share_id,
+  await publishCommentAddedWake(nc, producingSessionId, {
+    shareId: thread.shareId,
     threadId: p.thread_id,
     commentId: p.comment_id,
     authorDisplay: formatAuthor(p.actor_user_id, p.actor_session_id),
@@ -162,20 +204,32 @@ async function handleCommentAdded(
 async function handleThreadResolved(
   nc: NatsConnection,
   sessions: SessionRepository,
+  comments: ShareCommentRepository,
   p: ThreadResolvedPayload,
 ): Promise<void> {
-  if (!p.producing_session_id || !p.share_id || !p.thread_id) return;
-  if (await isTerminal(sessions, p.producing_session_id)) return;
+  if (!p.share_id || !p.thread_id) return;
+
+  // Same DB re-verification as handleCommentAdded — derive the routed
+  // session from the thread row, not from the NATS payload.
+  const thread = await comments.findThread(
+    ShareThreadId(p.thread_id),
+  );
+  if (!thread) return;
+  if (thread.shareId !== p.share_id) return;
+
+  const producingSessionId = thread.sessionId;
+  if (await isTerminal(sessions, producingSessionId)) return;
   // Resolve isn't author-attributed at the session-id level (the
   // resolver is a human via REST, not another agent session in v1),
   // so no anti-loop is required.
-  await publishCommentResolvedWake(nc, p.producing_session_id, {
-    shareId: p.share_id,
+  await publishCommentResolvedWake(nc, producingSessionId, {
+    shareId: thread.shareId,
     threadId: p.thread_id,
     resolverDisplay: p.resolved_by_user_id
       ? "human"
       : "platform",
     resolved: !!p.resolved,
+    transitionedAt: p.transitioned_at,
   });
 }
 

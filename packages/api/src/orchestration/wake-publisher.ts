@@ -458,6 +458,16 @@ export interface CommentResolvedWakeOpts {
   threadId: string;
   resolverDisplay: string;
   resolved: boolean;
+  /**
+   * Server-stamped transition timestamp (ISO 8601). Discriminates the
+   * msgId so a resolve → unresolve → re-resolve sequence on the same
+   * thread doesn't collapse to a single message inside JetStream's
+   * dedup window. Optional only for backwards-compat with older
+   * payloads on the wire — when absent we fall back to publish-time
+   * wall-clock, which is acceptable because the dedup window is
+   * short relative to user-driven toggle cadence.
+   */
+  transitionedAt?: string;
 }
 
 export async function publishCommentResolvedWake(
@@ -479,10 +489,12 @@ export async function publishCommentResolvedWake(
       source: "platform",
     },
   };
-  // Resolve toggles, so (thread_id, resolved-flag) is the dedup key —
-  // re-resolving / unresolving fires distinct wakes; redelivery of
-  // the same transition is collapsed.
-  const msgId = `wake.comment_resolved.${opts.threadId}.${opts.resolved ? "1" : "0"}`;
+  // Each transition has a distinct server-stamped time; (thread_id,
+  // resolved-flag, transitioned_at) makes re-resolve/unresolve cycles
+  // dedup correctly without collapsing legitimate toggles.
+  const discriminator =
+    opts.transitionedAt ?? new Date().toISOString();
+  const msgId = `wake.comment_resolved.${opts.threadId}.${opts.resolved ? "1" : "0"}.${discriminator}`;
   await publishInputEnvelope(nc, producingSessionId, envelope, msgId);
 }
 

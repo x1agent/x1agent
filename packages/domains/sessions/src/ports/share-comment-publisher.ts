@@ -52,6 +52,13 @@ export interface ShareCommentThreadResolvedEvent {
   shareType: string;
   /** `true` for a resolve, `false` for a reverse-resolve. */
   resolved: boolean;
+  /**
+   * Server-stamped time of this transition. Carried so the wake-router
+   * can discriminate a resolve → unresolve → re-resolve sequence inside
+   * the publisher dedup window — without it, the second resolve would
+   * collapse and the orchestrator would miss the transition.
+   */
+  transitionedAt: Date;
   producingSessionId: SessionId;
   producingAgentId: string;
 }

@@ -573,7 +573,7 @@ describe("publishCommentAddedWake / publishCommentResolvedWake", () => {
     }
   });
 
-  it("resolve wake distinguishes resolved-true vs resolved-false in msgId", async () => {
+  it("resolve wake distinguishes resolved-true vs resolved-false in msgId, and includes the transitioned_at discriminator so a toggle within the dedup window doesn't collapse", async () => {
     process.env.USE_JETSTREAM_PUBLISH = "true";
     try {
       const fake = new FakeNats();
@@ -582,19 +582,36 @@ describe("publishCommentAddedWake / publishCommentResolvedWake", () => {
         threadId: "thread-1",
         resolverDisplay: "human",
         resolved: true,
+        transitionedAt: "2026-05-12T10:00:00.000Z",
       });
       await publishCommentResolvedWake(fake as never, uuid(0xAA03), {
         shareId: "share-1",
         threadId: "thread-1",
         resolverDisplay: "human",
         resolved: false,
+        transitionedAt: "2026-05-12T10:00:05.000Z",
+      });
+      await publishCommentResolvedWake(fake as never, uuid(0xAA03), {
+        shareId: "share-1",
+        threadId: "thread-1",
+        resolverDisplay: "human",
+        resolved: true,
+        transitionedAt: "2026-05-12T10:00:10.000Z",
       });
       expect(fake.publishedJs[0]!.msgId).toBe(
-        "wake.comment_resolved.thread-1.1",
+        "wake.comment_resolved.thread-1.1.2026-05-12T10:00:00.000Z",
       );
       expect(fake.publishedJs[1]!.msgId).toBe(
-        "wake.comment_resolved.thread-1.0",
+        "wake.comment_resolved.thread-1.0.2026-05-12T10:00:05.000Z",
       );
+      // The third publish is a re-resolve of the same thread. Without
+      // the transitioned_at discriminator, this msgId would equal the
+      // first publish and JetStream would drop it — and the
+      // orchestrator would never hear the second resolve.
+      expect(fake.publishedJs[2]!.msgId).toBe(
+        "wake.comment_resolved.thread-1.1.2026-05-12T10:00:10.000Z",
+      );
+      expect(fake.publishedJs[2]!.msgId).not.toBe(fake.publishedJs[0]!.msgId);
     } finally {
       delete process.env.USE_JETSTREAM_PUBLISH;
     }

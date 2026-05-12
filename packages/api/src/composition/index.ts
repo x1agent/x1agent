@@ -249,6 +249,12 @@ export interface Composition {
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
   sessions: PostgresSessionRepository;
+  /** Doc-commenting persistence — exposed so the comment-wake subscriber
+   * can re-verify NATS-supplied routing fields against the DB before
+   * publishing a wake. Without this, an authenticated bus client could
+   * forge `producing_session_id` to inject text into another
+   * workspace's session. */
+  shareComments: PostgresShareCommentRepository;
   permissionGrants: PostgresPermissionGrantRepository;
   collections: PostgresCollectionRepository;
   agentRepoStore: PostgresAgentRepoStore;
@@ -1282,6 +1288,7 @@ export function compose(env: CompositionEnv): Composition {
     sql: env.sql,
     agents,
     sessions,
+    shareComments,
     permissionGrants,
     collections: collectionsRepo,
     agentRepoStore: agentRepos,

@@ -271,6 +271,7 @@ const {
   sql: composedSql,
   agents: composedAgents,
   sessions: composedSessions,
+  shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
@@ -556,6 +557,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
     const sub = await startCommentWakeSubscriber({
       natsUrl,
       sessions: composedSessions,
+      comments: composedShareComments,
     });
     registerCleanup(() => sub.close());
   } catch (err) {

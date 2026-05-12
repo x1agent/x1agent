@@ -42,7 +42,9 @@ export function ShareFullscreenRoot({
   sessionId,
   shareId,
 }: Props) {
-  const rows = useShareCommentsStore((s) => s.byShareId[shareId] ?? []);
+  const rows = useShareCommentsStore(
+    (s) => s.byShareId[shareId] ?? EMPTY_ROWS,
+  );
   const shareType = useShareCommentsStore(
     (s) => s.shareTypeById[shareId] ?? null,
   );

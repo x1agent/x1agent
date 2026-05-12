@@ -229,12 +229,52 @@ pub async fn handle_share(
     Json(req): Json<ShareRequest>,
 ) -> Result<Json<ShareResponse>, (StatusCode, Json<ShareResponse>)> {
     let workspace = PathBuf::from(WORKSPACE_ROOT);
+
+    // Reject `..` components up-front. A path containing parent-dir
+    // traversal cannot be a legitimate workspace-relative reference,
+    // and we must not rely on canonicalize() catching it because
+    // canonicalize() fails (no fall-open) on non-existent paths.
+    if Path::new(&req.path)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ShareResponse {
+                ok: false,
+                share_id: String::new(),
+                share_type: String::new(),
+                title: String::new(),
+                files: vec![],
+                total_size: 0,
+                entry_point: None,
+                error: Some("Path must not contain '..' components".into()),
+            }),
+        ));
+    }
+
     let abs_path = workspace.join(&req.path);
 
-    // canonicalize() resolves symlinks and `..` segments; if the result
-    // climbs out of /workspace the agent is trying to exfiltrate
-    // something it shouldn't touch. Block with 400.
-    let canonical = abs_path.canonicalize().unwrap_or(abs_path.clone());
+    // canonicalize() resolves symlinks and `..` segments; if it fails
+    // (path does not exist, broken symlink, permission denied) we
+    // refuse rather than falling back to the un-canonicalized path —
+    // a fall-back would let a non-existent traversal target pass the
+    // prefix check.
+    let canonical = abs_path.canonicalize().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ShareResponse {
+                ok: false,
+                share_id: String::new(),
+                share_type: String::new(),
+                title: String::new(),
+                files: vec![],
+                total_size: 0,
+                entry_point: None,
+                error: Some(format!("Path not accessible: {}", e)),
+            }),
+        )
+    })?;
     if !canonical.starts_with(WORKSPACE_ROOT) {
         return Err((
             StatusCode::BAD_REQUEST,

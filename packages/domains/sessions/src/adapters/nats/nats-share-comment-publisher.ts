@@ -60,6 +60,7 @@ export class NatsShareCommentPublisher implements ShareCommentPublisher {
       workspace_id: e.workspaceId,
       session_id: e.sessionId,
       share_type: e.shareType,
+      transitioned_at: e.transitionedAt.toISOString(),
       producing_session_id: e.producingSessionId,
       producing_agent_id: e.producingAgentId,
     });

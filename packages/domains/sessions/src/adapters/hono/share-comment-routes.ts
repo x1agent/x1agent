@@ -312,6 +312,7 @@ export function createShareCommentRoutes(
       sessionId: ctx.sessionId,
       shareType: ctx.shareType,
       resolved: true,
+      transitionedAt: now,
       producingSessionId: producing.producingSessionId,
       producingAgentId: producing.producingAgentId,
     });
@@ -347,6 +348,7 @@ export function createShareCommentRoutes(
       sessionId: ctx.sessionId,
       shareType: ctx.shareType,
       resolved: false,
+      transitionedAt: new Date(),
       producingSessionId: producing.producingSessionId,
       producingAgentId: producing.producingAgentId,
     });
@@ -666,6 +668,7 @@ export function createInternalShareCommentRoutes(
       sessionId: located.sessionId,
       shareType: located.shareType,
       resolved: !unresolve,
+      transitionedAt: stamp ?? new Date(),
       producingSessionId: producing.producingSessionId,
       producingAgentId: producing.producingAgentId,
     });
