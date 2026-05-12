@@ -1,3 +1,10 @@
+## [1.24.1](https://github.com/x1agent/x1agent/compare/v1.24.0...v1.24.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* **docker:** add missing workspace COPYs in prod Dockerfiles ([3cbb2d0](https://github.com/x1agent/x1agent/commit/3cbb2d0948dd534394613570d76a638dafb3928e))
+
 # [1.24.0](https://github.com/x1agent/x1agent/compare/v1.23.0...v1.24.0) (2026-05-12)
 
 
