@@ -588,6 +588,10 @@ export function compose(env: CompositionEnv): Composition {
     events: sessionEvents,
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    // Lets non-admin sharees fetch the share index + artefacts for
+    // sessions granted to them. Mirrors the wiring on
+    // workspaceSessionRoutes' loadScoped.
+    shares: sessionShares,
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
