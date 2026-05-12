@@ -1,3 +1,10 @@
+## [1.24.3](https://github.com/x1agent/x1agent/compare/v1.24.2...v1.24.3) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** switch agent-edit page to per-field zustand selectors ([3ba6af0](https://github.com/x1agent/x1agent/commit/3ba6af058f3a0ddde4c7a7cf752be7c07029c828)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+
 ## [1.24.2](https://github.com/x1agent/x1agent/compare/v1.24.1...v1.24.2) (2026-05-12)
 
 
