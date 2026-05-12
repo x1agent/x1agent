@@ -6,6 +6,11 @@ import {
   groupThreads,
 } from "../../stores/shareCommentsStore";
 
+// Stable module-level empty array — see CLAUDE.md "Frontend state management"
+// selector foot-gun rule. Without this, useSyncExternalStore detects a
+// "new" array on every render and triggers React error #185.
+const EMPTY_ROWS: never[] = [];
+
 interface Props {
   workspaceSlug: string;
   sessionId: string;

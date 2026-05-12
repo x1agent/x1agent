@@ -1,15 +1,12 @@
 ---
-import Layout from "../../../../../../../layouts/Layout.astro";
-import { ShareFullscreenRoot } from "../../../../../../../features/sessions/ShareFullscreenRoot";
-
+// Legacy redirect — the standalone fullscreen route was folded into
+// the unified session page via `?share=<id>&mode=fullscreen` query
+// params (X1A-54 follow-up). This file preserves any existing
+// deep-links and agent-emitted URLs by 301-redirecting to the
+// canonical form. ShareFullscreenRoot is no longer mounted.
 const { slug, id, shareId } = Astro.params;
+return Astro.redirect(
+  `/workspaces/${slug}/sessions/${id}?share=${shareId}&mode=fullscreen`,
+  301,
+);
 ---
-
-<Layout title={`share · comments · x1agent`}>
-  <ShareFullscreenRoot
-    client:only="react"
-    workspaceSlug={slug ?? ""}
-    sessionId={id ?? ""}
-    shareId={shareId ?? ""}
-  />
-</Layout>

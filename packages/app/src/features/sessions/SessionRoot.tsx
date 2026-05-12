@@ -10,6 +10,8 @@ import { EventStream } from "./EventStream";
 import { TurnComposer } from "./TurnComposer";
 import { ShareSessionPanel } from "./ShareSessionPanel";
 import { ArtifactPanel } from "./ArtifactPanel";
+import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
+import type { AgentSharePayload } from "./ShareCard";
 import { ChildWorkersCounter } from "./ChildWorkersCounter";
 import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
@@ -251,6 +253,34 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     pendingPromptSentRef.current = true;
     sendMessage(pending);
   }, [events, sessionId, takePendingPrompt]);
+
+  // Deep-link: if the URL carries `?share=<shareId>`, open that share in
+  // the right-rail artifact panel once the events stream loads it.
+  // Pairs with the URL-write in artifactPanelStore.show/close so the URL
+  // stays canonical: paste the URL → someone else lands on the same view.
+  const showArtifact = useArtifactPanelStore((s) => s.show);
+  const maximizeArtifact = useArtifactPanelStore((s) => s.maximize);
+  const deepLinkAppliedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("share");
+    if (!target) return;
+    const evt = events.find(
+      (e) =>
+        e.type === "agent.share" &&
+        (e.payload as { share_id?: string })?.share_id === target,
+    );
+    if (!evt) return; // events still streaming in; try again next render
+    deepLinkAppliedRef.current = true;
+    showArtifact({
+      workspaceSlug,
+      sessionId: evt.session_id ?? sessionId,
+      artifact: evt.payload as AgentSharePayload,
+    });
+    if (params.get("mode") === "fullscreen") maximizeArtifact();
+  }, [events, sessionId, workspaceSlug, showArtifact, maximizeArtifact]);
 
   const disabled =
     !session ||

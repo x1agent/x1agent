@@ -181,11 +181,14 @@ export function groupThreads(rows: ShareCommentDTO[]): ShareCommentThread[] {
       resolved_at: head.resolved_at,
     });
   }
-  // Most-recently-active thread first.
+  // Chronological order — oldest thread first, newest at the bottom,
+  // matching chat-timeline reading. Replies within a thread are
+  // already seq-ascending above, so the whole sidebar reads top-to-
+  // bottom in submission order.
   return threads.sort((a, b) => {
-    const at = a.comments[a.comments.length - 1]!.created_at;
-    const bt = b.comments[b.comments.length - 1]!.created_at;
-    return bt.localeCompare(at);
+    const at = a.comments[0]!.created_at;
+    const bt = b.comments[0]!.created_at;
+    return at.localeCompare(bt);
   });
 }
 

@@ -408,6 +408,16 @@ app.route("/api/workspaces/:slug/agents", agentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
+// Doc commenting v1 (X1A-52) must mount BEFORE the broader
+// `/sessions/:sessionId/shares` route, whose `/:shareId/*` binary-fetch
+// handler otherwise eats requests at `/shares/:shareId/comments` and
+// returns `{"error":"not_found"}` 404 before this handler can run.
+// Hono matches the first registered prefix; specific paths win when
+// registered first.
+app.route(
+  "/api/workspaces/:slug/sessions/:sessionId/shares/:shareId/comments",
+  shareCommentRoutes,
+);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/shares",
   workspaceShareRoutes,
@@ -416,13 +426,6 @@ app.route("/api/workspaces/:slug/shares", workspaceSharesIndexRoutes);
 app.route(
   "/api/workspaces/:slug/sessions/:sessionId/user-shares",
   sessionShareRoutes,
-);
-// Doc commenting v1 (X1A-52). Workspace-scoped REST under the existing
-// session-shares pattern; an internal-token-fronted twin under
-// /api/internal for the sidecar to forward `share_comment` MCP calls.
-app.route(
-  "/api/workspaces/:slug/sessions/:sessionId/shares/:shareId/comments",
-  shareCommentRoutes,
 );
 app.route("/api/internal/share-comments", internalShareCommentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);

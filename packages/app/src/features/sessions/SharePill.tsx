@@ -7,7 +7,14 @@ import {
   groupThreads,
   unresolvedThreadCount,
 } from "../../stores/shareCommentsStore";
+import { useAuthStore } from "../../stores/authStore";
 import { TYPE_ICONS, formatSize, type AgentSharePayload } from "./ShareCard";
+
+// Stable module-level empty array — see CLAUDE.md "Frontend state management"
+// selector foot-gun rule. Returning a fresh `[]` inside a zustand selector
+// makes useSyncExternalStore detect "changed" on every render and triggers
+// an infinite update loop (React error #185 / Maximum update depth).
+const EMPTY_ROWS: never[] = [];
 
 interface Props {
   event: SessionEventDTO;
@@ -33,25 +40,36 @@ const COMMENTABLE_TYPES = new Set(["document", "site"]);
 export function SharePill({ event, workspaceSlug, sessionId }: Props) {
   const payload = (event.payload ?? {}) as AgentSharePayload;
   const show = useArtifactPanelStore((s) => s.show);
+  const maximize = useArtifactPanelStore((s) => s.maximize);
   const open = useArtifactPanelStore((s) => s.open);
 
   const isCommentable = COMMENTABLE_TYPES.has(payload.share_type);
   const rows = useShareCommentsStore(
-    (s) => s.byShareId[payload.share_id] ?? [],
+    (s) => s.byShareId[payload.share_id] ?? EMPTY_ROWS,
   );
   const loadComments = useShareCommentsStore((s) => s.load);
 
-  // Lazy-load comments on first mount for a commentable share. Cheap
-  // — the GET is a single indexed query — and it lets the chip count
-  // appear without a click.
+  // Lazy-load comments on first mount for a commentable share.
+  //
+  // Use the EVENT's session_id (the session where the share was
+  // emitted) rather than the page's sessionId prop. When a resumed
+  // session inlines its parent's stream, the page renders SharePills
+  // for shares whose share_id only exists on the parent — fetching
+  // those at the child's URL yields 404 from findShareInSession.
+  // event.session_id always points at the originating session.
+  const originSessionId = event.session_id ?? sessionId;
   useEffect(() => {
     if (!isCommentable || !payload.share_id) return;
-    loadComments({ workspaceSlug, sessionId, shareId: payload.share_id });
+    loadComments({
+      workspaceSlug,
+      sessionId: originSessionId,
+      shareId: payload.share_id,
+    });
   }, [
     isCommentable,
     payload.share_id,
     workspaceSlug,
-    sessionId,
+    originSessionId,
     loadComments,
   ]);
 
@@ -93,27 +111,53 @@ export function SharePill({ event, workspaceSlug, sessionId }: Props) {
             {formatSize(payload.total_size)}
           </span>
         </button>
-        {isCommentable && unresolved > 0 && (
-          <button
-            type="button"
-            aria-label={`${unresolved} comment${unresolved === 1 ? "" : "s"}`}
-            onClick={() => setExpanded((v) => !v)}
-            className={
-              "ml-1 inline-flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide " +
-              "bg-accent-soft text-accent hover:opacity-90"
-            }
-            data-testid="comment-chip"
-          >
-            <MessageSquare className="size-3" />
-            {unresolved} {unresolved === 1 ? "comment" : "comments"}
-          </button>
-        )}
+        {isCommentable &&
+          (unresolved > 0 ? (
+            <button
+              type="button"
+              aria-label={`${unresolved} comment${unresolved === 1 ? "" : "s"}`}
+              onClick={() => setExpanded((v) => !v)}
+              className={
+                "ml-1 inline-flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide " +
+                "bg-accent-soft text-accent hover:opacity-90"
+              }
+              data-testid="comment-chip"
+            >
+              <MessageSquare className="size-3" />
+              {unresolved} {unresolved === 1 ? "comment" : "comments"}
+            </button>
+          ) : (
+            // Zero-state entry — always present on commentable shares so
+            // the first thread has somewhere to come from in the UI.
+            // Drives state through the zustand store (show + maximize)
+            // rather than navigating to a URL; the store's syncUrl
+            // side effect writes ?share=…&mode=fullscreen to the URL
+            // so the result is still copy-paste shareable.
+            <button
+              type="button"
+              onClick={() => {
+                show({ workspaceSlug, sessionId: originSessionId, artifact: payload });
+                maximize();
+              }}
+              aria-label="Start a comment thread on this share"
+              title="Comment on this share"
+              className={
+                "ml-1 inline-flex shrink-0 items-center justify-center rounded-[4px] px-1.5 py-0.5 text-fg-faint hover:bg-bg-elevated hover:text-fg-muted"
+              }
+              data-testid="comment-zero-entry"
+            >
+              <MessageSquare className="size-3.5" />
+            </button>
+          ))}
       </div>
       {expanded && threads.length > 0 && (
-        <ThreadSnippets
+        <ThreadSnippetsConnected
           threads={threads}
           shareType={payload.share_type}
-          fullscreenHref={`/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${payload.share_id}/fullscreen`}
+          onExpandFullscreen={() => {
+            show({ workspaceSlug, sessionId: originSessionId, artifact: payload });
+            maximize();
+          }}
         />
       )}
     </div>
@@ -126,14 +170,25 @@ export function SharePill({ event, workspaceSlug, sessionId }: Props) {
  * quote (or "On this share" sublabel for HTML), latest-reply preview,
  * "See all in fullscreen →" link at the bottom.
  */
+function ThreadSnippetsConnected(props: {
+  threads: ReturnType<typeof groupThreads>;
+  shareType: string;
+  onExpandFullscreen: () => void;
+}) {
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  return <ThreadSnippets {...props} currentUserId={currentUserId} />;
+}
+
 function ThreadSnippets({
   threads,
   shareType,
-  fullscreenHref,
+  onExpandFullscreen,
+  currentUserId,
 }: {
   threads: ReturnType<typeof groupThreads>;
   shareType: string;
-  fullscreenHref: string;
+  onExpandFullscreen: () => void;
+  currentUserId: string | null;
 }) {
   return (
     <div
@@ -154,22 +209,18 @@ function ThreadSnippets({
               (i > 0 ? "mt-1 border-t border-border-soft pt-2.5" : "")
             }
           >
-            {t.scope === "passage" && t.anchor?.selection.quoted_text ? (
-              <div className="mb-1 border-b border-dotted border-border-soft pb-1 text-[12px] italic text-fg-faint">
-                "{t.anchor.selection.quoted_text}"
-              </div>
-            ) : (
-              <div className="mb-1 border-b border-dotted border-border-soft pb-1 text-[11px] uppercase tracking-wide text-fg-faint">
-                On this share
-              </div>
+            {t.scope === "passage" && t.anchor?.selection.quoted_text && (
+              // Passage-anchored: the quoted source text tells the reader
+              // which span the thread is about. Share-scoped comments
+              // (HTML and unanchored markdown) skip this header — the
+              // surrounding pill is sufficient context.
+              <blockquote className="mb-1 border-l-2 border-border-soft pl-2 text-[12px] italic text-fg-faint">
+                {t.anchor.selection.quoted_text}
+              </blockquote>
             )}
             <div className="leading-snug text-fg">
               <span className="mr-1.5 font-semibold text-fg-muted">
-                {latest.author_user_id
-                  ? latest.author_user_id.slice(0, 6)
-                  : latest.author_session_id
-                    ? "agent"
-                    : "unknown"}
+                {snippetAuthor(latest, currentUserId)}
               </span>
               {latest.body.length > 240
                 ? latest.body.slice(0, 240) + "…"
@@ -178,16 +229,28 @@ function ThreadSnippets({
           </div>
         );
       })}
-      <a
-        href={fullscreenHref}
+      <button
+        type="button"
+        onClick={onExpandFullscreen}
         className="ml-2.5 mt-1 inline-block text-[12px] text-accent hover:opacity-90"
       >
-        See all{" "}
-        {threads.length === 1 ? "thread" : `${threads.length}+ threads`} in
-        fullscreen →
-      </a>
+        Open full view →
+      </button>
       {/* Suppress unused-shareType lint — kept for future "On this share" / per-passage divergence beyond v1. */}
       <span hidden data-share-type={shareType} />
     </div>
   );
+}
+
+// Same identity rules as the ArtifactCommentsSidebar's formatAuthor —
+// no raw uuid slices in the UI. Duplicating the four-line function
+// rather than extracting until there's a third caller.
+function snippetAuthor(
+  c: { author_user_id: string | null; author_session_id: string | null },
+  currentUserId: string | null,
+): string {
+  if (c.author_user_id && c.author_user_id === currentUserId) return "you";
+  if (c.author_session_id) return "agent";
+  if (c.author_user_id) return "someone";
+  return "unknown";
 }
