@@ -1,3 +1,16 @@
+# [1.24.0](https://github.com/x1agent/x1agent/compare/v1.23.0...v1.24.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **dev:** default KEYCHAIN in bootstrap-cert-manager.sh so set -u doesn't kill mise run dev ([b1829e3](https://github.com/x1agent/x1agent/commit/b1829e337c11c8cddc3fca702577f1c8f5657c72))
+* **security:** derive subscriber session_id from NATS subject, not body ([5868aec](https://github.com/x1agent/x1agent/commit/5868aec3272cbcfcf7ca66bfc3bbe2d6e4a56592))
+
+
+### Features
+
+* **mise:** intent-first prod verbs — plan:prod, status:prod, destroy:prod ([fe018b8](https://github.com/x1agent/x1agent/commit/fe018b804497525e1e0542d97ae47b4814da11db))
+
 # [1.23.0](https://github.com/x1agent/x1agent/compare/v1.22.0...v1.23.0) (2026-05-12)
 
 
