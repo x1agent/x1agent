@@ -197,6 +197,23 @@ When adding or modifying documentation:
 - Security features (mTLS, NetworkPolicy, pod security contexts) are **first-class**, not afterthoughts.
 - The default path must work out of the box. The hardened path must be well-documented and CI-tested.
 
+## Chart vs dev-manifest parity
+
+The Helm chart in `deploy/helm/x1agent/` is the customer-facing artifact. The hand-written dev manifests in `deploy/k8s/dev/` exist solely to enable hot reload + file-sync via devspace. **Any change to a chart template that defines a Service, RBAC role, ConfigMap, NetworkPolicy, or any non-pod-spec resource MUST also land in the equivalent dev manifest.** Pod-spec divergence (image, command, volume mounts for source sync, `bun --hot` vs `bun run`) is expected and fine; everything else must match.
+
+This rule exists because we've shipped this class of bug to prod more than once. The most recent example: the chart's `api` Service exposed port `80 → targetPort 30001`, while the dev manifest exposed `30001 → 30001` directly. Every in-cluster sidecar HTTP call (git credential fetch, share upload, `/api/internal/*`) hard-codes `http://api:30001`. Local works; prod silently 502s with `error sending request for url`. The drift is invisible at PR review because the chart change "looks reasonable" in isolation — only `mise run dev` against the chart-shaped Service catches it.
+
+**Two dev modes are supported:**
+
+| Mode | Purpose | Hot reload | Chart parity |
+|---|---|---|---|
+| `mise run dev` | Daily coding loop | yes | no |
+| `mise run dev:chart` (planned) | Chart-parity verification | no | yes |
+
+**Before merging any non-pod-spec chart change, run both modes locally.** If a session works under `mise run dev` but breaks under `mise run dev:chart`, that's a dev-manifest drift bug, not a chart bug — fix the dev manifest. If both work locally but prod breaks, that's almost always a Service/RBAC/ConfigMap drift the parity check didn't cover; expand the parity check.
+
+The older `dev:cold` and `dev:direct` task variants were removed in 2026-05; neither was used in practice and both added drift surface area without catching anything.
+
 ## Frontend state management
 
 **Use zustand for any state that crosses a component boundary or backs an API call.** The `packages/app` codebase has a consistent pattern of zustand stores in `packages/app/src/stores/` — `useAgentsStore`, `useCollectionsStore`, `useGitHubStore`, `useGrantsStore`, `useAuthStore`, `useCapabilitiesStore` all follow the same shape: a normalized cache keyed by workspace/agent, plus async actions (`load`, `attach`, `detach`, `update`) that hit `apiFetch` and write the result back into the cache.

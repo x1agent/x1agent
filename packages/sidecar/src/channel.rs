@@ -257,6 +257,31 @@ async fn input_subscriber_jetstream(
         let info = msg.info().ok();
         let delivery_count = info.as_ref().map(|i| i.delivered).unwrap_or(0);
 
+        // Per-message freshness gate. Publishers stamp `expires_at`
+        // (epoch ms) so a message that's been queued past its
+        // usefulness window doesn't fire surprise side effects. Stale
+        // → ack-and-drop, never inject. Missing `expires_at` is a
+        // legacy publisher (pre-Wave-1) — process as-is so a chart
+        // upgrade in the middle of a session doesn't lose messages
+        // published by an older browser tab still open.
+        if let Some(expires_at) = peek_expires_at(&msg.payload) {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if now_ms > expires_at {
+                tracing::warn!(
+                    "Dropping stale input (expired {}ms ago, delivery={})",
+                    now_ms.saturating_sub(expires_at),
+                    delivery_count
+                );
+                if let Err(e) = msg.ack().await {
+                    tracing::error!("ack failed on expired: {}", e);
+                }
+                continue;
+            }
+        }
+
         match post_inject(&client, &inject_url, &msg.payload).await {
             Ok(()) => {
                 if let Err(e) = msg.ack().await {
@@ -289,6 +314,17 @@ async fn input_subscriber_jetstream(
         }
     }
     Ok(())
+}
+
+/// Peek `expires_at` (epoch ms) out of an input envelope WITHOUT a
+/// full parse — we only need this one field for the freshness gate.
+/// `serde_json::from_slice::<serde_json::Value>` is cheap; the message
+/// is small (a few hundred bytes typical). Returns None on missing
+/// field, parse failure, or non-numeric value; the caller treats
+/// missing as "no TTL set, process normally".
+fn peek_expires_at(payload: &Bytes) -> Option<u64> {
+    let v: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    v.get("expires_at").and_then(|x| x.as_u64())
 }
 
 /// `x1.session.{id}.presence` → POST /keepalive on the agent. The agent
