@@ -777,6 +777,11 @@ export function compose(env: CompositionEnv): Composition {
     // per-spawn model overrides that aren't admin-enabled — otherwise
     // the orchestrator could side-channel around /admin/anthropic-models.
     enabledModels: async () => listEnabledOverrides(env.sql),
+    // X1A-96 — agent fetches its own upload bytes through the internal
+    // route. Both the repository and the storage adapter are wired
+    // so the route can look the row up + stream the bytes.
+    uploads: uploads.repository,
+    uploadStorage: uploads.storage,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so

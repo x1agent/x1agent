@@ -588,6 +588,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               disabled={disabled}
               running={session?.status === "running"}
               onStop={onPause}
+              sessionId={sessionId}
               statusLabel={
                 disabled
                   ? session?.status === "complete"

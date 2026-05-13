@@ -20,6 +20,11 @@ import {
 } from "@x1agent/domain-permissions";
 import { writeShareFiles } from "../shares/storage.js";
 import { StringCodec, JSONCodec } from "nats";
+import type {
+  UploadRepository,
+  UploadStorage,
+} from "@x1agent/domain-uploads";
+import { UploadId } from "@x1agent/domain-uploads";
 
 /**
  * Endpoints only the sidecar calls (same-cluster). Gated on a shared
@@ -65,6 +70,17 @@ export interface InternalRoutesConfig {
    * X1A-40: same gate the agent-write path enforces on `agents.model`.
    */
   enabledModels?: () => Promise<Set<string> | null>;
+  /**
+   * X1A-96 → agent-side fetch. When set, exposes
+   * `GET /api/internal/uploads/:id/raw` which streams the upload's
+   * bytes back. The agent in a session pod has the `API_INTERNAL_TOKEN`
+   * env var and can `curl` the route directly to read a file the user
+   * attached to the prompt. Out-of-cluster traffic never sees this
+   * route — Hono only mounts it under `/api/internal/*` which the
+   * ingress doesn't expose externally.
+   */
+  uploads?: UploadRepository;
+  uploadStorage?: UploadStorage;
   /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
@@ -883,6 +899,39 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       now: new Date(),
     });
     return c.json(rollup);
+  });
+
+  // X1A-96 → agent-side fetch of attached uploads. The agent's pod
+  // has API_INTERNAL_TOKEN; when it sees an `[image: <id>]` token in
+  // a user message, it curls this route to read the bytes. The
+  // internal token + cluster-private routing is the only access
+  // control; we deliberately don't scope by session here so the route
+  // stays a simple bytes-by-id lookup. Per-session ACL is a follow-up
+  // when uploads become readable across resume chains.
+  app.get("/uploads/:id/raw", async (c) => {
+    if (!cfg.uploads || !cfg.uploadStorage) {
+      return c.json({ error: "uploads_disabled" }, 503);
+    }
+    let id;
+    try {
+      id = UploadId(c.req.param("id"));
+    } catch {
+      return c.json({ error: "invalid_id" }, 400);
+    }
+    const upload = await cfg.uploads.findById(id);
+    if (!upload) return c.json({ error: "not_found" }, 404);
+    if (upload.status !== "ready" && upload.status !== "attached") {
+      return c.json({ error: "upload_not_ready" }, 409);
+    }
+    const body = await cfg.uploadStorage.readObject(upload.storageKey);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": upload.mime,
+        "Content-Length": String(upload.sizeBytes),
+        "Cache-Control": "private, no-store",
+      },
+    });
   });
 
   return app;

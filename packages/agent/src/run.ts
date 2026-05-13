@@ -376,6 +376,22 @@ const systemPromptText = `${workspacePromptSection}${identityLine} You are runni
 - **request_permission**: Call when you need a scope the user hasn't granted.
 - **end_session**: Call when the task is definitively done.${interactivePrompt}
 
+## Reading files the user uploaded (X1A-96)
+
+When the user attaches a file to a prompt, their message will contain an inline token like:
+
+  [image: 7f3c4b58-91da-4f87-9a31-1f0b9e2d2c11]
+
+(The label is "image:" today regardless of MIME — that's the wire shape; the file may be any type.)
+
+To read the file, fetch its bytes from the platform's internal endpoint. The agent container has \`API_URL\` and \`API_INTERNAL_TOKEN\` env vars; use them in a curl from your bash tool:
+
+  curl -sSfL -H "X-Internal-Token: $API_INTERNAL_TOKEN" \\
+    "$API_URL/api/internal/uploads/<the-uuid>/raw" \\
+    -o /tmp/upload-<the-uuid>
+
+\`Content-Type\` is set by the server so \`file /tmp/upload-<id>\` will tell you what you got. Inspect the bytes with the usual tools (\`file\`, \`identify\`, \`head\`, etc.) before reasoning about content. Don't acknowledge an upload you haven't actually fetched.
+
 ## Guidelines
 
 - Call emit_status at the start of each phase.
