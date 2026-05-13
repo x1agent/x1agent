@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronsLeft, ChevronsRight, MessageSquare } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, MessageSquare, X } from "lucide-react";
 import type { ShareCommentDTO } from "@x1agent/shared";
 import {
   useShareCommentsStore,
@@ -8,6 +8,13 @@ import {
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
 import { ComposerShell } from "./ComposerShell";
+
+/**
+ * X1A-110 — depth-1 reply visual indent. ~20px lines up the reply
+ * underneath the parent's body text without consuming so much width
+ * that the body has to wrap aggressively in the 380px sidebar.
+ */
+const REPLY_INDENT_PX = 20;
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -96,6 +103,12 @@ export function ArtifactCommentsSidebar({
   const [justPostedIds, setJustPostedIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // X1A-110 — when set, the composer's "post" submits as a reply to
+  // this comment rather than opening a fresh thread. Toggled by the
+  // per-row "Reply" affordance and by the chip's × clear-button.
+  const [replyTarget, setReplyTarget] = useState<ShareCommentDTO | null>(
+    null,
+  );
 
   if (!COMMENTABLE_TYPES.has(shareType)) return null;
 
@@ -129,13 +142,25 @@ export function ArtifactCommentsSidebar({
     if (!body || posting) return;
     setPosting(true);
     try {
-      const posted = await add(key, { scope: "share", body });
+      // X1A-110 — when replying, target the parent's thread and carry
+      // its id so the server persists the reply hierarchy. The composer
+      // clears reply state after a successful post so the next message
+      // defaults to a fresh thread again (the chat-y default).
+      const posted = replyTarget
+        ? await add(key, {
+            scope: "share",
+            body,
+            thread_id: replyTarget.thread_id,
+            parent_comment_id: replyTarget.id,
+          })
+        : await add(key, { scope: "share", body });
       setJustPostedIds((prev) => {
         const next = new Set(prev);
         next.add(posted.id);
         return next;
       });
       setDraft("");
+      setReplyTarget(null);
     } finally {
       setPosting(false);
     }
@@ -172,16 +197,27 @@ export function ArtifactCommentsSidebar({
         errorMsg={errorMsg}
         currentUserId={currentUserId}
         justPostedIds={justPostedIds}
+        replyTargetId={replyTarget?.id ?? null}
+        onReply={setReplyTarget}
       />
 
       <div className="shrink-0 border-t border-border-soft px-3 pb-3 pt-3">
+        {replyTarget && (
+          <ReplyTargetChip
+            target={replyTarget}
+            currentUserId={currentUserId}
+            onClear={() => setReplyTarget(null)}
+          />
+        )}
         <ComposerShell
           value={draft}
           onChange={setDraft}
           onSubmit={submit}
           busy={posting}
           canSend={!!draft.trim() && !posting}
-          placeholder="Comment on this share…"
+          placeholder={
+            replyTarget ? "Write a reply…" : "Comment on this share…"
+          }
           showAttachButton={false}
           hint={null}
         />
@@ -205,6 +241,8 @@ function ThreadList({
   errorMsg,
   currentUserId,
   justPostedIds,
+  replyTargetId,
+  onReply,
 }: {
   rows: ShareCommentDTO[];
   threads: ReturnType<typeof groupThreads>;
@@ -212,6 +250,11 @@ function ThreadList({
   errorMsg: string | null;
   currentUserId: string | null;
   justPostedIds: Set<string>;
+  /** X1A-110 — id of the comment the composer is currently replying to,
+   *  or null. Used to highlight that row in the thread list. */
+  replyTargetId: string | null;
+  /** X1A-110 — called when a "Reply" button is clicked on a row. */
+  onReply: (comment: ShareCommentDTO) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // Distance-from-bottom threshold (px). Anything within this counts
@@ -288,6 +331,8 @@ function ThreadList({
               currentUserId={currentUserId}
               isFirst={i === 0}
               initialExpanded={justPostedIds.has(c.id)}
+              isReplyTarget={replyTargetId === c.id}
+              onReply={onReply}
             />
           ))}
         </div>
@@ -301,25 +346,48 @@ function CommentRow({
   currentUserId,
   isFirst,
   initialExpanded,
+  isReplyTarget,
+  onReply,
 }: {
   comment: ShareCommentDTO;
   currentUserId: string | null;
   isFirst: boolean;
   initialExpanded: boolean;
+  /** X1A-110 — highlight the row currently being replied to. */
+  isReplyTarget: boolean;
+  /** X1A-110 — caller wires this to the composer's reply target setter. */
+  onReply: (comment: ShareCommentDTO) => void;
 }) {
   const author = formatAuthor(comment, currentUserId);
   // X1A-105: agent comments take the full thread width; user comments
   // (own or someone else's) sit in an inset right-aligned bubble so
   // the user vs agent rhythm is unambiguous at a glance.
   const isUser = !comment.author_session_id;
+  // X1A-110 — depth-1 indent for replies. We only indent rows whose
+  // own parent_comment_id is set; the depth-1 cap is enforced
+  // server-side so we don't need to walk the chain client-side.
+  const isReply = comment.parent_comment_id !== null;
+  // Top-level + reply both contribute vertical spacing once they're
+  // not the very first row in the thread. Replies get the indent
+  // applied to the wrapper so both the user-bubble flex-justify and
+  // the agent block alignment respect it uniformly.
   const wrapperClass = isFirst ? "" : "mt-2";
+  const indentStyle: React.CSSProperties | undefined = isReply
+    ? { marginLeft: `${REPLY_INDENT_PX}px` }
+    : undefined;
+  const targetHighlight = isReplyTarget
+    ? " ring-1 ring-accent rounded-md"
+    : "";
 
   if (isUser) {
     return (
       <div
-        className={`${wrapperClass} flex justify-end`}
+        className={`${wrapperClass} flex justify-end${targetHighlight}`}
+        style={indentStyle}
         data-comment-author={comment.author_user_id ?? "unknown"}
         data-author-kind="user"
+        data-comment-id={comment.id}
+        data-is-reply={isReply ? "true" : "false"}
       >
         <div className="max-w-[85%] rounded-md bg-bg/70 px-2.5 py-1.5 text-[13px]">
           <div className="mb-0.5 flex items-baseline gap-2">
@@ -334,6 +402,11 @@ function CommentRow({
             body={comment.body}
             initialExpanded={initialExpanded}
           />
+          <ReplyAction
+            comment={comment}
+            isReply={isReply}
+            onReply={onReply}
+          />
         </div>
       </div>
     );
@@ -341,9 +414,12 @@ function CommentRow({
 
   return (
     <div
-      className={`${wrapperClass} block w-full text-[13px]`}
+      className={`${wrapperClass} block w-full text-[13px]${targetHighlight}`}
+      style={indentStyle}
       data-comment-author={comment.author_session_id}
       data-author-kind="agent"
+      data-comment-id={comment.id}
+      data-is-reply={isReply ? "true" : "false"}
     >
       <div className="mb-0.5 flex items-baseline gap-2">
         <span className="text-[12px] font-semibold text-fg-muted">
@@ -354,6 +430,76 @@ function CommentRow({
         </span>
       </div>
       <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
+      <ReplyAction comment={comment} isReply={isReply} onReply={onReply} />
+    </div>
+  );
+}
+
+/**
+ * X1A-110 — small inline "Reply" button shown on every comment row.
+ * For depth-1: a reply itself can NOT be replied to (the server would
+ * reject with `nested_reply_not_supported`), so we hide the action
+ * on rows that are already replies. v1 keeps threads scannable.
+ */
+function ReplyAction({
+  comment,
+  isReply,
+  onReply,
+}: {
+  comment: ShareCommentDTO;
+  isReply: boolean;
+  onReply: (comment: ShareCommentDTO) => void;
+}) {
+  if (isReply) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onReply(comment)}
+      className="mt-1 text-[11px] text-fg-faint hover:text-accent"
+      data-testid="reply-button"
+    >
+      Reply
+    </button>
+  );
+}
+
+/**
+ * X1A-110 — chip rendered above the composer when a reply target is
+ * set. Mirrors the Slack-style "Replying to [name]: snippet" affordance.
+ * The × clears the target so the next post defaults back to opening a
+ * new thread.
+ */
+function ReplyTargetChip({
+  target,
+  currentUserId,
+  onClear,
+}: {
+  target: ShareCommentDTO;
+  currentUserId: string | null;
+  onClear: () => void;
+}) {
+  const who = formatAuthor(target, currentUserId);
+  const snippet =
+    target.body.length > 60 ? `${target.body.slice(0, 60)}…` : target.body;
+  return (
+    <div
+      data-testid="reply-target-chip"
+      className="mb-2 flex min-w-0 items-center gap-1.5 rounded-md border border-accent-soft bg-bg-elevated/60 px-2 py-1 text-[11px] text-fg-muted"
+    >
+      <span className="shrink-0 text-fg-faint">Replying to</span>
+      <span className="shrink-0 font-semibold">{who}:</span>
+      <span className="truncate" title={target.body}>
+        {snippet}
+      </span>
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label="Cancel reply"
+        className="ml-auto shrink-0 rounded p-0.5 text-fg-faint hover:bg-bg hover:text-fg"
+        data-testid="reply-target-clear"
+      >
+        <X className="size-3" />
+      </button>
     </div>
   );
 }

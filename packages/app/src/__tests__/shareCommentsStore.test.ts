@@ -17,6 +17,9 @@ const base: Omit<ShareCommentDTO, "id" | "seq" | "thread_id" | "body"> = {
   resolved_by_user_id: null,
   created_at: "2026-05-12T00:00:00.000Z",
   updated_at: "2026-05-12T00:00:00.000Z",
+  // X1A-110 — top-level comment by default. Tests that need a reply
+  // override via `comment(..., { parent_comment_id: "..." })`.
+  parent_comment_id: null,
 };
 
 function comment(

@@ -189,6 +189,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 workspace_id?: string;
                 session_id?: string;
                 share_type?: string;
+                parent_comment_id?: string | null;
               };
               if (!p.share_id || !p.thread_id || !p.comment_id) continue;
               // The NATS payload doesn't carry seq or resolved-state —
@@ -212,6 +213,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 resolved_by_user_id: null,
                 created_at: now,
                 updated_at: now,
+                // X1A-110 — carried so a reply lands indented under
+                // its parent the moment the NATS event arrives, rather
+                // than only after a full REST refresh.
+                parent_comment_id: p.parent_comment_id ?? null,
               };
               useShareCommentsStore.getState().applyServerEvent(dto);
             } catch {

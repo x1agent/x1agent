@@ -50,6 +50,9 @@ const baseRow: Omit<
   resolved_at: null,
   resolved_by_user_id: null,
   updated_at: "2026-05-13T00:00:00.000Z",
+  // X1A-110 — top-level comment by default. Tests that need a reply
+  // override this via `row(..., { parent_comment_id: "..." })`.
+  parent_comment_id: null,
 };
 
 function row(
@@ -217,5 +220,80 @@ describe("ArtifactCommentsSidebar — long-comment truncation (X1A-105)", () => 
     seedStore([row("c1", "t1", 1, "tiny body", "2026-05-12T00:00:00Z")]);
     renderSidebar();
     expect(screen.queryByTestId("see-more-toggle")).toBeNull();
+  });
+});
+
+// ── X1A-110 — reply-nesting affordance + indent ──────────────────────
+describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
+  it("renders a reply at the depth-1 indent under its parent", () => {
+    seedStore([
+      row("c1", "t1", 1, "root body", "2026-05-12T00:00:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent", // agent → full-width row
+      }),
+      row("c2", "t1", 2, "the reply body", "2026-05-12T00:01:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+        parent_comment_id: "c1",
+      }),
+    ]);
+
+    renderSidebar();
+
+    const rows = Array.from(
+      document.querySelectorAll("[data-comment-id]"),
+    ) as HTMLElement[];
+
+    expect(rows).toHaveLength(2);
+    // Root row has no indent.
+    expect(rows[0]!.getAttribute("data-is-reply")).toBe("false");
+    expect(rows[0]!.style.marginLeft).toBe("");
+    // Reply row carries the ~20px indent.
+    expect(rows[1]!.getAttribute("data-is-reply")).toBe("true");
+    expect(rows[1]!.style.marginLeft).toBe("20px");
+  });
+
+  it("renders a Reply button on top-level rows and HIDES it on replies (depth-1 cap)", () => {
+    seedStore([
+      row("c1", "t1", 1, "root", "2026-05-12T00:00:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+      }),
+      row("c2", "t1", 2, "reply", "2026-05-12T00:01:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+        parent_comment_id: "c1",
+      }),
+    ]);
+
+    renderSidebar();
+
+    const replyButtons = screen.queryAllByTestId("reply-button");
+    // Only the root has a Reply affordance — a reply itself cannot be
+    // replied to in v1 (server would 400 `nested_reply_not_supported`).
+    expect(replyButtons).toHaveLength(1);
+  });
+
+  it("clicking Reply opens the chip, X clears it", () => {
+    seedStore([
+      row("c1", "t1", 1, "root", "2026-05-12T00:00:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+      }),
+    ]);
+
+    renderSidebar();
+
+    // No chip before the user clicks Reply.
+    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("reply-button"));
+
+    const chip = screen.getByTestId("reply-target-chip");
+    expect(chip.textContent).toContain("Replying to");
+    expect(chip.textContent).toContain("root");
+
+    fireEvent.click(screen.getByTestId("reply-target-clear"));
+    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
   });
 });

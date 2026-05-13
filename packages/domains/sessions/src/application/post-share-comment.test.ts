@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { UserId } from "@x1agent/kernel";
 import { SessionId } from "../domain/session.js";
 import {
+  NestedReplyNotSupportedError,
+  ParentCommentNotInThreadError,
   ShareCommentId,
   ShareThreadId,
   ShareTypeNotCommentableError,
@@ -52,6 +54,7 @@ class FakeShareCommentRepository implements ShareCommentRepository {
       resolvedByUserId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
+      parentCommentId: input.parentCommentId,
     };
     this.rows.push(c);
     return c;
@@ -85,6 +88,10 @@ class FakeShareCommentRepository implements ShareCommentRepository {
           r.shareId === shareId && r.threadId === threadId && r.seq === seq,
       ) ?? null
     );
+  }
+
+  async findById(id: ShareCommentId) {
+    return this.rows.find((r) => r.id === id) ?? null;
   }
 
   async updateBody(id: string, body: string) {
@@ -222,6 +229,211 @@ describe("postShareComment", () => {
         } as never,
       ),
     ).rejects.toThrow();
+  });
+
+  // ── X1A-110 — reply nesting ────────────────────────────────────
+  it("persists parentCommentId on a reply (top-level → reply)", async () => {
+    const comments = new FakeShareCommentRepository();
+    const publisher = new RecordingShareCommentPublisher();
+    const root = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        scope: "share",
+        anchor: null,
+        body: "root",
+        authorUserId: UserId("22222222-2222-2222-2222-222222222222"),
+        authorSessionId: null,
+      },
+    );
+    const reply = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        threadId: root.threadId,
+        scope: "share",
+        anchor: null,
+        body: "reply",
+        authorUserId: UserId("33333333-3333-3333-3333-333333333333"),
+        authorSessionId: null,
+        parentCommentId: root.comment.id,
+      },
+    );
+    expect(reply.comment.parentCommentId).toBe(root.comment.id);
+    expect(reply.comment.threadId).toBe(root.comment.threadId);
+  });
+
+  it("rejects reply-to-reply (depth-1 cap)", async () => {
+    const comments = new FakeShareCommentRepository();
+    const publisher = new RecordingShareCommentPublisher();
+    const root = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        scope: "share",
+        anchor: null,
+        body: "root",
+        authorUserId: UserId("22222222-2222-2222-2222-222222222222"),
+        authorSessionId: null,
+      },
+    );
+    const reply = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        threadId: root.threadId,
+        scope: "share",
+        anchor: null,
+        body: "reply",
+        authorUserId: UserId("33333333-3333-3333-3333-333333333333"),
+        authorSessionId: null,
+        parentCommentId: root.comment.id,
+      },
+    );
+    // Now try to reply to the reply.
+    await expect(
+      postShareComment(
+        { comments, publisher, resolveProducingContext: producing },
+        {
+          sessionId: SESSION_A,
+          workspaceId: WS_A,
+          shareId: "sh1",
+          shareType: "site",
+          threadId: root.threadId,
+          scope: "share",
+          anchor: null,
+          body: "reply to reply",
+          authorUserId: UserId("44444444-4444-4444-4444-444444444444"),
+          authorSessionId: null,
+          parentCommentId: reply.comment.id,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NestedReplyNotSupportedError);
+  });
+
+  it("rejects cross-thread parent (parent lives in a different thread)", async () => {
+    const comments = new FakeShareCommentRepository();
+    const publisher = new RecordingShareCommentPublisher();
+    const threadA = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        scope: "share",
+        anchor: null,
+        body: "A root",
+        authorUserId: UserId("22222222-2222-2222-2222-222222222222"),
+        authorSessionId: null,
+      },
+    );
+    const threadB = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        scope: "share",
+        anchor: null,
+        body: "B root",
+        authorUserId: UserId("22222222-2222-2222-2222-222222222222"),
+        authorSessionId: null,
+      },
+    );
+    // Reply in thread B with a parent that belongs to thread A.
+    await expect(
+      postShareComment(
+        { comments, publisher, resolveProducingContext: producing },
+        {
+          sessionId: SESSION_A,
+          workspaceId: WS_A,
+          shareId: "sh1",
+          shareType: "site",
+          threadId: threadB.threadId,
+          scope: "share",
+          anchor: null,
+          body: "x",
+          authorUserId: UserId("33333333-3333-3333-3333-333333333333"),
+          authorSessionId: null,
+          parentCommentId: threadA.comment.id,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ParentCommentNotInThreadError);
+  });
+
+  it("rejects parent_comment_id without thread_id (can't reply while opening a new thread)", async () => {
+    const comments = new FakeShareCommentRepository();
+    const publisher = new RecordingShareCommentPublisher();
+    await expect(
+      postShareComment(
+        { comments, publisher, resolveProducingContext: producing },
+        {
+          sessionId: SESSION_A,
+          workspaceId: WS_A,
+          shareId: "sh1",
+          shareType: "site",
+          scope: "share",
+          anchor: null,
+          body: "x",
+          authorUserId: UserId("33333333-3333-3333-3333-333333333333"),
+          authorSessionId: null,
+          parentCommentId: ShareCommentId(
+            "11111111-1111-1111-1111-111111111111",
+          ),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ParentCommentNotInThreadError);
+  });
+
+  it("rejects parent_comment_id pointing at a non-existent comment", async () => {
+    const comments = new FakeShareCommentRepository();
+    const publisher = new RecordingShareCommentPublisher();
+    const root = await postShareComment(
+      { comments, publisher, resolveProducingContext: producing },
+      {
+        sessionId: SESSION_A,
+        workspaceId: WS_A,
+        shareId: "sh1",
+        shareType: "site",
+        scope: "share",
+        anchor: null,
+        body: "root",
+        authorUserId: UserId("22222222-2222-2222-2222-222222222222"),
+        authorSessionId: null,
+      },
+    );
+    await expect(
+      postShareComment(
+        { comments, publisher, resolveProducingContext: producing },
+        {
+          sessionId: SESSION_A,
+          workspaceId: WS_A,
+          shareId: "sh1",
+          shareType: "site",
+          threadId: root.threadId,
+          scope: "share",
+          anchor: null,
+          body: "x",
+          authorUserId: UserId("33333333-3333-3333-3333-333333333333"),
+          authorSessionId: null,
+          parentCommentId: ShareCommentId("does-not-exist"),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ParentCommentNotInThreadError);
   });
 
   it("rejects non-commentable share types", async () => {
