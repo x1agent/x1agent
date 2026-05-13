@@ -668,6 +668,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const bodyText = await res.text();
         let result: {
           ok?: boolean;
+          share_id?: string;
           title?: string;
           share_type?: string;
           files?: unknown[];
@@ -703,11 +704,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             isError: true,
           };
         }
+        // Echo the share_id back to the agent so it can:
+        //   1. update this share in place later (call `share` again with
+        //      the same share_id — bytes change, pill stays, comment
+        //      threads stay attached).
+        //   2. open a new comment thread or list existing comments via
+        //      `share_comment` / `list_share_comments` (X1A-91 + X1A-93).
+        // Without the id in the result the agent had no programmatic
+        // handle on its own artifacts and re-shared as a fresh row
+        // every time — orphaning prior comment threads.
+        const sid = result.share_id ?? "";
+        const usageHint = sid
+          ? [
+              "",
+              `share_id: ${sid}`,
+              "",
+              `To update this share (same pill, comments stay attached), call \`share\` again with share_id="${sid}".`,
+              `To post a comment, call \`share_comment\` with share_id="${sid}".`,
+              `To read existing comments, call \`list_share_comments\` with share_id="${sid}".`,
+            ].join("\n")
+          : "";
         return {
           content: [
             {
               type: "text" as const,
-              text: `Shared "${result.title ?? path}" (${result.share_type ?? "file"}) with user. ${result.files?.length ?? 1} file(s).`,
+              text:
+                `Shared "${result.title ?? path}" (${result.share_type ?? "file"}) with user. ${result.files?.length ?? 1} file(s).` +
+                usageHint,
             },
           ],
         };
