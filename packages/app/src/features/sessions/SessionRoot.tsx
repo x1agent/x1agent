@@ -24,6 +24,11 @@ import { SessionCostBlock } from "./SessionCostBlock";
 import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
+import {
+  useTypingIndicatorStore,
+  extractCorrelatedEventId,
+} from "../../stores/typingIndicatorStore";
+import { MainTimelineTypingIndicators } from "./TypingIndicator";
 
 interface Props {
   workspaceSlug: string;
@@ -149,6 +154,40 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 payload: unknown;
                 timestamp: string;
               };
+
+              // X1A-104: `session.agent_thinking` is transient — it
+              // travels over the same WS channel but is NOT persisted
+              // to the timeline. Route it into the typing-indicator
+              // store and skip `appendEvent` so it doesn't pollute
+              // the durable event list or trigger the dedupe path.
+              if (msg.type === "session.agent_thinking") {
+                const p = (msg.payload ?? {}) as {
+                  share_id?: string | null;
+                  thread_id?: string | null;
+                  event_id?: string | null;
+                  wake_source?: string;
+                  started_at?: string;
+                };
+                if (typeof p.event_id === "string" && p.event_id) {
+                  useTypingIndicatorStore.getState().add(sessionId, {
+                    event_id: p.event_id,
+                    share_id:
+                      typeof p.share_id === "string" ? p.share_id : null,
+                    thread_id:
+                      typeof p.thread_id === "string" ? p.thread_id : null,
+                    started_at:
+                      typeof p.started_at === "string"
+                        ? p.started_at
+                        : msg.timestamp,
+                    wake_source:
+                      typeof p.wake_source === "string"
+                        ? p.wake_source
+                        : "unknown",
+                  });
+                }
+                continue;
+              }
+
               const ev: SessionEventDTO = {
                 id: `nats-${msg.session_id}-${msg.sequence}`,
                 session_id: msg.session_id,
@@ -157,6 +196,23 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 payload: msg.payload,
                 timestamp: msg.timestamp,
               };
+
+              // X1A-104 clear-signal: if this agent emission carries
+              // a wake correlation id (`event_id` / `in_reply_to` /
+              // `triggered_by` from X1A-103's propagation contract),
+              // clear the matching indicator. Defense-in-depth on
+              // top of the 60s client TTL — the sweep covers the
+              // pod-death case where no correlated emission ever
+              // arrives.
+              const correlated = extractCorrelatedEventId(
+                ev as unknown as Record<string, unknown>,
+              );
+              if (correlated) {
+                useTypingIndicatorStore
+                  .getState()
+                  .clearByEventId(sessionId, correlated);
+              }
+
               appendEvent(sessionId, ev);
             } catch {
               // drop malformed
@@ -189,6 +245,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 workspace_id?: string;
                 session_id?: string;
                 share_type?: string;
+                parent_comment_id?: string | null;
               };
               if (!p.share_id || !p.thread_id || !p.comment_id) continue;
               // The NATS payload doesn't carry seq or resolved-state —
@@ -212,6 +269,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 resolved_by_user_id: null,
                 created_at: now,
                 updated_at: now,
+                // X1A-110 — carried so a reply lands indented under
+                // its parent the moment the NATS event arrives, rather
+                // than only after a full REST refresh.
+                parent_comment_id: p.parent_comment_id ?? null,
               };
               useShareCommentsStore.getState().applyServerEvent(dto);
             } catch {
@@ -272,6 +333,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         void nc.close();
       }
       ncRef.current = null;
+      // X1A-104: indicators are transient — dropping them on unmount
+      // matches the "fresh page load = clean" rule from X1A-103.
+      useTypingIndicatorStore.getState().clearAllForSession(sessionId);
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
 
@@ -295,6 +359,17 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
+    // X1A-103: stamp a client-minted event_id so the agent's
+    // `session.agent_thinking` indicator and the agent's first reply
+    // both carry it through. The frontend (X1A-104) uses it to clear
+    // the right indicator when two wakes overlap. randomUUID is in all
+    // modern browsers; the wider polyfill story isn't worth the bundle
+    // hit for an indicator-correlation id (worst case: indicator
+    // hangs until X1A-104's 60s TTL fires).
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      payload["event_id"] = crypto.randomUUID();
+    }
+    payload["wake_source"] = "user";
     // The agent emits a user.message (or user.input_response) to its
     // SSE stream on inject, which the sidecar publishes to NATS and
     // the api persists to session_events. The browser picks up that
@@ -418,7 +493,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-w-0 items-start gap-3 border-b border-border-soft px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
           <div className="min-w-0 flex-1">
             <SessionTitle session={session ?? null} sessionId={sessionId} />
           </div>
@@ -426,7 +501,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               Inline in the header (not a separate tab) per the
               greenlit mockup. live=true so the pulsing dot shows on
               the "this session" amount. */}
-          <div className="hidden w-[18rem] shrink-0 md:block">
+          <div className="hidden shrink-0 md:block">
             <SessionCostBlock
               workspaceSlug={workspaceSlug}
               sessionId={sessionId}
@@ -503,6 +578,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           workspaceSlug={workspaceSlug}
           agentId={agent?.id}
           sessionId={sessionId}
+          tailSlot={<MainTimelineTypingIndicators sessionId={sessionId} />}
         />
 
         <div className="px-4 pt-3 pb-[60px]">
@@ -512,6 +588,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               disabled={disabled}
               running={session?.status === "running"}
               onStop={onPause}
+              sessionId={sessionId}
               statusLabel={
                 disabled
                   ? session?.status === "complete"

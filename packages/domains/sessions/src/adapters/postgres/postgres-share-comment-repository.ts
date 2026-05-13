@@ -33,13 +33,15 @@ interface Row {
   resolved_by_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  parent_comment_id: string | null;
 }
 
 const SELECT = `
   id, share_id, thread_id, seq, session_id, workspace_id,
   share_type, comment_scope, anchor_json, body,
   author_user_id, author_session_id,
-  resolved_at, resolved_by_user_id, created_at, updated_at
+  resolved_at, resolved_by_user_id, created_at, updated_at,
+  parent_comment_id
 `;
 
 function toComment(r: Row): ShareComment {
@@ -64,6 +66,9 @@ function toComment(r: Row): ShareComment {
       : null,
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
+    parentCommentId: r.parent_comment_id
+      ? ShareCommentId(r.parent_comment_id)
+      : null,
   };
 }
 
@@ -99,7 +104,7 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
           INSERT INTO share_comments (
             share_id, thread_id, seq, session_id, workspace_id,
             share_type, comment_scope, anchor_json, body,
-            author_user_id, author_session_id
+            author_user_id, author_session_id, parent_comment_id
           ) VALUES (
             ${input.shareId},
             ${input.threadId},
@@ -111,7 +116,8 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
             ${this.sql.json(input.anchorJson as never) ?? null},
             ${input.body},
             ${input.authorUserId},
-            ${input.authorSessionId}
+            ${input.authorSessionId},
+            ${input.parentCommentId}
           )
           RETURNING ${this.sql.unsafe(SELECT)}
         `;
@@ -184,6 +190,14 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM share_comments
       WHERE share_id = ${shareId} AND thread_id = ${threadId} AND seq = ${seq}
+    `;
+    return rows[0] ? toComment(rows[0]) : null;
+  }
+
+  async findById(id: ShareCommentId): Promise<ShareComment | null> {
+    const rows = await this.sql<Row[]>`
+      SELECT ${this.sql.unsafe(SELECT)} FROM share_comments
+      WHERE id = ${id}
     `;
     return rows[0] ? toComment(rows[0]) : null;
   }

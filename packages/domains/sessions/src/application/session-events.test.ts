@@ -185,4 +185,86 @@ describe("listSessionEvents", () => {
       ),
     ).rejects.toBeInstanceOf(SessionNotFoundError);
   });
+
+  // ── X1A-110 — share-comment wakes filter from the main timeline ───
+  it("filters share-comment wakes (kind=comment_added / comment_resolved) from the timeline", async () => {
+    const { session } = await fixture();
+    // A normal human message …
+    await events.append({
+      sessionId: session.id,
+      seq: 0,
+      type: "user.message",
+      payload: { text: "hello" },
+      timestamp: clock.now(),
+    });
+    // … followed by a comment-wake-derived user.message — the api
+    // subscriber tagged this on ingest. It SHOULD NOT surface in the
+    // main session timeline; it belongs in the share's comment flyout.
+    await events.append({
+      sessionId: session.id,
+      seq: 1,
+      type: "user.message",
+      payload: {
+        text: "[wake: new comment on share abcd1234]\nBody:\nhi",
+        kind: "comment_added",
+        source: "platform",
+        share_id: "share-1",
+        thread_id: "thread-1",
+      },
+      timestamp: clock.now(),
+    });
+    // … and a comment-resolved wake too.
+    await events.append({
+      sessionId: session.id,
+      seq: 2,
+      type: "user.message",
+      payload: {
+        text: "[wake: comment thread resolved on share abcd1234]\n…",
+        kind: "comment_resolved",
+        source: "platform",
+        share_id: "share-1",
+        thread_id: "thread-1",
+      },
+      timestamp: clock.now(),
+    });
+    // … plus an agent reply that's NOT a wake — must survive.
+    await events.append({
+      sessionId: session.id,
+      seq: 3,
+      type: "agent.text",
+      payload: { text: "ack" },
+      timestamp: clock.now(),
+    });
+    const r = await listSessionEvents(
+      { agents, sessions, events, adminGuard: new AllowAllAdmin() },
+      ACTOR,
+      session.id,
+    );
+    expect(r.events.map((e) => e.seq)).toEqual([0, 3]);
+  });
+
+  it("does NOT filter orchestration wakes (state_change, watchdog, …) — those still belong on the timeline", async () => {
+    const { session } = await fixture();
+    await events.append({
+      sessionId: session.id,
+      seq: 0,
+      type: "user.message",
+      payload: {
+        text: "[driverless wake: child finished]\n…",
+        kind: "state_change",
+        source: "platform",
+        driverless: true,
+      },
+      timestamp: clock.now(),
+    });
+    const r = await listSessionEvents(
+      { agents, sessions, events, adminGuard: new AllowAllAdmin() },
+      ACTOR,
+      session.id,
+    );
+    expect(r.events).toHaveLength(1);
+    expect(
+      (r.events[0]!.payload as { kind: string }).kind,
+    ).toBe("state_change");
+  });
 });

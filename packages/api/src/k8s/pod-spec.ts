@@ -216,6 +216,13 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "SESSION_MODE", value: spec.sessionMode },
     { name: "IDLE_TIMEOUT_MS", value: String(spec.idleTimeoutMs) },
     { name: "SIDECAR_URL", value: "http://localhost:9090" },
+    // X1A-96: agent needs to call back to the api's internal route to
+    // read user-uploaded files when it sees `[image: <uuid>]` tokens
+    // in a message. The internal token is the only auth on that route;
+    // the agent's neighboring sidecar already has the same value, so
+    // exposing it here doesn't widen the trust boundary.
+    { name: "API_URL", value: spec.apiUrl },
+    { name: "API_INTERNAL_TOKEN", value: spec.apiInternalToken },
     { name: "WORKSPACE_NAME", value: spec.workspaceName },
     { name: "WORKSPACE_SYSTEM_PROMPT", value: spec.systemPromptText },
     { name: "PLATFORM_NAME", value: "x1agent" },

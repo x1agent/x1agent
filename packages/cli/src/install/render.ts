@@ -201,6 +201,14 @@ export function render(input: RenderInput): RenderResult {
     // keeps fresh installs working before the rotation script is run.
     (env.get("SURREALDB_ROOT_PASSWORD")
       ? `    rootPassword: ${q(env.get("SURREALDB_ROOT_PASSWORD")!)}\n`
+      : "") +
+    // Apex redirect — when APEX_REDIRECT_TO_APP is "true" in the env
+    // file (configure step asks), the chart adds an Ingress that 301s
+    // the bare baseDomain to https://app.<baseDomain>/. Default off
+    // for installs whose apex hosts a separate property (e.g.
+    // x1agent.com serves a marketing site outside the cluster).
+    (env.get("APEX_REDIRECT_TO_APP") === "true"
+      ? `\ningress:\n  apexRedirect:\n    enabled: true\n`
       : "");
 
   const valuesPath = resolve(

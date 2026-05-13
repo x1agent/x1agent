@@ -23,10 +23,17 @@ import {
 import http from "node:http";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { normalizeMessage } from "./normalize.js";
 import { createInputChannel } from "./input-channel.js";
 import { IdleTimer } from "./idle-timer.js";
+import {
+  buildAgentThinkingCancelledEvent,
+  buildAgentThinkingEvent,
+  type WakeEnvelopeFields,
+} from "./wake-classifier.js";
+import { createEventCorrelator } from "./event-correlator.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -94,7 +101,17 @@ async function waitForSidecar(timeoutMs = 30_000): Promise<boolean> {
 const eventBuffer: unknown[] = [];
 const listeners = new Set<(event: unknown) => void>();
 
-function emitToStream(event: unknown) {
+/**
+ * X1A-103: track the most recent wake's event_id so we can stamp it
+ * onto the first agent emission for that wake. The frontend uses the
+ * stamped id to deterministically clear the matching agent_thinking
+ * indicator. State machine logic lives in event-correlator.ts so it's
+ * unit-testable without a running agent process.
+ */
+const correlator = createEventCorrelator();
+
+function emitToStream(event: { type: string; payload: unknown }) {
+  correlator.maybeStamp(event);
   eventBuffer.push(event);
   if (eventBuffer.length > 1000) eventBuffer.shift();
   for (const listener of listeners) {
@@ -106,6 +123,30 @@ function emitToStream(event: unknown) {
   }
   // Any agent output (text, tool call, result) keeps the session alive.
   resetIdleTimer();
+}
+
+/**
+ * X1A-103 transient events: pushed to the SSE stream like any other
+ * event, but the api subscriber's persistence skip-list drops them on
+ * the floor (see packages/api/src/nats/subscriber.ts) so they never
+ * land in `session_events`. Goes through the buffer so a wake that
+ * hits /inject before the sidecar's stream consumer has connected
+ * still has its agent_thinking delivered on first connect.
+ *
+ * Distinct from emitToStream because:
+ *   1. Idle-timer is NOT reset (this event is informational, not work).
+ *   2. event_id stamping is skipped (the payload already carries it).
+ */
+function emitTransient(event: { type: string; payload: unknown }) {
+  eventBuffer.push(event);
+  if (eventBuffer.length > 1000) eventBuffer.shift();
+  for (const listener of listeners) {
+    try {
+      listener(event);
+    } catch {
+      // ignore — same close-race tolerance as emitToStream.
+    }
+  }
 }
 
 const streamServer = http.createServer((req, res) => {
@@ -336,6 +377,16 @@ const systemPromptText = `${workspacePromptSection}${identityLine} You are runni
 - **request_permission**: Call when you need a scope the user hasn't granted.
 - **end_session**: Call when the task is definitively done.${interactivePrompt}
 
+## Reading files the user uploaded (X1A-96)
+
+When the user attaches a file to their prompt, the platform writes the bytes to disk at \`/workspace/.x1/uploads/<uuid>.<ext>\` BEFORE the message reaches you. Your inbound message text will name that path inline, e.g.:
+
+  (user attached file: /workspace/.x1/uploads/7f3c4b58-91da-4f87-9a31-1f0b9e2d2c11.png — use the Read tool to view it)
+
+Use the **Read** tool on that path. For images (PNG, JPG, GIF, WebP) Read returns the file as visual content blocks so you can actually see the picture. For PDFs and text files Read returns the content as text. Don't shell out to \`curl\` or \`cat\` — Read handles every type correctly and is the only path that lets you see image contents.
+
+If the message says \`(upload <id>: unavailable)\` or \`(upload <id>: error)\` instead of a file path, the file couldn't be fetched — ask the user to re-attach. Don't fabricate what you think the file contains.
+
 ## Guidelines
 
 - Call emit_status at the start of each phase.
@@ -367,6 +418,121 @@ const conversation: Query = query({
 
 // ── Inject endpoint on :8788 ───────────────────────────
 
+/**
+ * X1A-96: expand `[image: <uuid>]` tokens in a user message into real
+ * files on disk so the LLM can `Read` them. The Read tool returns
+ * image content as visual blocks for the model — that's how Claude
+ * Code reads PNGs/JPGs the user drops on the terminal. Bytes come
+ * from the api's internal route gated by API_INTERNAL_TOKEN (both
+ * env vars are set on the agent container by job-watcher).
+ *
+ * Each token is rewritten to an inline sentence that names the file
+ * path so the next move ("use the Read tool on this path") is
+ * unambiguous in the message text. The original token is dropped.
+ *
+ * Failures are best-effort: a 404 or network error swaps the token
+ * for `(upload <id>: unavailable)` and the message still arrives —
+ * the LLM can ask the user to re-upload rather than the whole turn
+ * silently disappearing.
+ */
+const IMAGE_TOKEN_RE =
+  /\[image:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*\]/gi;
+
+const UPLOADS_DIR = "/workspace/.x1/uploads";
+
+function extFromMime(mime: string): string {
+  const base = mime.split(";")[0]!.trim().toLowerCase();
+  const map: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+    "application/pdf": "pdf",
+  };
+  return map[base] ?? "bin";
+}
+
+async function resolveImageTokens(text: string): Promise<string> {
+  IMAGE_TOKEN_RE.lastIndex = 0;
+  if (!IMAGE_TOKEN_RE.test(text)) return text;
+
+  const apiUrl = process.env.API_URL || "";
+  const internalToken = process.env.API_INTERNAL_TOKEN || "";
+  // X1A-96 ownership: the internal route requires the agent to name the
+  // user it's acting as. Without TRIGGERING_USER_ID we can't prove the
+  // upload belongs to the same human — bail rather than swap to
+  // unscoped fetches that would also work and would broaden the leak
+  // surface to "any upload in the system."
+  const triggeringUserId = process.env.TRIGGERING_USER_ID || "";
+  if (!apiUrl || !internalToken) {
+    console.error(
+      "[agent] image-token expansion: API_URL or API_INTERNAL_TOKEN missing — leaving tokens as-is",
+    );
+    return text;
+  }
+  if (!triggeringUserId) {
+    console.error(
+      "[agent] image-token expansion: TRIGGERING_USER_ID missing — cannot prove ownership, leaving tokens as-is",
+    );
+    return text;
+  }
+
+  try {
+    await mkdir(UPLOADS_DIR, { recursive: true });
+  } catch (err) {
+    console.error(
+      `[agent] could not create ${UPLOADS_DIR}: ${(err as Error).message}`,
+    );
+    return text;
+  }
+
+  // Walk every match, fetch + write each unique id once, collect the
+  // replacement string per id.
+  const expansions = new Map<string, string>();
+  IMAGE_TOKEN_RE.lastIndex = 0;
+  for (const m of text.matchAll(IMAGE_TOKEN_RE)) {
+    const id = m[1]!.toLowerCase();
+    if (expansions.has(id)) continue;
+    try {
+      const url = new URL(`${apiUrl}/api/internal/uploads/${id}/raw`);
+      url.searchParams.set("user_id", triggeringUserId);
+      if (sessionId) url.searchParams.set("session_id", sessionId);
+      const res = await fetch(url.toString(), {
+        headers: { "X-Internal-Token": internalToken },
+      });
+      if (!res.ok) {
+        console.error(`[agent] upload ${id} fetch failed: ${res.status}`);
+        expansions.set(id, `(upload ${id}: unavailable)`);
+        continue;
+      }
+      const mime = res.headers.get("content-type") ?? "application/octet-stream";
+      const ext = extFromMime(mime);
+      const filePath = `${UPLOADS_DIR}/${id}.${ext}`;
+      const buf = Buffer.from(await res.arrayBuffer());
+      await writeFile(filePath, buf);
+      expansions.set(
+        id,
+        `(user attached file: ${filePath} — use the Read tool to view it)`,
+      );
+      console.log(
+        `[agent] resolved upload ${id} → ${filePath} (${buf.byteLength} bytes, ${mime})`,
+      );
+    } catch (err) {
+      console.error(
+        `[agent] upload ${id} fetch threw: ${(err as Error).message}`,
+      );
+      expansions.set(id, `(upload ${id}: error)`);
+    }
+  }
+
+  return text.replace(IMAGE_TOKEN_RE, (_full, idRaw: string) => {
+    const replacement = expansions.get(idRaw.toLowerCase());
+    return replacement ?? `(upload ${idRaw}: missing)`;
+  });
+}
+
 const injectServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
@@ -377,13 +543,44 @@ const injectServer = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body) as {
         text?: string;
         request_id?: string;
+        // X1A-103: optional wake-classification fields the sidecar
+        // forwards from the NATS envelope. Older sidecars omit these
+        // — buildAgentThinkingEvent treats absent fields as "user wake
+        // with a fresh event_id" so the indicator still fires.
+        event_id?: string;
+        wake_source?: string;
+        share_id?: string | null;
+        thread_id?: string | null;
+        kind?: string;
+        source?: string;
       };
       if (typeof parsed.text !== "string") {
         res.writeHead(400);
         res.end("text required");
         return;
       }
-      inputChannel.push(parsed.text, parsed.request_id || undefined);
+      // X1A-103: emit the agent_thinking indicator BEFORE pushing the
+      // wake into the SDK so the UI shows the indicator the instant
+      // the pod receives the wake — not after the LLM call returns.
+      const wakeFields: WakeEnvelopeFields = {
+        event_id: parsed.event_id ?? null,
+        wake_source: parsed.wake_source ?? null,
+        share_id: parsed.share_id ?? null,
+        thread_id: parsed.thread_id ?? null,
+        kind: parsed.kind ?? null,
+        source: parsed.source ?? null,
+        request_id: parsed.request_id ?? null,
+      };
+      const thinking = buildAgentThinkingEvent(sessionId!, wakeFields);
+      correlator.arm(thinking.event_id);
+      emitTransient({ type: thinking.type, payload: thinking });
+
+      // X1A-96: rewrite any `[image: <uuid>]` tokens into "(user attached
+      // file: /workspace/.x1/uploads/<id>.<ext>)" before the LLM sees
+      // the message. The Read tool on the resulting path returns image
+      // content to Claude so the model literally sees the pixels.
+      const resolvedText = await resolveImageTokens(parsed.text);
+      inputChannel.push(resolvedText, parsed.request_id || undefined);
       // Emit the user message to the stream so the sidecar publishes
       // it on `.events` and the api persists it to session_events. The
       // browser applies a local echo immediately on send, but without
@@ -481,6 +678,28 @@ async function shutdown(
   }
   shuttingDown = true;
   idleTimer.dispose();
+  // X1A-103 ghost-indicator safety: if a wake's agent_thinking was
+  // emitted but no agent response stamped its event_id back yet, the
+  // browser still has the indicator pinned. Emit a cancellation so it
+  // clears immediately on graceful shutdown / end_session / idle
+  // timeout. (X1A-104 also applies a 60s client TTL as a backstop —
+  // this is the best-effort server-side fast path.)
+  const orphanedWakeId = correlator.pending();
+  if (orphanedWakeId) {
+    correlator.clear();
+    emitTransient({
+      type: "session.agent_thinking_cancelled",
+      payload: buildAgentThinkingCancelledEvent(
+        sessionId!,
+        orphanedWakeId,
+        "graceful_shutdown",
+      ),
+    });
+    // Give the SSE stream a beat to flush before we tear down. The
+    // sidecar polls bytes from the stream and republishes; the
+    // existing 500ms wait below covers NATS but not the SSE hop.
+    await new Promise((r) => setTimeout(r, 50));
+  }
   await postToSidecar(isSuccess ? "session.completed" : "session.failed", {
     result,
     error,
