@@ -1,4 +1,4 @@
-import { isCancel, note, select, text } from "@clack/prompts";
+import { confirm, isCancel, note, select, text } from "@clack/prompts";
 
 export type CloudProvider = "local" | "gcp";
 
@@ -25,6 +25,14 @@ export interface CloudTarget {
    * has permissions on the GCP project. Same rationale as project ID.
    */
   gcpAccount?: string;
+  /**
+   * When true, the chart adds an Ingress that catches the bare
+   * baseDomain and 301-redirects to `https://app.<baseDomain>/`.
+   * Useful when the apex isn't already serving content (typical for
+   * a fresh tenant install). Leave false when the apex hosts a
+   * separate property (e.g. a marketing site outside the cluster).
+   */
+  apexRedirect?: boolean;
 }
 
 const DEFAULT_LOCAL_DOMAIN = "local.x1agent.dev";
@@ -106,16 +114,31 @@ export async function promptCloudTarget(
 
   note(
     `Derived URLs from base domain "${baseDomain.trim()}":\n` +
-      `  app.${baseDomain.trim()}\n` +
-      `  api.${baseDomain.trim()}\n` +
-      `  *.preview.${baseDomain.trim()}`,
+      `  app   → https://app.${baseDomain.trim()}\n` +
+      `  api   → https://api.${baseDomain.trim()}\n` +
+      `  preview wildcard → https://*.preview.${baseDomain.trim()}\n\n` +
+      `The bare domain (${baseDomain.trim()}) is NOT used by this install\n` +
+      `unless you enable the apex redirect on the next prompt.`,
     "GCP target",
   );
+
+  // Apex redirect — turn the bare baseDomain into a 301 to the app
+  // subdomain. Default off so installs whose apex hosts a separate
+  // property (e.g. x1agent.com serves the marketing site outside the
+  // cluster) don't accidentally take over that hostname. Greenfield
+  // tenants where the apex is unused (or the operator wants users
+  // hitting the bare URL to land on the app) flip it on.
+  const apexRedirectAnswer = await confirm({
+    message: `Redirect ${baseDomain.trim()} → https://app.${baseDomain.trim()}/ ?`,
+    initialValue: current.apexRedirect ?? false,
+  });
+  if (isCancel(apexRedirectAnswer)) return null;
 
   return {
     provider: "gcp",
     baseDomain: baseDomain.trim(),
     gcpProjectId: gcpProjectId.trim(),
     gcpAccount: gcpAccount.trim(),
+    apexRedirect: apexRedirectAnswer === true,
   };
 }
