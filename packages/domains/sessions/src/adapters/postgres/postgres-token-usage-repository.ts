@@ -931,15 +931,28 @@ export class PostgresTokenUsageRepository implements TokenUsageRepository {
 
     // Per-session "started_at" — first event timestamp. Cheap because
     // session_id is indexed and we already have the set from usageRows.
+    //
+    // `sessions` has no `workspace_id` column — tenancy is reached via
+    // `sessions.agent_id -> agents.workspace_id`. The session ids we're
+    // looking up here came from a token_usage query already scoped to
+    // (workspace_id, agent_id), so the join is defence in depth: a row
+    // can only survive the JOIN if its agent still belongs to the
+    // caller's workspace. Previously this query referenced
+    // `sessions.workspace_id` directly, which threw
+    // `column "workspace_id" does not exist` against Postgres — the
+    // regression that fired across releases acf4e1b/16d23bb/d9b67e2/
+    // 13ec6a8 (see X1A-115). The in-memory adapter masked it because
+    // it doesn't enforce SQL constraints.
     const sessionIds = Array.from(new Set(usageRows.map((r) => r.session_id)));
     const startedAtRows = sessionIds.length
       ? await this.sql<{ session_id: string; started_at: Date; summary: string | null }[]>`
-          SELECT id::TEXT          AS session_id,
-                 triggered_at      AS started_at,
-                 summary           AS summary
-          FROM sessions
-          WHERE id = ANY(${sessionIds})
-            AND workspace_id = ${input.workspaceId}
+          SELECT s.id::TEXT        AS session_id,
+                 s.triggered_at    AS started_at,
+                 s.summary         AS summary
+          FROM sessions s
+          JOIN agents a ON a.id = s.agent_id
+          WHERE s.id = ANY(${sessionIds})
+            AND a.workspace_id = ${input.workspaceId}
         `
       : [];
     const sessionMeta = new Map<string, { startedAt: Date; summary: string | null }>(
