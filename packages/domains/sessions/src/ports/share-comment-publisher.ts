@@ -40,6 +40,13 @@ export interface ShareCommentAddedEvent {
   body: string;
   producingSessionId: SessionId;
   producingAgentId: string;
+  /**
+   * X1A-110 — id of the comment this one replies to. Carried on the
+   * wire so the browser's live comment subscriber can render the new
+   * row indented under the right parent without waiting for a full
+   * REST refresh. `null` for a top-level comment.
+   */
+  parentCommentId: ShareCommentId | null;
 }
 
 export interface ShareCommentThreadResolvedEvent {

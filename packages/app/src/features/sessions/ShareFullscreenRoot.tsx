@@ -268,8 +268,17 @@ function CommentRow({ comment }: { comment: ShareCommentDTO }) {
     : comment.author_session_id
       ? "agent"
       : "unknown";
+  // X1A-110 — replies get the same ~20px depth-1 indent here as in the
+  // flyout sidebar so the two surfaces read consistently. The
+  // fullscreen view doesn't yet host a Reply composer per comment;
+  // that's the flyout's job. Cross-surface render parity is the bar.
+  const isReply = comment.parent_comment_id !== null;
   return (
-    <div className="flex items-start gap-2">
+    <div
+      className="flex items-start gap-2"
+      style={isReply ? { marginLeft: 20 } : undefined}
+      data-is-reply={isReply ? "true" : "false"}
+    >
       <div className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-muted text-[10px] font-medium text-fg-muted">
         {author.slice(0, 2).toUpperCase()}
       </div>

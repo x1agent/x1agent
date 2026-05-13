@@ -25,6 +25,13 @@ export interface AppendShareCommentInput {
   body: string;
   authorUserId: UserId | null;
   authorSessionId: SessionId | null;
+  /**
+   * X1A-110 — id of the comment this one replies to. `null` for a
+   * top-level comment (the thread root). The application layer is
+   * responsible for enforcing the depth-1 cap and the same-thread
+   * invariant before calling `append`; the repository just persists.
+   */
+  parentCommentId: ShareCommentId | null;
 }
 
 /**
@@ -63,6 +70,13 @@ export interface ShareCommentRepository {
     threadId: ShareThreadId,
     seq: number,
   ): Promise<ShareComment | null>;
+
+  /**
+   * X1A-110 — fetch one comment by its surrogate id. Used by the
+   * reply-validation path: given `parent_comment_id`, confirm the
+   * parent exists in the same thread AND is itself top-level.
+   */
+  findById(id: ShareCommentId): Promise<ShareComment | null>;
 
   /** Edit body of an existing comment. anchor + scope are immutable. */
   updateBody(
