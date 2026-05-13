@@ -59,6 +59,8 @@ import {
   PostgresPermissionGrantRepository,
   createWorkspaceGrantRoutes,
 } from "@x1agent/domain-permissions";
+import { runUploadsCleanup } from "@x1agent/domain-uploads";
+import { composeUploads } from "./uploads.js";
 import {
   PostgresSecretRepository,
   SecretService,
@@ -273,6 +275,14 @@ export interface Composition {
    * children on the current sweep.
    */
   quietHints: QuietHintStore;
+  /**
+   * X1A-96 — Hono routes mounted at /api/uploads. Carries the
+   * pre-auth signed-PUT route plus the authenticated init/complete/get/
+   * delete surface.
+   */
+  uploadRoutes: Hono;
+  /** Periodic cleanup tick for the uploads subsystem. */
+  tickUploadsCleanup: () => Promise<import("@x1agent/domain-uploads").CleanupResult>;
 }
 
 export interface CompositionEnv {
@@ -709,6 +719,27 @@ export function compose(env: CompositionEnv): Composition {
         : undefined,
     });
 
+  // X1A-96 — image upload subsystem. Wires the LocalDiskStorage or
+  // S3Storage adapter (chosen by UPLOAD_STORAGE_BACKEND), the Postgres
+  // repository, and an in-memory rate limiter behind the `/api/uploads`
+  // route surface. The cleanup tick is exposed below; the api index
+  // registers it with the shared scheduler.
+  const uploads = composeUploads({
+    sql: env.sql,
+    apiUrl: env.apiUrl,
+    // Reuse the JWT secret as the HMAC key for local-disk signed
+    // upload URLs. Same trust boundary — both are server-only secrets
+    // that the api process needs to mint short-lived tokens.
+    hmacSecret: env.jwtSecret,
+  });
+  const uploadRoutes = uploads.routesFactory({ requireAuth, getActor });
+  const tickUploadsCleanup = () =>
+    runUploadsCleanup({
+      uploads: uploads.repository,
+      storage: uploads.storage,
+      clock: uploads.clock,
+    });
+
   // One QuietHintStore shared between the internal route that
   // receives `expect_quiet_for` from children and the watchdog
   // that consults them. Lives on the api process in-memory.
@@ -746,6 +777,11 @@ export function compose(env: CompositionEnv): Composition {
     // per-spawn model overrides that aren't admin-enabled — otherwise
     // the orchestrator could side-channel around /admin/anthropic-models.
     enabledModels: async () => listEnabledOverrides(env.sql),
+    // X1A-96 — agent fetches its own upload bytes through the internal
+    // route. Both the repository and the storage adapter are wired
+    // so the route can look the row up + stream the bytes.
+    uploads: uploads.repository,
+    uploadStorage: uploads.storage,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -1333,5 +1369,7 @@ export function compose(env: CompositionEnv): Composition {
     agentRepoStore: agentRepos,
     tickScheduler,
     quietHints,
+    uploadRoutes,
+    tickUploadsCleanup,
   };
 }

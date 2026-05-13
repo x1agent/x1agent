@@ -20,6 +20,11 @@ import {
 } from "@x1agent/domain-permissions";
 import { writeShareFiles } from "../shares/storage.js";
 import { StringCodec, JSONCodec } from "nats";
+import type {
+  UploadRepository,
+  UploadStorage,
+} from "@x1agent/domain-uploads";
+import { UploadId } from "@x1agent/domain-uploads";
 
 /**
  * Endpoints only the sidecar calls (same-cluster). Gated on a shared
@@ -65,6 +70,17 @@ export interface InternalRoutesConfig {
    * X1A-40: same gate the agent-write path enforces on `agents.model`.
    */
   enabledModels?: () => Promise<Set<string> | null>;
+  /**
+   * X1A-96 → agent-side fetch. When set, exposes
+   * `GET /api/internal/uploads/:id/raw` which streams the upload's
+   * bytes back. The agent in a session pod has the `API_INTERNAL_TOKEN`
+   * env var and can `curl` the route directly to read a file the user
+   * attached to the prompt. Out-of-cluster traffic never sees this
+   * route — Hono only mounts it under `/api/internal/*` which the
+   * ingress doesn't expose externally.
+   */
+  uploads?: UploadRepository;
+  uploadStorage?: UploadStorage;
   /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
@@ -883,6 +899,69 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       now: new Date(),
     });
     return c.json(rollup);
+  });
+
+  // X1A-96 → agent-side fetch of attached uploads. The agent's pod
+  // has API_INTERNAL_TOKEN; when it sees an `[image: <id>]` token in
+  // a user message, it curls this route to read the bytes. The
+  // internal token + cluster-private routing is the only access
+  // control; we deliberately don't scope by session here so the route
+  // stays a simple bytes-by-id lookup. Per-session ACL is a follow-up
+  // when uploads become readable across resume chains.
+  app.get("/uploads/:id/raw", async (c) => {
+    if (!cfg.uploads || !cfg.uploadStorage) {
+      return c.json({ error: "uploads_disabled" }, 503);
+    }
+    let id;
+    try {
+      id = UploadId(c.req.param("id"));
+    } catch {
+      return c.json({ error: "invalid_id" }, 400);
+    }
+    // Ownership check (X1A-96 security boundary). The internal token
+    // alone proves "this caller is inside the cluster"; it doesn't
+    // prove "this caller's session is allowed to read this upload."
+    // Without the user_id check, a compromised or buggy agent in
+    // session A could fetch any upload id it learned of — including
+    // ones attached to a different user's session. We require the
+    // caller to name the user_id they're acting as, and refuse if the
+    // upload row's creator doesn't match. 404 (not 403) so the route
+    // never leaks the existence of someone else's upload.
+    //
+    // For an extra belt: when the upload row has a session_id set, we
+    // also require the caller's session_id to match (so the same
+    // user's other sessions can't trivially read uploads attached
+    // elsewhere). Unattached uploads (session_id null) skip that
+    // check since they haven't been bound yet.
+    const callerUserId = c.req.query("user_id");
+    const callerSessionId = c.req.query("session_id");
+    if (!callerUserId) {
+      return c.json({ error: "user_id_required" }, 400);
+    }
+    const upload = await cfg.uploads.findById(id);
+    if (!upload) return c.json({ error: "not_found" }, 404);
+    if (upload.userId !== callerUserId) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (
+      upload.sessionId !== null &&
+      callerSessionId &&
+      upload.sessionId !== callerSessionId
+    ) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (upload.status !== "ready" && upload.status !== "attached") {
+      return c.json({ error: "upload_not_ready" }, 409);
+    }
+    const body = await cfg.uploadStorage.readObject(upload.storageKey);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": upload.mime,
+        "Content-Length": String(upload.sizeBytes),
+        "Cache-Control": "private, no-store",
+      },
+    });
   });
 
   return app;

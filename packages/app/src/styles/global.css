@@ -281,6 +281,36 @@ html[data-theme="light"] .rail-noise {
   background-image: var(--composer-border);
 }
 
+/* X1A-98 — drag-over affordance. Switches the halo from the soft
+ * pastel palette to a single dashed grey ring so the user reads
+ * "this is a drop zone." Subtle; the icon overlay does the heavy
+ * lifting for affordance. */
+.composer-border--drag-over {
+  background-image: none;
+  background-color: transparent;
+  outline: 2px dashed var(--color-fg-faint);
+  outline-offset: -1px;
+}
+
+/* X1A-98 — uploading state. The pastel halo stays but stretches to
+ * 300% width and animates left → right so it reads as a pulsing /
+ * flowing gradient. Boost saturation + brightness so the colors
+ * pop while the upload is in flight. */
+.composer-border--uploading {
+  background-size: 300% 100%;
+  animation: composer-border-flow 1.8s linear infinite;
+  filter: saturate(1.45) brightness(1.12);
+}
+
+@keyframes composer-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 300% 50%;
+  }
+}
+
 /* Scrollbars. Default browser scrollbars (chunky grey on dark, white on
  * light) clash with the warm-tinted surface ladder; replace them with a
  * thin, token-driven track + thumb that picks up the same border tones
