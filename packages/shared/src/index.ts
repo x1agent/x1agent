@@ -170,6 +170,14 @@ export interface ShareCommentDTO {
   resolved_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * X1A-110 — id of the comment this one replies to within the same
+   * thread. `null` for the first comment in a thread (the thread root).
+   * Nesting is capped at depth 1 in v1: a comment may reply to a
+   * top-level comment but not to another reply (server rejects
+   * `nested_reply_not_supported`).
+   */
+  parent_comment_id: string | null;
 }
 
 export interface ShareCommentListResponse {

@@ -48,6 +48,10 @@ export class NatsShareCommentPublisher implements ShareCommentPublisher {
       comment_body: e.body,
       producing_session_id: e.producingSessionId,
       producing_agent_id: e.producingAgentId,
+      // X1A-110 — carried so the browser's live subscriber can
+      // render a reply indented under the right parent without
+      // waiting for a REST refresh. Null for a top-level comment.
+      parent_comment_id: e.parentCommentId,
     });
   }
 
