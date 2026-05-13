@@ -21,6 +21,14 @@ interface Props {
    * inline path.
    */
   compactItems?: CompactItem[];
+  /**
+   * X1A-104 — bottom-of-timeline slot rendered after the last event
+   * but before the scroll anchor. Used by SessionRoot to mount the
+   * transient typing indicator without restructuring the timeline.
+   * Kept generic (ReactNode) so it stays a clean mount point rather
+   * than a one-off indicator hook.
+   */
+  tailSlot?: React.ReactNode;
 }
 
 /**
@@ -91,6 +99,7 @@ export function EventStream({
   agentId,
   sessionId,
   compactItems,
+  tailSlot,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -109,8 +118,12 @@ export function EventStream({
 
   if (events.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-10 text-sm text-fg-faint">
-        Waiting for events…
+      <div
+        className="flex flex-1 flex-col items-center justify-center p-10 text-sm text-fg-faint"
+        data-testid="event-stream-empty"
+      >
+        <div>Waiting for events…</div>
+        {tailSlot}
       </div>
     );
   }
@@ -175,6 +188,7 @@ export function EventStream({
             })
           )}
         </div>
+        {tailSlot}
         <div ref={bottomRef} />
       </div>
     );
@@ -195,6 +209,7 @@ export function EventStream({
           />
         ))}
       </div>
+      {tailSlot}
       <div ref={bottomRef} />
     </div>
   );
