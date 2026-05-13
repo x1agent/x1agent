@@ -300,6 +300,11 @@ async function runConfigureDeployment(): Promise<boolean> {
     env.unset("GCP_PROJECT_ID");
     env.unset("GCP_ACCOUNT");
   }
+  // X1A-? apex redirect — when true, the helm chart adds an Ingress
+  // that 301s the bare baseDomain to https://app.<baseDomain>/. Stored
+  // as a string so .env round-trips cleanly; the helm-values builder
+  // parses it back to a bool.
+  env.set("APEX_REDIRECT_TO_APP", cloud.apexRedirect ? "true" : "false");
   env.set("ANTHROPIC_PROVIDER", anthropic.provider);
   if (anthropic.provider === "vertex") {
     env.set("CLOUD_ML_REGION", anthropic.vertexRegion!);

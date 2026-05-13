@@ -155,6 +155,21 @@ ingress:
   # Same controller as local OrbStack dev — no GKE-specific magic.
   className: nginx
 
+  # Apex redirect — when enabled, an additional Ingress catches the bare
+  # baseDomain (e.g. `lattice.atomic.health`) and 301-redirects all paths
+  # to `https://app.<baseDomain>/...`.
+  #
+  # Set this to `true` when the bare baseDomain is part of the install
+  # and the operator wants users hitting the apex to land on the app
+  # (lattice cutover, fresh installs without a separate marketing site).
+  #
+  # Leave it `false` (default) when the apex is owned by a separate
+  # property — e.g. x1agent.com serves a marketing site outside the
+  # cluster; the install only manages `app.x1agent.com`, `api.x1agent.com`,
+  # and `*.preview.x1agent.com`, so the apex must not be touched.
+  apexRedirect:
+    enabled: false
+
 # ============================================================================
 # Secrets — backed by Google Secret Manager via External Secrets Operator.
 # Each entry binds an env var the api/preview pods read to a GSM secret name.
