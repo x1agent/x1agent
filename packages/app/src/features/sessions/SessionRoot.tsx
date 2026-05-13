@@ -426,7 +426,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               Inline in the header (not a separate tab) per the
               greenlit mockup. live=true so the pulsing dot shows on
               the "this session" amount. */}
-          <div className="hidden w-[18rem] shrink-0 md:block">
+          <div className="hidden shrink-0 md:block">
             <SessionCostBlock
               workspaceSlug={workspaceSlug}
               sessionId={sessionId}

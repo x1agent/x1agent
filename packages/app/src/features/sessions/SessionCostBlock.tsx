@@ -33,8 +33,8 @@ interface Props {
  * Combined View 1 + View 2 — header-mounted cost block on the session
  * detail page. Renders, in collapsed (default) form:
  *
- *   This session [●] $2.10                                    (no children)
- *   This session [●] $2.10  +  $1.20  =  $3.30                  ▸  (with children)
+ *   Cost [●] $2.10                                    (no children)
+ *   Cost [●] $2.10  +  $1.20  =  $3.30                  ▸  (with children)
  *
  * Each dashed-underlined amount opens a tooltip on hover/focus: the
  * "this session" amount shows the per-model breakdown; the workers sum
@@ -127,11 +127,11 @@ export function SessionCostBlock({
 
   return (
     <div
-      className="rounded-md border border-border-soft bg-surface-muted/40 px-3 py-2"
+      className="relative rounded-md border border-border-soft bg-surface-muted/40 px-3 py-2"
       data-testid="session-cost-block"
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="text-fg-faint">This session</span>
+      <div className="flex items-center gap-2 whitespace-nowrap text-xs">
+        <span className="text-fg-faint">Cost</span>
         {live ? (
           <span
             className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
@@ -184,7 +184,7 @@ export function SessionCostBlock({
       {hasChildren && treeCost && treeOpen ? (
         <div
           id={treeId}
-          className="mt-2 border-t border-border-soft/60 pt-2"
+          className="absolute right-0 top-full z-30 mt-1 w-[22rem] max-w-[90vw] rounded-md border border-border-strong bg-surface-elevated px-3 py-2 shadow-lg"
         >
           <div className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">
             Session tree
