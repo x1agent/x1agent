@@ -1,3 +1,30 @@
+# [1.25.0](https://github.com/x1agent/x1agent/compare/v1.24.9...v1.25.0) (2026-05-13)
+
+
+### Bug Fixes
+
+* **cli:** parse multi-line quoted values in installs env file ([b41f7d0](https://github.com/x1agent/x1agent/commit/b41f7d09c91451be6fd1a34752fb7c232f2a9f0a))
+* **comments:** chronological order + threaded layout + See-more clamp (X1A-105) ([fd16c5a](https://github.com/x1agent/x1agent/commit/fd16c5a0225e71993cc95bc790961aaf672dff10))
+* **comments:** clear reply target on shareId change ([49879c5](https://github.com/x1agent/x1agent/commit/49879c52f4b3ace7412ed702e2d70987156696a8))
+* **comments:** hide share-comment wakes from session timeline (X1A-110 Bug A) ([6c68409](https://github.com/x1agent/x1agent/commit/6c684094213457de4bdbe487f5a15b9457f85f7f))
+* **comments:** keep SharePill snippet inline; drop dead agent fallback ([81366c9](https://github.com/x1agent/x1agent/commit/81366c9d6d4f47547aa9a52726d884510326b011))
+* **sessions:** join sessions to agents for workspace scope in rollupForAgent ([b1fa7bf](https://github.com/x1agent/x1agent/commit/b1fa7bfdbe42f1e5e6852cfcbb89a03d73b1e6ad))
+* **uploads:** write image bytes to /workspace/.x1/uploads + ownership guard + pill render ([c716d2a](https://github.com/x1agent/x1agent/commit/c716d2aecb76ed51cc2d0e7e67bef627d2f690bb)), closes [#2](https://github.com/x1agent/x1agent/issues/2)
+
+
+### Features
+
+* **app:** X1A-104 typing indicator UI for agent thinking ([bafd3ff](https://github.com/x1agent/x1agent/commit/bafd3ff8733e9b37d78d89ab78b363f8ed7c2daf))
+* **comments:** reply-nesting on share comments (X1A-110 Bug B) ([b07fe69](https://github.com/x1agent/x1agent/commit/b07fe690dcbf11608ae5ec69a430268952397c50))
+* **cost:** click-outside + Escape close the floating tree dropdown ([f2f014d](https://github.com/x1agent/x1agent/commit/f2f014d2fe79df38c0368c487e98f273b5cf2a1b))
+* **cost:** collapse session-tree by default; expand on caret click ([6bd7555](https://github.com/x1agent/x1agent/commit/6bd7555aef4dda7e3add867e20edf0a1c05a39f2))
+* **cost:** collapsible top sessions + sparkline day-hover (X1A-115) ([f26fa8d](https://github.com/x1agent/x1agent/commit/f26fa8d2ee58b35b27e3727786c66c267a5d5623))
+* **install:** optional apex-redirect Ingress + configure prompt ([5057288](https://github.com/x1agent/x1agent/commit/50572888c840c5c27f59b843e98c6fdd65d1a994))
+* **prompt-tokens:** shared parser for [image: <uuid>] wire format ([f6f1140](https://github.com/x1agent/x1agent/commit/f6f1140ed57995627f5501cd5e60de27c3e648ef))
+* **sessions:** emit transient session.agent_thinking event on wake ([dffb580](https://github.com/x1agent/x1agent/commit/dffb5805ac514ff92e0c65495f9ec328c216ea30))
+* **uploads:** composer drag/drop + in-prompt pill + agent-side fetch (X1A-98 / X1A-96) ([ea37b59](https://github.com/x1agent/x1agent/commit/ea37b598ce230e3d95c5ea450927ed821221ce8c))
+* **uploads:** image upload backend foundation (X1A-96) ([691b2de](https://github.com/x1agent/x1agent/commit/691b2dedf68e4b9624d6bf5151e8a980d9e1b66b))
+
 ## [1.24.9](https://github.com/x1agent/x1agent/compare/v1.24.8...v1.24.9) (2026-05-13)
 
 
