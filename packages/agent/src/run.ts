@@ -27,6 +27,12 @@ import { fileURLToPath } from "node:url";
 import { normalizeMessage } from "./normalize.js";
 import { createInputChannel } from "./input-channel.js";
 import { IdleTimer } from "./idle-timer.js";
+import {
+  buildAgentThinkingCancelledEvent,
+  buildAgentThinkingEvent,
+  type WakeEnvelopeFields,
+} from "./wake-classifier.js";
+import { createEventCorrelator } from "./event-correlator.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -94,7 +100,17 @@ async function waitForSidecar(timeoutMs = 30_000): Promise<boolean> {
 const eventBuffer: unknown[] = [];
 const listeners = new Set<(event: unknown) => void>();
 
-function emitToStream(event: unknown) {
+/**
+ * X1A-103: track the most recent wake's event_id so we can stamp it
+ * onto the first agent emission for that wake. The frontend uses the
+ * stamped id to deterministically clear the matching agent_thinking
+ * indicator. State machine logic lives in event-correlator.ts so it's
+ * unit-testable without a running agent process.
+ */
+const correlator = createEventCorrelator();
+
+function emitToStream(event: { type: string; payload: unknown }) {
+  correlator.maybeStamp(event);
   eventBuffer.push(event);
   if (eventBuffer.length > 1000) eventBuffer.shift();
   for (const listener of listeners) {
@@ -106,6 +122,30 @@ function emitToStream(event: unknown) {
   }
   // Any agent output (text, tool call, result) keeps the session alive.
   resetIdleTimer();
+}
+
+/**
+ * X1A-103 transient events: pushed to the SSE stream like any other
+ * event, but the api subscriber's persistence skip-list drops them on
+ * the floor (see packages/api/src/nats/subscriber.ts) so they never
+ * land in `session_events`. Goes through the buffer so a wake that
+ * hits /inject before the sidecar's stream consumer has connected
+ * still has its agent_thinking delivered on first connect.
+ *
+ * Distinct from emitToStream because:
+ *   1. Idle-timer is NOT reset (this event is informational, not work).
+ *   2. event_id stamping is skipped (the payload already carries it).
+ */
+function emitTransient(event: { type: string; payload: unknown }) {
+  eventBuffer.push(event);
+  if (eventBuffer.length > 1000) eventBuffer.shift();
+  for (const listener of listeners) {
+    try {
+      listener(event);
+    } catch {
+      // ignore — same close-race tolerance as emitToStream.
+    }
+  }
 }
 
 const streamServer = http.createServer((req, res) => {
@@ -377,12 +417,38 @@ const injectServer = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body) as {
         text?: string;
         request_id?: string;
+        // X1A-103: optional wake-classification fields the sidecar
+        // forwards from the NATS envelope. Older sidecars omit these
+        // — buildAgentThinkingEvent treats absent fields as "user wake
+        // with a fresh event_id" so the indicator still fires.
+        event_id?: string;
+        wake_source?: string;
+        share_id?: string | null;
+        thread_id?: string | null;
+        kind?: string;
+        source?: string;
       };
       if (typeof parsed.text !== "string") {
         res.writeHead(400);
         res.end("text required");
         return;
       }
+      // X1A-103: emit the agent_thinking indicator BEFORE pushing the
+      // wake into the SDK so the UI shows the indicator the instant
+      // the pod receives the wake — not after the LLM call returns.
+      const wakeFields: WakeEnvelopeFields = {
+        event_id: parsed.event_id ?? null,
+        wake_source: parsed.wake_source ?? null,
+        share_id: parsed.share_id ?? null,
+        thread_id: parsed.thread_id ?? null,
+        kind: parsed.kind ?? null,
+        source: parsed.source ?? null,
+        request_id: parsed.request_id ?? null,
+      };
+      const thinking = buildAgentThinkingEvent(sessionId!, wakeFields);
+      correlator.arm(thinking.event_id);
+      emitTransient({ type: thinking.type, payload: thinking });
+
       inputChannel.push(parsed.text, parsed.request_id || undefined);
       // Emit the user message to the stream so the sidecar publishes
       // it on `.events` and the api persists it to session_events. The
@@ -481,6 +547,28 @@ async function shutdown(
   }
   shuttingDown = true;
   idleTimer.dispose();
+  // X1A-103 ghost-indicator safety: if a wake's agent_thinking was
+  // emitted but no agent response stamped its event_id back yet, the
+  // browser still has the indicator pinned. Emit a cancellation so it
+  // clears immediately on graceful shutdown / end_session / idle
+  // timeout. (X1A-104 also applies a 60s client TTL as a backstop —
+  // this is the best-effort server-side fast path.)
+  const orphanedWakeId = correlator.pending();
+  if (orphanedWakeId) {
+    correlator.clear();
+    emitTransient({
+      type: "session.agent_thinking_cancelled",
+      payload: buildAgentThinkingCancelledEvent(
+        sessionId!,
+        orphanedWakeId,
+        "graceful_shutdown",
+      ),
+    });
+    // Give the SSE stream a beat to flush before we tear down. The
+    // sidecar polls bytes from the stream and republishes; the
+    // existing 500ms wait below covers NATS but not the SSE hop.
+    await new Promise((r) => setTimeout(r, 50));
+  }
   await postToSidecar(isSuccess ? "session.completed" : "session.failed", {
     result,
     error,

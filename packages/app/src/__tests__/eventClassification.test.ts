@@ -4,6 +4,7 @@ import {
   compactKind,
   compactTimeline,
   isPublicEventType,
+  isShareCommentWakeEvent,
   latestPublicEvent,
 } from "../features/sessions/eventClassification";
 
@@ -235,5 +236,86 @@ describe("compactTimeline", () => {
     const items = compactTimeline([a, b]);
     // Two distinct rows because there's no share_id to dedupe by.
     expect(items.length).toBe(2);
+  });
+
+  // ── X1A-110 — share-comment wakes ─────────────────────────────────
+  it("drops share-comment-wake user.message rows from the timeline (Bug A)", () => {
+    const human = { ...ev("user.message", 1), payload: { text: "hello" } };
+    const wakeAdded = {
+      ...ev("user.message", 2),
+      payload: {
+        text: "[wake: new comment on share abcd1234]\n...",
+        kind: "comment_added",
+        source: "platform",
+        share_id: "share-1",
+        thread_id: "thread-1",
+        comment_id: "c1",
+      },
+    };
+    const wakeResolved = {
+      ...ev("user.message", 3),
+      payload: {
+        text: "[wake: comment thread resolved on share abcd1234]\n...",
+        kind: "comment_resolved",
+        source: "platform",
+        share_id: "share-1",
+        thread_id: "thread-1",
+      },
+    };
+    const agentText = { ...ev("agent.text", 4), payload: { text: "ack" } };
+    const items = compactTimeline([human, wakeAdded, wakeResolved, agentText]);
+    // The human message + agent.text should survive; both wake rows
+    // should be filtered out entirely — neither user-visible nor
+    // counted in any compacted group.
+    expect(items.length).toBe(2);
+    if (items[0]!.kind !== "event") throw new Error("expected event");
+    expect(items[0]!.event.seq).toBe(1);
+    if (items[1]!.kind !== "event") throw new Error("expected event");
+    expect(items[1]!.event.seq).toBe(4);
+  });
+
+  it("keeps a real user.message that happens to share a payload field name", () => {
+    // Belt-and-braces: we filter on `kind`, NOT on body text. A real
+    // human message with the word "comment" anywhere doesn't trip us.
+    const human = {
+      ...ev("user.message", 1),
+      payload: { text: "I want to leave a comment somewhere" },
+    };
+    const items = compactTimeline([human]);
+    expect(items.length).toBe(1);
+  });
+});
+
+describe("isShareCommentWakeEvent", () => {
+  it("matches payloads tagged with kind=comment_added", () => {
+    expect(
+      isShareCommentWakeEvent({
+        kind: "comment_added",
+        source: "platform",
+      }),
+    ).toBe(true);
+  });
+
+  it("matches payloads tagged with kind=comment_resolved", () => {
+    expect(
+      isShareCommentWakeEvent({
+        kind: "comment_resolved",
+        source: "platform",
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT match orchestration wakes (state_change, watchdog, …)", () => {
+    expect(isShareCommentWakeEvent({ kind: "state_change" })).toBe(false);
+    expect(isShareCommentWakeEvent({ kind: "watchdog" })).toBe(false);
+    expect(isShareCommentWakeEvent({ kind: "heartbeat" })).toBe(false);
+    expect(isShareCommentWakeEvent({ kind: "message" })).toBe(false);
+  });
+
+  it("does NOT match plain human messages (no kind)", () => {
+    expect(isShareCommentWakeEvent({ text: "hi" })).toBe(false);
+    expect(isShareCommentWakeEvent(null)).toBe(false);
+    expect(isShareCommentWakeEvent(undefined)).toBe(false);
+    expect(isShareCommentWakeEvent("plain string")).toBe(false);
   });
 });

@@ -346,56 +346,12 @@ run = "cd packages/app && bun run dev"
 description = "Full local dev with hot reload (devspace dev, blocks)"
 run = "devspace dev --namespace x1agent"
 
-# Same stack, NO hot reload. `devspace deploy` builds the images once
-# and applies the manifests; pods run their baked-in CMD directly
-# (bun on the COPY'd source), with no devspace-restart-helper, no
-# file-sync, no port-forwarding. Rebuild + redeploy is required to
-# pick up code changes. Use when hot-reload / devspace dev-mode is
-# suspected of masking or causing issues and you want a baseline.
-[tasks."dev:cold"]
-description = "Full local dev without hot reload (devspace deploy, one-shot)"
-run = "devspace deploy --namespace x1agent"
-
-# Same stack, NO devspace at all. Plain `docker build` for the 5 dev
-# images, plain `kubectl apply` for the manifests, secrets injected as
-# a K8s Secret built from .env.local. The most deterministic local-up
-# we have — useful for proving the platform works independent of
-# devspace's image-build / hot-reload machinery.
-#
-# Iteration model: edit code → `mise run dev:direct:rebuild <component>`
-# rebuilds that one image and restarts the deployment.
-#   <component> ∈ api | app | provider-preview |
-#                 provider-messaging-slack | provider-graph-surrealdb
-[tasks."dev:direct"]
-description = "Bring the dev stack up without devspace (build + apply + wait)"
-run = "deploy/scripts/dev-direct-up.sh"
-
-[tasks."dev:direct:rebuild"]
-description = "Rebuild one dev image + rollout-restart its deployment: mise run dev:direct:rebuild <api|app|provider-preview|provider-messaging-slack|provider-graph-surrealdb>"
-run = """
-set -euo pipefail
-COMP="{{arg(name='component')}}"
-case "$COMP" in
-  api)                       DF=deploy/docker/api.dev.Dockerfile; DEPLOY=api ;;
-  app)                       DF=deploy/docker/app.dev.Dockerfile; DEPLOY=app ;;
-  provider-preview)          DF=deploy/docker/preview.dev.Dockerfile; DEPLOY=preview ;;
-  provider-messaging-slack)  DF=deploy/docker/messaging-slack.dev.Dockerfile; DEPLOY=messaging-slack ;;
-  provider-graph-surrealdb)  DF=deploy/docker/graph-surrealdb.dev.Dockerfile; DEPLOY=graph-surrealdb ;;
-  *) echo "unknown component: $COMP" >&2; exit 2 ;;
-esac
-echo "[dev:direct:rebuild] building x1agent-$COMP:latest"
-DOCKER_BUILDKIT=1 docker build -f "$DF" -t "x1agent-$COMP:latest" .
-echo "[dev:direct:rebuild] rolling deploy/$DEPLOY"
-kubectl --context=orbstack -n x1agent rollout restart "deploy/$DEPLOY"
-kubectl --context=orbstack -n x1agent rollout status "deploy/$DEPLOY" --timeout=180s
-"""
-
-[tasks."dev:direct:stop"]
-description = "Tear down the dev:direct stack (delete deployments only)"
-run = """
-kubectl -n x1agent delete -f deploy/k8s/dev/ --ignore-not-found
-kubectl -n x1agent delete secret x1agent-dev-secrets --ignore-not-found
-"""
+# Note: `dev:cold` (devspace deploy without hot reload) and `dev:direct`
+# (plain docker+kubectl, no devspace) were removed — neither was ever
+# used in practice. The chart-parity dev loop that actually catches
+# prod drift bugs (different Service ports, RBAC, NATS ACLs) lives in
+# its own follow-up ticket; see "Chart vs dev manifest parity" in
+# CLAUDE.md for the constraint and the planned `dev:chart` mode.
 
 # ----------------------------------------------------------------------------
 # Tests

@@ -78,6 +78,20 @@ spec:
       port: 80
       targetPort: {{ .Values.api.port }}
       protocol: TCP
+    # Direct-port listener. Session sidecars (and the agent pod's
+    # session-spawned containers) dial `http://api:30001` for the
+    # /api/internal/* surface — matches both the dev-cluster Service
+    # (deploy/k8s/dev/api.yaml exposes :30001 directly) and the env
+    # the api injects into spawned pods (`API_URL=http://api:30001`,
+    # see packages/api/src/index.ts apiUrl default). Without this
+    # second port the prod Service only accepts :80, and every
+    # in-cluster HTTP call from a session sidecar (git-credential
+    # fetch, share upload, etc.) fails at the TCP layer with
+    # "error sending request for url".
+    - name: api
+      port: {{ .Values.api.port }}
+      targetPort: {{ .Values.api.port }}
+      protocol: TCP
 ---
 apiVersion: apps/v1
 kind: Deployment

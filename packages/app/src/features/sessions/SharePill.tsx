@@ -222,6 +222,12 @@ function ThreadSnippets({
               <span className="mr-1.5 font-semibold text-fg-muted">
                 {snippetAuthor(latest, currentUserId)}
               </span>
+              {/* Snippet preview keeps its inline, one-shot 240-char
+                  truncation. The fullscreen sidebar owns the
+                  toggleable See-more/See-less affordance; here the
+                  "Open full view →" link below is the right escape
+                  hatch for long bodies — two competing click targets
+                  for "show me more" would be confusing. */}
               {latest.body.length > 240
                 ? latest.body.slice(0, 240) + "…"
                 : latest.body}

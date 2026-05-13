@@ -59,6 +59,23 @@ struct InjectPayload {
     sender_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     request_id: Option<String>,
+    // X1A-103 — wake-classification fields forwarded to the agent so
+    // it can emit `session.agent_thinking` with the right payload
+    // (event_id for correlation, share_id/thread_id for share-comment
+    // wake routing). All optional: a publisher that doesn't stamp
+    // them gets sensible fallbacks on the agent side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wake_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +84,13 @@ pub struct ParsedInput {
     pub sender_id: Option<String>,
     pub request_id: Option<String>,
     pub sequence: u64,
+    // X1A-103 fields. Same nullable semantics as in InjectPayload.
+    pub event_id: Option<String>,
+    pub wake_source: Option<String>,
+    pub share_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub kind: Option<String>,
+    pub source: Option<String>,
 }
 
 /// Parse the user-input NATS message, preferring `text` over `answer`
@@ -89,11 +113,23 @@ pub fn parse_input_message(raw: &[u8]) -> Option<ParsedInput> {
         .and_then(|v| v.as_str())
         .map(String::from);
     let sequence = message.get("sequence").and_then(|v| v.as_u64()).unwrap_or(0);
+    let str_field = |name: &str| {
+        payload
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    };
     Some(ParsedInput {
         text,
         sender_id,
         request_id,
         sequence,
+        event_id: str_field("event_id"),
+        wake_source: str_field("wake_source"),
+        share_id: str_field("share_id"),
+        thread_id: str_field("thread_id"),
+        kind: str_field("kind"),
+        source: str_field("source"),
     })
 }
 
@@ -133,6 +169,12 @@ async fn post_inject(
         text: parsed.text,
         sender_id: parsed.sender_id,
         request_id: parsed.request_id,
+        event_id: parsed.event_id,
+        wake_source: parsed.wake_source,
+        share_id: parsed.share_id,
+        thread_id: parsed.thread_id,
+        kind: parsed.kind,
+        source: parsed.source,
     };
     let resp = client
         .post(inject_url)
@@ -257,6 +299,31 @@ async fn input_subscriber_jetstream(
         let info = msg.info().ok();
         let delivery_count = info.as_ref().map(|i| i.delivered).unwrap_or(0);
 
+        // Per-message freshness gate. Publishers stamp `expires_at`
+        // (epoch ms) so a message that's been queued past its
+        // usefulness window doesn't fire surprise side effects. Stale
+        // → ack-and-drop, never inject. Missing `expires_at` is a
+        // legacy publisher (pre-Wave-1) — process as-is so a chart
+        // upgrade in the middle of a session doesn't lose messages
+        // published by an older browser tab still open.
+        if let Some(expires_at) = peek_expires_at(&msg.payload) {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if now_ms > expires_at {
+                tracing::warn!(
+                    "Dropping stale input (expired {}ms ago, delivery={})",
+                    now_ms.saturating_sub(expires_at),
+                    delivery_count
+                );
+                if let Err(e) = msg.ack().await {
+                    tracing::error!("ack failed on expired: {}", e);
+                }
+                continue;
+            }
+        }
+
         match post_inject(&client, &inject_url, &msg.payload).await {
             Ok(()) => {
                 if let Err(e) = msg.ack().await {
@@ -289,6 +356,17 @@ async fn input_subscriber_jetstream(
         }
     }
     Ok(())
+}
+
+/// Peek `expires_at` (epoch ms) out of an input envelope WITHOUT a
+/// full parse — we only need this one field for the freshness gate.
+/// `serde_json::from_slice::<serde_json::Value>` is cheap; the message
+/// is small (a few hundred bytes typical). Returns None on missing
+/// field, parse failure, or non-numeric value; the caller treats
+/// missing as "no TTL set, process normally".
+fn peek_expires_at(payload: &Bytes) -> Option<u64> {
+    let v: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    v.get("expires_at").and_then(|x| x.as_u64())
 }
 
 /// `x1.session.{id}.presence` → POST /keepalive on the agent. The agent
@@ -349,5 +427,41 @@ mod tests {
     #[test]
     fn parse_input_returns_none_for_invalid_json() {
         assert!(parse_input_message(b"not-json").is_none());
+    }
+
+    // X1A-103 — wake-classification fields the agent uses to emit
+    // session.agent_thinking. Optional on the wire; absent = "user
+    // wake from a legacy publisher."
+
+    #[test]
+    fn parse_input_extracts_event_id_and_wake_source() {
+        let raw = br#"{"payload":{"text":"hi","event_id":"evt-1","wake_source":"user"}}"#;
+        let p = parse_input_message(raw).unwrap();
+        assert_eq!(p.event_id.as_deref(), Some("evt-1"));
+        assert_eq!(p.wake_source.as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn parse_input_extracts_share_comment_routing_fields() {
+        let raw = br#"{"payload":{"text":"hi","kind":"comment_added","share_id":"s-1","thread_id":"t-1","source":"platform","event_id":"comment-1"}}"#;
+        let p = parse_input_message(raw).unwrap();
+        assert_eq!(p.kind.as_deref(), Some("comment_added"));
+        assert_eq!(p.share_id.as_deref(), Some("s-1"));
+        assert_eq!(p.thread_id.as_deref(), Some("t-1"));
+        assert_eq!(p.source.as_deref(), Some("platform"));
+        assert_eq!(p.event_id.as_deref(), Some("comment-1"));
+    }
+
+    #[test]
+    fn parse_input_legacy_publisher_leaves_wake_fields_none() {
+        // Pre-X1A-103 envelope shape — the agent will derive
+        // wake_source=user and mint a fresh event_id.
+        let raw = br#"{"payload":{"text":"hello"}}"#;
+        let p = parse_input_message(raw).unwrap();
+        assert!(p.event_id.is_none());
+        assert!(p.wake_source.is_none());
+        assert!(p.kind.is_none());
+        assert!(p.share_id.is_none());
+        assert!(p.thread_id.is_none());
     }
 }

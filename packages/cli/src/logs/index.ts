@@ -46,6 +46,7 @@ interface ParsedArgs {
   tail: number;
   since: string | null;
   grep: string | null;
+  container: string | null;
   /** Anything after `--` is forwarded verbatim to kubectl. */
   passthrough: string[];
 }
@@ -57,6 +58,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     tail: 200,
     since: null,
     grep: null,
+    container: null,
     passthrough: [],
   };
   // Split on `--` so passthrough flags don't collide with ours.
@@ -77,6 +79,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--since=")) out.since = a.slice(8);
     else if (a === "--grep") out.grep = ours[++i] ?? null;
     else if (a.startsWith("--grep=")) out.grep = a.slice(7);
+    else if (a === "-c" || a === "--container") out.container = ours[++i] ?? null;
+    else if (a.startsWith("--container="))
+      out.container = a.slice("--container=".length);
   }
   return out;
 }
@@ -215,6 +220,7 @@ export async function runLogs(argv: string[]): Promise<number> {
   kubectlArgs.push(`--tail=${args.tail}`);
   if (args.since) kubectlArgs.push(`--since=${args.since}`);
   if (args.follow) kubectlArgs.push("-f");
+  if (args.container) kubectlArgs.push(`--container=${args.container}`);
 
   // Show pod name on each line so multi-pod components stay legible.
   kubectlArgs.push("--prefix");

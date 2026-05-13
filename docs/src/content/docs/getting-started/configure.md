@@ -118,7 +118,7 @@ Switching deployment targets (e.g. `local` → `gcp`) prompts for the new fields
 
 ## Just check, don't prompt
 
-`mise run configure:check` runs the same validation without any TUI. Useful in CI, in scripts, or when you just want to know whether `dev:cold` is going to refuse to start:
+`mise run configure:check` runs the same validation without any TUI. Useful in CI, in scripts, or when you just want to know whether `dev` is going to refuse to start:
 
 ```
 $ mise run configure:check
