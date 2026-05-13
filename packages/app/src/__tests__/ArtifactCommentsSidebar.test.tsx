@@ -296,4 +296,78 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
     fireEvent.click(screen.getByTestId("reply-target-clear"));
     expect(screen.queryByTestId("reply-target-chip")).toBeNull();
   });
+
+  it("reply target clears when shareId changes (no leak across share switches)", () => {
+    // Share A: seed a root comment so we can open a reply target.
+    seedStore([
+      row("c1", "t1", 1, "share A root", "2026-05-12T00:00:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+      }),
+    ]);
+
+    // Also seed share B with a different root so the rerender renders
+    // something — proves the component remounted in a sensible state.
+    const SHARE_B = "sh_other";
+    useShareCommentsStore.setState((s) => ({
+      ...s,
+      byShareId: {
+        ...s.byShareId,
+        [SHARE_B]: [
+          {
+            ...baseRow,
+            id: "c-b1",
+            share_id: SHARE_B,
+            thread_id: "t-b1",
+            seq: 1,
+            body: "share B root",
+            created_at: "2026-05-12T01:00:00Z",
+            author_user_id: null,
+            author_session_id: "sess_agent",
+          },
+        ],
+      },
+      loading: { ...s.loading, [SHARE_B]: false },
+      errors: { ...s.errors, [SHARE_B]: null },
+      shareTypeById: { ...s.shareTypeById, [SHARE_B]: "document" },
+    }));
+
+    const { rerender } = render(
+      <ArtifactCommentsSidebar
+        workspaceSlug={WORKSPACE_SLUG}
+        sessionId={SESSION_ID}
+        shareId={SHARE_ID}
+        shareType="document"
+      />,
+    );
+
+    // Open a reply target on share A.
+    fireEvent.click(screen.getByTestId("reply-button"));
+    expect(screen.getByTestId("reply-target-chip")).toBeTruthy();
+
+    // Drop unsent draft text into the composer so we can prove it
+    // clears too. The composer renders a textarea via ComposerShell.
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    fireEvent.change(textarea, { target: { value: "half-typed reply" } });
+    expect(textarea.value).toBe("half-typed reply");
+
+    // Navigate the sidebar to share B without unmounting — the same
+    // shape as closing share A's flyout and opening share B's while
+    // the ArtifactPanel stays mounted.
+    rerender(
+      <ArtifactCommentsSidebar
+        workspaceSlug={WORKSPACE_SLUG}
+        sessionId={SESSION_ID}
+        shareId={SHARE_B}
+        shareType="document"
+      />,
+    );
+
+    // Reply chip and draft both gone — composer state was per-share.
+    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
+    const textareaB = document.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textareaB).toBeTruthy();
+    expect(textareaB.value).toBe("");
+  });
 });

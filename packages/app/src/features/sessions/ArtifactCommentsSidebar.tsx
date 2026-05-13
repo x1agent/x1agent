@@ -110,6 +110,20 @@ export function ArtifactCommentsSidebar({
     null,
   );
 
+  // X1A-110 follow-up — the sidebar can stay mounted while the user
+  // navigates between shares (e.g. closes the flyout → opens another
+  // share's flyout without the panel unmounting). Without resetting
+  // here, share A's `replyTarget` and unsent draft leak into share B,
+  // and submitting would send share A's `parent_comment_id` against
+  // share B's thread context — the server rejects with
+  // `parent_comment_not_in_thread`, or, depending on timing, the reply
+  // attaches to the wrong thread entirely. Clearing on shareId change
+  // keeps composer state strictly per-share.
+  useEffect(() => {
+    setReplyTarget(null);
+    setDraft("");
+  }, [shareId]);
+
   if (!COMMENTABLE_TYPES.has(shareType)) return null;
 
   if (collapsed) {
