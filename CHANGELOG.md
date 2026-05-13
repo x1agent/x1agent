@@ -1,3 +1,10 @@
+## [1.24.8](https://github.com/x1agent/x1agent/compare/v1.24.7...v1.24.8) (2026-05-13)
+
+
+### Bug Fixes
+
+* **nats:** widen ACL for api comment-wake + sidecar archive subjects ([16d23bb](https://github.com/x1agent/x1agent/commit/16d23bbb34d7ff72f66e9c8342670011dda128d8))
+
 ## [1.24.7](https://github.com/x1agent/x1agent/compare/v1.24.6...v1.24.7) (2026-05-13)
 
 
