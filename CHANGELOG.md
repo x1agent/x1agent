@@ -1,3 +1,10 @@
+## [1.24.9](https://github.com/x1agent/x1agent/compare/v1.24.8...v1.24.9) (2026-05-13)
+
+
+### Bug Fixes
+
+* **agent:** share tool returns share_id + usage hints ([d70d924](https://github.com/x1agent/x1agent/commit/d70d924c2e1b3b528ab77de6abf878403a6dfaa0))
+
 ## [1.24.8](https://github.com/x1agent/x1agent/compare/v1.24.7...v1.24.8) (2026-05-13)
 
 
