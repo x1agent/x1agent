@@ -243,8 +243,16 @@ data:
         {
           user: "CN=x1agent-api"
           permissions: {
-            publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>"{{- if $jsEnabled }}, "$JS.API.>"{{- end }}] }
-            subscribe: { allow: ["x1.session.*.events", "x1.session.*.audit", "_INBOX.>"] }
+            # `agent.>` covers the share-comment + thread-resolved wake
+            # subjects published by the share endpoint and consumed by
+            # the comment-wake subscriber. Without these, NATS silently
+            # rejected the api's own subscription with "Permissions
+            # Violation" and the comment-wake never fired — user-added
+            # comments never reached the producing agent.
+            # `x1.image.build` is the kaniko image-builder queue the
+            # api both publishes to and consumes from.
+            publish:   { allow: ["x1.session.*.input", "x1.provider.>", "x1.providers.>", "x1.orchestration.>", "agent.>", "x1.image.>"{{- if $jsEnabled }}, "$JS.API.>"{{- end }}] }
+            subscribe: { allow: ["x1.session.*.events", "x1.session.*.audit", "agent.>", "x1.image.>", "_INBOX.>"] }
           }
         }
         {
@@ -260,7 +268,14 @@ data:
             # subjects from the client's perspective; the response /
             # delivered messages flow back over _INBOX.> which is
             # already in the subscribe allow list.
-            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
+            #
+            # `x1.session.*.archive` is the Wave 3 split — sidecar
+            # publishes a durable copy of every event for forensic
+            # replay (rfcs/jetstream-migration.md). Without this
+            # permission, every event publish hits a Permissions
+            # Violation log line even when the rest of the pipeline
+            # is healthy.
+            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit", "x1.session.*.archive"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
             subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] }
           }
         }

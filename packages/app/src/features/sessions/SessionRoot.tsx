@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { connect, StringCodec, type NatsConnection } from "nats.ws";
+import {
+  connect,
+  StringCodec,
+  type JetStreamClient,
+  type NatsConnection,
+} from "nats.ws";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
@@ -56,6 +61,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const [resuming, setResuming] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const ncRef = useRef<NatsConnection | null>(null);
+  const jsRef = useRef<JetStreamClient | null>(null);
   const seqRef = useRef(0);
   const takePendingPrompt = usePendingPromptStore((s) => s.take);
   const pendingPromptSentRef = useRef(false);
@@ -122,6 +128,13 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           return;
         }
         ncRef.current = nc;
+        // Browser publishes user input via JetStream so a message
+        // typed during the session-pod warmup window (image pull +
+        // sidecar boot, up to ~30s) is buffered on the broker and
+        // delivered once the sidecar's durable consumer comes up.
+        // Without this, NATS-core's at-most-once delivery dropped
+        // any input the user typed before the sidecar subscribed.
+        jsRef.current = nc.jetstream();
         const sc = StringCodec();
         const sub = nc.subscribe(`x1.session.${sessionId}.events`);
 
@@ -262,9 +275,19 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
 
-  const sendMessage = (text: string, requestId?: string) => {
-    const nc = ncRef.current;
-    if (!nc) return;
+  // User input TTL: drop messages older than this on the consumer.
+  // 2 min is "long enough to cover pod warmup (~30s typical, ~2min
+  // worst-case on cold image pull) but short enough that a stale
+  // message can't run surprise commands hours later when an old
+  // session is revived." Same constant lives in
+  // packages/api/src/orchestration/wake-publisher.ts for server-side
+  // wakes; centralise once the wake-kind→ttl table grows past two
+  // entries.
+  const USER_INPUT_TTL_MS = 2 * 60 * 1000;
+
+  const sendMessage = async (text: string, requestId?: string) => {
+    const js = jsRef.current;
+    if (!js) return;
     const sc = StringCodec();
     const basePayload: Record<string, unknown> = { text };
     const payload: Record<string, unknown> = { ...basePayload };
@@ -272,25 +295,39 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
-    // The agent now emits a user.message (or user.input_response) to
-    // its SSE stream on inject, which the sidecar publishes to NATS
-    // and the api persists to session_events. The browser picks up
-    // that same event via its NATS subscription — so we do NOT add a
-    // local echo here. The round trip is one hop through the pod and
-    // costs ~50–200ms; in exchange the event is durable and survives
-    // page refresh.
+    // The agent emits a user.message (or user.input_response) to its
+    // SSE stream on inject, which the sidecar publishes to NATS and
+    // the api persists to session_events. The browser picks up that
+    // same event via its NATS subscription — so we do NOT add a local
+    // echo here. The round trip is one hop through the pod and costs
+    // ~50–200ms; in exchange the event is durable and survives page
+    // refresh.
     const seq = seqRef.current++;
+    const msgId = `${sessionId}:${seq}:${Date.now()}`;
+    const now = Date.now();
     const envelope = {
       session_id: sessionId,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(now).toISOString(),
       sequence: seq,
       type: requestId ? "user.input_response" : "user.message",
+      expires_at: now + USER_INPUT_TTL_MS,
       payload,
     };
-    nc.publish(
-      `x1.session.${sessionId}.input`,
-      sc.encode(JSON.stringify(envelope)),
-    );
+    try {
+      await js.publish(
+        `x1.session.${sessionId}.input`,
+        sc.encode(JSON.stringify(envelope)),
+        { msgID: msgId },
+      );
+    } catch (err) {
+      // JetStream publish errors are the loud-failure signal: stream
+      // full, broker unreachable, or the X1_SESSION stream isn't
+      // bootstrapped on this cluster. Bubble up so the composer can
+      // show "Send failed — retry" instead of pretending it worked.
+      throw new Error(
+        `failed to publish user input: ${(err as Error).message}`,
+      );
+    }
   };
 
   // Auto-send a pending prompt once the agent is actually up. We wait
@@ -310,7 +347,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     const pending = takePendingPrompt(sessionId);
     if (!pending) return;
     pendingPromptSentRef.current = true;
-    sendMessage(pending);
+    void sendMessage(pending).catch((err) => {
+      console.error("[pending-prompt] send failed", err);
+    });
   }, [events, sessionId, takePendingPrompt]);
 
   // Deep-link: if the URL carries `?share=<shareId>`, open that share in

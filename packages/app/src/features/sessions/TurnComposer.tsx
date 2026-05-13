@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ComposerShell } from "./ComposerShell";
 
 interface Props {
-  onSend: (text: string, requestId?: string) => void;
+  onSend: (text: string, requestId?: string) => void | Promise<void>;
   disabled?: boolean;
   placeholder?: string;
   /** Tiny status pill on the lower-left when present (e.g. "Working…",
@@ -38,7 +38,14 @@ export function TurnComposer({
   const onSubmit = () => {
     const v = text.trim();
     if (!v || disabled) return;
-    onSend(v);
+    // Loud failure: if the JetStream publish rejects (stream full,
+    // broker unreachable, dedup conflict), log it to the browser
+    // console so Sentry catches it via the global handler instead of
+    // letting the message disappear silently. Surface in the UI is a
+    // follow-up; this minimum ensures it's noisy in dev tools.
+    void Promise.resolve(onSend(v)).catch((err) => {
+      console.error("[composer] send failed", err);
+    });
     setText("");
   };
 
