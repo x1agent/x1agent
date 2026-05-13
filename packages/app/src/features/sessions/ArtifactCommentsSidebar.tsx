@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronsLeft, ChevronsRight, MessageSquare, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  ChevronsRight,
+  MessageSquare,
+} from "lucide-react";
 import type { ShareCommentDTO } from "@x1agent/shared";
 import {
   useShareCommentsStore,
@@ -8,13 +13,6 @@ import {
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
 import { ComposerShell } from "./ComposerShell";
-
-/**
- * X1A-110 — depth-1 reply visual indent. ~20px lines up the reply
- * underneath the parent's body text without consuming so much width
- * that the body has to wrap aggressively in the 380px sidebar.
- */
-const REPLY_INDENT_PX = 20;
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -103,26 +101,76 @@ export function ArtifactCommentsSidebar({
   const [justPostedIds, setJustPostedIds] = useState<Set<string>>(
     () => new Set(),
   );
-  // X1A-110 — when set, the composer's "post" submits as a reply to
-  // this comment rather than opening a fresh thread. Toggled by the
-  // per-row "Reply" affordance and by the chip's × clear-button.
-  const [replyTarget, setReplyTarget] = useState<ShareCommentDTO | null>(
-    null,
-  );
+  // View-replace pattern: when a thread is opened, the sidebar swaps
+  // from the channel (list of top-level comments) to a focused
+  // thread-detail view. `activeThreadId === null` is the default
+  // channel mode. Setting it enters the thread; clearing it returns.
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  // Tracks whether the URL deep-link (?thread=…) has been consumed for
+  // the current share. Guards both ways: (a) don't re-apply the URL
+  // once the user has navigated past it; (b) don't write the URL out
+  // before we've had a chance to read it in.
+  const threadDeepLinkAppliedRef = useRef(false);
 
-  // X1A-110 follow-up — the sidebar can stay mounted while the user
-  // navigates between shares (e.g. closes the flyout → opens another
-  // share's flyout without the panel unmounting). Without resetting
-  // here, share A's `replyTarget` and unsent draft leak into share B,
-  // and submitting would send share A's `parent_comment_id` against
-  // share B's thread context — the server rejects with
-  // `parent_comment_not_in_thread`, or, depending on timing, the reply
-  // attaches to the wrong thread entirely. Clearing on shareId change
-  // keeps composer state strictly per-share.
+  // Clear thread + draft when navigating between shares so state from
+  // share A doesn't leak into share B (would otherwise post a reply
+  // against share A's thread_id while viewing share B — server rejects
+  // with `parent_comment_not_in_thread`). Also reset the deep-link
+  // guard so a permalink-shaped URL on the new share gets a chance to
+  // apply.
   useEffect(() => {
-    setReplyTarget(null);
+    setActiveThreadId(null);
     setDraft("");
+    threadDeepLinkAppliedRef.current = false;
   }, [shareId]);
+
+  // Deep-link: pick up `?thread=<id>` from the URL once the threads for
+  // this share have loaded. Pairs with the URL-write effect below so a
+  // pasted permalink lands on the right thread; an invalid id (stale
+  // link, different share) is silently dropped.
+  useEffect(() => {
+    if (threadDeepLinkAppliedRef.current) return;
+    if (typeof window === "undefined") return;
+    if (threads.length === 0) return;
+    threadDeepLinkAppliedRef.current = true;
+    const target = new URLSearchParams(window.location.search).get("thread");
+    if (target && threads.some((t) => t.thread_id === target)) {
+      setActiveThreadId(target);
+    }
+  }, [threads]);
+
+  // State → URL. Mirrors the `?share=` sync in artifactPanelStore so the
+  // URL stays canonical: someone pastes the URL and lands on the same
+  // thread. `replaceState` (not `pushState`) — opening / closing a
+  // thread isn't a navigable history step.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!threadDeepLinkAppliedRef.current) return;
+    const url = new URL(window.location.href);
+    if (activeThreadId) {
+      if (url.searchParams.get("thread") !== activeThreadId) {
+        url.searchParams.set("thread", activeThreadId);
+        window.history.replaceState({}, "", url.toString());
+      }
+    } else if (url.searchParams.has("thread")) {
+      url.searchParams.delete("thread");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [activeThreadId]);
+
+  // If a thread is opened and disappears from the underlying rows (e.g.
+  // share switched, thread resolved + removed), bail back to channel
+  // rather than rendering an empty thread. Lives ABOVE the early
+  // returns so the hook order is stable when shareType swaps between
+  // commentable and non-commentable artifacts.
+  useEffect(() => {
+    if (
+      activeThreadId &&
+      !threads.some((t) => t.thread_id === activeThreadId)
+    ) {
+      setActiveThreadId(null);
+    }
+  }, [activeThreadId, threads]);
 
   if (!COMMENTABLE_TYPES.has(shareType)) return null;
 
@@ -137,35 +185,41 @@ export function ArtifactCommentsSidebar({
           onClick={toggleCollapsed}
           aria-label="Expand comments"
           title="Show comments"
-          className="flex flex-col items-center gap-1 rounded-md p-1.5 text-fg-faint hover:bg-bg-elevated hover:text-fg-muted"
+          className="rounded-md p-1.5 text-fg-faint hover:bg-bg-elevated hover:text-fg-muted"
         >
-          <ChevronsLeft className="size-4" />
-          <MessageSquare className="size-4" />
-          {threads.length > 0 && (
-            <span className="text-[10px] font-medium tabular-nums text-accent">
-              {threads.length}
-            </span>
-          )}
+          <span className="relative inline-block">
+            <MessageSquare className="size-4" />
+            {threads.length > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 min-w-[14px] rounded-full bg-accent px-1 text-center text-[9px] font-semibold leading-[14px] tabular-nums text-bg">
+                {threads.length}
+              </span>
+            )}
+          </span>
         </button>
       </aside>
     );
   }
+
+  // Derived lookups for the currently-active thread (post early returns —
+  // these are not hooks, just convenience).
+  const activeThread = activeThreadId
+    ? threads.find((t) => t.thread_id === activeThreadId) ?? null
+    : null;
+  const activeTopLevel = activeThread?.comments[0] ?? null;
 
   const submit = async () => {
     const body = draft.trim();
     if (!body || posting) return;
     setPosting(true);
     try {
-      // X1A-110 — when replying, target the parent's thread and carry
-      // its id so the server persists the reply hierarchy. The composer
-      // clears reply state after a successful post so the next message
-      // defaults to a fresh thread again (the chat-y default).
-      const posted = replyTarget
+      // Channel mode → new top-level (new thread).
+      // Thread mode → reply to the active thread's top-level.
+      const posted = activeTopLevel
         ? await add(key, {
             scope: "share",
             body,
-            thread_id: replyTarget.thread_id,
-            parent_comment_id: replyTarget.id,
+            thread_id: activeTopLevel.thread_id,
+            parent_comment_id: activeTopLevel.id,
           })
         : await add(key, { scope: "share", body });
       setJustPostedIds((prev) => {
@@ -174,7 +228,6 @@ export function ArtifactCommentsSidebar({
         return next;
       });
       setDraft("");
-      setReplyTarget(null);
     } finally {
       setPosting(false);
     }
@@ -186,12 +239,27 @@ export function ArtifactCommentsSidebar({
       className="flex h-full w-[380px] shrink-0 flex-col border-l border-border-soft bg-bg"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border-soft px-4 py-3">
-        <MessageSquare className="size-4 text-fg-muted" />
-        <div className="min-w-0 flex-1 text-sm font-medium text-fg">
-          Comments
-          <span className="ml-2 text-[12px] font-normal text-fg-faint">
-            {threads.length} {threads.length === 1 ? "thread" : "threads"}
-          </span>
+        {activeThreadId ? (
+          <button
+            type="button"
+            onClick={() => setActiveThreadId(null)}
+            aria-label="Back to all comments"
+            title="Back to all comments"
+            className="shrink-0 rounded-md p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+            data-testid="comment-thread-back"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+        ) : (
+          <MessageSquare className="size-4 text-fg-muted" />
+        )}
+        <div className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
+          {activeThreadId ? "Thread" : "Comments"}
+          {!activeThreadId && (
+            <span className="ml-2 text-[12px] font-normal text-fg-faint">
+              {threads.length} {threads.length === 1 ? "thread" : "threads"}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -204,25 +272,25 @@ export function ArtifactCommentsSidebar({
         </button>
       </header>
 
-      <ThreadList
-        rows={rows}
-        threads={threads}
-        loading={loading}
-        errorMsg={errorMsg}
-        currentUserId={currentUserId}
-        justPostedIds={justPostedIds}
-        replyTargetId={replyTarget?.id ?? null}
-        onReply={setReplyTarget}
-      />
+      {activeThread ? (
+        <ThreadDetail
+          thread={activeThread}
+          currentUserId={currentUserId}
+          justPostedIds={justPostedIds}
+        />
+      ) : (
+        <ThreadList
+          rows={rows}
+          threads={threads}
+          loading={loading}
+          errorMsg={errorMsg}
+          currentUserId={currentUserId}
+          justPostedIds={justPostedIds}
+          onOpenThread={setActiveThreadId}
+        />
+      )}
 
       <div className="shrink-0 border-t border-border-soft px-3 pb-3 pt-3">
-        {replyTarget && (
-          <ReplyTargetChip
-            target={replyTarget}
-            currentUserId={currentUserId}
-            onClear={() => setReplyTarget(null)}
-          />
-        )}
         <ComposerShell
           value={draft}
           onChange={setDraft}
@@ -230,7 +298,7 @@ export function ArtifactCommentsSidebar({
           busy={posting}
           canSend={!!draft.trim() && !posting}
           placeholder={
-            replyTarget ? "Write a reply…" : "Comment on this share…"
+            activeThread ? "Reply in thread…" : "Comment on this share…"
           }
           showAttachButton={false}
           hint={null}
@@ -255,8 +323,7 @@ function ThreadList({
   errorMsg,
   currentUserId,
   justPostedIds,
-  replyTargetId,
-  onReply,
+  onOpenThread,
 }: {
   rows: ShareCommentDTO[];
   threads: ReturnType<typeof groupThreads>;
@@ -264,11 +331,9 @@ function ThreadList({
   errorMsg: string | null;
   currentUserId: string | null;
   justPostedIds: Set<string>;
-  /** X1A-110 — id of the comment the composer is currently replying to,
-   *  or null. Used to highlight that row in the thread list. */
-  replyTargetId: string | null;
-  /** X1A-110 — called when a "Reply" button is clicked on a row. */
-  onReply: (comment: ShareCommentDTO) => void;
+  /** Channel-mode caller — entering a thread swaps the sidebar to the
+   *  focused thread-detail view. */
+  onOpenThread: (threadId: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // Distance-from-bottom threshold (px). Anything within this counts
@@ -327,30 +392,133 @@ function ThreadList({
           No comments yet. Start the first thread below.
         </div>
       )}
-      {threads.map((t) => (
-        <div
-          key={t.thread_id}
-          className="mb-3 rounded-md border border-border-soft bg-bg-elevated p-2.5"
-          data-testid="comment-thread"
-        >
-          {t.scope === "passage" && t.anchor?.selection.quoted_text && (
-            <blockquote className="mb-2 border-l-2 border-border-soft pl-2 text-[12px] italic text-fg-faint">
-              {t.anchor.selection.quoted_text}
-            </blockquote>
-          )}
-          {t.comments.map((c, i) => (
+      {threads.map((t) => {
+        const top = t.comments[0]!;
+        const replyCount = t.comments.length - 1;
+        return (
+          <div
+            key={t.thread_id}
+            className="mb-3 rounded-md bg-bg-elevated p-2.5"
+            data-testid="comment-thread"
+          >
+            {t.scope === "passage" && t.anchor?.selection.quoted_text && (
+              <blockquote className="mb-2 border-l-2 border-border-soft pl-2 text-[12px] italic text-fg-faint">
+                {t.anchor.selection.quoted_text}
+              </blockquote>
+            )}
             <CommentRow
-              key={c.id}
-              comment={c}
+              comment={top}
               currentUserId={currentUserId}
-              isFirst={i === 0}
-              initialExpanded={justPostedIds.has(c.id)}
-              isReplyTarget={replyTargetId === c.id}
-              onReply={onReply}
+              isFirst={true}
+              initialExpanded={justPostedIds.has(top.id)}
             />
-          ))}
+            <button
+              type="button"
+              onClick={() => onOpenThread(t.thread_id)}
+              className="mt-2 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1 text-[12px] text-fg-faint hover:border-border-soft hover:bg-bg hover:text-fg-muted"
+              data-testid="thread-open"
+              data-thread-id={t.thread_id}
+            >
+              {replyCount === 0 ? (
+                <span>Reply</span>
+              ) : (
+                <>
+                  <span className="font-medium text-fg-muted">
+                    {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                  </span>
+                  <span>View thread</span>
+                </>
+              )}
+              <ChevronRight className="ml-auto size-3" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * View-replace thread-detail. Shown when the user has clicked a thread
+ * footer in the channel — the sidebar swaps to render this until the
+ * Back button is hit. Pinned top-level comment + chronological replies
+ * + (inherited) composer at the bottom of the parent. The composer is
+ * a sibling of this component; this just renders the rows.
+ */
+function ThreadDetail({
+  thread,
+  currentUserId,
+  justPostedIds,
+}: {
+  thread: ReturnType<typeof groupThreads>[number];
+  currentUserId: string | null;
+  justPostedIds: Set<string>;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const AT_BOTTOM_PX = 32;
+  const wasAtBottomRef = useRef(true);
+  const lastCountRef = useRef(thread.comments.length);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
+      wasAtBottomRef.current = dist <= AT_BOTTOM_PX;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const prev = lastCountRef.current;
+    lastCountRef.current = thread.comments.length;
+    if (thread.comments.length > prev && wasAtBottomRef.current) {
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      });
+    }
+  }, [thread.comments.length]);
+
+  const [top, ...replies] = thread.comments;
+  return (
+    <div
+      ref={scrollerRef}
+      className="flex-1 overflow-auto px-3 py-3"
+      data-testid="comment-thread-detail"
+    >
+      {thread.scope === "passage" && thread.anchor?.selection.quoted_text && (
+        <blockquote className="mb-2 border-l-2 border-border-soft pl-2 text-[12px] italic text-fg-faint">
+          {thread.anchor.selection.quoted_text}
+        </blockquote>
+      )}
+      {top && (
+        <div className="mb-3 rounded-md bg-bg-elevated p-2.5">
+          <CommentRow
+            comment={top}
+            currentUserId={currentUserId}
+            isFirst={true}
+            initialExpanded={justPostedIds.has(top.id)}
+          />
         </div>
-      ))}
+      )}
+      {/* Replies share the same horizontal indent as the anchor card's
+          inner text so names + bodies line up vertically. Anchor uses
+          p-2.5 above; mirror its horizontal padding here. */}
+      <div className="px-2.5">
+        {replies.map((c, i) => (
+          <CommentRow
+            key={c.id}
+            comment={c}
+            currentUserId={currentUserId}
+            isFirst={i === 0}
+            initialExpanded={justPostedIds.has(c.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -360,78 +528,29 @@ function CommentRow({
   currentUserId,
   isFirst,
   initialExpanded,
-  isReplyTarget,
-  onReply,
 }: {
   comment: ShareCommentDTO;
   currentUserId: string | null;
   isFirst: boolean;
   initialExpanded: boolean;
-  /** X1A-110 — highlight the row currently being replied to. */
-  isReplyTarget: boolean;
-  /** X1A-110 — caller wires this to the composer's reply target setter. */
-  onReply: (comment: ShareCommentDTO) => void;
 }) {
   const author = formatAuthor(comment, currentUserId);
-  // X1A-105: agent comments take the full thread width; user comments
-  // (own or someone else's) sit in an inset right-aligned bubble so
-  // the user vs agent rhythm is unambiguous at a glance.
   const isUser = !comment.author_session_id;
-  // X1A-110 — depth-1 indent for replies. We only indent rows whose
-  // own parent_comment_id is set; the depth-1 cap is enforced
-  // server-side so we don't need to walk the chain client-side.
   const isReply = comment.parent_comment_id !== null;
-  // Top-level + reply both contribute vertical spacing once they're
-  // not the very first row in the thread. Replies get the indent
-  // applied to the wrapper so both the user-bubble flex-justify and
-  // the agent block alignment respect it uniformly.
   const wrapperClass = isFirst ? "" : "mt-2";
-  const indentStyle: React.CSSProperties | undefined = isReply
-    ? { marginLeft: `${REPLY_INDENT_PX}px` }
-    : undefined;
-  const targetHighlight = isReplyTarget
-    ? " ring-1 ring-accent rounded-md"
-    : "";
 
-  if (isUser) {
-    return (
-      <div
-        className={`${wrapperClass} flex justify-end${targetHighlight}`}
-        style={indentStyle}
-        data-comment-author={comment.author_user_id ?? "unknown"}
-        data-author-kind="user"
-        data-comment-id={comment.id}
-        data-is-reply={isReply ? "true" : "false"}
-      >
-        <div className="max-w-[85%] rounded-md bg-bg/70 px-2.5 py-1.5 text-[13px]">
-          <div className="mb-0.5 flex items-baseline gap-2">
-            <span className="text-[12px] font-semibold text-fg-muted">
-              {author}
-            </span>
-            <span className="text-[11px] text-fg-faint">
-              {formatRelativeTime(comment.created_at)}
-            </span>
-          </div>
-          <ClippableBody
-            body={comment.body}
-            initialExpanded={initialExpanded}
-          />
-          <ReplyAction
-            comment={comment}
-            isReply={isReply}
-            onReply={onReply}
-          />
-        </div>
-      </div>
-    );
-  }
-
+  // Slack-style: same full-width row for everyone. Author is conveyed
+  // by the name label only. `data-author-kind` stays stable as a hook
+  // for future accent treatments (avatar / colour on name).
   return (
     <div
-      className={`${wrapperClass} block w-full text-[13px]${targetHighlight}`}
-      style={indentStyle}
-      data-comment-author={comment.author_session_id}
-      data-author-kind="agent"
+      className={`${wrapperClass} block w-full text-[13px]`}
+      data-comment-author={
+        isUser
+          ? comment.author_user_id ?? "unknown"
+          : comment.author_session_id
+      }
+      data-author-kind={isUser ? "user" : "agent"}
       data-comment-id={comment.id}
       data-is-reply={isReply ? "true" : "false"}
     >
@@ -444,76 +563,6 @@ function CommentRow({
         </span>
       </div>
       <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
-      <ReplyAction comment={comment} isReply={isReply} onReply={onReply} />
-    </div>
-  );
-}
-
-/**
- * X1A-110 — small inline "Reply" button shown on every comment row.
- * For depth-1: a reply itself can NOT be replied to (the server would
- * reject with `nested_reply_not_supported`), so we hide the action
- * on rows that are already replies. v1 keeps threads scannable.
- */
-function ReplyAction({
-  comment,
-  isReply,
-  onReply,
-}: {
-  comment: ShareCommentDTO;
-  isReply: boolean;
-  onReply: (comment: ShareCommentDTO) => void;
-}) {
-  if (isReply) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => onReply(comment)}
-      className="mt-1 text-[11px] text-fg-faint hover:text-accent"
-      data-testid="reply-button"
-    >
-      Reply
-    </button>
-  );
-}
-
-/**
- * X1A-110 — chip rendered above the composer when a reply target is
- * set. Mirrors the Slack-style "Replying to [name]: snippet" affordance.
- * The × clears the target so the next post defaults back to opening a
- * new thread.
- */
-function ReplyTargetChip({
-  target,
-  currentUserId,
-  onClear,
-}: {
-  target: ShareCommentDTO;
-  currentUserId: string | null;
-  onClear: () => void;
-}) {
-  const who = formatAuthor(target, currentUserId);
-  const snippet =
-    target.body.length > 60 ? `${target.body.slice(0, 60)}…` : target.body;
-  return (
-    <div
-      data-testid="reply-target-chip"
-      className="mb-2 flex min-w-0 items-center gap-1.5 rounded-md border border-accent-soft bg-bg-elevated/60 px-2 py-1 text-[11px] text-fg-muted"
-    >
-      <span className="shrink-0 text-fg-faint">Replying to</span>
-      <span className="shrink-0 font-semibold">{who}:</span>
-      <span className="truncate" title={target.body}>
-        {snippet}
-      </span>
-      <button
-        type="button"
-        onClick={onClear}
-        aria-label="Cancel reply"
-        className="ml-auto shrink-0 rounded p-0.5 text-fg-faint hover:bg-bg hover:text-fg"
-        data-testid="reply-target-clear"
-      >
-        <X className="size-3" />
-      </button>
     </div>
   );
 }

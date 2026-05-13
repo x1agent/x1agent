@@ -129,22 +129,29 @@ function renderSidebar() {
 }
 
 describe("ArtifactCommentsSidebar — ordering (X1A-105)", () => {
-  it("renders replies inside a thread oldest-first regardless of insert order", () => {
+  it("renders replies inside a thread oldest-first regardless of insert order (visible in thread-detail)", () => {
     seedStore([
-      row("c2", "t1", 2, "second comment body", "2026-05-12T01:00:00Z"),
+      row("c2", "t1", 2, "second comment body", "2026-05-12T01:00:00Z", {
+        parent_comment_id: "c1",
+      }),
       row("c1", "t1", 1, "first comment body", "2026-05-12T00:00:00Z"),
-      row("c3", "t1", 3, "third comment body", "2026-05-12T02:00:00Z"),
+      row("c3", "t1", 3, "third comment body", "2026-05-12T02:00:00Z", {
+        parent_comment_id: "c1",
+      }),
     ]);
 
     renderSidebar();
+    // Replies live in thread-detail under the view-replace model. Open
+    // the thread so we can assert their order.
+    fireEvent.click(screen.getByTestId("thread-open"));
 
+    const detail = screen.getByTestId("comment-thread-detail");
     const bodies = Array.from(
-      document.querySelectorAll("[data-comment-author]"),
+      detail.querySelectorAll("[data-comment-author]"),
     ).map((el) => el.textContent ?? "");
 
-    // The first rendered row's body contains "first", the next "second",
-    // the last "third" — proves seq-ascending order regardless of how
-    // rows were inserted into the store.
+    // Seq-ascending: first, then second, then third — regardless of the
+    // order they were inserted into the store.
     expect(bodies[0]).toContain("first comment body");
     expect(bodies[1]).toContain("second comment body");
     expect(bodies[2]).toContain("third comment body");
@@ -168,16 +175,25 @@ describe("ArtifactCommentsSidebar — ordering (X1A-105)", () => {
 });
 
 describe("ArtifactCommentsSidebar — author rhythm (X1A-105)", () => {
-  it("marks agent comments as full-width and user comments as inset", () => {
+  it("renders user and agent comments at the same full row width (slack-style); data-author-kind preserves the distinction for future styling", () => {
+    // Two separate threads — one user-started, one agent-started — so
+    // both rows surface in the channel view (where only top-levels show).
     seedStore([
-      row("c1", "t1", 1, "user opens thread", "2026-05-12T00:00:00Z", {
+      row("c1", "t-user", 1, "user opens thread", "2026-05-12T00:00:00Z", {
         author_user_id: CURRENT_USER_ID,
         author_session_id: null,
       }),
-      row("c2", "t1", 2, "agent replies in full width", "2026-05-12T00:01:00Z", {
-        author_user_id: null,
-        author_session_id: "sess_agent",
-      }),
+      row(
+        "c2",
+        "t-agent",
+        1,
+        "agent starts another thread",
+        "2026-05-12T00:01:00Z",
+        {
+          author_user_id: null,
+          author_session_id: "sess_agent",
+        },
+      ),
     ]);
 
     renderSidebar();
@@ -187,18 +203,13 @@ describe("ArtifactCommentsSidebar — author rhythm (X1A-105)", () => {
     ) as HTMLElement[];
 
     expect(rows.length).toBe(2);
-    // Order matches the chronological render order from the test
-    // above — first row is the user, second is the agent.
     expect(rows[0]!.getAttribute("data-author-kind")).toBe("user");
     expect(rows[1]!.getAttribute("data-author-kind")).toBe("agent");
 
-    // The class hooks let the rest of the app (and the visual
-    // designer reading the DOM in devtools) tell the two apart.
-    // User rows live inside a `flex justify-end` parent so the
-    // inset bubble sits to the right; agent rows render as a
-    // block at full width.
-    expect(rows[0]!.className).toContain("justify-end");
+    // Slack-style — same full-width row for both, no justify-end inset.
+    expect(rows[0]!.className).toContain("w-full");
     expect(rows[1]!.className).toContain("w-full");
+    expect(rows[0]!.className).not.toContain("justify-end");
   });
 });
 
@@ -223,13 +234,13 @@ describe("ArtifactCommentsSidebar — long-comment truncation (X1A-105)", () => 
   });
 });
 
-// ── X1A-110 — reply-nesting affordance + indent ──────────────────────
-describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
-  it("renders a reply at the depth-1 indent under its parent", () => {
+// ── X1A-110 — view-replace thread detail (Slack-style) ──────────────
+describe("ArtifactCommentsSidebar — view-replace thread (X1A-110)", () => {
+  it("channel mode renders only the top-level of each thread; replies are hidden behind the footer", () => {
     seedStore([
       row("c1", "t1", 1, "root body", "2026-05-12T00:00:00Z", {
         author_user_id: null,
-        author_session_id: "sess_agent", // agent → full-width row
+        author_session_id: "sess_agent",
       }),
       row("c2", "t1", 2, "the reply body", "2026-05-12T00:01:00Z", {
         author_user_id: null,
@@ -244,22 +255,39 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
       document.querySelectorAll("[data-comment-id]"),
     ) as HTMLElement[];
 
-    expect(rows).toHaveLength(2);
-    // Root row has no indent.
-    expect(rows[0]!.getAttribute("data-is-reply")).toBe("false");
-    expect(rows[0]!.style.marginLeft).toBe("");
-    // Reply row carries the ~20px indent.
-    expect(rows[1]!.getAttribute("data-is-reply")).toBe("true");
-    expect(rows[1]!.style.marginLeft).toBe("20px");
+    // Only one row visible in channel mode — the top-level. The reply
+    // lives inside the thread-detail view, which we haven't opened.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("data-comment-id")).toBe("c1");
+
+    // The footer reports the reply count.
+    const opener = screen.getByTestId("thread-open");
+    expect(opener.textContent).toContain("1 reply");
   });
 
-  it("renders a Reply button on top-level rows and HIDES it on replies (depth-1 cap)", () => {
+  it("footer reads 'Reply' for a thread with no replies yet", () => {
     seedStore([
-      row("c1", "t1", 1, "root", "2026-05-12T00:00:00Z", {
+      row("c1", "t1", 1, "lonely root", "2026-05-12T00:00:00Z", {
         author_user_id: null,
         author_session_id: "sess_agent",
       }),
-      row("c2", "t1", 2, "reply", "2026-05-12T00:01:00Z", {
+    ]);
+    renderSidebar();
+    expect(screen.getByTestId("thread-open").textContent).toBe("Reply");
+  });
+
+  it("clicking the footer enters thread-detail; back button returns to channel mode", () => {
+    seedStore([
+      row("c1", "t1", 1, "the root", "2026-05-12T00:00:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+      }),
+      row("c2", "t1", 2, "an earlier reply", "2026-05-12T00:01:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+        parent_comment_id: "c1",
+      }),
+      row("c3", "t1", 3, "a later reply", "2026-05-12T00:02:00Z", {
         author_user_id: null,
         author_session_id: "sess_agent",
         parent_comment_id: "c1",
@@ -268,37 +296,30 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
 
     renderSidebar();
 
-    const replyButtons = screen.queryAllByTestId("reply-button");
-    // Only the root has a Reply affordance — a reply itself cannot be
-    // replied to in v1 (server would 400 `nested_reply_not_supported`).
-    expect(replyButtons).toHaveLength(1);
-  });
+    // Open the thread.
+    fireEvent.click(screen.getByTestId("thread-open"));
 
-  it("clicking Reply opens the chip, X clears it", () => {
-    seedStore([
-      row("c1", "t1", 1, "root", "2026-05-12T00:00:00Z", {
-        author_user_id: null,
-        author_session_id: "sess_agent",
-      }),
+    // Detail view is up; all three comments visible, in seq order.
+    const detail = screen.getByTestId("comment-thread-detail");
+    const detailRows = Array.from(
+      detail.querySelectorAll("[data-comment-id]"),
+    ) as HTMLElement[];
+    expect(detailRows.map((r) => r.getAttribute("data-comment-id"))).toEqual([
+      "c1",
+      "c2",
+      "c3",
     ]);
+    // The composer placeholder switches to reply-in-thread.
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.placeholder).toContain("Reply");
 
-    renderSidebar();
-
-    // No chip before the user clicks Reply.
-    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
-
-    fireEvent.click(screen.getByTestId("reply-button"));
-
-    const chip = screen.getByTestId("reply-target-chip");
-    expect(chip.textContent).toContain("Replying to");
-    expect(chip.textContent).toContain("root");
-
-    fireEvent.click(screen.getByTestId("reply-target-clear"));
-    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
+    // Back button returns to channel.
+    fireEvent.click(screen.getByTestId("comment-thread-back"));
+    expect(screen.queryByTestId("comment-thread-detail")).toBeNull();
+    expect(screen.getByTestId("comment-thread-list")).toBeTruthy();
   });
 
-  it("reply target clears when shareId changes (no leak across share switches)", () => {
-    // Share A: seed a root comment so we can open a reply target.
+  it("thread state clears when shareId changes (no leak across share switches)", () => {
     seedStore([
       row("c1", "t1", 1, "share A root", "2026-05-12T00:00:00Z", {
         author_user_id: null,
@@ -306,8 +327,6 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
       }),
     ]);
 
-    // Also seed share B with a different root so the rerender renders
-    // something — proves the component remounted in a sensible state.
     const SHARE_B = "sh_other";
     useShareCommentsStore.setState((s) => ({
       ...s,
@@ -341,20 +360,14 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
       />,
     );
 
-    // Open a reply target on share A.
-    fireEvent.click(screen.getByTestId("reply-button"));
-    expect(screen.getByTestId("reply-target-chip")).toBeTruthy();
+    // Open the thread on share A.
+    fireEvent.click(screen.getByTestId("thread-open"));
+    expect(screen.getByTestId("comment-thread-detail")).toBeTruthy();
 
-    // Drop unsent draft text into the composer so we can prove it
-    // clears too. The composer renders a textarea via ComposerShell.
+    // Half-typed draft in the in-thread composer.
     const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea).toBeTruthy();
     fireEvent.change(textarea, { target: { value: "half-typed reply" } });
-    expect(textarea.value).toBe("half-typed reply");
 
-    // Navigate the sidebar to share B without unmounting — the same
-    // shape as closing share A's flyout and opening share B's while
-    // the ArtifactPanel stays mounted.
     rerender(
       <ArtifactCommentsSidebar
         workspaceSlug={WORKSPACE_SLUG}
@@ -364,10 +377,10 @@ describe("ArtifactCommentsSidebar — reply nesting (X1A-110)", () => {
       />,
     );
 
-    // Reply chip and draft both gone — composer state was per-share.
-    expect(screen.queryByTestId("reply-target-chip")).toBeNull();
+    // Snap-back to channel mode for share B, draft cleared.
+    expect(screen.queryByTestId("comment-thread-detail")).toBeNull();
+    expect(screen.getByTestId("comment-thread-list")).toBeTruthy();
     const textareaB = document.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textareaB).toBeTruthy();
     expect(textareaB.value).toBe("");
   });
 });
