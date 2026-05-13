@@ -918,8 +918,38 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     } catch {
       return c.json({ error: "invalid_id" }, 400);
     }
+    // Ownership check (X1A-96 security boundary). The internal token
+    // alone proves "this caller is inside the cluster"; it doesn't
+    // prove "this caller's session is allowed to read this upload."
+    // Without the user_id check, a compromised or buggy agent in
+    // session A could fetch any upload id it learned of — including
+    // ones attached to a different user's session. We require the
+    // caller to name the user_id they're acting as, and refuse if the
+    // upload row's creator doesn't match. 404 (not 403) so the route
+    // never leaks the existence of someone else's upload.
+    //
+    // For an extra belt: when the upload row has a session_id set, we
+    // also require the caller's session_id to match (so the same
+    // user's other sessions can't trivially read uploads attached
+    // elsewhere). Unattached uploads (session_id null) skip that
+    // check since they haven't been bound yet.
+    const callerUserId = c.req.query("user_id");
+    const callerSessionId = c.req.query("session_id");
+    if (!callerUserId) {
+      return c.json({ error: "user_id_required" }, 400);
+    }
     const upload = await cfg.uploads.findById(id);
     if (!upload) return c.json({ error: "not_found" }, 404);
+    if (upload.userId !== callerUserId) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (
+      upload.sessionId !== null &&
+      callerSessionId &&
+      upload.sessionId !== callerSessionId
+    ) {
+      return c.json({ error: "not_found" }, 404);
+    }
     if (upload.status !== "ready" && upload.status !== "attached") {
       return c.json({ error: "upload_not_ready" }, 409);
     }
