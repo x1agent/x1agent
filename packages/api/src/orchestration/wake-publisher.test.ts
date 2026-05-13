@@ -272,6 +272,119 @@ describe("publishStateChangeWake", () => {
   });
 });
 
+describe("X1A-103 — event_id stamping (indicator correlation)", () => {
+  it("publishStateChangeWake stamps event_id matching the JetStream msgId", async () => {
+    const parentAgent = await makeAgent("orch", "orchestrator");
+    const childAgent = await makeAgent("worker", "worker");
+    const parent = await sessions.create({
+      agentId: parentAgent.id,
+      triggeredBy: "user",
+      triggeredByUserId: uuid(1) as never,
+      parentSessionId: null,
+      parentAgentId: null,
+      resumedFromSessionId: null,
+      triggeredAt: new Date(),
+    });
+    const child = await sessions.create({
+      agentId: childAgent.id,
+      triggeredBy: "agent",
+      triggeredByUserId: null,
+      parentSessionId: parent.id,
+      parentAgentId: parentAgent.id,
+      resumedFromSessionId: null,
+      triggeredAt: new Date(),
+    });
+
+    await publishStateChangeWake(deps(), child, "complete", new Date(), null);
+
+    const body = nats.published[0]!.body as {
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toBe(
+      `wake.state_change.${child.id}.complete`,
+    );
+  });
+
+  it("publishWatchdogWake stamps event_id = msgId", async () => {
+    await publishWatchdogWake(nats as never, "p-1", "c-1", "child-slug", 120, 3);
+    const body = nats.published[0]!.body as {
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toBe("wake.watchdog.p-1.c-1.3");
+  });
+
+  it("publishCheckupWake stamps event_id = msgId (timestamp-based)", async () => {
+    await publishCheckupWake(nats as never, "p-1", []);
+    const body = nats.published[0]!.body as {
+      timestamp: string;
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toBe(
+      `wake.checkup.p-1.${body.timestamp}`,
+    );
+  });
+
+  it("publishHeartbeatWake stamps event_id = msgId", async () => {
+    await publishHeartbeatWake(nats as never, "s-1", "do the thing");
+    const body = nats.published[0]!.body as {
+      timestamp: string;
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toBe(
+      `wake.heartbeat.s-1.${body.timestamp}`,
+    );
+  });
+
+  it("publishMessageWake stamps event_id = content-hash msgId", async () => {
+    await publishMessageWake(nats as never, "p-1", {
+      childSessionId: "c-1",
+      childSlug: "child",
+      summary: "hello",
+      body: "world",
+      needsResponse: false,
+    });
+    const body = nats.published[0]!.body as {
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toMatch(/^wake\.message\.[0-9a-f]{64}$/);
+  });
+
+  it("publishCommentAddedWake stamps event_id = comment_id (locked spec mapping)", async () => {
+    await publishCommentAddedWake(nats as never, uuid(0xBB01), {
+      shareId: "share-1",
+      threadId: "thread-1",
+      commentId: "comment-42",
+      authorDisplay: "human",
+      scope: "share",
+      anchorQuote: null,
+      body: "x",
+    });
+    const body = nats.published[0]!.body as {
+      payload: Record<string, unknown>;
+    };
+    // X1A-103 source→event_id mapping locks this to comment_id.
+    expect(body.payload.event_id).toBe("comment-42");
+    expect(body.payload.share_id).toBe("share-1");
+    expect(body.payload.thread_id).toBe("thread-1");
+  });
+
+  it("publishCommentResolvedWake stamps event_id = msgId (resolve has no comment_id of its own)", async () => {
+    await publishCommentResolvedWake(nats as never, uuid(0xBB02), {
+      shareId: "share-1",
+      threadId: "thread-1",
+      resolverDisplay: "human",
+      resolved: true,
+      transitionedAt: "2026-05-12T10:00:00.000Z",
+    });
+    const body = nats.published[0]!.body as {
+      payload: Record<string, unknown>;
+    };
+    expect(body.payload.event_id).toBe(
+      "wake.comment_resolved.thread-1.1.2026-05-12T10:00:00.000Z",
+    );
+  });
+});
+
 describe("formatMessageWakeText", () => {
   it("summary-only (no body, no response needed)", async () => {
     const { formatMessageWakeText } = await import("./wake-publisher.js");
