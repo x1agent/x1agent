@@ -295,6 +295,17 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
+    // X1A-103: stamp a client-minted event_id so the agent's
+    // `session.agent_thinking` indicator and the agent's first reply
+    // both carry it through. The frontend (X1A-104) uses it to clear
+    // the right indicator when two wakes overlap. randomUUID is in all
+    // modern browsers; the wider polyfill story isn't worth the bundle
+    // hit for an indicator-correlation id (worst case: indicator
+    // hangs until X1A-104's 60s TTL fires).
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      payload["event_id"] = crypto.randomUUID();
+    }
+    payload["wake_source"] = "user";
     // The agent emits a user.message (or user.input_response) to its
     // SSE stream on inject, which the sidecar publishes to NATS and
     // the api persists to session_events. The browser picks up that

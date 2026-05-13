@@ -94,6 +94,33 @@ POST /api/workspaces/:slug/agents/:agentId/sessions/:sessionId/cancel
      the execution layer, not here.
 ```
 
+## Transient WebSocket events
+
+A small set of session events flow over the existing `x1.session.{id}.events` NATS subject but are deliberately **not** persisted to `session_events`. They exist purely to drive UI affordances that have no meaning across a page refresh.
+
+| Type                                | Direction      | Purpose                                                                 |
+|-------------------------------------|----------------|-------------------------------------------------------------------------|
+| `session.agent_thinking`            | pod → browser  | Pod just received a wake; render a typing indicator.                    |
+| `session.agent_thinking_cancelled`  | pod → browser  | Pod is shutting down without producing a real reply for an earlier wake — clear the indicator. |
+
+Payload shape for `session.agent_thinking` (locked):
+
+```json
+{
+  "type": "session.agent_thinking",
+  "session_id": "<uuid>",
+  "share_id":   "<uuid> | null",
+  "thread_id":  "<uuid> | null",
+  "event_id":   "<uuid>",
+  "wake_source": "user | share_comment | child_message | scheduler | platform",
+  "started_at": "<iso8601>"
+}
+```
+
+`event_id` originates with the wake-triggering party (browser-stamped UUID, comment id, or wake msgId) and is propagated through to the agent's first reply emission so the frontend can deterministically clear the matching indicator. `share_id` and `thread_id` are populated only on `share_comment` wakes; the indicator renders inside the comment thread, not on the main timeline.
+
+The `api` NATS subscriber drops both transient types on the floor before they hit Postgres — see `TRANSIENT_EVENT_TYPES` in `packages/api/src/nats/subscriber.ts`.
+
 ## Reaper
 
 A periodic in-process job in the api walks for cleanup work:

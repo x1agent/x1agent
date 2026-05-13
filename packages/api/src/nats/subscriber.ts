@@ -75,6 +75,23 @@ const PUBLIC_EVENT_TYPES = new Set([
   "session.started",
 ]);
 
+/**
+ * X1A-103 — transient indicator events that the agent emits over the
+ * existing `.events` channel but that must NOT land in `session_events`.
+ * They're pure WebSocket fan-out: the frontend (X1A-104) renders a
+ * "thinking" indicator; on a page refresh the indicator is gone, so
+ * persisting them would just clutter the timeline replay.
+ *
+ * Keep this list in sync with `TRANSIENT_EVENT_TYPES` in
+ * packages/agent/src/wake-classifier.ts. It's duplicated rather than
+ * imported because pulling the agent package into the api would drag
+ * the whole SDK runtime tree with it.
+ */
+export const TRANSIENT_EVENT_TYPES = new Set<string>([
+  "session.agent_thinking",
+  "session.agent_thinking_cancelled",
+]);
+
 export interface Subscriber {
   nc: NatsConnection;
   stop: () => Promise<void>;
@@ -195,6 +212,16 @@ export async function startSessionEventSubscriber(
         continue;
       }
       const sessionId = SessionId(subjectSessionId);
+
+      // X1A-103: transient events flow over `.events` for browser
+      // fan-out but are deliberately NOT persisted. Skip BEFORE the
+      // appendSessionEvent call so we don't take a Postgres round
+      // trip for an event we'll discard. Also skip the summarizer +
+      // token-usage paths below — those only apply to durable rows.
+      if (TRANSIENT_EVENT_TYPES.has(parsed.type)) {
+        continue;
+      }
+
       try {
         await appendSessionEvent(
           { events: opts.events },
