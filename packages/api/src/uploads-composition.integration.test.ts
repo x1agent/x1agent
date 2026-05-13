@@ -29,17 +29,27 @@ beforeAll(async () => {
   const { resetSql } = await import("./db/client.js");
   await resetSql();
 
-  await dbSql<{ id: string }[]>`
+  // Seed: workspace + users + memberships. The /auth/bypass route
+  // refuses sign-in via `assertHasMembership` when the user has no
+  // workspace_members row; that's the production-correct path but
+  // it means the test has to provide a membership for the bypass
+  // user(s) before any cookie comes back.
+  const [{ id: workspaceId }] = await dbSql<{ id: string }[]>`
     INSERT INTO workspaces (slug, name) VALUES ('default', 'Default')
     RETURNING id
   `;
-  await dbSql<{ id: string }[]>`
+  const [{ id: aliceId }] = await dbSql<{ id: string }[]>`
     INSERT INTO users (email, name) VALUES ('alice@example.com', 'Alice')
     RETURNING id
   `;
-  await dbSql<{ id: string }[]>`
+  const [{ id: bobId }] = await dbSql<{ id: string }[]>`
     INSERT INTO users (email, name) VALUES ('bob@example.com', 'Bob')
     RETURNING id
+  `;
+  await dbSql`
+    INSERT INTO workspace_members (workspace_id, user_id, role)
+    VALUES (${workspaceId}, ${aliceId}, 'admin'),
+           (${workspaceId}, ${bobId},   'member')
   `;
 
   process.env.TEST_USER = "alice@example.com";
