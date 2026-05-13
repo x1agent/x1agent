@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import {
-  formatTokens,
   formatUsd,
   useCostStore,
   type AgentCost,
@@ -36,6 +36,7 @@ const WINDOW_LABEL: Record<AgentCostWindow, string> = {
 export function AgentCostCard({ workspaceSlug, agentId }: Props) {
   // 7d default is locked.
   const [window, setWindow] = useState<AgentCostWindow>("7d");
+  const [topOpen, setTopOpen] = useState(false);
   const loadAgentCost = useCostStore((s) => s.loadAgentCost);
   const cost = useCostStore(
     (s) => s.agentCostByKey[`${agentId}:${window}`],
@@ -52,6 +53,8 @@ export function AgentCostCard({ workspaceSlug, agentId }: Props) {
     () => buildSparkline(cost?.byDay ?? []),
     [cost],
   );
+  const hasTopSessions = (cost?.topSessions?.length ?? 0) > 0;
+  const TopChevron = topOpen ? ChevronDown : ChevronRight;
 
   return (
     <div
@@ -85,40 +88,47 @@ export function AgentCostCard({ workspaceSlug, agentId }: Props) {
       </div>
 
       <div className="flex items-baseline gap-3">
-        <BigCost cost={cost} live={false} loading={loading} />
+        <BigCost
+          cost={cost}
+          loading={loading}
+          toggleable={hasTopSessions}
+          open={topOpen}
+          onToggle={() => setTopOpen((v) => !v)}
+        />
         <span className="text-xs text-fg-faint">
           {window === "all" ? "all-time" : `last ${window}`}
         </span>
+        {hasTopSessions ? (
+          <button
+            type="button"
+            onClick={() => setTopOpen((v) => !v)}
+            aria-expanded={topOpen}
+            aria-controls="agent-cost-top-sessions"
+            className="ml-auto inline-flex items-center text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
+            data-testid="agent-cost-top-toggle"
+            title={topOpen ? "Hide top sessions" : "Show top sessions"}
+          >
+            <TopChevron className="size-4" />
+          </button>
+        ) : null}
       </div>
 
       {/* Sparkline. Accent-color line, ~40px tall. Hidden when there's
           no usage so the card doesn't sport a flat baseline that
-          looks like a bug. */}
+          looks like a bug. Hovering reveals per-day cost in a tooltip. */}
       {(cost?.byDay?.length ?? 0) > 0 ? (
-        <svg
-          className="mt-2 w-full"
-          viewBox="0 0 200 40"
-          preserveAspectRatio="none"
-          height={40}
-          aria-label="Daily cost sparkline"
-        >
-          <path
-            d={sparkPath}
-            fill="none"
-            stroke="var(--color-accent)"
-            strokeWidth={1.5}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        </svg>
+        <Sparkline byDay={cost!.byDay} path={sparkPath} />
       ) : (
         <div className="mt-2 text-[11px] text-fg-faint">
           No usage in this window.
         </div>
       )}
 
-      {(cost?.topSessions?.length ?? 0) > 0 ? (
-        <div className="mt-3 border-t border-border-soft pt-2">
+      {hasTopSessions && topOpen ? (
+        <div
+          id="agent-cost-top-sessions"
+          className="mt-3 border-t border-border-soft pt-2"
+        >
           <div className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">
             Top sessions
           </div>
@@ -160,66 +170,169 @@ export function AgentCostCard({ workspaceSlug, agentId }: Props) {
 
 function BigCost({
   cost,
-  live,
   loading,
+  toggleable,
+  open,
+  onToggle,
 }: {
   cost: AgentCost | undefined;
-  live: boolean;
   loading: boolean;
+  toggleable: boolean;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const amount = cost?.totals.costUsdEstimate ?? 0;
+  const label = loading && !cost ? "…" : formatUsd(amount);
+  const className =
+    "border-b border-dashed border-fg-faint text-2xl font-medium text-fg-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong";
+
+  if (!toggleable) {
+    return (
+      <span className={className} title="This agent — all sessions in window">
+        {label}
+      </span>
+    );
+  }
+
+  // Toggleable variant: clicking the big number opens or closes the
+  // top-sessions table below. Hover tooltip is intentionally tiny so the
+  // detailed breakdown lives in one place — inside the expanded view.
   return (
-    <span className="group relative inline-flex items-baseline">
-      <span
-        className="cursor-help border-b border-dashed border-fg-faint text-2xl font-medium text-fg-muted"
-        tabIndex={0}
-        aria-describedby="agent-cost-tooltip"
-      >
-        {loading && !cost ? "…" : formatUsd(amount)}
-      </span>
-      <span
-        id="agent-cost-tooltip"
-        role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden min-w-[18rem] rounded-md border border-border-strong bg-surface-elevated px-3 py-2 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
-      >
-        <div className="mb-1 font-medium text-fg">
-          Agent cost — breakdown by model
-        </div>
-        <div className="mb-2 border-t border-border-soft" />
-        {(cost?.byModel?.length ?? 0) === 0 ? (
-          <div className="text-fg-faint">No model usage in this window</div>
-        ) : (
-          <table className="w-full border-collapse text-[11px]">
-            <tbody>
-              {cost!.byModel.map((m) => (
-                <tr key={m.model}>
-                  <td className="font-mono text-fg-muted">{m.model}</td>
-                  <td className="text-right text-fg">
-                    {formatUsd(m.costUsdEstimate)}
-                  </td>
-                  <td className="pl-2 text-right text-fg-faint">
-                    {formatTokens(m.inputTokens + m.outputTokens)}
-                  </td>
-                </tr>
-              ))}
-              <tr className="border-t border-border-soft">
-                <td className="pt-1 text-fg-faint">Total</td>
-                <td className="pt-1 text-right font-medium">
-                  {formatUsd(amount)}
-                </td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        )}
-        {live ? (
-          <div className="mt-2 text-[10px] text-fg-faint">
-            Live · updates within ~2s
-          </div>
-        ) : null}
-      </span>
-    </span>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls="agent-cost-top-sessions"
+      className={`${className} cursor-pointer hover:text-fg`}
+      title={open ? "Hide top sessions" : "Show top sessions"}
+      data-testid="agent-cost-big-toggle"
+    >
+      {label}
+    </button>
   );
+}
+
+/**
+ * Sparkline with per-day hover tooltip. On mouse move, the closest
+ * day-bucket is highlighted with a circle marker; an absolutely-
+ * positioned label above the cursor shows the date and that day's
+ * cost. The container is relatively positioned so the tooltip anchors
+ * against the sparkline width.
+ */
+function Sparkline({
+  byDay,
+  path,
+}: {
+  byDay: AgentCost["byDay"];
+  path: string;
+}) {
+  const sorted = useMemo(
+    () => byDay.slice().sort((a, b) => a.day.localeCompare(b.day)),
+    [byDay],
+  );
+  const max = useMemo(
+    () => Math.max(...sorted.map((d) => d.costUsdEstimate), 1e-9),
+    [sorted],
+  );
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState<number>(0);
+
+  const onMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = containerRef.current;
+    if (!el || sorted.length === 0) return;
+    const rect = el.getBoundingClientRect();
+    const xPx = e.clientX - rect.left;
+    const ratio = Math.min(Math.max(xPx / rect.width, 0), 1);
+    const idx =
+      sorted.length === 1
+        ? 0
+        : Math.round(ratio * (sorted.length - 1));
+    setHoverIdx(idx);
+    setHoverX(xPx);
+  };
+
+  const onMouseLeave = () => setHoverIdx(null);
+
+  const hovered = hoverIdx !== null ? sorted[hoverIdx] : null;
+  // SVG x for the hovered point in the 0..200 viewBox.
+  const hoveredSvgX =
+    hoverIdx !== null && sorted.length > 1
+      ? (hoverIdx / (sorted.length - 1)) * 200
+      : 0;
+  const hoveredSvgY =
+    hovered != null ? 40 - (hovered.costUsdEstimate / max) * 32 - 4 : 0;
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative mt-2"
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+    >
+      <svg
+        className="w-full"
+        viewBox="0 0 200 40"
+        preserveAspectRatio="none"
+        height={40}
+        aria-label="Daily cost sparkline"
+      >
+        <path
+          d={path}
+          fill="none"
+          stroke="var(--color-accent)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {hovered ? (
+          <>
+            <line
+              x1={hoveredSvgX}
+              x2={hoveredSvgX}
+              y1={0}
+              y2={40}
+              stroke="var(--color-fg-faint)"
+              strokeWidth={0.5}
+              strokeDasharray="2 2"
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle
+              cx={hoveredSvgX}
+              cy={hoveredSvgY}
+              r={2.5}
+              fill="var(--color-accent)"
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        ) : null}
+      </svg>
+      {hovered ? (
+        <div
+          className="pointer-events-none absolute -top-1 z-30 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-border-strong bg-surface-elevated px-2 py-1 text-[11px] text-fg shadow-lg"
+          style={{ left: hoverX }}
+          data-testid="sparkline-day-tooltip"
+        >
+          <span className="text-fg-faint">{formatDayShort(hovered.day)}</span>
+          <span className="ml-2 font-medium">
+            {formatUsd(hovered.costUsdEstimate)}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatDayShort(day: string): string {
+  // day is "YYYY-MM-DD"; render as "May 10" using the browser's locale.
+  const d = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return day;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /**
