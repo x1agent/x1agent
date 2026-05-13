@@ -117,6 +117,13 @@ export async function publishStateChangeWake(
     errorMessage,
   });
 
+  // X1A-103: stamp an event_id on every server-published wake so the
+  // agent's `session.agent_thinking` event can carry it through to
+  // the UI for deterministic indicator-clearing. The msgId is
+  // already deterministic per-wake (and is what JetStream uses for
+  // dedup); reusing it as event_id keeps a single id flowing from
+  // publisher → sidecar → agent → frontend.
+  const msgId = `wake.state_change.${childSession.id}.${terminalStatus}`;
   const envelope = {
     session_id: parent.id,
     timestamp: new Date().toISOString(),
@@ -128,6 +135,7 @@ export async function publishStateChangeWake(
       // forwarding to the agent, but the api persists the full
       // payload to session_events.
       kind: "state_change",
+      event_id: msgId,
       from_session_id: childSession.id,
       from_agent_slug: String(childSlug),
       new_status: terminalStatus,
@@ -141,7 +149,6 @@ export async function publishStateChangeWake(
   // A child only transitions into each terminal state once, so the
   // (childSessionId, status) tuple is enough to dedup any duplicate
   // fire from a racing terminal-state watcher.
-  const msgId = `wake.state_change.${childSession.id}.${terminalStatus}`;
   await publishInputEnvelope(deps.nc, parent.id, envelope, msgId);
 }
 
@@ -164,6 +171,8 @@ export async function publishWatchdogWake(
   silenceSeconds: number,
   attempt: number,
 ): Promise<void> {
+  // X1A-103: msgId doubles as event_id (see publishStateChangeWake).
+  const msgId = `wake.watchdog.${parentSessionId}.${childSessionId}.${attempt}`;
   const envelope = {
     session_id: parentSessionId,
     timestamp: new Date().toISOString(),
@@ -176,6 +185,7 @@ export async function publishWatchdogWake(
         attempt,
       }),
       kind: "watchdog",
+      event_id: msgId,
       from_session_id: childSessionId,
       from_agent_slug: childSlug,
       silence_seconds: silenceSeconds,
@@ -186,7 +196,6 @@ export async function publishWatchdogWake(
   };
   // attempt is monotonic per (parent, child); two publishes for the
   // same attempt are publisher-side retries that should dedup.
-  const msgId = `wake.watchdog.${parentSessionId}.${childSessionId}.${attempt}`;
   await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
@@ -215,6 +224,7 @@ export async function publishMessageWake(
     payload: {
       text: formatMessageWakeText(opts),
       kind: "message",
+      // X1A-103: stamp event_id below once msgId is computed.
       from_session_id: opts.childSessionId,
       from_agent_slug: opts.childSlug,
       summary: opts.summary,
@@ -222,7 +232,7 @@ export async function publishMessageWake(
       needs_response: opts.needsResponse,
       driverless: true,
       source: "platform",
-    },
+    } as Record<string, unknown>,
   };
   // The child has no nominal request id at this layer; hashing the
   // payload makes a publisher retry of an identical message dedup,
@@ -239,6 +249,9 @@ export async function publishMessageWake(
         opts.needsResponse ? "1" : "0",
       ].join(" "),
     );
+  // X1A-103: msgId doubles as event_id so the agent_thinking
+  // indicator clears against the same id the publisher uses for dedup.
+  envelope.payload.event_id = msgId;
   await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
@@ -293,6 +306,9 @@ export async function publishCheckupWake(
   snapshot: readonly ChildSnapshot[],
 ): Promise<void> {
   const timestamp = new Date().toISOString();
+  // Checkup is cadence-driven; the wall-clock at publish time is the
+  // natural dedup key. A retry of the same tick reuses this id.
+  const msgId = `wake.checkup.${parentSessionId}.${timestamp}`;
   const envelope = {
     session_id: parentSessionId,
     timestamp,
@@ -300,6 +316,8 @@ export async function publishCheckupWake(
     payload: {
       text: formatCheckupWakeText(snapshot),
       kind: "checkup",
+      // X1A-103: msgId doubles as event_id (see publishStateChangeWake).
+      event_id: msgId,
       snapshot: snapshot.map((s) => ({
         session_id: s.sessionId,
         agent_slug: s.agentSlug,
@@ -311,9 +329,6 @@ export async function publishCheckupWake(
       source: "platform",
     },
   };
-  // Checkup is cadence-driven; the wall-clock at publish time is the
-  // natural dedup key. A retry of the same tick reuses this id.
-  const msgId = `wake.checkup.${parentSessionId}.${timestamp}`;
   await publishInputEnvelope(nc, parentSessionId, envelope, msgId);
 }
 
@@ -383,6 +398,8 @@ export async function publishHeartbeatWake(
   heartbeatText: string,
 ): Promise<void> {
   const timestamp = new Date().toISOString();
+  // Scheduler tick dedup: same wall-clock = same heartbeat publish.
+  const msgId = `wake.heartbeat.${sessionId}.${timestamp}`;
   const envelope = {
     session_id: sessionId,
     timestamp,
@@ -390,12 +407,12 @@ export async function publishHeartbeatWake(
     payload: {
       text: wrapHeartbeatText(heartbeatText),
       kind: "heartbeat",
+      // X1A-103: msgId doubles as event_id (see publishStateChangeWake).
+      event_id: msgId,
       driverless: true,
       source: "platform",
     },
   };
-  // Scheduler tick dedup: same wall-clock = same heartbeat publish.
-  const msgId = `wake.heartbeat.${sessionId}.${timestamp}`;
   await publishInputEnvelope(nc, sessionId, envelope, msgId);
 }
 
@@ -437,6 +454,9 @@ export async function publishCommentAddedWake(
     payload: {
       text: formatCommentAddedWakeText(opts),
       kind: "comment_added",
+      // X1A-103: comment_id IS the event_id for share-comment wakes.
+      // Locked source→event_id mapping per the X1A-103 spec.
+      event_id: opts.commentId,
       share_id: opts.shareId,
       thread_id: opts.threadId,
       comment_id: opts.commentId,
@@ -475,6 +495,12 @@ export async function publishCommentResolvedWake(
   producingSessionId: string,
   opts: CommentResolvedWakeOpts,
 ): Promise<void> {
+  // Each transition has a distinct server-stamped time; (thread_id,
+  // resolved-flag, transitioned_at) makes re-resolve/unresolve cycles
+  // dedup correctly without collapsing legitimate toggles.
+  const discriminator =
+    opts.transitionedAt ?? new Date().toISOString();
+  const msgId = `wake.comment_resolved.${opts.threadId}.${opts.resolved ? "1" : "0"}.${discriminator}`;
   const envelope = {
     session_id: producingSessionId,
     timestamp: new Date().toISOString(),
@@ -482,6 +508,9 @@ export async function publishCommentResolvedWake(
     payload: {
       text: formatCommentResolvedWakeText(opts),
       kind: "comment_resolved",
+      // X1A-103: msgId doubles as event_id (a resolve transition has
+      // no comment_id of its own — the msgId IS the resolve event).
+      event_id: msgId,
       share_id: opts.shareId,
       thread_id: opts.threadId,
       resolver_display: opts.resolverDisplay,
@@ -489,12 +518,6 @@ export async function publishCommentResolvedWake(
       source: "platform",
     },
   };
-  // Each transition has a distinct server-stamped time; (thread_id,
-  // resolved-flag, transitioned_at) makes re-resolve/unresolve cycles
-  // dedup correctly without collapsing legitimate toggles.
-  const discriminator =
-    opts.transitionedAt ?? new Date().toISOString();
-  const msgId = `wake.comment_resolved.${opts.threadId}.${opts.resolved ? "1" : "0"}.${discriminator}`;
   await publishInputEnvelope(nc, producingSessionId, envelope, msgId);
 }
 

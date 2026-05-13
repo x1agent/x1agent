@@ -189,6 +189,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 workspace_id?: string;
                 session_id?: string;
                 share_type?: string;
+                parent_comment_id?: string | null;
               };
               if (!p.share_id || !p.thread_id || !p.comment_id) continue;
               // The NATS payload doesn't carry seq or resolved-state —
@@ -212,6 +213,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 resolved_by_user_id: null,
                 created_at: now,
                 updated_at: now,
+                // X1A-110 — carried so a reply lands indented under
+                // its parent the moment the NATS event arrives, rather
+                // than only after a full REST refresh.
+                parent_comment_id: p.parent_comment_id ?? null,
               };
               useShareCommentsStore.getState().applyServerEvent(dto);
             } catch {
@@ -295,6 +300,17 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload["request_id"] = requestId;
       payload["answer"] = text;
     }
+    // X1A-103: stamp a client-minted event_id so the agent's
+    // `session.agent_thinking` indicator and the agent's first reply
+    // both carry it through. The frontend (X1A-104) uses it to clear
+    // the right indicator when two wakes overlap. randomUUID is in all
+    // modern browsers; the wider polyfill story isn't worth the bundle
+    // hit for an indicator-correlation id (worst case: indicator
+    // hangs until X1A-104's 60s TTL fires).
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      payload["event_id"] = crypto.randomUUID();
+    }
+    payload["wake_source"] = "user";
     // The agent emits a user.message (or user.input_response) to its
     // SSE stream on inject, which the sidecar publishes to NATS and
     // the api persists to session_events. The browser picks up that
@@ -418,7 +434,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-w-0 items-start gap-3 border-b border-border-soft px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
           <div className="min-w-0 flex-1">
             <SessionTitle session={session ?? null} sessionId={sessionId} />
           </div>
@@ -426,7 +442,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
               Inline in the header (not a separate tab) per the
               greenlit mockup. live=true so the pulsing dot shows on
               the "this session" amount. */}
-          <div className="hidden w-[18rem] shrink-0 md:block">
+          <div className="hidden shrink-0 md:block">
             <SessionCostBlock
               workspaceSlug={workspaceSlug}
               sessionId={sessionId}
