@@ -1,0 +1,221 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+} from "bun:test";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ShareCommentDTO } from "@x1agent/shared";
+import { ArtifactCommentsSidebar } from "../features/sessions/ArtifactCommentsSidebar";
+import { useShareCommentsStore } from "../stores/shareCommentsStore";
+import { useArtifactPanelStore } from "../stores/artifactPanelStore";
+import { useAuthStore } from "../stores/authStore";
+
+/**
+ * X1A-105 regression suite. Three concerns under test:
+ *
+ *   1. Ordering — comments inside a thread render oldest-first
+ *      (chronological). This was the originally-reported bug.
+ *   2. Threaded layout — agent comments render at full thread-card
+ *      width while user comments render in an inset bubble. The
+ *      `data-author-kind` attribute is the stable hook other parts
+ *      of the app (and these tests) read.
+ *   3. Truncation — long comment bodies get a "See more" affordance.
+ *      Short bodies don't. Just-posted-by-current-user comments
+ *      bypass the clamp because the X1A-105 ticket says "don't
+ *      immediately hide what they just wrote."
+ *
+ * The store is reset between tests so each case starts from a clean
+ * slate; bypassing the `load` action lets us drive the rendered state
+ * deterministically without mocking apiFetch.
+ */
+
+const SHARE_ID = "sh_test";
+const SESSION_ID = "sess_test";
+const WORKSPACE_SLUG = "default";
+const CURRENT_USER_ID = "u_me";
+
+const baseRow: Omit<
+  ShareCommentDTO,
+  "id" | "seq" | "thread_id" | "body" | "created_at"
+> = {
+  share_id: SHARE_ID,
+  session_id: SESSION_ID,
+  share_type: "document",
+  scope: "share",
+  anchor: null,
+  author_user_id: CURRENT_USER_ID,
+  author_session_id: null,
+  resolved_at: null,
+  resolved_by_user_id: null,
+  updated_at: "2026-05-13T00:00:00.000Z",
+};
+
+function row(
+  id: string,
+  thread_id: string,
+  seq: number,
+  body: string,
+  created_at: string,
+  overrides: Partial<ShareCommentDTO> = {},
+): ShareCommentDTO {
+  return {
+    ...baseRow,
+    id,
+    thread_id,
+    seq,
+    body,
+    created_at,
+    ...overrides,
+  };
+}
+
+function seedStore(rows: ShareCommentDTO[]) {
+  // Pre-populate the store and short-circuit the load() effect so the
+  // component renders the seeded rows immediately on first paint.
+  useShareCommentsStore.setState((s) => ({
+    ...s,
+    byShareId: { ...s.byShareId, [SHARE_ID]: rows },
+    loading: { ...s.loading, [SHARE_ID]: false },
+    errors: { ...s.errors, [SHARE_ID]: null },
+    shareTypeById: { ...s.shareTypeById, [SHARE_ID]: "document" },
+    // Replace load with a noop so the useEffect on mount doesn't
+    // clobber our seed by issuing a real fetch.
+    load: async () => {},
+  }));
+}
+
+beforeEach(() => {
+  useAuthStore.setState({
+    user: {
+      id: CURRENT_USER_ID,
+      email: "me@example.com",
+      name: "Me",
+      avatar_url: null,
+    },
+    memberships: [],
+    isPlatformAdmin: false,
+    status: "authenticated",
+    error: null,
+  });
+  useArtifactPanelStore.setState({ commentsCollapsed: false });
+});
+
+afterEach(() => {
+  cleanup();
+  // Drop seeded rows so subsequent tests don't inherit them.
+  useShareCommentsStore.setState((s) => ({
+    ...s,
+    byShareId: {},
+    loading: {},
+    errors: {},
+    shareTypeById: {},
+  }));
+});
+
+function renderSidebar() {
+  return render(
+    <ArtifactCommentsSidebar
+      workspaceSlug={WORKSPACE_SLUG}
+      sessionId={SESSION_ID}
+      shareId={SHARE_ID}
+      shareType="document"
+    />,
+  );
+}
+
+describe("ArtifactCommentsSidebar — ordering (X1A-105)", () => {
+  it("renders replies inside a thread oldest-first regardless of insert order", () => {
+    seedStore([
+      row("c2", "t1", 2, "second comment body", "2026-05-12T01:00:00Z"),
+      row("c1", "t1", 1, "first comment body", "2026-05-12T00:00:00Z"),
+      row("c3", "t1", 3, "third comment body", "2026-05-12T02:00:00Z"),
+    ]);
+
+    renderSidebar();
+
+    const bodies = Array.from(
+      document.querySelectorAll("[data-comment-author]"),
+    ).map((el) => el.textContent ?? "");
+
+    // The first rendered row's body contains "first", the next "second",
+    // the last "third" — proves seq-ascending order regardless of how
+    // rows were inserted into the store.
+    expect(bodies[0]).toContain("first comment body");
+    expect(bodies[1]).toContain("second comment body");
+    expect(bodies[2]).toContain("third comment body");
+  });
+
+  it("renders threads in chronological order — oldest thread first", () => {
+    seedStore([
+      row("a", "t-new", 1, "newer thread body", "2026-05-12T02:00:00Z"),
+      row("b", "t-old", 1, "older thread body", "2026-05-12T00:00:00Z"),
+    ]);
+
+    renderSidebar();
+
+    const threads = document.querySelectorAll(
+      '[data-testid="comment-thread"]',
+    );
+    expect(threads.length).toBe(2);
+    expect(threads[0]!.textContent).toContain("older thread body");
+    expect(threads[1]!.textContent).toContain("newer thread body");
+  });
+});
+
+describe("ArtifactCommentsSidebar — author rhythm (X1A-105)", () => {
+  it("marks agent comments as full-width and user comments as inset", () => {
+    seedStore([
+      row("c1", "t1", 1, "user opens thread", "2026-05-12T00:00:00Z", {
+        author_user_id: CURRENT_USER_ID,
+        author_session_id: null,
+      }),
+      row("c2", "t1", 2, "agent replies in full width", "2026-05-12T00:01:00Z", {
+        author_user_id: null,
+        author_session_id: "sess_agent",
+      }),
+    ]);
+
+    renderSidebar();
+
+    const rows = Array.from(
+      document.querySelectorAll("[data-author-kind]"),
+    ) as HTMLElement[];
+
+    expect(rows.length).toBe(2);
+    // Order matches the chronological render order from the test
+    // above — first row is the user, second is the agent.
+    expect(rows[0]!.getAttribute("data-author-kind")).toBe("user");
+    expect(rows[1]!.getAttribute("data-author-kind")).toBe("agent");
+
+    // The class hooks let the rest of the app (and the visual
+    // designer reading the DOM in devtools) tell the two apart.
+    // User rows live inside a `flex justify-end` parent so the
+    // inset bubble sits to the right; agent rows render as a
+    // block at full width.
+    expect(rows[0]!.className).toContain("justify-end");
+    expect(rows[1]!.className).toContain("w-full");
+  });
+});
+
+describe("ArtifactCommentsSidebar — long-comment truncation (X1A-105)", () => {
+  const LONG = "x".repeat(800);
+
+  it("renders a See more toggle for long comments and toggles to See less when clicked", () => {
+    seedStore([row("c1", "t1", 1, LONG, "2026-05-12T00:00:00Z")]);
+
+    renderSidebar();
+
+    const toggle = screen.getByTestId("see-more-toggle");
+    expect(toggle.textContent).toBe("See more");
+    fireEvent.click(toggle);
+    expect(toggle.textContent).toBe("See less");
+  });
+
+  it("does NOT render See more for short comments", () => {
+    seedStore([row("c1", "t1", 1, "tiny body", "2026-05-12T00:00:00Z")]);
+    renderSidebar();
+    expect(screen.queryByTestId("see-more-toggle")).toBeNull();
+  });
+});

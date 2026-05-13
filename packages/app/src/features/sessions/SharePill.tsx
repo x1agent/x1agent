@@ -9,6 +9,7 @@ import {
 } from "../../stores/shareCommentsStore";
 import { useAuthStore } from "../../stores/authStore";
 import { TYPE_ICONS, formatSize, type AgentSharePayload } from "./ShareCard";
+import { ClippableBody } from "./ArtifactCommentsSidebar";
 
 // Stable module-level empty array — see CLAUDE.md "Frontend state management"
 // selector foot-gun rule. Returning a fresh `[]` inside a zustand selector
@@ -222,9 +223,10 @@ function ThreadSnippets({
               <span className="mr-1.5 font-semibold text-fg-muted">
                 {snippetAuthor(latest, currentUserId)}
               </span>
-              {latest.body.length > 240
-                ? latest.body.slice(0, 240) + "…"
-                : latest.body}
+              {/* X1A-105: share the See-more clamp with the fullscreen
+                  sidebar so the truncation threshold is consistent
+                  across both comment surfaces. */}
+              <ClippableBody body={latest.body} initialExpanded={false} />
             </div>
           </div>
         );
