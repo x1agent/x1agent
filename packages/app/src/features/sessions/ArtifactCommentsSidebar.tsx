@@ -342,7 +342,7 @@ function CommentRow({
   return (
     <div
       className={`${wrapperClass} block w-full text-[13px]`}
-      data-comment-author={comment.author_session_id ?? "agent"}
+      data-comment-author={comment.author_session_id}
       data-author-kind="agent"
     >
       <div className="mb-0.5 flex items-baseline gap-2">
