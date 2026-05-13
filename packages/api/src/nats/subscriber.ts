@@ -75,6 +75,23 @@ const PUBLIC_EVENT_TYPES = new Set([
   "session.started",
 ]);
 
+/**
+ * X1A-103 — transient indicator events that the agent emits over the
+ * existing `.events` channel but that must NOT land in `session_events`.
+ * They're pure WebSocket fan-out: the frontend (X1A-104) renders a
+ * "thinking" indicator; on a page refresh the indicator is gone, so
+ * persisting them would just clutter the timeline replay.
+ *
+ * Keep this list in sync with `TRANSIENT_EVENT_TYPES` in
+ * packages/agent/src/wake-classifier.ts. It's duplicated rather than
+ * imported because pulling the agent package into the api would drag
+ * the whole SDK runtime tree with it.
+ */
+export const TRANSIENT_EVENT_TYPES = new Set<string>([
+  "session.agent_thinking",
+  "session.agent_thinking_cancelled",
+]);
+
 export interface Subscriber {
   nc: NatsConnection;
   stop: () => Promise<void>;
@@ -97,33 +114,68 @@ interface WireMessage {
  * re-derive `source` and `kind` from the well-known text header so
  * the UI's pill detection has something to match on.
  *
- * Format contract: text starts with `[driverless wake: <header>]`
- * where header is one of the five literals emitted by
- * `format*WakeText` in wake-publisher.ts. Keep this in sync with
- * those literals.
+ * Format contracts (keep in sync with `format*WakeText` in
+ * wake-publisher.ts):
+ *   • `[driverless wake: <header>]` — orchestration wakes
+ *     (watchdog, heartbeat, checkup, message, state_change)
+ *   • `[wake: <header>]` — share-comment wakes (comment_added,
+ *     comment_resolved). The shorter prefix is historical — X1A-55
+ *     shipped these before the driverless framing was standardised.
  *
  * The proper fix (real columns + dual-write from wake-publisher) is
  * tracked separately.
  */
 export function deriveWakeKindFromText(text: string): string | null {
-  if (!text.startsWith("[driverless wake:")) return null;
-  const closingBracket = text.indexOf("]");
-  if (closingBracket < 0) return null;
-  const header = text
-    .slice("[driverless wake:".length, closingBracket)
-    .trim();
-  if (header.startsWith("watchdog")) return "watchdog";
-  if (header.startsWith("scheduler heartbeat")) return "heartbeat";
-  if (header.startsWith("platform checkup")) return "checkup";
-  if (header.startsWith("message from child")) return "message";
-  if (
-    header.startsWith("child finished") ||
-    header.startsWith("child failed") ||
-    header.startsWith("child completed") ||
-    header.startsWith("child transitioned")
-  )
-    return "state_change";
+  if (text.startsWith("[driverless wake:")) {
+    const closingBracket = text.indexOf("]");
+    if (closingBracket < 0) return null;
+    const header = text
+      .slice("[driverless wake:".length, closingBracket)
+      .trim();
+    if (header.startsWith("watchdog")) return "watchdog";
+    if (header.startsWith("scheduler heartbeat")) return "heartbeat";
+    if (header.startsWith("platform checkup")) return "checkup";
+    if (header.startsWith("message from child")) return "message";
+    if (
+      header.startsWith("child finished") ||
+      header.startsWith("child failed") ||
+      header.startsWith("child completed") ||
+      header.startsWith("child transitioned")
+    )
+      return "state_change";
+    return null;
+  }
+  // X1A-110 — share-comment wakes use the shorter `[wake: ...]` prefix.
+  // Without re-deriving `kind` here, these user.message rows land in
+  // the session timeline indistinguishable from a human-typed message
+  // and leak the comment body into the main event stream.
+  if (text.startsWith("[wake:")) {
+    const closingBracket = text.indexOf("]");
+    if (closingBracket < 0) return null;
+    const header = text.slice("[wake:".length, closingBracket).trim();
+    if (header.startsWith("new comment on share")) return "comment_added";
+    if (
+      header.startsWith("comment thread resolved") ||
+      header.startsWith("comment thread reopened")
+    )
+      return "comment_resolved";
+    return null;
+  }
   return null;
+}
+
+/**
+ * Returns true when a `user.message` payload originated from a
+ * share-comment wake (X1A-55). The session timeline filters these out
+ * per X1A-110 — they belong in the share's comment flyout, not in the
+ * main conversation event stream.
+ */
+export function isShareCommentWakePayload(
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!payload) return false;
+  const kind = payload["kind"];
+  return kind === "comment_added" || kind === "comment_resolved";
 }
 
 export function enrichWakePayload(
@@ -141,6 +193,13 @@ export function enrichWakePayload(
   const text = typeof p.text === "string" ? p.text : "";
   const kind = deriveWakeKindFromText(text);
   if (!kind) return p;
+  // Share-comment wakes don't carry the `driverless: true` flag in the
+  // original envelope (they aren't an orchestration wake), so we only
+  // stamp `source` + `kind` for them — preserves parity with what
+  // wake-publisher would have put on the wire.
+  if (kind === "comment_added" || kind === "comment_resolved") {
+    return { ...p, source: "platform", kind };
+  }
   return { ...p, source: "platform", kind, driverless: true };
 }
 
@@ -195,6 +254,16 @@ export async function startSessionEventSubscriber(
         continue;
       }
       const sessionId = SessionId(subjectSessionId);
+
+      // X1A-103: transient events flow over `.events` for browser
+      // fan-out but are deliberately NOT persisted. Skip BEFORE the
+      // appendSessionEvent call so we don't take a Postgres round
+      // trip for an event we'll discard. Also skip the summarizer +
+      // token-usage paths below — those only apply to durable rows.
+      if (TRANSIENT_EVENT_TYPES.has(parsed.type)) {
+        continue;
+      }
+
       try {
         await appendSessionEvent(
           { events: opts.events },

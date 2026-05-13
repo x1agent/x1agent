@@ -7,10 +7,13 @@ import {
   type WorkspaceId,
 } from "@x1agent/kernel";
 import {
+  ShareCommentId,
   ShareThreadId,
   ThreadNotFoundError,
   ThreadNotVisibleError,
   ShareNotFoundError,
+  NestedReplyNotSupportedError,
+  ParentCommentNotInThreadError,
   isCommentScope,
   type CommentScope,
   type PassageAnchor,
@@ -79,6 +82,11 @@ function statusFor(err: unknown): number {
   if (err instanceof ThreadNotFoundError) return 404;
   if (err instanceof ShareNotFoundError) return 404;
   if (err instanceof ThreadNotVisibleError) return 403;
+  // X1A-110 — reply-nesting failures are client-error 400 so the
+  // composer can surface the rejection inline. Listed explicitly so a
+  // future DomainError subclass doesn't silently inherit 400.
+  if (err instanceof NestedReplyNotSupportedError) return 400;
+  if (err instanceof ParentCommentNotInThreadError) return 400;
   if (err instanceof DomainError) return 400;
   return 500;
 }
@@ -106,6 +114,7 @@ function serialiseComment(c: {
   resolvedByUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
+  parentCommentId: string | null;
 }) {
   return {
     id: c.id,
@@ -123,6 +132,7 @@ function serialiseComment(c: {
     resolved_by_user_id: c.resolvedByUserId,
     created_at: c.createdAt.toISOString(),
     updated_at: c.updatedAt.toISOString(),
+    parent_comment_id: c.parentCommentId,
   };
 }
 
@@ -217,6 +227,7 @@ export function createShareCommentRoutes(
       scope?: string;
       anchor?: PassageAnchor | null;
       body?: string;
+      parent_comment_id?: string;
     };
     if (!isCommentScope(body.scope ?? "")) {
       return c.json({ error: "invalid_comment_scope" }, 400);
@@ -263,6 +274,9 @@ export function createShareCommentRoutes(
           body: body.body ?? "",
           authorUserId: actor.userId,
           authorSessionId: null,
+          parentCommentId: body.parent_comment_id
+            ? ShareCommentId(body.parent_comment_id)
+            : null,
         },
       );
       return c.json(
@@ -472,6 +486,7 @@ export function createInternalShareCommentRoutes(
       scope?: string;
       anchor?: PassageAnchor | null;
       body?: string;
+      parent_comment_id?: string;
     };
     if (!body.author_session_id) {
       return c.json({ error: "missing_author_session_id" }, 400);
@@ -533,6 +548,9 @@ export function createInternalShareCommentRoutes(
             body: body.body ?? "",
             authorUserId: null,
             authorSessionId,
+            parentCommentId: body.parent_comment_id
+              ? ShareCommentId(body.parent_comment_id)
+              : null,
           },
         );
         return c.json(

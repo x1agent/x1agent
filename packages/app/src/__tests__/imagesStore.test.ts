@@ -1,4 +1,24 @@
 import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
+
+// Module mock for `../lib/api`. bun:test installs `mock.module` calls
+// process-wide for the rest of the run — siblings like
+// ShareSessionPanel.test.tsx do the same, and whichever file loads
+// LAST wins. By calling it here, this file's apiFetch shim is the one
+// active while these tests run; in isolation it stays consistent too.
+// The shim delegates to globalThis.fetch so the existing `fetchMock`
+// queue below keeps working as-is.
+mock.module("../lib/api", () => ({
+  API_BASE: "",
+  apiFetch: async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const res: Response = await globalThis.fetch(path, init);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    return (await res.json()) as T;
+  },
+}));
+
 import {
   useImagesStore,
   hasTransientBuilds,

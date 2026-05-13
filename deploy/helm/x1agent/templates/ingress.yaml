@@ -63,6 +63,50 @@ spec:
 # reaching this endpoint gets the api's full publish/subscribe perms
 # until the JWT auth_callout flow ships. Acceptable for single-user
 # deployments; lock down before opening to other tenants.
+{{- if .Values.ingress.apexRedirect.enabled }}
+---
+# Apex → app subdomain redirect. Enabled per-install via
+# `ingress.apexRedirect.enabled` in values.yaml. Catches the bare
+# baseDomain and 301s every path to https://app.<baseDomain>/<path>.
+# Default off so installs whose apex is owned by a separate property
+# (e.g. x1agent.com → marketing) don't accidentally take over that
+# hostname; greenfield installs like a fresh tenant on lattice.atomic.health
+# flip it on.
+#
+# The redirect lives entirely in nginx via the configuration-snippet
+# annotation — no backend service needed, but ingress-nginx requires
+# `defaultBackend` (or a path/backend pair) before it accepts the rule.
+# We point at the app Service as a no-op backend; the snippet returns
+# before the proxy_pass ever fires.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x1agent-apex-redirect
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/permanent-redirect: "https://{{ include "x1agent.appHost" . }}$request_uri"
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  tls:
+    - hosts:
+        - {{ .Values.baseDomain | quote }}
+      secretName: x1agent-apex-tls
+  rules:
+    - host: {{ .Values.baseDomain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 80
+{{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

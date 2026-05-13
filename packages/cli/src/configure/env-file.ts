@@ -14,9 +14,17 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
  * What it does NOT do:
  *   - Variable interpolation (mise reads these via dotenv-like behavior;
  *     we don't expand on write).
- *   - Multi-line values (e.g. a PEM private key needs '\n' literal in a
- *     single-line value, which is what GitHub-app private keys already
- *     do everywhere they appear in this codebase).
+ *
+ * What it DOES handle:
+ *   - Multi-line double/single-quoted values. A PEM private key pasted as
+ *     a real multi-line block (BEGIN/END markers on their own lines) is a
+ *     supported on-disk shape because dotenv-style readers (mise, etc.)
+ *     accept it, and operators paste private keys from GitHub that way.
+ *     Previously the parser stopped at the first newline and silently
+ *     truncated the value to `"-----BEGIN RSA PRIVATE KEY-----` (32 bytes)
+ *     — `installs/up.ts` then pushed that placeholder into GSM, which
+ *     broke the GitHub App OAuth flow in prod until the operator pushed
+ *     the real PEM via `gcloud secrets versions add`.
  */
 
 type Line =
@@ -95,7 +103,9 @@ export class EnvFile {
 
 function parse(text: string): Line[] {
   const out: Line[] = [];
-  for (const raw of text.split("\n")) {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
     if (raw === "") {
       out.push({ kind: "blank", raw: "" });
       continue;
@@ -112,6 +122,40 @@ function parse(text: string): Line[] {
     }
     const key = raw.slice(0, eq).trim();
     const rest = raw.slice(eq + 1);
+    // Multi-line quoted value: if `rest` opens with " or ' and that quote
+    // isn't closed on the same line, consume lines until the matching
+    // closing quote appears. Without this, a pasted multi-line PEM gets
+    // truncated to its first line and (worse) the trailing lines become
+    // bogus "comment" entries.
+    const quote = openingQuote(rest);
+    if (quote && !hasClosingQuoteOnSameLine(rest, quote)) {
+      const collectedRaw: string[] = [raw];
+      let j = i + 1;
+      let closed = false;
+      for (; j < lines.length; j++) {
+        const next = lines[j] ?? "";
+        collectedRaw.push(next);
+        if (lineEndsQuotedValue(next, quote)) {
+          closed = true;
+          break;
+        }
+      }
+      if (closed) {
+        const joinedRaw = collectedRaw.join("\n");
+        const joinedRest = joinedRaw.slice(eq + 1);
+        out.push({
+          kind: "kv",
+          key,
+          value: parseValue(joinedRest),
+          raw: joinedRaw,
+        });
+        i = j;
+        continue;
+      }
+      // Unterminated — fall through to single-line behavior so we keep
+      // the file readable. This matches the old, lossy behavior on
+      // genuinely broken input.
+    }
     out.push({ kind: "kv", key, value: parseValue(rest), raw });
   }
   // Trim trailing all-blank lines so save() doesn't grow the file.
@@ -121,6 +165,37 @@ function parse(text: string): Line[] {
     out.pop();
   }
   return out;
+}
+
+function openingQuote(rest: string): '"' | "'" | undefined {
+  const t = rest.trimStart();
+  if (t.startsWith('"')) return '"';
+  if (t.startsWith("'")) return "'";
+  return undefined;
+}
+
+function hasClosingQuoteOnSameLine(rest: string, quote: '"' | "'"): boolean {
+  const t = rest.trimStart();
+  // Skip the opening quote and look for an unescaped matching quote in
+  // the remainder of this line.
+  return findUnescapedQuote(t.slice(1), quote) !== -1;
+}
+
+function lineEndsQuotedValue(line: string, quote: '"' | "'"): boolean {
+  return findUnescapedQuote(line, quote) !== -1;
+}
+
+function findUnescapedQuote(s: string, quote: '"' | "'"): number {
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\" && quote === '"') {
+      // Only double-quoted strings honor backslash-escapes here.
+      i++;
+      continue;
+    }
+    if (c === quote) return i;
+  }
+  return -1;
 }
 
 function parseValue(raw: string): string {

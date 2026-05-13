@@ -5,6 +5,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SessionEventDTO } from "@x1agent/shared";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { SharePill } from "./SharePill";
+import { UploadedImagePill } from "./UploadedImagePill";
+import { parseImageTokens } from "../../lib/imageTokens";
 import { markdownComponents } from "./markdown-components";
 import { Button } from "../../components/ui/button";
 import { apiFetch } from "../../lib/api";
@@ -336,7 +338,7 @@ function UserBubble({
   return (
     <div className="flex justify-end py-3">
       <div className="max-w-[80%] rounded-2xl bg-bg-elevated/70 px-4 py-2.5 text-[15px] leading-7 text-fg">
-        <p className="whitespace-pre-wrap">{String(payload["text"] ?? "")}</p>
+        <UserBubbleBody body={String(payload["text"] ?? "")} />
         {fromSessionId && (
           <div className="mt-1 text-[10px] text-fg-faint">
             from session {String(fromSessionId).slice(0, 8)}
@@ -344,6 +346,33 @@ function UserBubble({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a user message body, swapping `[image: <uuid>]` tokens for
+ * inline `UploadedImagePill`s and dropping the file-path "(user attached
+ * file: …)" sentences the agent's /inject handler rewrites them into —
+ * those are for the LLM, not for the human reading the timeline. Plain
+ * prose between tokens keeps its whitespace and line breaks.
+ */
+function UserBubbleBody({ body }: { body: string }) {
+  const blocks = parseImageTokens(body);
+  if (blocks.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {blocks.map((b, i) =>
+        b.type === "text" ? (
+          <p key={i} className="whitespace-pre-wrap">
+            {b.value.trim()}
+          </p>
+        ) : (
+          <div key={i} className="flex justify-end">
+            <UploadedImagePill uploadId={b.id} />
+          </div>
+        ),
+      )}
     </div>
   );
 }
