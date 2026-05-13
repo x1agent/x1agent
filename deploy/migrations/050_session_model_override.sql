@@ -1,4 +1,5 @@
--- 047_session_model_override
+-- 050_session_model_override (originally landed as 047; renumbered after
+-- it collided with 047_relax_sessions_trigger_source_shape_for_agent_spawns)
 -- Per-spawn Claude model override on the session row.
 --
 -- Until now the Claude model a session ran under was decided by the
@@ -25,5 +26,5 @@
 ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS model_override TEXT;
 
-INSERT INTO schema_migrations (version) VALUES ('047_session_model_override')
+INSERT INTO schema_migrations (version) VALUES ('050_session_model_override')
   ON CONFLICT DO NOTHING;

@@ -65,6 +65,7 @@
         "@x1agent/domain-notifications": "workspace:*",
         "@x1agent/domain-permissions": "workspace:*",
         "@x1agent/domain-sessions": "workspace:*",
+        "@x1agent/domain-uploads": "workspace:*",
         "@x1agent/domain-workspace-secrets": "workspace:*",
         "@x1agent/domain-workspaces": "workspace:*",
         "@x1agent/infra-kaniko": "workspace:*",
@@ -355,6 +356,19 @@
         "@x1agent/domain-agents": "workspace:*",
         "@x1agent/kernel": "workspace:*",
         "cron-parser": "^4.9.0",
+        "hono": "^4.6.0",
+        "postgres": "^3.4.4",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
+    "packages/domains/uploads": {
+      "name": "@x1agent/domain-uploads",
+      "version": "0.0.0",
+      "dependencies": {
+        "@x1agent/kernel": "workspace:*",
         "hono": "^4.6.0",
         "postgres": "^3.4.4",
       },
@@ -1526,6 +1540,8 @@
     "@x1agent/domain-permissions": ["@x1agent/domain-permissions@workspace:packages/domains/permissions"],
 
     "@x1agent/domain-sessions": ["@x1agent/domain-sessions@workspace:packages/domains/sessions"],
+
+    "@x1agent/domain-uploads": ["@x1agent/domain-uploads@workspace:packages/domains/uploads"],
 
     "@x1agent/domain-vector": ["@x1agent/domain-vector@workspace:packages/domains/vector"],
 

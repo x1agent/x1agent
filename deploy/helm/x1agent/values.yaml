@@ -115,18 +115,24 @@ api:
     limits:   { cpu: 1,    memory: 1Gi }
   serviceAccountName: x1agent-api
   port: 30001
-  # Wave 1 of rfcs/jetstream-migration.md. Both default off so a chart
-  # upgrade introduces JetStream the *infrastructure* (configmap, PV,
-  # stream) without touching the runtime publish/consume paths. Flip
-  # to true to opt into the durable wake path:
-  #   1. useJetstreamPublish — api publishes wakes via JetStream so
-  #      msg-ids dedup and the broker stores every wake.
-  #   2. useJetstreamConsume — api injects USE_JETSTREAM_CONSUME=true
-  #      into NEW session sidecars; existing sessions stay on their
-  #      core subscriber until they terminate.
-  # Reversible: flip back to false + helm upgrade.
-  useJetstreamPublish: false
-  useJetstreamConsume: false
+  # Wave 1 of rfcs/jetstream-migration.md, now the default. Durable
+  # wake publish + per-session JetStream consumer on the sidecar so
+  # messages survive sidecar/pod restart instead of being silently
+  # dropped on NATS-core's at-most-once delivery.
+  #
+  # 1. useJetstreamPublish — api publishes wakes via JetStream so
+  #    msg-ids dedup and the broker stores every wake.
+  # 2. useJetstreamConsume — api injects USE_JETSTREAM_CONSUME=true
+  #    into NEW session sidecars; existing sessions stay on their
+  #    core subscriber until they terminate.
+  #
+  # Reversible per release: flip back to false + helm upgrade if a
+  # production issue traces to the JetStream path. Old `core` code
+  # paths remain in the api + sidecar so a downgrade is a one-line
+  # change for a release cycle. Once Wave 1 has soaked, the core
+  # paths get deleted and these flags go away.
+  useJetstreamPublish: true
+  useJetstreamConsume: true
 
 # ============================================================================
 # app Deployment
@@ -148,6 +154,21 @@ ingress:
   # this chart's Ingress resources reference it via ingressClassName.
   # Same controller as local OrbStack dev — no GKE-specific magic.
   className: nginx
+
+  # Apex redirect — when enabled, an additional Ingress catches the bare
+  # baseDomain (e.g. `lattice.atomic.health`) and 301-redirects all paths
+  # to `https://app.<baseDomain>/...`.
+  #
+  # Set this to `true` when the bare baseDomain is part of the install
+  # and the operator wants users hitting the apex to land on the app
+  # (lattice cutover, fresh installs without a separate marketing site).
+  #
+  # Leave it `false` (default) when the apex is owned by a separate
+  # property — e.g. x1agent.com serves a marketing site outside the
+  # cluster; the install only manages `app.x1agent.com`, `api.x1agent.com`,
+  # and `*.preview.x1agent.com`, so the apex must not be touched.
+  apexRedirect:
+    enabled: false
 
 # ============================================================================
 # Secrets — backed by Google Secret Manager via External Secrets Operator.

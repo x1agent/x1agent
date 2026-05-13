@@ -288,6 +288,8 @@ const {
   users: composedUsers,
   tickScheduler,
   quietHints: composedQuietHints,
+  uploadRoutes,
+  tickUploadsCleanup,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -472,6 +474,12 @@ app.route(
 app.route("/api/workspaces/:slug/members", workspaceMembersRoutes);
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
+// X1A-96 — image uploads. The first route inside (PUT /:id/raw) is
+// the local-disk signed-URL ingress, which authorises on the HMAC
+// token in the query string and runs BEFORE requireAuth. Every other
+// route under /api/uploads requires an authenticated session and
+// scopes to the creator-only ACL.
+app.route("/api/uploads", uploadRoutes);
 
 // Always-run seed: platform image presets. Idempotent.
 await seedPlatformPresets().catch((err) => {
@@ -528,6 +536,36 @@ if (!reaperDisabled) {
     },
   });
   console.log(`[grants-reaper] registered (interval=${REAPER_INTERVAL_MS}ms)`);
+}
+
+// X1A-96 — uploads cleanup sweep. 1h cadence is conventional for this
+// kind of "transition rows past their TTL, then delete the backing
+// objects" sweep; tunable via UPLOADS_CLEANUP_INTERVAL_MS for tests +
+// operators with smaller windows. UPLOADS_CLEANUP_DISABLED=true turns
+// the sweep off (kept for parity with the other schedulers).
+const UPLOADS_CLEANUP_INTERVAL_MS = Number(
+  process.env.UPLOADS_CLEANUP_INTERVAL_MS || 60 * 60 * 1000,
+);
+const uploadsCleanupDisabled =
+  process.env.UPLOADS_CLEANUP_DISABLED === "true";
+if (!uploadsCleanupDisabled) {
+  scheduler.register({
+    name: "uploads-cleanup",
+    intervalMs: UPLOADS_CLEANUP_INTERVAL_MS,
+    jitterMs: Math.floor(UPLOADS_CLEANUP_INTERVAL_MS * 0.1),
+    runOnStart: true,
+    fn: async () => {
+      const r = await tickUploadsCleanup();
+      if (r.expired > 0 || r.objectsDeleted > 0 || r.hardDeleted > 0 || r.errors > 0) {
+        console.log(
+          `[uploads-cleanup] expired=${r.expired} objects_deleted=${r.objectsDeleted} hard_deleted=${r.hardDeleted} errors=${r.errors}`,
+        );
+      }
+    },
+  });
+  console.log(
+    `[uploads-cleanup] registered (interval=${UPLOADS_CLEANUP_INTERVAL_MS}ms)`,
+  );
 }
 
 const natsUrl = process.env.NATS_URL || "";

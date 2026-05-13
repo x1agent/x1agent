@@ -42,6 +42,13 @@ interface ShareCommentsState {
       scope: "passage" | "share";
       anchor?: ShareCommentDTO["anchor"];
       body: string;
+      /**
+       * X1A-110 — set when the user clicks "Reply" on a comment. The
+       * server rejects with `nested_reply_not_supported` if the named
+       * parent is itself a reply, and with `parent_comment_not_in_thread`
+       * if it lives in a different thread.
+       */
+      parent_comment_id?: string;
     },
   ) => Promise<ShareCommentDTO>;
   resolveThread: (key: ShareKey, threadId: string) => Promise<void>;

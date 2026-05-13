@@ -70,6 +70,15 @@ export interface ShareComment {
   resolvedByUserId: UserId | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * X1A-110 — id of the parent comment this one replies to within the
+   * same thread. `null` for the first comment in a thread.
+   * Application-layer invariant (depth cap): if a comment has
+   * parent_comment_id set, that parent's `parentCommentId` MUST be
+   * null. The migration column accepts arbitrary depth so the cap can
+   * be lifted later; v1 enforces it in `postShareComment`.
+   */
+  parentCommentId: ShareCommentId | null;
 }
 
 /**
@@ -139,6 +148,34 @@ export class CommentBodyTooLongError extends DomainError {
   readonly code = "comment_body_too_long";
   constructor(public readonly limit: number) {
     super(`comment body exceeds ${limit} characters`);
+  }
+}
+
+/**
+ * X1A-110 — depth cap for reply nesting. v1 allows exactly one level
+ * of indent: top-level comment → reply. Replying to a reply is
+ * rejected so threads stay scannable. Lift this once we have a real
+ * design for deep threads (and a way to render them without runaway
+ * indentation on narrow viewports).
+ */
+export class NestedReplyNotSupportedError extends DomainError {
+  readonly code = "nested_reply_not_supported";
+  constructor() {
+    super(
+      "v1 supports replying to a top-level comment only; reply-to-reply is not supported",
+    );
+  }
+}
+
+/**
+ * X1A-110 — `parent_comment_id` must reference a comment in the same
+ * thread. Cross-thread parents are rejected to avoid the "reply
+ * routes to a different thread" footgun.
+ */
+export class ParentCommentNotInThreadError extends DomainError {
+  readonly code = "parent_comment_not_in_thread";
+  constructor() {
+    super("parent_comment_id must reference a comment in the same thread");
   }
 }
 

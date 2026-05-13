@@ -1,3 +1,59 @@
+## [1.24.9](https://github.com/x1agent/x1agent/compare/v1.24.8...v1.24.9) (2026-05-13)
+
+
+### Bug Fixes
+
+* **agent:** share tool returns share_id + usage hints ([d70d924](https://github.com/x1agent/x1agent/commit/d70d924c2e1b3b528ab77de6abf878403a6dfaa0))
+
+## [1.24.8](https://github.com/x1agent/x1agent/compare/v1.24.7...v1.24.8) (2026-05-13)
+
+
+### Bug Fixes
+
+* **nats:** widen ACL for api comment-wake + sidecar archive subjects ([16d23bb](https://github.com/x1agent/x1agent/commit/16d23bbb34d7ff72f66e9c8342670011dda128d8))
+
+## [1.24.7](https://github.com/x1agent/x1agent/compare/v1.24.6...v1.24.7) (2026-05-13)
+
+
+### Bug Fixes
+
+* **helm:** expose port 30001 on prod api Service for in-cluster callers ([d9b67e2](https://github.com/x1agent/x1agent/commit/d9b67e23d4f2e18b7a22bf80c6fb36ee159878ee))
+* **input:** make user-input durable via JetStream + drop stale on consumer ([13ec6a8](https://github.com/x1agent/x1agent/commit/13ec6a8a4f109de6ae73ccbfce41b8647d9e589a))
+
+## [1.24.6](https://github.com/x1agent/x1agent/compare/v1.24.5...v1.24.6) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** gate scheduled-run-as default on workspaceMembers load ([57308b8](https://github.com/x1agent/x1agent/commit/57308b894963cba7c97d3f6dfb9deace3100fe22))
+* **migrate:** fail loudly on duplicate numeric prefixes ([47cba20](https://github.com/x1agent/x1agent/commit/47cba20e3f5a4765e7316e667c7a1bf06bf0f6be))
+
+
+### Reverts
+
+* Revert "fix(app): minimal two-step create form for new agents" ([3a83b20](https://github.com/x1agent/x1agent/commit/3a83b20bdb9e6026d85826d58b35fbe26ecf5c7a))
+
+## [1.24.5](https://github.com/x1agent/x1agent/compare/v1.24.4...v1.24.5) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** minimal two-step create form for new agents ([ecb725a](https://github.com/x1agent/x1agent/commit/ecb725af80bb4525175088031ea63eac2cca4390)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+
+## [1.24.4](https://github.com/x1agent/x1agent/compare/v1.24.3...v1.24.4) (2026-05-12)
+
+
+### Bug Fixes
+
+* **helm:** pass stream name positional to nats stream edit/add ([8c3902d](https://github.com/x1agent/x1agent/commit/8c3902dc0a75b9530c2fab4dbbe3a9817a779e62)), closes [#101](https://github.com/x1agent/x1agent/issues/101)
+
+## [1.24.3](https://github.com/x1agent/x1agent/compare/v1.24.2...v1.24.3) (2026-05-12)
+
+
+### Bug Fixes
+
+* **app:** switch agent-edit page to per-field zustand selectors ([3ba6af0](https://github.com/x1agent/x1agent/commit/3ba6af058f3a0ddde4c7a7cf752be7c07029c828)), closes [#185](https://github.com/x1agent/x1agent/issues/185)
+
 ## [1.24.2](https://github.com/x1agent/x1agent/compare/v1.24.1...v1.24.2) (2026-05-12)
 
 

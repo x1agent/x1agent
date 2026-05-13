@@ -79,5 +79,18 @@ KUBECONFIG="$KCFG" gcloud container clusters get-credentials "$CLUSTER" \
 # Drop in. POSTGRES_USER / POSTGRES_DB come from the chart and are
 # stable (both 'x1agent'); pull from pod env so a future rename doesn't
 # break this script.
-exec env KUBECONFIG="$KCFG" kubectl -n "$NAMESPACE" exec -it sts/postgres -- \
-  bash -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+#
+# Modes:
+#   mise run psql:prod                           — interactive shell
+#   mise run psql:prod -- -c "SELECT 1"          — one-shot query
+#   echo "SELECT 1" | mise run psql:prod -- -i   — pipe SQL via stdin
+#
+# Anything in $@ is forwarded verbatim to psql. The `-it` only fires
+# when no positional args are passed (true interactive shell).
+if [[ $# -gt 0 ]]; then
+  exec env KUBECONFIG="$KCFG" kubectl -n "$NAMESPACE" exec -i sts/postgres -- \
+    psql -U x1agent -d x1agent "$@"
+else
+  exec env KUBECONFIG="$KCFG" kubectl -n "$NAMESPACE" exec -it sts/postgres -- \
+    bash -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+fi

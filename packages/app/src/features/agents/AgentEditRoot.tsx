@@ -193,11 +193,23 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
 
   // On create, default scheduled-run-as to the current user (= creator).
   // Edit mode loads the existing value below.
+  //
+  // Gated on workspaceMembers being populated AND containing the
+  // current user. Setting the value before the SelectItem with that
+  // value mounts trips a Radix Select infinite-render bug when other
+  // controlled Selects on the page are mid-mount — see X1A-85 / Sentry
+  // X1AGENT-APP-C. The cheapest fix is to never put a value into the
+  // Select that doesn't have a matching <SelectItem> at the same render.
   useEffect(() => {
-    if (isCreate && currentUser && !scheduledRunAsUserId) {
+    if (
+      isCreate &&
+      currentUser &&
+      !scheduledRunAsUserId &&
+      workspaceMembers.some((m) => m.user_id === currentUser.id)
+    ) {
       setScheduledRunAsUserId(currentUser.id);
     }
-  }, [isCreate, currentUser, scheduledRunAsUserId]);
+  }, [isCreate, currentUser, scheduledRunAsUserId, workspaceMembers]);
 
   // Workspace members for the "Run as" picker on the Schedule card.
   // Only fetched when this user has admin/owner role — non-admins
