@@ -274,6 +274,31 @@ describe("SessionCostBlock — markup", () => {
     expect(html).not.toContain("Session tree");
   });
 
+  it("closes the expanded tree when the user clicks outside the cost block", () => {
+    seedTreeCost();
+    const { container, getByTestId } = render(
+      <div>
+        <SessionCostBlock
+          workspaceSlug="ws-a"
+          sessionId="p"
+          live={false}
+          lastEventSeq={0}
+        />
+        <button data-testid="outside" type="button">
+          elsewhere
+        </button>
+      </div>,
+    );
+    const toggle = getByTestId("session-tree-toggle");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(container.innerHTML).toContain("Session tree");
+
+    fireEvent.mouseDown(getByTestId("outside"));
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(container.innerHTML).not.toContain("Session tree");
+  });
+
   it("omits the caret toggle entirely when the tree has no children", () => {
     // Only a `sessionCost` is seeded — no `treeCostBySession` entry,
     // so there's nothing to collapse and no caret should render.

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   formatTokens,
@@ -124,9 +124,34 @@ export function SessionCostBlock({
   const [treeOpen, setTreeOpen] = useState(false);
   const treeId = useId();
   const ChevronIcon = treeOpen ? ChevronDown : ChevronRight;
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the floating tree on outside click or Escape. Listener is
+  // only attached while the dropdown is open so we don't pay for every
+  // session in the page that isn't expanded.
+  useEffect(() => {
+    if (!treeOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (e.target instanceof Node && !root.contains(e.target)) {
+        setTreeOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTreeOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [treeOpen]);
 
   return (
     <div
+      ref={rootRef}
       className="relative rounded-md border border-border-soft bg-surface-muted/40 px-3 py-2"
       data-testid="session-cost-block"
     >
