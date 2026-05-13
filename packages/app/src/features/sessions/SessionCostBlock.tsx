@@ -1,12 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
-  formatTokens,
   formatUsd,
   useCostStore,
   type SessionCost,
   type SessionTreeCost,
-  type TokenUsageByModel,
 } from "../../stores/costStore";
 
 interface Props {
@@ -100,11 +98,6 @@ export function SessionCostBlock({
   const selfCost = treeCost?.parent.totals.costUsdEstimate
     ?? sessionCost?.totals.costUsdEstimate
     ?? 0;
-  const selfByModel: TokenUsageByModel[] = useMemo(
-    () =>
-      (treeCost?.parent.byModel ?? sessionCost?.byModel ?? []) as TokenUsageByModel[],
-    [treeCost, sessionCost],
-  );
 
   const hasChildren = (treeCost?.children?.length ?? 0) > 0;
   const treeTotal = treeCost?.totals.costUsdEstimate ?? selfCost;
@@ -164,11 +157,7 @@ export function SessionCostBlock({
             title="Live · updates within ~2s"
           />
         ) : null}
-        <CostAmount
-          amount={selfCost}
-          byModel={selfByModel}
-          live={live}
-        />
+        <CostAmount amount={selfCost} />
         {hasChildren && treeCost ? (
           <>
             <span aria-hidden="true" className="text-fg-faint">
@@ -177,8 +166,6 @@ export function SessionCostBlock({
             <WorkerCostAmount
               amount={workerTotal}
               count={workerCount}
-              workers={treeCost.children}
-              workspaceSlug={workspaceSlug}
             />
             <span aria-hidden="true" className="text-fg-faint">
               =
@@ -253,21 +240,11 @@ export function SessionCostBlock({
 
 /**
  * The muted dollar amount with dashed-underline hover affordance.
- * Hover (or keyboard focus) reveals a tooltip with the per-model token
- * breakdown — locked by the greenlit mockup. Implemented as a native
- * CSS-only tooltip using `details/summary` would change the keyboard
- * model; we keep it as a span with a sibling popover sized via Tailwind
- * to stay consistent with other inline tooltips in the app.
+ * Hover (or keyboard focus) reveals a short label clarifying that this
+ * is the current session's cost — the full per-worker breakdown lives
+ * inside the floating tree dropdown one click away on the caret.
  */
-export function CostAmount({
-  amount,
-  byModel,
-  live,
-}: {
-  amount: number;
-  byModel: TokenUsageByModel[];
-  live: boolean;
-}) {
+export function CostAmount({ amount }: { amount: number }) {
   return (
     <span className="group relative inline-flex items-center">
       <span
@@ -280,34 +257,9 @@ export function CostAmount({
       <span
         id="cost-tooltip"
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden min-w-[18rem] rounded-md border border-border-strong bg-surface-elevated px-3 py-2 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden whitespace-nowrap rounded-md border border-border-strong bg-surface-elevated px-2 py-1 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
       >
-        <div className="mb-1 font-medium text-fg">
-          This session — cost breakdown by model
-        </div>
-        <div className="mb-2 border-t border-border-soft" />
-        {byModel.length === 0 ? (
-          <div className="text-fg-faint">No model usage yet</div>
-        ) : (
-          <table className="w-full border-collapse text-[11px]">
-            <tbody>
-              {byModel.map((m) => (
-                <ModelRow key={m.model} m={m} />
-              ))}
-              <tr className="border-t border-border-soft">
-                <td className="pt-1 text-fg-faint">Total</td>
-                <td className="pt-1 text-right font-medium">
-                  {formatUsd(amount)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-        {live ? (
-          <div className="mt-2 text-[10px] text-fg-faint">
-            Live · updates within ~2s
-          </div>
-        ) : null}
+        This session
       </span>
     </span>
   );
@@ -322,13 +274,9 @@ export function CostAmount({
 export function WorkerCostAmount({
   amount,
   count,
-  workers,
-  workspaceSlug,
 }: {
   amount: number;
   count: number;
-  workers: SessionTreeCost["children"];
-  workspaceSlug: string;
 }) {
   const label = `${count} ${count === 1 ? "worker" : "workers"}`;
   return (
@@ -344,61 +292,11 @@ export function WorkerCostAmount({
       <span
         id="workers-cost-tooltip"
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden min-w-[18rem] rounded-md border border-border-strong bg-surface-elevated px-3 py-2 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden whitespace-nowrap rounded-md border border-border-strong bg-surface-elevated px-2 py-1 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
       >
-        <div className="mb-1 font-medium text-fg">Across {label}</div>
-        <div className="mb-2 border-t border-border-soft" />
-        <ul className="space-y-1">
-          {workers.map((w) => (
-            <li
-              key={w.sessionId}
-              className="flex min-w-0 items-center gap-2"
-            >
-              <a
-                href={`/workspaces/${workspaceSlug}/sessions/${w.sessionId}`}
-                className="truncate text-fg-muted hover:underline"
-                title={w.summary ?? w.sessionId}
-              >
-                {w.agentName ?? "worker"} {w.sessionId.slice(0, 8)}…
-              </a>
-              <span className="ml-auto shrink-0 text-fg">
-                {formatUsd(w.costUsdEstimate)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        Across {label}
       </span>
     </span>
   );
 }
 
-function ModelRow({ m }: { m: TokenUsageByModel }) {
-  return (
-    <>
-      <tr>
-        <td className="font-mono">{m.model}</td>
-        <td className="text-right">{formatUsd(m.costUsdEstimate)}</td>
-      </tr>
-      <tr className="text-fg-faint">
-        <td className="pl-3">input tokens</td>
-        <td className="text-right">{formatTokens(m.inputTokens)}</td>
-      </tr>
-      <tr className="text-fg-faint">
-        <td className="pl-3">output tokens</td>
-        <td className="text-right">{formatTokens(m.outputTokens)}</td>
-      </tr>
-      <tr className="text-fg-faint">
-        <td className="pl-3">cache reads</td>
-        <td className="text-right">
-          {formatTokens(m.cacheReadInputTokens)}
-        </td>
-      </tr>
-      <tr className="text-fg-faint">
-        <td className="pl-3">cache writes</td>
-        <td className="text-right">
-          {formatTokens(m.cacheCreationInputTokens)}
-        </td>
-      </tr>
-    </>
-  );
-}
