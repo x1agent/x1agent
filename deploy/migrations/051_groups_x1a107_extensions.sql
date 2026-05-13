@@ -79,3 +79,16 @@ CREATE INDEX groups_created_by
 CREATE INDEX groups_workspace_active
   ON groups (workspace_id)
   WHERE archived_at IS NULL;
+
+-- Replace 027's non-partial UNIQUE (workspace_id, slug) with a partial
+-- index scoped to active manual groups, mirroring the name-uniqueness
+-- pattern above. Archived groups keep their slug column but no longer
+-- block re-creating a manual group with the same slug — without this,
+-- archiving "Temporary" and then re-creating "Temporary" deterministically
+-- generates the same slug and trips 027's table-level UNIQUE, surfacing
+-- as a 409 to the caller even though the name-uniqueness index already
+-- (correctly) permits the reuse.
+ALTER TABLE groups DROP CONSTRAINT groups_workspace_id_slug_key;
+CREATE UNIQUE INDEX groups_ws_slug_active_manual
+  ON groups (workspace_id, slug)
+  WHERE archived_at IS NULL AND source = 'manual';

@@ -281,6 +281,52 @@ describe("groups routes (X1A-107)", () => {
       );
       expect(reArchived.status).toBe(204);
     });
+
+    // Regression for the 027-vs-051 mismatch: name uniqueness is partial
+    // (active + manual) but the legacy table-level UNIQUE on
+    // (workspace_id, slug) was non-partial. Re-creating a group with the
+    // same name deterministically derives the same slug, so the slug
+    // unique would 409 even though the name unique would (correctly)
+    // permit reuse. Migration 051 narrows the slug constraint to active
+    // manual groups; this test pins that.
+    it("archived group's slug is reusable when re-creating the same name", async () => {
+      const c = await login("admin@example.com");
+      const created = await app.fetch(
+        new Request("http://api.test/api/workspaces/alpha/groups", {
+          method: "POST",
+          headers: { Cookie: c, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "SlugReuse" }),
+        }),
+      );
+      expect(created.status).toBe(201);
+      const { group: original } = (await created.json()) as {
+        group: { id: string; slug: string };
+      };
+
+      const archived = await app.fetch(
+        new Request(
+          `http://api.test/api/workspaces/alpha/groups/${original.id}`,
+          { method: "DELETE", headers: { Cookie: c } },
+        ),
+      );
+      expect(archived.status).toBe(204);
+
+      // Same name → same derived slug → would have collided with the
+      // legacy non-partial slug unique before the 051 fix.
+      const reused = await app.fetch(
+        new Request("http://api.test/api/workspaces/alpha/groups", {
+          method: "POST",
+          headers: { Cookie: c, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "SlugReuse" }),
+        }),
+      );
+      expect(reused.status).toBe(201);
+      const { group: replacement } = (await reused.json()) as {
+        group: { id: string; slug: string };
+      };
+      expect(replacement.id).not.toBe(original.id);
+      expect(replacement.slug).toBe(original.slug);
+    });
   });
 
   describe("members", () => {
