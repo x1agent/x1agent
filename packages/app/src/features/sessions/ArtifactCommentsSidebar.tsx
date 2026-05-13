@@ -7,6 +7,7 @@ import {
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
 import { ComposerShell } from "./ComposerShell";
+import { ThreadTypingIndicators } from "./TypingIndicator";
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -164,6 +165,17 @@ export function ArtifactCommentsSidebar({
                   <CommentRow comment={r} currentUserId={currentUserId} />
                 </div>
               ))}
+              {/* X1A-104 — transient typing indicator scoped to this
+                  thread. Renders only when an `agent_thinking` wake
+                  with matching share_id+thread_id is active; clears
+                  the moment the correlated agent emission arrives or
+                  the 60s TTL fires. Never bubbles into the main
+                  timeline. */}
+              <ThreadTypingIndicators
+                sessionId={sessionId}
+                shareId={shareId}
+                threadId={t.thread_id}
+              />
             </div>
           );
         })}

@@ -19,6 +19,11 @@ import { SessionCostBlock } from "./SessionCostBlock";
 import { SessionTitle } from "./SessionTitle";
 import { Share2 } from "lucide-react";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
+import {
+  useTypingIndicatorStore,
+  extractCorrelatedEventId,
+} from "../../stores/typingIndicatorStore";
+import { MainTimelineTypingIndicators } from "./TypingIndicator";
 
 interface Props {
   workspaceSlug: string;
@@ -136,6 +141,40 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 payload: unknown;
                 timestamp: string;
               };
+
+              // X1A-104: `session.agent_thinking` is transient — it
+              // travels over the same WS channel but is NOT persisted
+              // to the timeline. Route it into the typing-indicator
+              // store and skip `appendEvent` so it doesn't pollute
+              // the durable event list or trigger the dedupe path.
+              if (msg.type === "session.agent_thinking") {
+                const p = (msg.payload ?? {}) as {
+                  share_id?: string | null;
+                  thread_id?: string | null;
+                  event_id?: string | null;
+                  wake_source?: string;
+                  started_at?: string;
+                };
+                if (typeof p.event_id === "string" && p.event_id) {
+                  useTypingIndicatorStore.getState().add(sessionId, {
+                    event_id: p.event_id,
+                    share_id:
+                      typeof p.share_id === "string" ? p.share_id : null,
+                    thread_id:
+                      typeof p.thread_id === "string" ? p.thread_id : null,
+                    started_at:
+                      typeof p.started_at === "string"
+                        ? p.started_at
+                        : msg.timestamp,
+                    wake_source:
+                      typeof p.wake_source === "string"
+                        ? p.wake_source
+                        : "unknown",
+                  });
+                }
+                continue;
+              }
+
               const ev: SessionEventDTO = {
                 id: `nats-${msg.session_id}-${msg.sequence}`,
                 session_id: msg.session_id,
@@ -144,6 +183,23 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
                 payload: msg.payload,
                 timestamp: msg.timestamp,
               };
+
+              // X1A-104 clear-signal: if this agent emission carries
+              // a wake correlation id (`event_id` / `in_reply_to` /
+              // `triggered_by` from X1A-103's propagation contract),
+              // clear the matching indicator. Defense-in-depth on
+              // top of the 60s client TTL — the sweep covers the
+              // pod-death case where no correlated emission ever
+              // arrives.
+              const correlated = extractCorrelatedEventId(
+                ev as unknown as Record<string, unknown>,
+              );
+              if (correlated) {
+                useTypingIndicatorStore
+                  .getState()
+                  .clearByEventId(sessionId, correlated);
+              }
+
               appendEvent(sessionId, ev);
             } catch {
               // drop malformed
@@ -259,6 +315,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         void nc.close();
       }
       ncRef.current = null;
+      // X1A-104: indicators are transient — dropping them on unmount
+      // matches the "fresh page load = clean" rule from X1A-103.
+      useTypingIndicatorStore.getState().clearAllForSession(sessionId);
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
 
@@ -464,6 +523,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           workspaceSlug={workspaceSlug}
           agentId={agent?.id}
           sessionId={sessionId}
+          tailSlot={<MainTimelineTypingIndicators sessionId={sessionId} />}
         />
 
         <div className="px-4 pt-3 pb-[60px]">
