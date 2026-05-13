@@ -9,7 +9,7 @@ import {
   type SessionId,
   type Session,
 } from "../domain/session.js";
-import type { SessionEvent } from "../domain/event.js";
+import { isShareCommentWakeEvent, type SessionEvent } from "../domain/event.js";
 
 export interface ListSessionEventsDeps {
   agents: AgentRepository;
@@ -42,5 +42,10 @@ export async function listSessionEvents(
     afterSeq: opts.afterSeq,
     limit,
   });
-  return { session, events };
+  // X1A-110 — share-comment wakes live in the share's comment flyout,
+  // not the main session timeline. Server-side filter so a refresh /
+  // first-load doesn't render them; the client also filters live
+  // WS-arriving events via `compactKind` to cover the streaming path.
+  const filtered = events.filter((e) => !isShareCommentWakeEvent(e));
+  return { session, events: filtered };
 }

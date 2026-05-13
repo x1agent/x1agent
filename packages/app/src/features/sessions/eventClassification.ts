@@ -83,6 +83,29 @@ export function compactKind(type: string): CompactKind {
 }
 
 /**
+ * X1A-110 — `user.message` rows whose payload carries
+ * `kind: "comment_added" | "comment_resolved"` originated from a
+ * share-comment wake (the agent received the wake as a user message;
+ * the SSE round-trip stripped the structured metadata; the api's
+ * subscriber re-derived `kind` from the wake-text header). These
+ * belong in the share's comment flyout, not the main timeline.
+ *
+ * Server-side filter in `listSessionEvents` handles the initial-load /
+ * refresh path; this client-side check covers the live WS-arriving
+ * path so a freshly-posted comment doesn't flash into the timeline
+ * for a beat before the page is refreshed.
+ *
+ * Returns "hidden" for matching rows, "event" otherwise — the caller
+ * pairs this with `compactKind` so a `user.message` that's NOT a
+ * comment wake still renders normally.
+ */
+export function isShareCommentWakeEvent(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  const kind = (payload as { kind?: unknown }).kind;
+  return kind === "comment_added" || kind === "comment_resolved";
+}
+
+/**
  * One row in the compact timeline.
  *
  * `key` is stable across re-grouping so React reuses the same DOM
@@ -117,6 +140,12 @@ export function compactTimeline(
   const out: CompactItem[] = [];
   const sharePillIdxByShareId = new Map<string, number>();
   for (const ev of events) {
+    // X1A-110 — drop share-comment wakes before any compact-grouping
+    // happens. They look like `user.message` but belong in the share
+    // flyout, not the main session timeline.
+    if (ev.type === "user.message" && isShareCommentWakeEvent(ev.payload)) {
+      continue;
+    }
     const k = compactKind(ev.type);
     if (k === "hidden") continue;
     if (k === "event") {
