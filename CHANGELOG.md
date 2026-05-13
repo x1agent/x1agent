@@ -1,3 +1,18 @@
+## [1.24.8](https://github.com/x1agent/x1agent/compare/v1.24.7...v1.24.8) (2026-05-13)
+
+
+### Bug Fixes
+
+* **nats:** widen ACL for api comment-wake + sidecar archive subjects ([16d23bb](https://github.com/x1agent/x1agent/commit/16d23bbb34d7ff72f66e9c8342670011dda128d8))
+
+## [1.24.7](https://github.com/x1agent/x1agent/compare/v1.24.6...v1.24.7) (2026-05-13)
+
+
+### Bug Fixes
+
+* **helm:** expose port 30001 on prod api Service for in-cluster callers ([d9b67e2](https://github.com/x1agent/x1agent/commit/d9b67e23d4f2e18b7a22bf80c6fb36ee159878ee))
+* **input:** make user-input durable via JetStream + drop stale on consumer ([13ec6a8](https://github.com/x1agent/x1agent/commit/13ec6a8a4f109de6ae73ccbfce41b8647d9e589a))
+
 ## [1.24.6](https://github.com/x1agent/x1agent/compare/v1.24.5...v1.24.6) (2026-05-12)
 
 
