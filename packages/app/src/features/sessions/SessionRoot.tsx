@@ -418,7 +418,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       />
       <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-w-0 items-start gap-3 border-b border-border-soft px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
           <div className="min-w-0 flex-1">
             <SessionTitle session={session ?? null} sessionId={sessionId} />
           </div>

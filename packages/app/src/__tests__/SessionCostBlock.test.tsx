@@ -166,6 +166,88 @@ describe("SessionCostBlock — markup", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("shows the inline session+workers math when children exist (collapsed default)", () => {
+    seedTreeCost();
+    const { container, getByTestId } = render(
+      <SessionCostBlock
+        workspaceSlug="ws-a"
+        sessionId="p"
+        live={false}
+        lastEventSeq={0}
+      />,
+    );
+    const html = container.innerHTML;
+    // Self amount (this session), worker amount, grand total are all
+    // visible in the headline pill before the tree is expanded.
+    expect(html).toContain("$2.1"); // self
+    expect(html).toContain("$1.2"); // workers sum
+    // Grand total is rendered as font-medium, marked with its own testid.
+    expect(getByTestId("session-tree-grand-total").textContent).toContain(
+      "$3.3",
+    );
+    // Plus / equals separators are present (inside aria-hidden spans).
+    expect(html).toContain(">+<");
+    expect(html).toContain(">=<");
+    // Worker context lives in the tooltip; no inline "N workers" label
+    // (it was too long inside the 18rem header pill).
+    expect(html).toContain("Across 1 worker");
+    // Caret renders on the far right of the row.
+    const toggle = getByTestId("session-tree-toggle");
+    expect(toggle.className).toContain("ml-auto");
+  });
+
+  it("pluralizes the worker label to '3 workers' in the tooltip when there are multiple children", () => {
+    useCostStore.setState({
+      treeCostBySession: {
+        p: {
+          rootSessionId: "p",
+          parent: {
+            sessionId: "p",
+            totals: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+              costUsdEstimate: 1,
+              cacheSavingsUsdEstimate: 0,
+            },
+            byModel: [],
+          },
+          children: ["a", "b", "c"].map((slug, idx) => ({
+            sessionId: `00000000-0000-7000-8000-aaaaaaaaaaa${idx}`,
+            depth: 1,
+            summary: `worker ${slug}`,
+            agentSlug: slug,
+            agentName: slug,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+            costUsdEstimate: 0.5,
+            cacheSavingsUsdEstimate: 0,
+          })),
+          totals: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+            costUsdEstimate: 2.5,
+            cacheSavingsUsdEstimate: 0,
+          },
+        },
+      },
+    });
+    const { container } = render(
+      <SessionCostBlock
+        workspaceSlug="ws-a"
+        sessionId="p"
+        live={false}
+        lastEventSeq={0}
+      />,
+    );
+    expect(container.innerHTML).toContain("Across 3 workers");
+  });
+
   it("expands the session tree on caret click and collapses again on a second click (X1A-116)", () => {
     seedTreeCost();
     const { container, getByTestId } = render(

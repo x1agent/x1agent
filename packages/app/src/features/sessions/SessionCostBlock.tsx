@@ -33,15 +33,13 @@ interface Props {
  * Combined View 1 + View 2 — header-mounted cost block on the session
  * detail page. Renders, in collapsed (default) form:
  *
- *   [●] $4.23  ▸    (dashed-underline span, hover for per-model tooltip)
+ *   This session [●] $2.10                                    (no children)
+ *   This session [●] $2.10  +  $1.20  =  $3.30                  ▸  (with children)
  *
- * Clicking the caret expands the tree inline below the pill:
- *
- *   [●] $4.23  ▾
- *   └─ self          $2.10
- *   └─ worker abc…   $1.20
- *   └─ worker def…   $0.93
- *   Total            $4.23
+ * Each dashed-underlined amount opens a tooltip on hover/focus: the
+ * "this session" amount shows the per-model breakdown; the workers sum
+ * shows which workers contributed and how many. Clicking the caret on
+ * the right expands the full tree inline below the pill.
  *
  * Locked decisions (greenlit mockup, 2026-05-12):
  *   - Muted dollar amount + dashed underline as the hover-affordance.
@@ -50,9 +48,10 @@ interface Props {
  *     aggregate row or any per-child row).
  *   - Tree breakdown inline under the cost block — not in a separate
  *     "Cost" tab (which would bury the answer to the question).
- *   - Tree is collapsed by default (X1A-116). The headline number is
- *     the answer most of the time; the tree is one click away when
- *     needed. State is per-session and does not persist across reloads.
+ *   - Tree is collapsed by default (X1A-116). The headline math
+ *     (session + workers = total) is the answer most of the time; the
+ *     per-worker rows are one click away. State is per-session and does
+ *     not persist across reloads.
  */
 export function SessionCostBlock({
   workspaceSlug,
@@ -109,6 +108,15 @@ export function SessionCostBlock({
 
   const hasChildren = (treeCost?.children?.length ?? 0) > 0;
   const treeTotal = treeCost?.totals.costUsdEstimate ?? selfCost;
+  const workerCount = treeCost?.children.length ?? 0;
+  const workerTotal = useMemo(
+    () =>
+      (treeCost?.children ?? []).reduce(
+        (acc, c) => acc + c.costUsdEstimate,
+        0,
+      ),
+    [treeCost],
+  );
 
   // Collapsed-by-default per X1A-116. State is per-session via React
   // local state — toggling on one session view doesn't affect siblings,
@@ -122,7 +130,7 @@ export function SessionCostBlock({
       className="rounded-md border border-border-soft bg-surface-muted/40 px-3 py-2"
       data-testid="session-cost-block"
     >
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className="text-fg-faint">This session</span>
         {live ? (
           <span
@@ -137,17 +145,39 @@ export function SessionCostBlock({
           live={live}
         />
         {hasChildren && treeCost ? (
-          <button
-            type="button"
-            onClick={() => setTreeOpen((v) => !v)}
-            aria-expanded={treeOpen}
-            aria-controls={treeId}
-            aria-label={treeOpen ? "Collapse session tree" : "Expand session tree"}
-            className="ml-0.5 inline-flex items-center rounded text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
-            data-testid="session-tree-toggle"
-          >
-            <ChevronIcon className="size-3" />
-          </button>
+          <>
+            <span aria-hidden="true" className="text-fg-faint">
+              +
+            </span>
+            <WorkerCostAmount
+              amount={workerTotal}
+              count={workerCount}
+              workers={treeCost.children}
+              workspaceSlug={workspaceSlug}
+            />
+            <span aria-hidden="true" className="text-fg-faint">
+              =
+            </span>
+            <span
+              className="font-medium text-fg"
+              data-testid="session-tree-grand-total"
+            >
+              {formatUsd(treeTotal)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setTreeOpen((v) => !v)}
+              aria-expanded={treeOpen}
+              aria-controls={treeId}
+              aria-label={
+                treeOpen ? "Collapse session tree" : "Expand session tree"
+              }
+              className="ml-auto inline-flex items-center rounded text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
+              data-testid="session-tree-toggle"
+            >
+              <ChevronIcon className="size-3" />
+            </button>
+          </>
         ) : null}
       </div>
 
@@ -253,6 +283,65 @@ export function CostAmount({
             Live · updates within ~2s
           </div>
         ) : null}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Inline summary of worker costs sitting between the "this session"
+ * amount and the grand total. Hover/focus reveals which workers
+ * contributed — same dashed-underline affordance as the by-model
+ * tooltip on `CostAmount`.
+ */
+export function WorkerCostAmount({
+  amount,
+  count,
+  workers,
+  workspaceSlug,
+}: {
+  amount: number;
+  count: number;
+  workers: SessionTreeCost["children"];
+  workspaceSlug: string;
+}) {
+  const label = `${count} ${count === 1 ? "worker" : "workers"}`;
+  return (
+    <span className="group relative inline-flex items-center">
+      <span
+        className="cursor-help border-b border-dashed border-fg-faint text-fg-muted"
+        tabIndex={0}
+        aria-describedby="workers-cost-tooltip"
+        aria-label={`Workers cost — ${label}`}
+      >
+        {formatUsd(amount)}
+      </span>
+      <span
+        id="workers-cost-tooltip"
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden min-w-[18rem] rounded-md border border-border-strong bg-surface-elevated px-3 py-2 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
+      >
+        <div className="mb-1 font-medium text-fg">Across {label}</div>
+        <div className="mb-2 border-t border-border-soft" />
+        <ul className="space-y-1">
+          {workers.map((w) => (
+            <li
+              key={w.sessionId}
+              className="flex min-w-0 items-center gap-2"
+            >
+              <a
+                href={`/workspaces/${workspaceSlug}/sessions/${w.sessionId}`}
+                className="truncate text-fg-muted hover:underline"
+                title={w.summary ?? w.sessionId}
+              >
+                {w.agentName ?? "worker"} {w.sessionId.slice(0, 8)}…
+              </a>
+              <span className="ml-auto shrink-0 text-fg">
+                {formatUsd(w.costUsdEstimate)}
+              </span>
+            </li>
+          ))}
+        </ul>
       </span>
     </span>
   );
