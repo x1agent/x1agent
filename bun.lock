@@ -446,6 +446,14 @@
         "typescript": "^5.6.0",
       },
     },
+    "packages/prompt-tokens": {
+      "name": "@x1agent/prompt-tokens",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/providers/google-workspace": {
       "name": "@x1agent/provider-google-workspace",
       "version": "0.0.0",
@@ -1541,6 +1549,8 @@
     "@x1agent/mcp-oauth-proxy": ["@x1agent/mcp-oauth-proxy@workspace:packages/mcp-oauth-proxy"],
 
     "@x1agent/observability": ["@x1agent/observability@workspace:packages/observability"],
+
+    "@x1agent/prompt-tokens": ["@x1agent/prompt-tokens@workspace:packages/prompt-tokens"],
 
     "@x1agent/provider-google-workspace": ["@x1agent/provider-google-workspace@workspace:packages/providers/google-workspace"],
 
