@@ -1,4 +1,4 @@
-import type { CollectionHandle } from "@x1agent/domain-graph";
+import type { CollectionAddress } from "@x1agent/domain-graph";
 import type { CollectionProviderType } from "../domain/collection.js";
 
 /**
@@ -22,13 +22,13 @@ export interface ProviderGateway {
    */
   provision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
     settings: Record<string, unknown>,
   ): Promise<void>;
 
   deprovision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<void>;
 
   /**
@@ -38,7 +38,7 @@ export interface ProviderGateway {
    */
   discover(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<readonly ProviderRecordType[]>;
 
   /**
@@ -48,7 +48,7 @@ export interface ProviderGateway {
    */
   listRecords(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
     recordType: string,
     limit: number,
   ): Promise<readonly ProviderRecord[]>;

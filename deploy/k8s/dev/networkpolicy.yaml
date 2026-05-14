@@ -305,12 +305,51 @@ spec:
       ports: [{ port: 6379, protocol: TCP }]
     # External: github (gh, git), npm/jsr (package installs), Anthropic
     # / OpenAI (LLM calls if not via provider), generic web.
+    #
+    # 169.254.0.0/16 is denied because that's the cloud metadata server
+    # (link-local). On GKE Workload Identity, anything reaching
+    # 169.254.169.254 can mint a GSA token; on dev OrbStack the range
+    # is just unused link-local, but we keep the rule for parity with
+    # the chart template
+    # (deploy/helm/x1agent/templates/agent-session-networkpolicy.yaml).
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
+              - 169.254.0.0/16
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
+---
+# Agent-session ingress default-deny. Mirrors the chart template at
+# `deploy/helm/x1agent/templates/agent-session-networkpolicy.yaml` —
+# the chart/dev parity rule in CLAUDE.md requires both stay in sync.
+#
+# The previous dev manifest set `ingress: - {}` on the session pod
+# NetworkPolicy, which is allow-from-anywhere. Combined with the
+# sidecar's old `0.0.0.0:9090` bind, that left ~50 unauthenticated
+# credential-bearing routes reachable from any pod in the cluster
+# (`/git/credential`, `/user-oauth-token`, `/files/*`, etc.). The
+# sidecar now binds those routes to 127.0.0.1; this policy is the
+# defense-in-depth backstop.
+#
+# Only the kubelet readiness probe on :9091 is allowed. OrbStack's
+# kindnet CNI does not enforce NetworkPolicy, so locally this is a
+# no-op — the loopback bind in the sidecar is the active control.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-session-ingress
+  namespace: x1agent
+spec:
+  podSelector: { matchLabels: { component: agent-session } }
+  policyTypes:
+    - Ingress
   ingress:
-    - {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 9091
+          protocol: TCP

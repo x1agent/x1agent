@@ -1,5 +1,9 @@
 import { Email } from "@x1agent/kernel";
-import type { AuthProvider } from "../../ports/auth-provider.js";
+import type {
+  AuthProvider,
+  AuthorizeUrlOptions,
+  ExchangeCodeOptions,
+} from "../../ports/auth-provider.js";
 import type { AuthProfile } from "../../domain/auth-profile.js";
 import { InvalidAuthCodeError } from "../../domain/errors.js";
 
@@ -27,7 +31,11 @@ export class DevBypassAuthProvider implements AuthProvider {
     this.acceptedCode = config.code ?? "bypass";
   }
 
-  getAuthorizeUrl(redirectUri: string, state?: string): string {
+  getAuthorizeUrl(
+    redirectUri: string,
+    state?: string,
+    _options?: AuthorizeUrlOptions,
+  ): string {
     const params = new URLSearchParams({
       redirect_uri: redirectUri,
       code: this.acceptedCode,
@@ -36,7 +44,11 @@ export class DevBypassAuthProvider implements AuthProvider {
     return `${redirectUri}?${params.toString()}`;
   }
 
-  async exchangeCode(code: string): Promise<AuthProfile> {
+  async exchangeCode(
+    code: string,
+    _redirectUri?: string,
+    _options?: ExchangeCodeOptions,
+  ): Promise<AuthProfile> {
     if (code !== this.acceptedCode) {
       throw new InvalidAuthCodeError("bypass code mismatch");
     }

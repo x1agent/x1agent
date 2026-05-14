@@ -19,9 +19,6 @@ spec:
     - name: client
       port: 4222
       targetPort: 4222
-    - name: ws
-      port: 8080
-      targetPort: 8080
 ---
 {{- $nats := .Values.infra.nats -}}
 {{- $js := default (dict) $nats.jetstream -}}
@@ -65,8 +62,6 @@ spec:
           ports:
             - containerPort: 4222
               name: client
-            - containerPort: 8080
-              name: ws
           resources: {{- toYaml $nats.resources | nindent 12 }}
           volumeMounts:
             - name: config
@@ -125,7 +120,6 @@ spec:
   ports:
     - { name: client,  port: 4222, targetPort: 4222 }
     - { name: cluster, port: 6222, targetPort: 6222 }
-    - { name: ws,      port: 8080, targetPort: 8080 }
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -152,7 +146,6 @@ spec:
           ports:
             - { containerPort: 4222, name: client }
             - { containerPort: 6222, name: cluster }
-            - { containerPort: 8080, name: ws }
           resources: {{- toYaml $nats.resources | nindent 12 }}
           volumeMounts:
             - { name: config,     mountPath: /etc/nats,            readOnly: true }
@@ -294,18 +287,15 @@ data:
       ]
     }
 
-    # Diagnostic-only WebSocket listener. The browser used to reach this
-    # port through a public Ingress at nats.<base-domain>, which mapped
+    # No WebSocket listener. The browser used to reach NATS directly
+    # through a public Ingress at nats.<base-domain>, which mapped
     # anonymous clients to CN=x1agent-api — a cluster-wide super-user.
-    # That Ingress is gone (2026-05-13) and browsers now talk to the api
-    # bridge at wss://api.<base-domain>/api/ws, which uses its own mTLS
-    # connection to NATS on :4222. The :8080 listener is left in for
-    # `nats` CLI use inside the cluster; the nats-networkpolicy.yaml
-    # NetworkPolicy denies traffic to either port from any pod that
-    # isn't api, provider, or session-pod.
-    websocket {
-      port: 8080
-      no_tls: true
-      no_auth_user: "CN=x1agent-api"
-    }
+    # That Ingress was deleted 2026-05-13. The in-cluster :8080 listener
+    # lingered for `nats` CLI debugging with no remaining production
+    # consumer, but kept the no_auth_user super-user mapping a single
+    # mis-labeled deployment or unenforced NetworkPolicy away from
+    # re-introducing the original exploit (security sweep t01 P0).
+    # Browsers go through the api ws-bridge at wss://api.<base>/api/ws,
+    # which holds its own mTLS connection to NATS on :4222. Any operator
+    # who needs raw NATS access uses the same :4222 path with a real cert.
 {{- end }}

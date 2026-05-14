@@ -1,6 +1,13 @@
+import type { WorkspaceNamespace } from "@x1agent/domain-graph";
 import type { VectorNamespace } from "../domain/namespace.js";
 
 export interface ProvisionInput {
+  /**
+   * SurrealDB namespace that owns this workspace's collections. Pins
+   * the per-workspace tenancy isolation introduced in t03 P0 #2
+   * Layer 2; the vector store lives inside this namespace's database.
+   */
+  workspaceNamespace: WorkspaceNamespace;
   namespace: VectorNamespace;
   /** Dimension of every vector in this namespace. Immutable per namespace. */
   dimension: number;
@@ -13,6 +20,7 @@ export interface ProvisionInput {
 }
 
 export interface UpsertInput {
+  workspaceNamespace: WorkspaceNamespace;
   namespace: VectorNamespace;
   /** Opaque per-caller id. If it already exists the vector is replaced. */
   id: string;
@@ -22,6 +30,7 @@ export interface UpsertInput {
 }
 
 export interface SearchInput {
+  workspaceNamespace: WorkspaceNamespace;
   namespace: VectorNamespace;
   vector: readonly number[];
   topK: number;
@@ -45,17 +54,26 @@ export interface SearchResult {
 
 /**
  * Port every vector-provider adapter implements. One namespace per
- * collection; `provision` creates it with a fixed dimension + metric,
- * `deprovision` drops it. Agents call `upsert` as they accrete
- * knowledge and `search` when they want semantic recall.
+ * collection within a per-workspace SurrealDB namespace; `provision`
+ * creates it with a fixed dimension + metric, `deprovision` drops it.
+ * Agents call `upsert` as they accrete knowledge and `search` when
+ * they want semantic recall. Every method requires
+ * `workspaceNamespace` for tenancy isolation — see t03 P0 #2 Layer 2.
  */
 export interface VectorProvider {
   readonly id: string;
 
   provision(input: ProvisionInput): Promise<void>;
-  deprovision(namespace: VectorNamespace): Promise<void>;
+  deprovision(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+  ): Promise<void>;
 
   upsert(input: UpsertInput): Promise<void>;
   search(input: SearchInput): Promise<SearchResult>;
-  delete(namespace: VectorNamespace, id: string): Promise<void>;
+  delete(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+    id: string,
+  ): Promise<void>;
 }

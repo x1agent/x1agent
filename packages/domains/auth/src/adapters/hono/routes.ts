@@ -1,9 +1,11 @@
 import { Hono } from "hono";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AuthProvider } from "../../ports/auth-provider.js";
 import type { UserRepository } from "../../ports/user-repository.js";
 import type { SessionTokenizer } from "../../ports/session-tokenizer.js";
 import type { PersonRepository } from "../../ports/person-repository.js";
 import type { LinkAttemptStore } from "../../ports/link-attempt-store.js";
+import type { OAuthLoginStateStore } from "../../ports/oauth-login-state-store.js";
 import type { PasswordCredentialStore } from "../../ports/password-credential-store.js";
 import type { UserOAuthTokenStore } from "../../ports/user-oauth-token-store.js";
 import {
@@ -23,6 +25,10 @@ import {
 } from "../../domain/errors.js";
 import type { AuthProfile } from "../../domain/auth-profile.js";
 import { LinkState } from "../../domain/link-attempt.js";
+import {
+  LoginState,
+  type OAuthLoginState,
+} from "../../domain/oauth-login-state.js";
 import { Email, UserId } from "@x1agent/kernel";
 
 export interface AuthRoutesConfig {
@@ -71,6 +77,14 @@ export interface AuthRoutesConfig {
    */
   persons?: PersonRepository;
   linkAttempts?: LinkAttemptStore;
+  /**
+   * REQUIRED for OAuth login (`/google` + `/google/callback`). Backs
+   * the server-side `state` + PKCE-verifier ledger that closes the
+   * login-CSRF + open-redirect chain (audit t04 P0 #1, OAuth 2.0 §10.12,
+   * RFC 7636). Composition root must wire the Postgres adapter; tests
+   * use the in-memory fake.
+   */
+  loginStates: OAuthLoginStateStore;
   clock?: Clock;
 
   /**
@@ -113,6 +127,22 @@ function buildCookieHeader(
   if (secure) parts.push("Secure");
   return parts.join("; ");
 }
+
+/** Constant-time string compare. False on length mismatch. */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return timingSafeEqual(ab, bb);
+}
+
+/** PKCE S256 challenge derivation (RFC 7636 §4.2). */
+function pkceChallengeFor(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+const OAUTH_STATE_TTL_SECONDS = 10 * 60;
+const OAUTH_STATE_COOKIE_NAME = "x1_oauth_state";
 
 function readCookie(
   rawCookie: string | undefined,
@@ -157,13 +187,81 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
     }),
   );
 
-  app.get("/google", (c) =>
-    c.redirect(cfg.authProvider.getAuthorizeUrl(redirectUri())),
-  );
+  const loginStates = cfg.loginStates;
+  const clock = cfg.clock ?? systemClock;
+
+  // /google — initiation. Mints a fresh OAuth `state` + PKCE verifier,
+  // persists them server-side keyed by `state`, sets a one-shot
+  // httpOnly cookie carrying the same `state` (defense-in-depth), and
+  // sends the browser to Google with `state` + `code_challenge`.
+  //
+  // Two layers MUST agree on the callback before we touch the code:
+  //   1. The cookie returned by the browser equals the `state` query
+  //      param (login-CSRF: an attacker cannot fabricate the cookie).
+  //   2. The persisted row exists, isn't expired, and isn't already
+  //      consumed (prevents replay).
+  //
+  // See audit docs/audits/2026-05-14_security-sweep/findings/t04_auth.md
+  // (orchestrator repo) and OAuth 2.0 §10.12 / RFC 7636.
+  app.get("/google", async (c) => {
+    const state = randomBytes(32).toString("base64url");
+    const codeVerifier = randomBytes(64).toString("base64url");
+    const codeChallenge = pkceChallengeFor(codeVerifier);
+    const now = clock.now();
+    const attempt: OAuthLoginState = {
+      state: LoginState(state),
+      codeVerifier,
+      redirectPath: null,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_SECONDS * 1000),
+      usedAt: null,
+    };
+    await loginStates.put(attempt);
+    c.header(
+      "Set-Cookie",
+      cookieHeader(OAUTH_STATE_COOKIE_NAME, state, OAUTH_STATE_TTL_SECONDS),
+    );
+    return c.redirect(
+      cfg.authProvider.getAuthorizeUrl(redirectUri(), state, {
+        codeChallenge,
+        codeChallengeMethod: "S256",
+      }),
+    );
+  });
 
   app.get("/google/callback", async (c) => {
     const code = c.req.query("code");
+    const queryState = c.req.query("state");
     if (!code) return c.json({ error: "missing_code" }, 400);
+    if (!queryState) return c.json({ error: "oauth_state_invalid" }, 400);
+
+    // Belt: cookie binding. An attacker who lures the victim into
+    // hitting an attacker-built /callback URL cannot forge this cookie
+    // — it was never set on the victim's browser.
+    const cookieState = readCookie(
+      c.req.header("Cookie"),
+      OAUTH_STATE_COOKIE_NAME,
+    );
+    if (!cookieState || !safeEqual(cookieState, queryState)) {
+      // Always clear the cookie on rejection so a stale value can't
+      // accidentally be reused on a follow-up request.
+      c.header("Set-Cookie", expiredCookie(OAUTH_STATE_COOKIE_NAME), {
+        append: true,
+      });
+      return c.json({ error: "oauth_state_invalid" }, 400);
+    }
+
+    // Suspenders: server-side single-use ledger. consume() atomically
+    // marks `used_at` and returns null on missing / already-used /
+    // double-submit races.
+    const row = await loginStates.consume(LoginState(queryState));
+    c.header("Set-Cookie", expiredCookie(OAUTH_STATE_COOKIE_NAME), {
+      append: true,
+    });
+    if (!row) return c.json({ error: "oauth_state_invalid" }, 400);
+    if (row.expiresAt.getTime() < clock.now().getTime())
+      return c.json({ error: "oauth_state_invalid" }, 400);
+
     try {
       const { session, token } = await signInWithCode(
         {
@@ -177,18 +275,26 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
         },
         code,
         redirectUri(),
+        { codeVerifier: row.codeVerifier },
       );
       c.header(
         "Set-Cookie",
         cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
+        { append: true },
       );
       // Fresh-install platform admin: they signed in successfully but
       // there's no workspace yet (assertHasMembership exempts admins
       // for exactly this case). Send them to /workspaces/new so they
       // can bootstrap the first workspace. Anyone else with at least
       // one membership lands on their first workspace.
+      //
+      // The post-auth path is server-controlled (either the row's
+      // stashed `redirect_path` or the membership-derived default) —
+      // never a client-supplied callback param. This is the
+      // open-redirect defense.
       const slug = session.memberships[0]?.slug;
-      const dest = slug ? `/workspaces/${slug}` : "/workspaces/new";
+      const fallback = slug ? `/workspaces/${slug}` : "/workspaces/new";
+      const dest = row.redirectPath ?? fallback;
       return c.redirect(`${cfg.appUrl}${dest}`);
     } catch (err) {
       if (err instanceof NoWorkspaceMembershipError)
@@ -319,7 +425,6 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
   if (cfg.persons && cfg.linkAttempts) {
     const persons = cfg.persons;
     const linkAttempts = cfg.linkAttempts;
-    const clock = cfg.clock ?? systemClock;
     const linkRedirectUri = () => `${cfg.apiUrl}/auth/link/callback`;
 
     app.post("/link/begin", async (c) => {

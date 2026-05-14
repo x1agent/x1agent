@@ -91,12 +91,16 @@ describe("createCollection", () => {
       },
     );
     expect(c.backendHandle).toBe("col_default_general" as never);
+    expect(c.backendNamespace).toBe("ws_default" as never);
     expect(collections.rows).toHaveLength(1);
     expect(providers.calls).toHaveLength(1);
     expect(providers.calls[0]).toMatchObject({
       kind: "provision",
       providerType: "surrealdb",
-      handle: "col_default_general",
+      address: {
+        namespace: "ws_default",
+        database: "col_default_general",
+      },
     });
   });
 

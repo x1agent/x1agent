@@ -119,6 +119,42 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       },
     );
 
+    // t02/t05 P0 (X1A-96 follow-up): API_INTERNAL_TOKEN authorises every
+    // /api/internal/* route for every user / installation in the install.
+    // Putting it on the agent container collapsed the documented trust
+    // boundary (the agent is untrusted; the sidecar is the boundary).
+    // The agent → upload path now goes through the sidecar's
+    // /uploads/read credential proxy, exactly like git creds and OAuth
+    // tokens. This regression guard fails the build if anyone ever
+    // re-adds the env to the agent container.
+    it.each<AgentKind>(["worker", "orchestrator", "scheduled"])(
+      "%s pod: API_INTERNAL_TOKEN is NEVER set on the agent container (trust boundary)",
+      (kind) => {
+        const job = buildSessionJob(baseSpec(kind));
+        const agent = job.spec!.template.spec!.containers!.find(
+          (c) => c.name === "agent",
+        )!;
+        expect(
+          (agent.env ?? []).find((e) => e.name === "API_INTERNAL_TOKEN"),
+        ).toBeUndefined();
+      },
+    );
+
+    it.each<AgentKind>(["worker", "orchestrator", "scheduled"])(
+      "%s pod: API_INTERNAL_TOKEN IS still set on the sidecar container — sidecar is the trust boundary",
+      (kind) => {
+        const job = buildSessionJob(baseSpec(kind));
+        const sidecar = job.spec!.template.spec!.containers!.find(
+          (c) => c.name === "sidecar",
+        )!;
+        const entry = (sidecar.env ?? []).find(
+          (e) => e.name === "API_INTERNAL_TOKEN",
+        );
+        expect(entry).toBeDefined();
+        expect(entry!.value).toBe("t"); // value from baseSpec
+      },
+    );
+
     it.each<AgentKind>(["worker", "orchestrator", "scheduled"])(
       "%s pod mounts the nats-tls secret on the sidecar",
       (kind) => {

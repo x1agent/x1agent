@@ -28,6 +28,14 @@ pub struct AttachedCollection {
     pub id: String,
     pub slug: String,
     pub backend_handle: String,
+    /// Per-workspace SurrealDB namespace (ws_<slug>). The sidecar
+    /// relays it on every NATS call so the provider pins `surreal-ns`
+    /// for tenancy isolation. Optional during the rollout window so
+    /// pre-Layer-2 jobs still parse cleanly; absent => empty string
+    /// downstream and the provider falls back to the install bootstrap
+    /// namespace (pre-existing behavior). See t03 P0 #2 Layer 2.
+    #[serde(default)]
+    pub backend_namespace: String,
     pub provider_type: String,
     #[serde(default)]
     pub is_default: bool,
@@ -45,24 +53,29 @@ static ATTACHED_COLLECTIONS: Lazy<Vec<AttachedCollection>> = Lazy::new(|| {
     }
 });
 
-/// Resolve a caller-supplied `collection` string to the attached
-/// collection's backend_handle. Matches on id, slug, or handle. If no
-/// `collection` is supplied, returns the default attachment.
-fn resolve_handle(collection: Option<&str>) -> Option<String> {
+/// (workspace_namespace, backend_handle) pair — the full address of a
+/// collection's backing store. See t03 P0 #2 Layer 2.
+struct ResolvedCollection {
+    namespace: String,
+    handle: String,
+}
+
+/// Resolve a caller-supplied `collection` string to its full address.
+/// Matches on id, slug, or handle. If no `collection` is supplied,
+/// returns the default attachment.
+fn resolve_collection(collection: Option<&str>) -> Option<ResolvedCollection> {
     let attached = &*ATTACHED_COLLECTIONS;
+    let pick = |a: &AttachedCollection| ResolvedCollection {
+        namespace: a.backend_namespace.clone(),
+        handle: a.backend_handle.clone(),
+    };
     if let Some(c) = collection {
-        if let Some(m) = attached
+        return attached
             .iter()
             .find(|a| a.id == c || a.slug == c || a.backend_handle == c)
-        {
-            return Some(m.backend_handle.clone());
-        }
-        return None;
+            .map(pick);
     }
-    attached
-        .iter()
-        .find(|a| a.is_default)
-        .map(|a| a.backend_handle.clone())
+    attached.iter().find(|a| a.is_default).map(pick)
 }
 
 #[derive(Serialize)]
@@ -203,9 +216,11 @@ pub struct GraphDiscoverRequest {
 
 // ── Graph handlers ───────────────────────────────────────────────
 
-fn require_handle(collection: Option<&str>) -> Result<String, axum::response::Response> {
-    match resolve_handle(collection) {
-        Some(h) => Ok(h),
+fn require_address(
+    collection: Option<&str>,
+) -> Result<ResolvedCollection, axum::response::Response> {
+    match resolve_collection(collection) {
+        Some(addr) => Ok(addr),
         None => Err(error_response(
             StatusCode::NOT_FOUND,
             "collection_not_attached",
@@ -218,12 +233,13 @@ pub async fn handle_graph_query(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GraphQueryRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let body = serde_json::json!({
-        "handle": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "query": req.query,
         "vars": req.vars,
     });
@@ -234,8 +250,8 @@ pub async fn handle_graph_write(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GraphWriteRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let user_id = std::env::var("SESSION_USER_ID").ok();
@@ -247,7 +263,8 @@ pub async fn handle_graph_write(
         "derived_from": req.derived_from,
     });
     let body = serde_json::json!({
-        "handle": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "record_type": req.record_type,
         "data": req.data,
         "provenance": provenance,
@@ -259,12 +276,13 @@ pub async fn handle_graph_relate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GraphRelateRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let body = serde_json::json!({
-        "handle": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "from": req.from,
         "edge": req.edge,
         "to": req.to,
@@ -277,12 +295,13 @@ pub async fn handle_graph_resolve(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GraphResolveRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let body = serde_json::json!({
-        "handle": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "record_type": req.record_type,
         "name": req.name,
         "email": req.email,
@@ -295,11 +314,14 @@ pub async fn handle_graph_discover(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GraphDiscoverRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
-    let body = serde_json::json!({ "handle": handle });
+    let body = serde_json::json!({
+        "namespace": addr.namespace,
+        "handle": addr.handle,
+    });
     nats_request(&state, "x1.provider.graph.discover", body).await
 }
 
@@ -340,12 +362,17 @@ pub async fn handle_vector_upsert(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VectorUpsertRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
+    // Wire shape (Layer 2): `namespace` carries the workspace
+    // SurrealDB namespace (ws_<slug>); `handle` carries the
+    // per-collection database name. Pre-Layer-2 the field name was
+    // overloaded — `namespace` used to mean the collection's db.
     let body = serde_json::json!({
-        "namespace": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "id": req.id,
         "vector": req.vector,
         "metadata": req.metadata,
@@ -357,12 +384,13 @@ pub async fn handle_vector_search(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VectorSearchRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let body = serde_json::json!({
-        "namespace": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "vector": req.vector,
         "top_k": req.top_k,
         "filter": req.filter,
@@ -374,12 +402,13 @@ pub async fn handle_vector_delete(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VectorDeleteRequest>,
 ) -> axum::response::Response {
-    let handle = match require_handle(req.collection.as_deref()) {
-        Ok(h) => h,
+    let addr = match require_address(req.collection.as_deref()) {
+        Ok(a) => a,
         Err(r) => return r,
     };
     let body = serde_json::json!({
-        "namespace": handle,
+        "namespace": addr.namespace,
+        "handle": addr.handle,
         "id": req.id,
     });
     nats_request(&state, "x1.provider.vector.delete", body).await

@@ -1,7 +1,7 @@
 # NATS mTLS certs — issued by the internal CA in cert-manager-issuer.yaml.
 #
 # Three certs:
-#   - nats-server         — server cert NATS presents on :4222 + :8080
+#   - nats-server         — server cert NATS presents on :4222
 #   - nats-api-client     — client cert the api uses to connect
 #   - nats-session-client — client cert each session sidecar uses
 #
