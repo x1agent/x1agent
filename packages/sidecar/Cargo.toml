@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 async-nats = "0.42"
+base64 = "0.22"
 bytes = "1"
 # Sentry uses native-tls (openssl). Alpine builder has openssl-dev +
 # openssl-libs-static so the build works. Tried `rustls` feature first
@@ -25,6 +26,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+# `oneshot` for in-process Router exercising in unit tests
+# (listener-isolation tests in main.rs).
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 opt-level = "s"

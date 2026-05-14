@@ -1,6 +1,10 @@
+{{- if .Values.previews.enabled }}
+{{- if ne (default "http01" .Values.tls.solver.type) "dns01" }}
+{{- fail "previews.enabled=true requires tls.solver.type=dns01 — wildcard certs cannot be issued via http01" }}
+{{- end }}
 # Wildcard preview Ingress — every preview deployment in x1-previews
 # routes through this single Ingress + cert. Each preview Service the
-# preview provider creates is matched by its host (foo.preview.x1agent.com)
+# preview provider creates is matched by its host (foo.preview.<base>)
 # via a separate Ingress rule the provider adds at deploy time, OR by
 # wildcard-matching the cert + having the provider create per-preview
 # Ingress resources. v1: per-preview Ingresses, this one is just the
@@ -21,3 +25,4 @@ spec:
   dnsNames:
     - {{ printf "*.preview.%s" .Values.baseDomain | quote }}
     - {{ printf "preview.%s" .Values.baseDomain | quote }}
+{{- end }}

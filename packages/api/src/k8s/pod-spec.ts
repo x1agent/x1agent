@@ -30,6 +30,12 @@ export interface AttachedCollectionForPod {
   slug: string;
   /** Provider-opaque backing-store id the adapter uses in NATS calls. */
   backend_handle: string;
+  /**
+   * Per-workspace SurrealDB namespace this collection lives in. The
+   * sidecar relays it on every NATS call so the provider pins
+   * `surreal-ns` for tenancy isolation — see t03 P0 #2 Layer 2.
+   */
+  backend_namespace: string;
   /** "surrealdb" | future providers. */
   provider_type: string;
   is_default: boolean;
@@ -216,13 +222,18 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "SESSION_MODE", value: spec.sessionMode },
     { name: "IDLE_TIMEOUT_MS", value: String(spec.idleTimeoutMs) },
     { name: "SIDECAR_URL", value: "http://localhost:9090" },
-    // X1A-96: agent needs to call back to the api's internal route to
-    // read user-uploaded files when it sees `[image: <uuid>]` tokens
-    // in a message. The internal token is the only auth on that route;
-    // the agent's neighboring sidecar already has the same value, so
-    // exposing it here doesn't widen the trust boundary.
+    // API_URL stays on the agent container so the SDK / tooling can
+    // construct absolute URLs back to the platform if needed. Crucially,
+    // API_INTERNAL_TOKEN is NOT here: that token authorises every
+    // /api/internal/* route (git-credential, user-oauth-token, spawn,
+    // inject, uploads/raw, …) for any user in the install. Putting it
+    // in the agent container collapsed the documented trust boundary
+    // — the agent container is untrusted; the sidecar is the trust
+    // boundary and holds the master credential. The one legitimate
+    // agent → api call (X1A-96 image-upload reads) is now relayed
+    // through the sidecar's /uploads/read route, exactly like git
+    // creds and OAuth tokens. See packages/sidecar/src/uploads.rs.
     { name: "API_URL", value: spec.apiUrl },
-    { name: "API_INTERNAL_TOKEN", value: spec.apiInternalToken },
     { name: "WORKSPACE_NAME", value: spec.workspaceName },
     { name: "WORKSPACE_SYSTEM_PROMPT", value: spec.systemPromptText },
     { name: "PLATFORM_NAME", value: "x1agent" },
@@ -522,7 +533,13 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 limits: { memory: "256Mi", cpu: "250m" },
               },
               readinessProbe: {
-                httpGet: { path: "/health", port: 9090 },
+                // Health surface is split off the credential-bearing
+                // :9090 listener. :9090 is bound to 127.0.0.1 only so
+                // the kubelet (which dials from the node IP, not
+                // localhost) cannot reach it; :9091 binds 0.0.0.0 and
+                // serves health only. See `packages/sidecar/src/main.rs`
+                // and `deploy/helm/x1agent/templates/agent-session-networkpolicy.yaml`.
+                httpGet: { path: "/health", port: 9091 },
                 initialDelaySeconds: 3,
                 periodSeconds: 5,
               },

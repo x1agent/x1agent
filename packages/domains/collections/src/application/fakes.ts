@@ -1,6 +1,6 @@
 import { DomainError, type UserId, type WorkspaceId } from "@x1agent/kernel";
 import type { AgentId } from "@x1agent/domain-agents";
-import type { CollectionHandle } from "@x1agent/domain-graph";
+import type { CollectionAddress, CollectionHandle, WorkspaceNamespace } from "@x1agent/domain-graph";
 import {
   CollectionId,
   CollectionSlug,
@@ -36,6 +36,7 @@ export class InMemoryCollectionRepository implements CollectionRepository {
       description: input.description,
       providerType: input.providerType,
       backendHandle: input.backendHandle as CollectionHandle,
+      backendNamespace: input.backendNamespace as WorkspaceNamespace,
       settings: { ...input.settings },
       createdBy: input.createdBy,
       createdAt: new Date(),
@@ -194,22 +195,22 @@ export class RecordingProviderGateway implements ProviderGateway {
   readonly calls: Array<{
     kind: "provision" | "deprovision";
     providerType: CollectionProviderType;
-    handle: string;
+    address: CollectionAddress;
     settings?: Record<string, unknown>;
   }> = [];
 
   async provision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
     settings: Record<string, unknown>,
   ): Promise<void> {
-    this.calls.push({ kind: "provision", providerType, handle, settings });
+    this.calls.push({ kind: "provision", providerType, address, settings });
   }
   async deprovision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<void> {
-    this.calls.push({ kind: "deprovision", providerType, handle });
+    this.calls.push({ kind: "deprovision", providerType, address });
   }
 
   /** Tests seed this to control what discover returns. */
@@ -242,7 +243,7 @@ export class RecordingProviderGateway implements ProviderGateway {
 
   async listRecords(
     _providerType: CollectionProviderType,
-    _handle: CollectionHandle,
+    _address: CollectionAddress,
     recordType: string,
     limit: number,
   ) {

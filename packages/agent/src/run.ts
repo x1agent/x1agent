@@ -23,9 +23,9 @@ import {
 import http from "node:http";
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { normalizeMessage } from "./normalize.js";
+import { resolveImageTokens as resolveImageTokensImpl } from "./image-tokens.js";
 import { createInputChannel } from "./input-channel.js";
 import { IdleTimer } from "./idle-timer.js";
 import {
@@ -420,117 +420,14 @@ const conversation: Query = query({
 
 /**
  * X1A-96: expand `[image: <uuid>]` tokens in a user message into real
- * files on disk so the LLM can `Read` them. The Read tool returns
- * image content as visual blocks for the model — that's how Claude
- * Code reads PNGs/JPGs the user drops on the terminal. Bytes come
- * from the api's internal route gated by API_INTERNAL_TOKEN (both
- * env vars are set on the agent container by job-watcher).
- *
- * Each token is rewritten to an inline sentence that names the file
- * path so the next move ("use the Read tool on this path") is
- * unambiguous in the message text. The original token is dropped.
- *
- * Failures are best-effort: a 404 or network error swaps the token
- * for `(upload <id>: unavailable)` and the message still arrives —
- * the LLM can ask the user to re-upload rather than the whole turn
- * silently disappearing.
+ * files on disk so the LLM can `Read` them. After the t02/t05 P0 fix
+ * the agent container no longer holds the api's master internal
+ * token — bytes come through the sidecar's `/uploads/read`
+ * credential proxy. Logic lives in `image-tokens.ts` so it's
+ * unit-testable without booting this file's HTTP servers.
  */
-const IMAGE_TOKEN_RE =
-  /\[image:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*\]/gi;
-
-const UPLOADS_DIR = "/workspace/.x1/uploads";
-
-function extFromMime(mime: string): string {
-  const base = mime.split(";")[0]!.trim().toLowerCase();
-  const map: Record<string, string> = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "image/svg+xml": "svg",
-    "application/pdf": "pdf",
-  };
-  return map[base] ?? "bin";
-}
-
-async function resolveImageTokens(text: string): Promise<string> {
-  IMAGE_TOKEN_RE.lastIndex = 0;
-  if (!IMAGE_TOKEN_RE.test(text)) return text;
-
-  const apiUrl = process.env.API_URL || "";
-  const internalToken = process.env.API_INTERNAL_TOKEN || "";
-  // X1A-96 ownership: the internal route requires the agent to name the
-  // user it's acting as. Without TRIGGERING_USER_ID we can't prove the
-  // upload belongs to the same human — bail rather than swap to
-  // unscoped fetches that would also work and would broaden the leak
-  // surface to "any upload in the system."
-  const triggeringUserId = process.env.TRIGGERING_USER_ID || "";
-  if (!apiUrl || !internalToken) {
-    console.error(
-      "[agent] image-token expansion: API_URL or API_INTERNAL_TOKEN missing — leaving tokens as-is",
-    );
-    return text;
-  }
-  if (!triggeringUserId) {
-    console.error(
-      "[agent] image-token expansion: TRIGGERING_USER_ID missing — cannot prove ownership, leaving tokens as-is",
-    );
-    return text;
-  }
-
-  try {
-    await mkdir(UPLOADS_DIR, { recursive: true });
-  } catch (err) {
-    console.error(
-      `[agent] could not create ${UPLOADS_DIR}: ${(err as Error).message}`,
-    );
-    return text;
-  }
-
-  // Walk every match, fetch + write each unique id once, collect the
-  // replacement string per id.
-  const expansions = new Map<string, string>();
-  IMAGE_TOKEN_RE.lastIndex = 0;
-  for (const m of text.matchAll(IMAGE_TOKEN_RE)) {
-    const id = m[1]!.toLowerCase();
-    if (expansions.has(id)) continue;
-    try {
-      const url = new URL(`${apiUrl}/api/internal/uploads/${id}/raw`);
-      url.searchParams.set("user_id", triggeringUserId);
-      if (sessionId) url.searchParams.set("session_id", sessionId);
-      const res = await fetch(url.toString(), {
-        headers: { "X-Internal-Token": internalToken },
-      });
-      if (!res.ok) {
-        console.error(`[agent] upload ${id} fetch failed: ${res.status}`);
-        expansions.set(id, `(upload ${id}: unavailable)`);
-        continue;
-      }
-      const mime = res.headers.get("content-type") ?? "application/octet-stream";
-      const ext = extFromMime(mime);
-      const filePath = `${UPLOADS_DIR}/${id}.${ext}`;
-      const buf = Buffer.from(await res.arrayBuffer());
-      await writeFile(filePath, buf);
-      expansions.set(
-        id,
-        `(user attached file: ${filePath} — use the Read tool to view it)`,
-      );
-      console.log(
-        `[agent] resolved upload ${id} → ${filePath} (${buf.byteLength} bytes, ${mime})`,
-      );
-    } catch (err) {
-      console.error(
-        `[agent] upload ${id} fetch threw: ${(err as Error).message}`,
-      );
-      expansions.set(id, `(upload ${id}: error)`);
-    }
-  }
-
-  return text.replace(IMAGE_TOKEN_RE, (_full, idRaw: string) => {
-    const replacement = expansions.get(idRaw.toLowerCase());
-    return replacement ?? `(upload ${idRaw}: missing)`;
-  });
+function resolveImageTokens(text: string): Promise<string> {
+  return resolveImageTokensImpl(text, { sidecarUrl });
 }
 
 const injectServer = http.createServer(async (req, res) => {
