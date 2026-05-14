@@ -48,13 +48,16 @@ function walk(dir: string): string[] {
   return out;
 }
 
-/**
- * Strip Go template comments (`{{/* ... */}}`) since helm omits them
- * from rendered output entirely — a historical narrative inside one
- * is not a live config directive. We replace each match with the same
- * number of newlines so 1-based line numbers in error messages stay
- * accurate against the on-disk source.
- */
+// Strip Go template comments (`{{/* ... */}}`) since helm omits them
+// from rendered output entirely — a historical narrative inside one
+// is not a live config directive. We replace each match with the same
+// number of newlines so 1-based line numbers in error messages stay
+// accurate against the on-disk source.
+//
+// NOTE: this comment uses `//` rather than a JSDoc `/** */` block on
+// purpose — a JSDoc block would be terminated by the literal `*/`
+// embedded in the backtick example above, leaving the rest of the
+// block to be parsed as code (Bun fails with `Unexpected }`).
 function stripGoTemplateComments(content: string): string {
   return content.replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, (match) => {
     const newlines = (match.match(/\n/g) ?? []).length;
