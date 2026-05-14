@@ -3600,6 +3600,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "axum",
+ "base64",
  "bytes",
  "chrono",
  "futures-util",

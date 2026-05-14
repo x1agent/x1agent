@@ -33,6 +33,7 @@ mod sheets;
 mod share_comments;
 mod shares;
 mod stream;
+mod uploads;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -383,6 +384,12 @@ pub fn build_credential_router(state: Arc<AppState>) -> Router {
             routing::get(cost::handle_session_tree_cost),
         )
         .route("/cost/agent", routing::get(cost::handle_agent_cost))
+        // X1A-96 (t02/t05 P0): credential-proxy for upload bytes. The
+        // agent container no longer has API_INTERNAL_TOKEN; it POSTs
+        // here with just `{ upload_id }` and the sidecar relays to
+        // the api's /api/internal/uploads/:id/raw with the master
+        // token + this pod's user_id and session_id.
+        .route("/uploads/read", routing::post(uploads::handle_read_upload))
         // Audit middleware emits one NATS message per request (denylist
         // for /event; /health is on the separate :9091 router below and
         // never enters this layer). The api side persists those into
