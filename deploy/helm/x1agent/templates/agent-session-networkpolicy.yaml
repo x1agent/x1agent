@@ -1,4 +1,4 @@
-{{- if .Values.session.networkPolicy.enabled | default true }}
+{{- if .Values.session.networkPolicy.enabled }}
 # Agent-session NetworkPolicy. Defense-in-depth on top of the sidecar's
 # split-listener bind (see packages/sidecar/src/main.rs):
 #
