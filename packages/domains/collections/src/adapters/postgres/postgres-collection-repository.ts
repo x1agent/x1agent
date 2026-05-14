@@ -1,7 +1,7 @@
 import type postgres from "postgres";
 import { UserId, WorkspaceId } from "@x1agent/kernel";
 import { AgentId } from "@x1agent/domain-agents";
-import { CollectionHandle } from "@x1agent/domain-graph";
+import { CollectionHandle, WorkspaceNamespace } from "@x1agent/domain-graph";
 import {
   CollectionId,
   CollectionProviderType,
@@ -26,6 +26,7 @@ interface Row {
   description: string | null;
   provider_type: string;
   backend_handle: string;
+  backend_namespace: string;
   settings: Record<string, unknown>;
   created_by: string | null;
   created_at: Date | string;
@@ -41,7 +42,8 @@ interface AttachmentRow {
 
 const SELECT = `
   id, workspace_id, name, slug, description, provider_type,
-  backend_handle, settings, created_by, created_at, updated_at
+  backend_handle, backend_namespace, settings, created_by,
+  created_at, updated_at
 `;
 
 function toCollection(r: Row): Collection {
@@ -53,6 +55,7 @@ function toCollection(r: Row): Collection {
     description: r.description,
     providerType: CollectionProviderType(r.provider_type),
     backendHandle: CollectionHandle(r.backend_handle),
+    backendNamespace: WorkspaceNamespace(r.backend_namespace),
     settings: r.settings ?? {},
     createdBy: r.created_by ? UserId(r.created_by) : null,
     createdAt: new Date(r.created_at),
@@ -76,11 +79,11 @@ export class PostgresCollectionRepository implements CollectionRepository {
     const rows = await this.sql<Row[]>`
       INSERT INTO collections
         (workspace_id, name, slug, description, provider_type,
-         backend_handle, settings, created_by)
+         backend_handle, backend_namespace, settings, created_by)
       VALUES
         (${input.workspaceId}, ${input.name}, ${input.slug},
          ${input.description}, ${input.providerType},
-         ${input.backendHandle},
+         ${input.backendHandle}, ${input.backendNamespace},
          ${this.sql.json(input.settings as never)},
          ${input.createdBy})
       RETURNING ${this.sql.unsafe(SELECT)}

@@ -1,3 +1,4 @@
+import type { WorkspaceNamespace } from "@x1agent/domain-graph";
 import {
   DimensionMismatchError,
   VectorNamespaceNotProvisionedError,
@@ -59,30 +60,43 @@ function matchesFilter(
  *  dot produce higher-is-better; l2 produces lower-is-better — we
  *  flip l2's sign for ranking consistency so "top by score desc" works
  *  identically regardless of metric. */
+function key(
+  workspaceNamespace: WorkspaceNamespace,
+  namespace: VectorNamespace,
+): string {
+  return `${workspaceNamespace}/${namespace}`;
+}
+
 export class InMemoryVectorProvider implements VectorProvider {
   readonly id = "fake";
-  readonly namespaces = new Map<VectorNamespace, NamespaceState>();
+  readonly namespaces = new Map<string, NamespaceState>();
 
   async provision(input: ProvisionInput): Promise<void> {
-    this.namespaces.set(input.namespace, {
+    this.namespaces.set(key(input.workspaceNamespace, input.namespace), {
       dimension: input.dimension,
       metric: input.metric,
       vectors: new Map(),
     });
   }
 
-  async deprovision(namespace: VectorNamespace): Promise<void> {
-    this.namespaces.delete(namespace);
+  async deprovision(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+  ): Promise<void> {
+    this.namespaces.delete(key(workspaceNamespace, namespace));
   }
 
-  private state(ns: VectorNamespace): NamespaceState {
-    const s = this.namespaces.get(ns);
-    if (!s) throw new VectorNamespaceNotProvisionedError(ns);
+  private state(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+  ): NamespaceState {
+    const s = this.namespaces.get(key(workspaceNamespace, namespace));
+    if (!s) throw new VectorNamespaceNotProvisionedError(namespace);
     return s;
   }
 
   async upsert(input: UpsertInput): Promise<void> {
-    const s = this.state(input.namespace);
+    const s = this.state(input.workspaceNamespace, input.namespace);
     if (input.vector.length !== s.dimension)
       throw new DimensionMismatchError(s.dimension, input.vector.length);
     s.vectors.set(input.id, {
@@ -92,7 +106,7 @@ export class InMemoryVectorProvider implements VectorProvider {
   }
 
   async search(input: SearchInput): Promise<SearchResult> {
-    const s = this.state(input.namespace);
+    const s = this.state(input.workspaceNamespace, input.namespace);
     if (input.vector.length !== s.dimension)
       throw new DimensionMismatchError(s.dimension, input.vector.length);
 
@@ -111,8 +125,12 @@ export class InMemoryVectorProvider implements VectorProvider {
     return { hits: all.slice(0, Math.max(0, input.topK)) };
   }
 
-  async delete(namespace: VectorNamespace, id: string): Promise<void> {
-    const s = this.state(namespace);
+  async delete(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+    id: string,
+  ): Promise<void> {
+    const s = this.state(workspaceNamespace, namespace);
     s.vectors.delete(id);
   }
 }

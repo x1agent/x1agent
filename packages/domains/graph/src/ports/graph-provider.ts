@@ -1,9 +1,22 @@
 import type { CollectionHandle } from "../domain/collection-handle.js";
+import type { WorkspaceNamespace } from "../domain/workspace-namespace.js";
 import type { GraphEdge, GraphRecord } from "../domain/record.js";
 import type { RecordType } from "../domain/record-type.js";
 
+/**
+ * Pair that fully addresses a collection's backing store. The
+ * SurrealDB namespace is per-workspace; the database is per-
+ * collection. Carrying both at the port boundary (instead of the
+ * old single-string handle) is the load-bearing structural change
+ * for t03 P0 #2 Layer 2 — see `WorkspaceNamespace`'s docstring.
+ */
+export interface CollectionAddress {
+  namespace: WorkspaceNamespace;
+  database: CollectionHandle;
+}
+
 export interface QueryInput {
-  collection: CollectionHandle;
+  collection: CollectionAddress;
   /** Backend-native query string. SurrealQL for SurrealDB, Cypher for Neo4j. */
   query: string;
   vars: Record<string, unknown>;
@@ -15,7 +28,7 @@ export interface QueryResult {
 }
 
 export interface WriteInput {
-  collection: CollectionHandle;
+  collection: CollectionAddress;
   recordType: string;
   data: Record<string, unknown>;
   provenance: {
@@ -28,7 +41,7 @@ export interface WriteInput {
 }
 
 export interface RelateInput {
-  collection: CollectionHandle;
+  collection: CollectionAddress;
   from: string;
   edge: string;
   to: string;
@@ -36,7 +49,7 @@ export interface RelateInput {
 }
 
 export interface ResolveInput {
-  collection: CollectionHandle;
+  collection: CollectionAddress;
   recordType: string;
   /** Soft match hints. Adapters combine these with fuzzy + exact rules. */
   name: string | null;
@@ -56,8 +69,8 @@ export interface ResolveInput {
 export interface GraphProvider {
   readonly id: string;
 
-  provision(handle: CollectionHandle): Promise<void>;
-  deprovision(handle: CollectionHandle): Promise<void>;
+  provision(address: CollectionAddress): Promise<void>;
+  deprovision(address: CollectionAddress): Promise<void>;
 
   query(input: QueryInput): Promise<QueryResult>;
   write(input: WriteInput): Promise<GraphRecord>;
@@ -69,5 +82,5 @@ export interface GraphProvider {
    * seeded at provisioning plus any new ones agents have written into
    * the collection since. Backs the Collections UI detail page.
    */
-  discover(handle: CollectionHandle): Promise<readonly RecordType[]>;
+  discover(address: CollectionAddress): Promise<readonly RecordType[]>;
 }

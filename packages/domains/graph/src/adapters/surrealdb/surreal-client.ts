@@ -12,9 +12,13 @@ export interface SurrealClientConfig {
   /** Root password. */
   password: string;
   /**
-   * SurrealDB namespace that holds every collection database. One per
-   * platform install — we keep x1agent collections in a single ns so
-   * operator-level queries scan the whole fleet at once.
+   * Bootstrap SurrealDB namespace. Pre-Layer-2 this was the install-
+   * wide namespace every collection landed in. Post-Layer-2 it is
+   * only used as the active namespace for DEFINE NAMESPACE bootstrap
+   * calls when no caller-supplied namespace is available — the
+   * provider service migrates collections into per-workspace
+   * namespaces (`ws_<slug>`) on provision and pins the namespace per
+   * request from then on.
    */
   namespace: string;
 }
@@ -26,7 +30,8 @@ export interface SurrealClientConfig {
  * plumbing.
  *
  * Used by both SurrealGraphProvider and SurrealVectorProvider — one
- * db per collection, same HTTP surface, different queries.
+ * db per collection within a per-workspace namespace, same HTTP
+ * surface, different queries.
  */
 export class SurrealClient {
   constructor(readonly cfg: SurrealClientConfig) {}
@@ -44,6 +49,13 @@ export class SurrealClient {
   /**
    * Forwards a SurrealQL body to SurrealDB's `/sql` endpoint.
    *
+   * `ns` pins `surreal-ns` per request; defaults to `cfg.namespace`
+   * (the install bootstrap namespace) so legacy callers that haven't
+   * been migrated to per-workspace namespaces still work for now.
+   * Callers that operate on a specific workspace's data MUST pass
+   * the workspace namespace explicitly — the SurrealClient does not
+   * resolve it from the database name.
+   *
    * `opts.allowMultiStatement` is a Layer 3 defense (see t03 P0 #2):
    * any path that takes agent-controlled input MUST leave this at
    * `false` (the default) so a body containing multiple statements is
@@ -54,14 +66,14 @@ export class SurrealClient {
   async sql(
     query: string,
     db: string | null = null,
-    opts: { allowMultiStatement?: boolean } = {},
+    opts: { allowMultiStatement?: boolean; ns?: string | null } = {},
   ): Promise<unknown> {
     if (!opts.allowMultiStatement) assertSingleStatement(query);
     const headers: Record<string, string> = {
       "Content-Type": "text/plain",
       Accept: "application/json",
       Authorization: this.authHeader(),
-      "surreal-ns": this.cfg.namespace,
+      "surreal-ns": opts.ns ?? this.cfg.namespace,
     };
     if (db) headers["surreal-db"] = db;
 

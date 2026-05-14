@@ -1,7 +1,6 @@
 import { WorkspaceSlug, type UserId, type WorkspaceId } from "@x1agent/kernel";
-import { CollectionHandle } from "@x1agent/domain-graph";
 import {
-  buildBackendHandle,
+  buildCollectionAddress,
   type Collection,
   type CollectionProviderType,
   type CollectionSlug,
@@ -47,9 +46,7 @@ export async function createCollection(
   );
   if (existing) throw new CollectionSlugTakenError(cmd.slug);
 
-  const handle = CollectionHandle(
-    buildBackendHandle(cmd.workspaceSlug, cmd.slug),
-  );
+  const address = buildCollectionAddress(cmd.workspaceSlug, cmd.slug);
 
   const collection = await deps.collections.create({
     workspaceId: cmd.workspaceId,
@@ -57,12 +54,13 @@ export async function createCollection(
     slug: cmd.slug,
     description: cmd.description,
     providerType: cmd.providerType,
-    backendHandle: handle,
+    backendHandle: address.database,
+    backendNamespace: address.namespace,
     settings: cmd.settings,
     createdBy: cmd.actor,
   });
 
-  await deps.providers.provision(cmd.providerType, handle, cmd.settings);
+  await deps.providers.provision(cmd.providerType, address, cmd.settings);
 
   return collection;
 }

@@ -1,18 +1,29 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { DomainError } from "@x1agent/kernel";
 import { CollectionHandle } from "../domain/collection-handle.js";
+import { WorkspaceNamespace } from "../domain/workspace-namespace.js";
 import { DEFAULT_RECORD_TYPES } from "../domain/record-type.js";
-import type { GraphProvider } from "../ports/graph-provider.js";
+import type {
+  CollectionAddress,
+  GraphProvider,
+} from "../ports/graph-provider.js";
 
 export interface GraphProviderContractFixture {
   name: string;
   /**
-   * Build a fresh provider that's **not** yet provisioned for `handle`.
-   * The contract suite calls `provision(handle)` first in each test.
+   * Build a fresh provider that's **not** yet provisioned for the
+   * supplied address. The contract suite calls `provision(address)`
+   * first in each test.
    */
   factory: () => Promise<GraphProvider> | GraphProvider;
   /** Unique handle per test run so provision doesn't collide. */
   handle: string;
+  /**
+   * Workspace namespace under which the contract suite runs its
+   * canonical test address. Defaults to a generated namespace per
+   * fixture name; explicit fixtures can pin it.
+   */
+  namespace?: string;
 }
 
 export function runGraphProviderContract(
@@ -20,16 +31,19 @@ export function runGraphProviderContract(
 ): void {
   describe(`GraphProvider contract — ${fx.name}`, () => {
     let provider: GraphProvider;
-    let handle: CollectionHandle;
+    let address: CollectionAddress;
 
     beforeEach(async () => {
       provider = await fx.factory();
-      handle = CollectionHandle(fx.handle);
-      await provider.provision(handle);
+      address = {
+        namespace: WorkspaceNamespace(fx.namespace ?? "ws_contract"),
+        database: CollectionHandle(fx.handle),
+      };
+      await provider.provision(address);
     });
 
     it("provision seeds the default record types", async () => {
-      const types = await provider.discover(handle);
+      const types = await provider.discover(address);
       const slugs = types.map((t) => t.slug).sort();
       for (const seed of DEFAULT_RECORD_TYPES) {
         expect(slugs).toContain(seed.slug);
@@ -37,15 +51,15 @@ export function runGraphProviderContract(
     });
 
     it("provision is idempotent-after-deprovision", async () => {
-      await provider.deprovision(handle);
-      await provider.provision(handle);
-      const types = await provider.discover(handle);
+      await provider.deprovision(address);
+      await provider.provision(address);
+      const types = await provider.discover(address);
       expect(types.length).toBeGreaterThan(0);
     });
 
     it("write + discover registers the record type the first time", async () => {
       await provider.write({
-        collection: handle,
+        collection: address,
         recordType: "idea",
         data: { title: "agent self-play", tag: "dark-factory" },
         provenance: {
@@ -56,13 +70,13 @@ export function runGraphProviderContract(
           derivedFrom: [],
         },
       });
-      const types = await provider.discover(handle);
+      const types = await provider.discover(address);
       expect(types.find((t) => t.slug === "idea")).toBeDefined();
     });
 
     it("write stamps provenance with session + confidence", async () => {
       const rec = await provider.write({
-        collection: handle,
+        collection: address,
         recordType: "person",
         data: { name: "Sarah" },
         provenance: {
@@ -81,7 +95,7 @@ export function runGraphProviderContract(
 
     it("relate links two existing records and echoes the edge label", async () => {
       const a = await provider.write({
-        collection: handle,
+        collection: address,
         recordType: "person",
         data: { name: "Sarah" },
         provenance: {
@@ -93,7 +107,7 @@ export function runGraphProviderContract(
         },
       });
       const b = await provider.write({
-        collection: handle,
+        collection: address,
         recordType: "project",
         data: { name: "rebrand", status: "active" },
         provenance: {
@@ -105,7 +119,7 @@ export function runGraphProviderContract(
         },
       });
       const edge = await provider.relate({
-        collection: handle,
+        collection: address,
         from: a.id,
         edge: "WORKS_ON",
         to: b.id,
@@ -118,7 +132,7 @@ export function runGraphProviderContract(
 
     it("resolve finds a record by email hint", async () => {
       await provider.write({
-        collection: handle,
+        collection: address,
         recordType: "person",
         data: { name: "Sarah", email: "sarah@example.com" },
         provenance: {
@@ -130,7 +144,7 @@ export function runGraphProviderContract(
         },
       });
       const got = await provider.resolve({
-        collection: handle,
+        collection: address,
         recordType: "person",
         name: null,
         email: "sarah@example.com",
@@ -141,7 +155,7 @@ export function runGraphProviderContract(
 
     it("resolve returns null when nothing matches", async () => {
       const got = await provider.resolve({
-        collection: handle,
+        collection: address,
         recordType: "person",
         name: "no-such-name",
         email: null,
@@ -151,10 +165,10 @@ export function runGraphProviderContract(
     });
 
     it("write against a deprovisioned collection throws collection_not_provisioned", async () => {
-      await provider.deprovision(handle);
+      await provider.deprovision(address);
       try {
         await provider.write({
-          collection: handle,
+          collection: address,
           recordType: "person",
           data: {},
           provenance: {
@@ -170,6 +184,37 @@ export function runGraphProviderContract(
         expect(err).toBeInstanceOf(DomainError);
         expect((err as DomainError).code).toBe("collection_not_provisioned");
       }
+    });
+
+    it("two-workspace isolation — a collection with the same db name in another namespace is invisible", async () => {
+      // Same database name, different namespace = different backing
+      // store. This is the structural property Layer 2 buys us.
+      const foreign: CollectionAddress = {
+        namespace: WorkspaceNamespace("ws_foreign_tenant"),
+        database: address.database,
+      };
+      await provider.provision(foreign);
+      await provider.write({
+        collection: foreign,
+        recordType: "person",
+        data: { name: "OnlyInForeign" },
+        provenance: {
+          sessionId: "00000000-0000-0000-0000-000000000001",
+          userId: null,
+          confidence: 1,
+          source: null,
+          derivedFrom: [],
+        },
+      });
+      const got = await provider.resolve({
+        collection: address,
+        recordType: "person",
+        name: "OnlyInForeign",
+        email: null,
+        attributes: {},
+      });
+      expect(got).toBeNull();
+      await provider.deprovision(foreign);
     });
   });
 }

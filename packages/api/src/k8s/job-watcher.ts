@@ -342,6 +342,7 @@ async function launchSession(
       id: c.id,
       slug: c.slug,
       backend_handle: c.backendHandle,
+      backend_namespace: c.backendNamespace,
       provider_type: c.providerType,
       is_default: c.isDefault,
     }),

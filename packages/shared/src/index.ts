@@ -258,6 +258,8 @@ export interface CollectionDTO {
   description: string | null;
   provider_type: CollectionProviderType;
   backend_handle: string;
+  /** Per-workspace SurrealDB namespace (`ws_<slug>`). See t03 P0 #2 Layer 2. */
+  backend_namespace: string;
   settings: Record<string, unknown>;
   created_by: string | null;
   created_at: string;
