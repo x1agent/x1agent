@@ -1,3 +1,27 @@
+# [1.26.0](https://github.com/x1agent/x1agent/compare/v1.25.2...v1.26.0) (2026-05-14)
+
+
+### Bug Fixes
+
+* **auth:** enforce OAuth state + PKCE on Google sign-in flow ([c6d4186](https://github.com/x1agent/x1agent/commit/c6d4186ffe368fada4ee4f15768941b6226367fa)), closes [#1](https://github.com/x1agent/x1agent/issues/1)
+* **chart:** allow http01 cert solver + gate preview wildcard ([fc9cb50](https://github.com/x1agent/x1agent/commit/fc9cb506aefdaddc926cf7afc7c724ab6af3c674)), closes [#132](https://github.com/x1agent/x1agent/issues/132)
+* **chart:** drop redundant default true on session.networkPolicy.enabled ([acccd69](https://github.com/x1agent/x1agent/commit/acccd69e3c5c1db2623e4e73ac41a73f75211abc)), closes [124/#129](https://github.com/x1agent/x1agent/issues/129)
+* **chart:** restore session.networkPolicy values dropped by [#132](https://github.com/x1agent/x1agent/issues/132) merge ([a1b3c62](https://github.com/x1agent/x1agent/commit/a1b3c628daff8e333a464e17623c7bd58bba08e9)), closes [#124](https://github.com/x1agent/x1agent/issues/124) [#129](https://github.com/x1agent/x1agent/issues/129)
+* **graph:** reject USE / multi-statement SurrealQL from agents ([8e1ea9a](https://github.com/x1agent/x1agent/commit/8e1ea9a4ad6178f9742f4cfbf2b0e08125f51f5d)), closes [#2](https://github.com/x1agent/x1agent/issues/2)
+* **helm:** remove anonymous NATS WebSocket listener mapping to api super-user ([3052216](https://github.com/x1agent/x1agent/commit/30522160d7b23279370281266fdb3173b88e9161))
+* **mcp-catalog:** close SSRF holes in OAuth metadata + DCR fetches ([0dccfb2](https://github.com/x1agent/x1agent/commit/0dccfb220c884ba97675d248070c8ebca4c76205))
+* **migrations:** renumber oauth_login_states 053→054 (collision with collections_backend_namespace) ([70e8d4f](https://github.com/x1agent/x1agent/commit/70e8d4f907ddc2b385b8045a442fd3bc4f039ce4))
+* **sidecar:** bind credential routes to localhost + add session NetworkPolicy ([b432c74](https://github.com/x1agent/x1agent/commit/b432c740e32a72cc59e1ec7ae740517b1fc6fe7b))
+* **sidecar:** delete unauthenticated /user-oauth-token sidecar route ([bd8853c](https://github.com/x1agent/x1agent/commit/bd8853c3d169f9f4ab0115f6c725bb0182306392))
+* **sidecar:** drop API_INTERNAL_TOKEN from agent container — relay upload reads through sidecar ([a2040e5](https://github.com/x1agent/x1agent/commit/a2040e5bf5a263885d2e9edf089108ee682a328d))
+* **tests:** switch JSDoc to line comments to unblock bun parser ([4067293](https://github.com/x1agent/x1agent/commit/4067293429e862ab7b0dcea14755ac7e9e6630ad))
+
+
+### Features
+
+* **graph:** per-workspace SurrealDB namespace isolation ([9cb7437](https://github.com/x1agent/x1agent/commit/9cb74378252d27533cb8f4010b06e67aba0bae19)), closes [#2](https://github.com/x1agent/x1agent/issues/2) [#128](https://github.com/x1agent/x1agent/issues/128) [#128](https://github.com/x1agent/x1agent/issues/128)
+* **security:** add agent-session egress NetworkPolicy to Helm chart ([de0715f](https://github.com/x1agent/x1agent/commit/de0715f4609b27fc2d2e4c8398541fdb9c1ce9fb)), closes [#1](https://github.com/x1agent/x1agent/issues/1)
+
 ## [1.25.2](https://github.com/x1agent/x1agent/compare/v1.25.1...v1.25.2) (2026-05-14)
 
 
