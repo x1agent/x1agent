@@ -138,6 +138,10 @@ export function AppSidebar() {
   const showWorkspaceChip = !!activeMembership && !onAdminRoute;
 
   const navBase = activeSlug ? `/workspaces/${activeSlug}` : "";
+  // Workspace settings is admin-only on the backend; hide its entry
+  // for plain members so they don't bounce off a 403. (X1A-131.)
+  const canManageWorkspace =
+    activeMembership?.role === "admin" || activeMembership?.role === "owner";
   const navItems: NavItem[] = activeSlug
     ? [
         // Sessions is reachable from the workspace home's "View all"
@@ -157,7 +161,15 @@ export function AppSidebar() {
             ]
           : []),
         { title: "GitHub", url: `${navBase}/github`, icon: Github },
-        { title: "Settings", url: `${navBase}/settings`, icon: Settings },
+        ...(canManageWorkspace
+          ? [
+              {
+                title: "Settings",
+                url: `${navBase}/settings`,
+                icon: Settings,
+              },
+            ]
+          : []),
       ]
     : [];
 
@@ -192,16 +204,21 @@ export function AppSidebar() {
                 </div>
               </div>
             </a>
-            {/* Cog: clicks to workspace settings. Standalone target so
-                the body can route to the home page above. */}
-            <a
-              href={`/workspaces/${activeSlug}/settings`}
-              title="Workspace settings"
-              aria-label="Workspace settings"
-              className="flex items-center justify-center border-l border-border-soft px-2 text-fg-faint hover:bg-bg-elevated hover:text-fg"
-            >
-              <Settings className="size-3.5" />
-            </a>
+            {/* Cog: workspace settings. Hidden for plain members —
+                X1A-131. The settings surfaces are admin-only on the
+                backend; rendering the cog to non-admins just landed
+                them on a 403 wall. */}
+            {(activeMembership.role === "admin" ||
+              activeMembership.role === "owner") && (
+              <a
+                href={`/workspaces/${activeSlug}/settings`}
+                title="Workspace settings"
+                aria-label="Workspace settings"
+                className="flex items-center justify-center border-l border-border-soft px-2 text-fg-faint hover:bg-bg-elevated hover:text-fg"
+              >
+                <Settings className="size-3.5" />
+              </a>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="flex items-center justify-center rounded-r-md border-l border-border-soft px-2 text-fg-faint hover:bg-bg-elevated hover:text-fg"

@@ -103,6 +103,13 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     if (!r) return;
     r.revokedAt = at;
   }
+
+  async updateRole(id: InvitationId, role: Role): Promise<Invitation> {
+    const r = this.rows.get(id);
+    if (!r) throw new Error(`invitation ${id} not found`);
+    r.role = role;
+    return r;
+  }
 }
 
 export class FakeWorkspaceReader implements WorkspaceReader {

@@ -29,6 +29,7 @@ export type {
   EncryptedUserOAuthTokenBlob,
 } from "./ports/user-oauth-token-store.js";
 export { denyAllAccessGate } from "./ports/access-gate.js";
+export type { PendingInvitationAcceptor } from "./ports/pending-invitation-acceptor.js";
 
 // Application
 export * from "./application/sign-in.js";

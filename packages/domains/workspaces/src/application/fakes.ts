@@ -72,6 +72,10 @@ export class InMemoryMembershipRepository implements MembershipRepository {
     return this.rows.filter((m) => m.userId === userId);
   }
 
+  async listByWorkspace(workspaceId: WorkspaceId) {
+    return this.rows.filter((m) => m.workspaceId === workspaceId);
+  }
+
   async grant(input: {
     workspaceId: WorkspaceId;
     userId: UserId;

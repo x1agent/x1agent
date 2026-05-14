@@ -43,6 +43,17 @@ export class WorkspaceAdminGuard implements AdminGuard {
       throw new InsufficientRoleError(m.role, "admin");
     }
   }
+
+  async assertMember(
+    userId: UserId,
+    workspaceId: WorkspaceId,
+  ): Promise<void> {
+    const m = await this.memberships.findByUserAndWorkspace(
+      userId,
+      workspaceId,
+    );
+    if (!m) throw new NotAMemberError(userId, workspaceId);
+  }
 }
 
 export class WorkspaceReaderAdapter implements WorkspaceReader {
@@ -88,5 +99,53 @@ export class MembershipGrantorAdapter implements MembershipGrantor {
     role: Role,
   ): Promise<void> {
     await this.memberships.grant({ workspaceId, userId, role });
+  }
+}
+
+/**
+ * Auto-accept-pending-invitations-on-sign-in adapter.
+ *
+ * Picks up every still-active invitation whose email matches the user
+ * (case-insensitive), grants the corresponding workspace membership,
+ * and marks the invitation accepted. Runs inside a single UPDATE that
+ * uses the invitation row's role; idempotent against concurrent
+ * sign-in attempts because `workspace_members` PK is (workspace_id,
+ * user_id) and `invitations.accepted_at` is set non-NULL on first win.
+ */
+export class PendingInvitationAcceptorAdapter {
+  constructor(private readonly sql: Sql) {}
+
+  async acceptAllFor(userId: UserId, email: Email): Promise<void> {
+    const lower = String(email).toLowerCase();
+    const pending = await this.sql<
+      { id: string; workspace_id: string; role: Role }[]
+    >`
+      SELECT id, workspace_id, role
+        FROM invitations
+       WHERE lower(email) = ${lower}
+         AND accepted_at IS NULL
+         AND revoked_at  IS NULL
+         AND expires_at  > now()
+    `;
+    if (pending.length === 0) return;
+
+    await this.sql.begin(async (tx) => {
+      for (const inv of pending) {
+        await tx`
+          INSERT INTO workspace_members (workspace_id, user_id, role)
+          VALUES (${inv.workspace_id}, ${userId}, ${inv.role})
+          ON CONFLICT (workspace_id, user_id)
+            DO UPDATE SET role = EXCLUDED.role
+        `;
+        await tx`
+          UPDATE invitations
+             SET accepted_at = now(),
+                 accepted_by = ${userId}
+           WHERE id = ${inv.id}
+             AND accepted_at IS NULL
+             AND revoked_at  IS NULL
+        `;
+      }
+    });
   }
 }

@@ -37,4 +37,11 @@ export interface InvitationRepository {
   ): Promise<void>;
 
   markRevoked(id: InvitationId, at: Date): Promise<void>;
+
+  /**
+   * Change the role on a still-active invitation. Caller is
+   * responsible for asserting state (accepted_at / revoked_at IS
+   * NULL) and role validity before invoking.
+   */
+  updateRole(id: InvitationId, role: Role): Promise<Invitation>;
 }

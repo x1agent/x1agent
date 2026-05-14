@@ -19,6 +19,7 @@ import { sendInvitation } from "../../application/send-invitation.js";
 import { acceptInvitation } from "../../application/accept-invitation.js";
 import { revokeInvitation } from "../../application/revoke-invitation.js";
 import { listInvitations } from "../../application/list-invitations.js";
+import { changeInvitationRole } from "../../application/change-invitation-role.js";
 import { InvitationNotFoundError } from "../../domain/errors.js";
 
 export interface InvitationRoutesConfig {
@@ -176,6 +177,7 @@ export function createWorkspaceInvitationRoutes(
     const actor = cfg.getActor(c);
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     try {
+      const id = InvitationId(c.req.param("id")!);
       await revokeInvitation(
         {
           invitations: cfg.invitations,
@@ -183,9 +185,33 @@ export function createWorkspaceInvitationRoutes(
           clock: cfg.clock,
         },
         actor.userId,
-        InvitationId(c.req.param("id")!),
+        id,
       );
-      return c.json({ ok: true });
+      // Return the revoked row so the UI can keep it visible (under
+      // a "show revoked" toggle) instead of treating the action as a
+      // hard delete.
+      const updated = await cfg.invitations.findById(id);
+      return c.json(
+        updated ? { ok: true, invitation: serializeInvitation(updated) } : { ok: true },
+      );
+    } catch (err) {
+      return c.json(domainErrorBody(err), domainErrorStatus(err) as 400);
+    }
+  });
+
+  app.patch("/:id", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const body = await c.req.json<{ role?: string }>().catch(() => ({}));
+    if (!body.role) return c.json({ error: "invalid_role" }, 400);
+    try {
+      const inv = await changeInvitationRole(
+        { invitations: cfg.invitations, adminGuard: cfg.adminGuard },
+        actor.userId,
+        InvitationId(c.req.param("id")!),
+        Role(body.role),
+      );
+      return c.json({ invitation: serializeInvitation(inv) });
     } catch (err) {
       return c.json(domainErrorBody(err), domainErrorStatus(err) as 400);
     }

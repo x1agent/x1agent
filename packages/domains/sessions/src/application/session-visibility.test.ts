@@ -15,6 +15,9 @@ class AdminGuardYes {
   async assertAdmin() {
     // workspace admin / owner — passes
   }
+  async assertMember() {
+    // any member — passes
+  }
 }
 
 class AdminGuardNo {
@@ -25,6 +28,10 @@ class AdminGuardNo {
         super("not admin");
       }
     })();
+  }
+  async assertMember() {
+    // Visibility tests use this guard for non-admin members; they should
+    // pass the member check (they're still a member, just not admin).
   }
 }
 
@@ -129,6 +136,9 @@ describe("resolveSessionVisibility", () => {
       {
         adminGuard: {
           async assertAdmin() {
+            called = true;
+          },
+          async assertMember() {
             called = true;
           },
         },

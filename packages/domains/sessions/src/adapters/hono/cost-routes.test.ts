@@ -140,6 +140,7 @@ function makeApp(opts: {
     assertAdmin: async () => {
       if (!opts.isAdmin) throw new Error("not_admin");
     },
+    assertMember: async () => {},
   };
   const app = new Hono();
   const sub = createWorkspaceCostRoutes({
@@ -272,7 +273,7 @@ describe("cost routes — agent rollup window default", () => {
             ({ id: AGENT_A, workspaceId: W_A }) as never,
         } as unknown as AgentRepository,
         tokenUsage,
-        adminGuard: { assertAdmin: async () => {} },
+        adminGuard: { assertAdmin: async () => {}, assertMember: async () => {} },
         resolveWorkspace: async () => W_A,
         requireAuth: async (_c, next) => {
           await next();
@@ -309,7 +310,7 @@ describe("cost routes — agent rollup window default", () => {
           rollupForSessionTree: async () => fakeTree(),
           rollupForAgent: async () => fakeAgentRollup(),
         },
-        adminGuard: { assertAdmin: async () => {} },
+        adminGuard: { assertAdmin: async () => {}, assertMember: async () => {} },
         resolveWorkspace: async () => W_A,
         requireAuth: async (_c, next) => {
           await next();
@@ -349,7 +350,7 @@ describe("cost routes — agent rollup window default", () => {
             return fakeAgentRollup();
           },
         },
-        adminGuard: { assertAdmin: async () => {} },
+        adminGuard: { assertAdmin: async () => {}, assertMember: async () => {} },
         resolveWorkspace: async () => W_A,
         requireAuth: async (_c, next) => {
           await next();
@@ -390,7 +391,7 @@ describe("cost routes — agent rollup window default", () => {
             return fakeAgentRollup();
           },
         },
-        adminGuard: { assertAdmin: async () => {} },
+        adminGuard: { assertAdmin: async () => {}, assertMember: async () => {} },
         resolveWorkspace: async () => W_A,
         requireAuth: async (_c, next) => {
           await next();
