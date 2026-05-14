@@ -25,6 +25,54 @@ const WORKSPACE_ROOT: &str = "/workspace";
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB per file
 const MAX_TOTAL_SIZE: u64 = 200 * 1024 * 1024; // 200 MB per share
 
+/// Coerce the user-supplied `path` into a value that, when joined with
+/// `/workspace`, points at the intended file. Accepts:
+///
+///   - `foo.md`                              (workspace-relative, single file)
+///   - `dir/sub/foo.md`                      (workspace-relative, subdir — X1A-23)
+///   - `/workspace/foo.md`                   (absolute, under workspace)
+///   - `/workspace/dir/sub/foo.md`           (absolute, subdir)
+///   - `./foo.md`                            (current-dir relative)
+///
+/// Rejects:
+///   - any component equal to `..` (parent-dir traversal)
+///   - an absolute path NOT under `/workspace/` (e.g. `/etc/passwd`)
+///
+/// Returns the workspace-relative form (`dir/sub/foo.md`) — the caller
+/// joins it onto `/workspace` to get the absolute path. This isolates
+/// the leading-slash + absolute-path handling that has bitten subdir
+/// shares before (see X1A-23).
+fn normalize_request_path(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("path is empty".into());
+    }
+
+    // Strip the `/workspace` prefix if the caller sent an absolute
+    // path. An absolute path that's NOT under `/workspace` is a hard
+    // error — refuse rather than silently swallow it.
+    let rel = if let Some(rest) = trimmed.strip_prefix(WORKSPACE_ROOT) {
+        // /workspace, /workspace/foo, /workspace/dir/foo
+        rest.trim_start_matches('/')
+    } else if trimmed.starts_with('/') {
+        return Err(format!(
+            "absolute path '{}' is outside the workspace root",
+            trimmed
+        ));
+    } else {
+        // Already workspace-relative — strip a leading `./` if any.
+        trimmed.strip_prefix("./").unwrap_or(trimmed)
+    };
+
+    if Path::new(rel)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("path must not contain '..' components".into());
+    }
+    Ok(rel.to_string())
+}
+
 #[derive(Deserialize)]
 pub struct ShareRequest {
     pub path: String,
@@ -230,30 +278,36 @@ pub async fn handle_share(
 ) -> Result<Json<ShareResponse>, (StatusCode, Json<ShareResponse>)> {
     let workspace = PathBuf::from(WORKSPACE_ROOT);
 
-    // Reject `..` components up-front. A path containing parent-dir
-    // traversal cannot be a legitimate workspace-relative reference,
-    // and we must not rely on canonicalize() catching it because
-    // canonicalize() fails (no fall-open) on non-existent paths.
-    if Path::new(&req.path)
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ShareResponse {
-                ok: false,
-                share_id: String::new(),
-                share_type: String::new(),
-                title: String::new(),
-                files: vec![],
-                total_size: 0,
-                entry_point: None,
-                error: Some("Path must not contain '..' components".into()),
-            }),
-        ));
-    }
+    // Normalize the request path — accepts workspace-relative
+    // (`dir/foo.md`), absolute (`/workspace/dir/foo.md`), and
+    // `./`-prefixed forms; rejects `..` components and absolute paths
+    // outside the workspace root. See X1A-23 — subdirectory shares
+    // were failing because of `req.path` shapes the old explicit
+    // checks didn't cover.
+    let rel = match normalize_request_path(&req.path) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ShareResponse {
+                    ok: false,
+                    share_id: String::new(),
+                    share_type: String::new(),
+                    title: String::new(),
+                    files: vec![],
+                    total_size: 0,
+                    entry_point: None,
+                    error: Some(e),
+                }),
+            ));
+        }
+    };
 
-    let abs_path = workspace.join(&req.path);
+    let abs_path = if rel.is_empty() {
+        workspace.clone()
+    } else {
+        workspace.join(&rel)
+    };
 
     // canonicalize() resolves symlinks and `..` segments; if it fails
     // (path does not exist, broken symlink, permission denied) we
@@ -375,6 +429,16 @@ pub async fn handle_share(
         ));
     }
 
+    // updated_at_ms is the millisecond timestamp at the moment storage
+    // finished writing. The browser viewer uses it as a cache-buster
+    // (`?v=<updated_at_ms>`) on content-fetch URLs so an update of an
+    // existing share_id renders new bytes immediately instead of the
+    // cached version. See X1A-92.
+    let updated_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
     let payload = serde_json::json!({
         "share_id": share_id,
         "share_type": share_type,
@@ -387,8 +451,15 @@ pub async fn handle_share(
         })).collect::<Vec<_>>(),
         "total_size": total_size,
         "entry_point": entry_point,
+        "updated_at_ms": updated_at_ms,
     });
 
+    // Publish-after-persist: the upload_to_gcs / upload_to_api call
+    // above is awaited to completion BEFORE we publish here. The
+    // viewer re-fetches content as soon as it sees this event, so
+    // publishing before the bytes are durable would have it pull v1
+    // bytes (or hit a 404) thinking they're v2. If you move this
+    // publish call earlier, you reintroduce that race — don't.
     crate::nats_bridge::publish_event(&state, "agent.share", payload).await;
 
     tracing::info!(
@@ -849,5 +920,62 @@ mod tests {
     fn collect_files_errors_for_missing_path() {
         let bogus = std::path::PathBuf::from("/nonexistent/path/12345");
         assert!(collect_files(&bogus, &bogus).is_err());
+    }
+
+    // ── X1A-23: subdirectory paths ──────────────────────────────────
+
+    #[test]
+    fn normalize_accepts_workspace_relative_top_level_file() {
+        assert_eq!(normalize_request_path("foo.md").unwrap(), "foo.md");
+    }
+
+    #[test]
+    fn normalize_accepts_subdirectory_path() {
+        assert_eq!(
+            normalize_request_path("dir/sub/foo.md").unwrap(),
+            "dir/sub/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_workspace_prefix_for_absolute_path() {
+        assert_eq!(
+            normalize_request_path("/workspace/dir/foo.md").unwrap(),
+            "dir/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_workspace_prefix_alone() {
+        // `/workspace` and `/workspace/` both resolve to the root.
+        assert_eq!(normalize_request_path("/workspace").unwrap(), "");
+        assert_eq!(normalize_request_path("/workspace/").unwrap(), "");
+    }
+
+    #[test]
+    fn normalize_strips_leading_dot_slash() {
+        assert_eq!(normalize_request_path("./foo.md").unwrap(), "foo.md");
+        assert_eq!(
+            normalize_request_path("./dir/foo.md").unwrap(),
+            "dir/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_parent_dir_traversal() {
+        assert!(normalize_request_path("../foo.md").is_err());
+        assert!(normalize_request_path("dir/../foo.md").is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_absolute_path_outside_workspace() {
+        assert!(normalize_request_path("/etc/passwd").is_err());
+        assert!(normalize_request_path("/tmp/file").is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_empty_path() {
+        assert!(normalize_request_path("").is_err());
+        assert!(normalize_request_path("   ").is_err());
     }
 }
