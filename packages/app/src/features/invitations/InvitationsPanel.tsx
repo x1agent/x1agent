@@ -44,7 +44,7 @@ const STATE_VARIANT: Record<InvitationState, BadgeVariant> = {
 };
 
 export function InvitationsPanel({ slug, canManage }: Props) {
-  const { bySlug, loadingSlug, errorBySlug, load, create, revoke } =
+  const { bySlug, loadingSlug, errorBySlug, load, create, revoke, changeRole } =
     useInvitationsStore();
   const rows = bySlug[slug] ?? [];
   const error = errorBySlug[slug];
@@ -53,6 +53,9 @@ export function InvitationsPanel({ slug, canManage }: Props) {
   const [role, setRole] = useState<Role>("member");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // X1A-130: default to pending only — revoked/accepted rows pile up
+  // forever otherwise and bury the live signal.
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     if (canManage) load(slug);
@@ -122,63 +125,116 @@ export function InvitationsPanel({ slug, canManage }: Props) {
         )}
         {error && <div className="text-sm text-red-400">{error}</div>}
 
-        {rows.length === 0 && loadingSlug !== slug && (
-          <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
-            No invitations yet.
-          </div>
-        )}
+        {(() => {
+          const annotated = rows.map((inv) => {
+            const state: InvitationState = inv.accepted_at
+              ? "accepted"
+              : inv.revoked_at
+                ? "revoked"
+                : new Date(inv.expires_at).getTime() < Date.now()
+                  ? "expired"
+                  : "pending";
+            return { inv, state };
+          });
+          const pending = annotated.filter((r) => r.state === "pending");
+          const history = annotated.filter((r) => r.state !== "pending");
+          const visible = showHistory ? annotated : pending;
+          const historyCount = history.length;
 
-        {rows.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-border-soft">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead className="w-0" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((inv) => {
-                  const state: InvitationState = inv.accepted_at
-                    ? "accepted"
-                    : inv.revoked_at
-                      ? "revoked"
-                      : new Date(inv.expires_at).getTime() < Date.now()
-                        ? "expired"
-                        : "pending";
-                  return (
-                    <TableRow key={inv.id} className="hover:bg-transparent">
-                      <TableCell className="text-fg">
-                        {inv.email}
-                      </TableCell>
-                      <TableCell className="text-fg-muted">
-                        {inv.role}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={STATE_VARIANT[state]}>{state}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {state === "pending" && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => revoke(slug, inv.id)}
-                            className="text-xs text-fg-muted hover:text-red-400"
-                          >
-                            Revoke
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+          if (visible.length === 0 && loadingSlug !== slug) {
+            return (
+              <div className="rounded-md border border-border-soft p-6 text-center text-sm text-fg-faint">
+                {historyCount > 0
+                  ? "No pending invitations. Showing only pending; toggle History to see revoked/accepted."
+                  : "No invitations yet."}
+              </div>
+            );
+          }
+          return (
+            <div className="space-y-2">
+              {historyCount > 0 && (
+                <div className="flex items-center justify-end gap-2 text-xs text-fg-muted">
+                  <label className="flex cursor-pointer items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={showHistory}
+                      onChange={(e) => setShowHistory(e.target.checked)}
+                    />
+                    Show {historyCount} historical{" "}
+                    {historyCount === 1 ? "row" : "rows"}
+                  </label>
+                </div>
+              )}
+              {visible.length > 0 && (
+                <div className="overflow-hidden rounded-md border border-border-soft">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead className="w-0" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {visible.map(({ inv, state }) => (
+                        <TableRow
+                          key={inv.id}
+                          className="hover:bg-transparent"
+                        >
+                          <TableCell className="text-fg">
+                            {inv.email}
+                          </TableCell>
+                          <TableCell className="text-fg-muted">
+                            {state === "pending" ? (
+                              <Select
+                                value={inv.role}
+                                onValueChange={(v) =>
+                                  changeRole(slug, inv.id, v as Role)
+                                }
+                              >
+                                <SelectTrigger
+                                  className="h-7 w-28 text-xs"
+                                  aria-label={`Change role for ${inv.email}`}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="member">member</SelectItem>
+                                  <SelectItem value="admin">admin</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              inv.role
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={STATE_VARIANT[state]}>
+                              {state}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {state === "pending" && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => revoke(slug, inv.id)}
+                                className="text-xs text-fg-muted hover:text-red-400"
+                              >
+                                Revoke
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </CardContent>
     </Card>
   );
