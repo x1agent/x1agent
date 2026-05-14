@@ -388,19 +388,59 @@ monitoring:
 # by the api job-watcher (see packages/api/src/k8s/pod-spec.ts) — the
 # chart only owns the surrounding policies (ServiceAccount, NetworkPolicy).
 session:
+  # Per-pod NetworkPolicy bundle for agent-session pods. Two resources
+  # are rendered from one `enabled: true` flag (chart template
+  # agent-session-networkpolicy.yaml):
+  #
+  #   - default-deny ingress, allowing only the kubelet readiness probe
+  #     on the sidecar's :9091 health listener. The credential-bearing
+  #     :9090 surface is loopback-only at the bind level (see
+  #     sidecar/src/main.rs), so this policy is defense-in-depth.
+  #
+  #   - default-deny egress with explicit allow-rules for kube-dns, the
+  #     api Service, nats:4222, and internet 0.0.0.0/0 EXCEPT cloud
+  #     metadata (169.254/16) and RFC1918 (so the agent can't reach
+  #     other in-cluster Services beyond the allow-list).
+  #
+  # Disable on CNIs that don't enforce NetworkPolicy (e.g. OrbStack's
+  # kindnet — the resource applies cleanly but has no effect, which is
+  # fine; turning it off is for environments where the resource itself
+  # is rejected).
   networkPolicy:
-    # Default-deny ingress for agent-session pods. Allows only the
-    # kubelet readiness probe on the sidecar's :9091 health listener.
-    # The credential-bearing :9090 surface is loopback-only at the bind
-    # level (see sidecar/src/main.rs), so this policy is defense-in-
-    # depth — not the primary control.
     enabled: true
+
     # Namespaces whose pods (and the kubelet running in them) may reach
     # :9091. On most managed K8s distributions the kubelet probe is
     # attributed to kube-system; override only if your distribution
     # routes probes differently.
     allowedFromNamespaces:
       - kube-system
+
+    # Operator-allowlisted additional egress IP blocks. Use for private
+    # LLM endpoints, internal package registries, or other destinations
+    # that live in RFC1918 space and would otherwise be blocked by the
+    # default `except` list.
+    # Example:
+    #   additionalEgressIPs:
+    #     - 10.50.0.0/16   # internal Artifactory
+    additionalEgressIPs: []
+
+    # Extra CIDRs to *deny* on top of metadata + RFC1918. Use to harden
+    # the policy further on clouds that expose extra link-local ranges
+    # (e.g. some on-prem environments use 100.64.0.0/10).
+    additionalDeniedIPs: []
+
+    # Extra internal Services to allow egress to. Default lets agents
+    # reach the api + nats only; add per-install destinations here
+    # (vector DB, registry, etc.) by chart component label.
+    # Example:
+    #   allowedInternalServices:
+    #     - component: graph-surrealdb
+    #       port: 8000
+    #     - component: x1-registry
+    #       port: 5000
+    #       protocol: TCP
+    allowedInternalServices: []
 
 infra:
   postgres:

@@ -62,4 +62,140 @@ spec:
       ports:
         - port: 9091
           protocol: TCP
+---
+# Agent-session egress NetworkPolicy. Closes the t05 security-sweep P0 #1
+# gap: the chart shipped no egress restriction on session pods, so on any
+# enforcing CNI (GKE Dataplane v2, Calico, Cilium) a compromised agent
+# could reach:
+#   - 169.254.169.254 (cloud metadata server → Workload Identity token)
+#   - kubernetes.default.svc (kube-apiserver)
+#   - the control-plane Postgres (`app.kubernetes.io/component=postgres`)
+#   - any other in-cluster Service.
+#
+# This policy is the layer-3/4 lockdown. Hostname-level egress filtering
+# (e.g. "github.com OK, evil-exfil.com blocked") is NOT possible at the
+# NetworkPolicy layer and is tracked as a follow-up egress-proxy ticket.
+#
+# Two gotchas worth re-reading before editing:
+#
+# 1. NetworkPolicy applies per-POD, not per-container. The session pod
+#    contains both the untrusted agent container and the trusted sidecar
+#    container, sharing the same network namespace. This policy MUST
+#    therefore allow every destination the sidecar legitimately reaches
+#    (NATS, the api's /api/internal surface) in addition to whatever the
+#    agent itself needs (the wider internet for git / npm / LLM APIs).
+#    Per-container isolation needs Cilium or an in-pod egress proxy.
+#
+# 2. NetworkPolicy is bypassed entirely by `hostNetwork: true`. Verified
+#    in packages/api/src/k8s/pod-spec.ts: session Jobs do NOT set
+#    hostNetwork, so the policy applies.
+#
+# The podSelector matches the labels the api's job-watcher imperatively
+# stamps onto session pods (pod-spec.ts lines 200-206): `app: x1agent`
+# and `component: agent-session`. These are intentionally NOT the chart-
+# managed `app.kubernetes.io/component` form — the existing
+# nats-networkpolicy.yaml has the same wart for the same reason.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-session-egress
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: x1agent
+      component: agent-session
+  policyTypes:
+    - Egress
+  egress:
+    # ── kube-dns (every pod needs to resolve `nats`, `api`, etc.) ────
+    # The kube-system namespace label `kubernetes.io/metadata.name`
+    # is set automatically by the apiserver on every namespace from
+    # k8s 1.22 onward; using it avoids requiring operators to label
+    # kube-system by hand.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+    # ── api Service: /api/internal surface (sidecar share-upload,
+    #    git-credential fetch, image-token lookup). Selector matches
+    #    the chart-managed api Deployment's pod labels.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: x1agent
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: api
+      ports:
+        - port: {{ .Values.api.port }}
+          protocol: TCP
+
+    # ── nats: sidecar mTLS connection (CN=session-sidecar). The agent
+    #    container has no NATS cert + no way to forge one, so even
+    #    though the pod-level policy allows :4222, the TLS handshake
+    #    drops any direct agent connect.
+    {{- if .Values.infra.nats.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: x1agent
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: nats
+      ports:
+        - port: 4222
+          protocol: TCP
+    {{- end }}
+
+    {{- range $svc := .Values.session.networkPolicy.allowedInternalServices }}
+    # ── operator-allowlisted internal Service ({{ $svc.component }}).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: x1agent
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+              app.kubernetes.io/component: {{ $svc.component | quote }}
+      ports:
+        - port: {{ $svc.port }}
+          protocol: {{ default "TCP" $svc.protocol }}
+    {{- end }}
+
+    # ── Internet: git, npm/jsr, github.com, Anthropic/OpenAI/Vertex,
+    #    LLM-tool API calls. NetworkPolicy can't filter by hostname;
+    #    that's a follow-up egress-proxy ticket. The `except` block
+    #    is the load-bearing part of this rule — it blocks:
+    #      - 169.254.0.0/16  cloud metadata server (Workload Identity
+    #                        token + GKE node attributes)
+    #      - 10.0.0.0/8      RFC1918 (Pod + Service CIDR on most clouds)
+    #      - 172.16.0.0/12   RFC1918
+    #      - 192.168.0.0/16  RFC1918
+    #    The explicit allow-rules above re-open the precise in-cluster
+    #    destinations (kube-dns, api, nats) that egress needs; nothing
+    #    else inside the cluster is reachable.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              {{- range $cidr := .Values.session.networkPolicy.additionalDeniedIPs }}
+              - {{ $cidr | quote }}
+              {{- end }}
+
+    {{- range $cidr := .Values.session.networkPolicy.additionalEgressIPs }}
+    # ── operator-allowlisted destination ({{ $cidr }}).
+    - to:
+        - ipBlock:
+            cidr: {{ $cidr | quote }}
+    {{- end }}
 {{- end }}
