@@ -14,6 +14,7 @@ export * from "./application/send-invitation.js";
 export * from "./application/accept-invitation.js";
 export * from "./application/revoke-invitation.js";
 export * from "./application/list-invitations.js";
+export * from "./application/change-invitation-role.js";
 
 // Adapters
 export { CryptoTokenGenerator } from "./adapters/crypto/crypto-token-generator.js";
