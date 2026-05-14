@@ -614,6 +614,11 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
     getActor,
     gcsArtifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
+    // Powers the cross-session 403 distinction on
+    // `/:shareId/content`. When omitted the route still returns 404
+    // for unknown shares — the agent just can't tell "wrong session"
+    // from "no such share".
+    sql: env.sql,
   });
 
   const workspaceSharesIndexRoutes = createWorkspaceSharesIndexRoutes({

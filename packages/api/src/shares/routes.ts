@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { Buffer } from "node:buffer";
 import type postgres from "postgres";
 import {
   WorkspaceSlug,
@@ -26,6 +27,9 @@ import { getMimeType, readShareFile } from "./storage.js";
  * sidecar is the only caller and authenticates with the internal token.
  *
  *   GET /          — list every `agent.share` event for this session
+ *   GET /:shareId/content
+ *                  — read a share's bytes as base64 JSON for an agent
+ *                    in this session (X1A — PRD 0006 Slice A)
  *   GET /:shareId/*
  *                  — proxy a single file out of the share's directory
  *                    (or the share's GCS prefix in prod)
@@ -51,6 +55,14 @@ export interface WorkspaceShareRoutesConfig {
    * Unset in dev — we read from local disk instead.
    */
   gcsArtifactsBucket?: string;
+  /**
+   * Raw SQL client — only consulted by the `/:shareId/content` route to
+   * distinguish "share_id exists in some other session" (403) from
+   * "share_id doesn't exist anywhere" (404). Optional: when absent the
+   * route collapses both into 404, which is still safe but less useful
+   * for the agent.
+   */
+  sql?: postgres.Sql<Record<string, unknown>>;
 }
 
 export function createWorkspaceShareRoutes(
@@ -147,6 +159,100 @@ export function createWorkspaceShareRoutes(
         created_at: e.timestamp.toISOString(),
       }));
     return c.json({ shares });
+  });
+
+  // Read a share's content back as base64 JSON.
+  //
+  // PRD 0006, Slice A: when a session is paused and resumed, the pod's
+  // /workspace is gone but the share content (in local /tmp or GCS)
+  // survives. An agent in *the same session that produced the share*
+  // needs a way to read its own past output without re-deriving it.
+  //
+  // Authorisation is narrower than the wildcard `/:shareId/*` proxy
+  // above: the share MUST belong to the URL's `:sessionId`. A
+  // cross-session reference returns 403 (even when the caller is
+  // workspace-admin and the share is otherwise visible to them).
+  // Slice B will widen this to honour explicit grants; Slice A
+  // intentionally keeps the surface tiny.
+  app.get("/:shareId/content", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const shareId = c.req.param("shareId")!;
+    const sessionId = scope.session.id;
+    // Path is opt-in. Sites and other multi-file shares need it;
+    // simple shares (a single .md / .png / .csv) are happy with the
+    // default. Empty string is normalised to "index.html" later
+    // when we touch disk, but for the JSON response we want to echo
+    // back exactly what the caller asked for so the agent can
+    // re-correlate the answer.
+    const requestedPath = c.req.query("path") ?? "";
+
+    // 5000 matches what the list route uses — shares are sparse
+    // relative to message events.
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    const sharedHere = events.some((e) => {
+      if (e.type !== "agent.share") return false;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      return payload?.share_id === shareId;
+    });
+
+    if (!sharedHere) {
+      // Disambiguate "exists elsewhere → 403" from "doesn't exist →
+      // 404" so the agent can branch programmatically. When sql isn't
+      // wired (tests, slim composition) we collapse both into 404 —
+      // safe, just slightly less informative.
+      if (cfg.sql) {
+        const rows = await cfg.sql<{ session_id: string }[]>`
+          SELECT session_id
+          FROM session_events
+          WHERE type = 'agent.share'
+            AND (payload->>'share_id') = ${shareId}
+          LIMIT 1
+        `;
+        if (rows.length > 0) {
+          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        }
+      }
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    // For single-file shares (markdown, image, csv) the agent does
+    // not need to know the on-disk path — default to "index.html"
+    // because that's the convention `writeShareFiles` uses for the
+    // canonical entry point, and the share write path lays single
+    // files down with the user-provided basename. The empty-string
+    // case is what falls through here.
+    const filePath = requestedPath || "index.html";
+
+    if (cfg.gcsArtifactsBucket) {
+      return readFromGcsAsJson(
+        cfg.gcsArtifactsBucket,
+        sessionId,
+        shareId,
+        filePath,
+        requestedPath,
+      );
+    }
+    const bytes = readShareFile(sessionId, shareId, filePath);
+    if (!bytes) return c.json({ error: "file_not_found" }, 404);
+    return c.json({
+      share_id: shareId,
+      path: requestedPath || undefined,
+      mime_type: getMimeType(filePath),
+      size: bytes.length,
+      content_b64: bytes.toString("base64"),
+    });
   });
 
   // Stream a single file out of the share. For sites (share_type: "site")
@@ -334,6 +440,64 @@ export function createWorkspaceSharesIndexRoutes(
   });
 
   return app;
+}
+
+/**
+ * Same shape as `serveFromGcs` but returns a JSON envelope with the
+ * bytes base64-encoded — used by the `/:shareId/content` route the
+ * agent reads its own past output through. Streaming the body is
+ * pointless when the caller wants JSON, and base64 is the lowest-fric
+ * encoding for binary shares (PDF, PNG) over a JSON channel.
+ */
+async function readFromGcsAsJson(
+  bucket: string,
+  sessionId: string,
+  shareId: string,
+  filePath: string,
+  requestedPath: string,
+): Promise<Response> {
+  try {
+    const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
+    const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(objectName)}?alt=media`;
+
+    const tokenRes = await fetch(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      { headers: { "Metadata-Flavor": "Google" } },
+    );
+    const tokenBody = (await tokenRes.json()) as { access_token?: string };
+    const token = tokenBody.access_token;
+    if (!token) {
+      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const res = await fetch(gcsUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      return new Response(JSON.stringify({ error: "file_not_found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return new Response(
+      JSON.stringify({
+        share_id: shareId,
+        path: requestedPath || undefined,
+        mime_type: getMimeType(filePath),
+        size: buf.length,
+        content_b64: buf.toString("base64"),
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  } catch {
+    return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }
 
 /**
