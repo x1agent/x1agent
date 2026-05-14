@@ -36,7 +36,7 @@ export async function triggerSession(
   input: TriggerSessionInput,
 ): Promise<Session> {
   const agent = await loadAgent(deps.agents, input.agentId);
-  await deps.adminGuard.assertAdmin(input.actor, agent.workspaceId);
+  await deps.adminGuard.assertMember(input.actor, agent.workspaceId);
 
   if (isOrchestratorKind(agent.kind)) {
     const existing = await deps.sessions.findLiveSessionForAgent(agent.id);

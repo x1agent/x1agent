@@ -183,10 +183,16 @@ export class AllowAllAdmin implements AdminGuard {
   async assertAdmin() {
     return;
   }
+  async assertMember() {
+    return;
+  }
 }
 
 export class DenyAdmin implements AdminGuard {
   async assertAdmin(): Promise<never> {
+    throw new FakeAdminDeniedError();
+  }
+  async assertMember(): Promise<never> {
     throw new FakeAdminDeniedError();
   }
 }

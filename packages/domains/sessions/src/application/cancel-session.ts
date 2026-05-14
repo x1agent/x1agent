@@ -40,7 +40,13 @@ export async function cancelSession(
 
   const agent = await deps.agents.findById(session.agentId);
   if (!agent) throw new AgentNotFoundError(session.agentId);
-  await deps.adminGuard.assertAdmin(actor, agent.workspaceId);
+  // The user who triggered the session can cancel their own. Anyone
+  // else (e.g. an admin stopping someone else's run) must be admin.
+  if (session.triggeredByUserId === actor) {
+    await deps.adminGuard.assertMember(actor, agent.workspaceId);
+  } else {
+    await deps.adminGuard.assertAdmin(actor, agent.workspaceId);
+  }
 
   if (isTerminal(session.status)) {
     throw new SessionAlreadyTerminalError(sessionId, session.status);

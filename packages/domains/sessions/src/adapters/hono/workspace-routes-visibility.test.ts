@@ -116,11 +116,20 @@ class AdminGuard {
   // WS_A check, which is exactly the bug the cross-workspace test
   // exists to catch.
   admins = new Set<string>();
+  members = new Set<string>();
   setAdmin(userId: string, workspaceId: string) {
     this.admins.add(`${userId}:${workspaceId}`);
+    this.members.add(`${userId}:${workspaceId}`);
+  }
+  setMember(userId: string, workspaceId: string) {
+    this.members.add(`${userId}:${workspaceId}`);
   }
   async assertAdmin(userId: string, workspaceId: string) {
     if (!this.admins.has(`${userId}:${workspaceId}`))
+      throw new AdminDeniedError();
+  }
+  async assertMember(userId: string, workspaceId: string) {
+    if (!this.members.has(`${userId}:${workspaceId}`))
       throw new AdminDeniedError();
   }
 }

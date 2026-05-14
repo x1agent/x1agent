@@ -83,14 +83,34 @@ describe("triggerSession", () => {
     expect(s.triggeredAt.toISOString()).toBe("2026-04-18T12:00:00.000Z");
   });
 
-  it("requires admin", async () => {
+  it("requires workspace membership (but not admin)", async () => {
     const a = await makeAgent();
+    // DenyAdmin rejects both assertAdmin and assertMember — proxy for
+    // "user is not a workspace member at all".
     await expect(
       triggerSession(
         { agents, sessions, adminGuard: new DenyAdmin(), clock },
         { actor: ACTOR, agentId: a.id },
       ),
     ).rejects.toBeTruthy();
+
+    // A plain member (allowed by assertMember) should succeed without
+    // assertAdmin ever being called.
+    class MemberOnlyGuard {
+      assertAdminCalled = false;
+      async assertAdmin() {
+        this.assertAdminCalled = true;
+        throw new Error("admin gate must not be invoked from triggerSession");
+      }
+      async assertMember() {}
+    }
+    const guard = new MemberOnlyGuard();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: guard, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    expect(s.status).toBe("pending");
+    expect(guard.assertAdminCalled).toBe(false);
   });
 
   it("rejects when the agent doesn't exist", async () => {
@@ -288,6 +308,50 @@ describe("cancelSession", () => {
         SessionId(uuid(900)),
       ),
     ).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+
+  it("the triggerer (a plain member) can cancel their own session", async () => {
+    const a = await makeAgent();
+    // Trigger as ACTOR with a member-only guard — assertMember succeeds,
+    // assertAdmin would throw if called.
+    class MemberOnlyGuard {
+      async assertAdmin(): Promise<never> {
+        throw new Error("admin gate must not be hit when cancelling own session");
+      }
+      async assertMember() {}
+    }
+    const guard = new MemberOnlyGuard();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: guard, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    const cancelled = await cancelSession(
+      { agents, sessions, adminGuard: guard, clock },
+      ACTOR,
+      s.id,
+    );
+    expect(cancelled.status).toBe("complete");
+    expect(cancelled.errorMessage).toBe("cancelled");
+  });
+
+  it("a non-triggerer member is rejected — admin gate applies for somebody else's session", async () => {
+    const a = await makeAgent();
+    // Owner triggers as ACTOR (passes member check).
+    const allow = new AllowAllAdmin();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: allow, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    // A different user (OTHER) tries to cancel — only assertAdmin is
+    // consulted in this branch; DenyAdmin rejects.
+    const OTHER = UserId(uuid(778));
+    await expect(
+      cancelSession(
+        { agents, sessions, adminGuard: new DenyAdmin(), clock },
+        OTHER,
+        s.id,
+      ),
+    ).rejects.toBeTruthy();
   });
 });
 
