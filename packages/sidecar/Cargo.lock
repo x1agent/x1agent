@@ -3611,6 +3611,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "urlencoding",

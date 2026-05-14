@@ -522,7 +522,13 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 limits: { memory: "256Mi", cpu: "250m" },
               },
               readinessProbe: {
-                httpGet: { path: "/health", port: 9090 },
+                // Health surface is split off the credential-bearing
+                // :9090 listener. :9090 is bound to 127.0.0.1 only so
+                // the kubelet (which dials from the node IP, not
+                // localhost) cannot reach it; :9091 binds 0.0.0.0 and
+                // serves health only. See `packages/sidecar/src/main.rs`
+                // and `deploy/helm/x1agent/templates/agent-session-networkpolicy.yaml`.
+                httpGet: { path: "/health", port: 9091 },
                 initialDelaySeconds: 3,
                 periodSeconds: 5,
               },

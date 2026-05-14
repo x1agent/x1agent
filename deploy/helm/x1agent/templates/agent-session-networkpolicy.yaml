@@ -1,0 +1,65 @@
+{{- if .Values.session.networkPolicy.enabled | default true }}
+# Agent-session NetworkPolicy. Defense-in-depth on top of the sidecar's
+# split-listener bind (see packages/sidecar/src/main.rs):
+#
+#   * The credential-bearing :9090 listener is bound to 127.0.0.1, so a
+#     peer pod cannot dial it regardless of NetworkPolicy. That is the
+#     architectural guarantee.
+#
+#   * This policy provides a separate, lower-layer guarantee: the only
+#     external port the kubelet needs is :9091 (the readinessProbe).
+#     Nothing else in the cluster should be dialing a session pod, and
+#     so this policy denies everything else by default.
+#
+# Two reasons we still want this even though :9090 is loopback-only:
+#
+#   1. NATS-WS-style mistake protection. The recent NATS-WS public
+#      ingress vuln was a "policy fictional, transport real" hole — the
+#      docs said "internal only" but the Service was reachable. With
+#      this policy in place, a future PR that flips a credential route
+#      back to `0.0.0.0` is still blocked at the pod boundary.
+#
+#   2. Other future ports. As soon as the sidecar exposes a second
+#      external port (metrics, debug, etc.), this policy forces the
+#      author to think about who is allowed to dial it.
+#
+# Why kube-system: kubelet probes originate from the node, not from any
+# pod, but `from: namespaceSelector: kube-system` is the conventional
+# allow rule for kubelet ingress on managed clusters that route probes
+# through a kube-system component. For GKE, EKS, AKS, and OrbStack this
+# is the right match; if a target distribution routes probes from
+# elsewhere, override via `session.networkPolicy.allowedFromNamespaces`
+# in values.
+#
+# Session pod labels come from packages/api/src/k8s/pod-spec.ts (Jobs
+# constructed imperatively by the api job-watcher). Selector here must
+# stay in sync with that label set — the same constraint the
+# nats-networkpolicy comments call out.
+#
+# NetworkPolicy requires an enforcing CNI. ingress-nginx + GKE's
+# default CNI enforce it; OrbStack's kindnet does not, so locally this
+# is a no-op (the loopback bind is the live defense).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-session-default-deny
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: x1agent
+      component: agent-session
+  policyTypes:
+    - Ingress
+  ingress:
+    # Kubelet readiness probe → sidecar :9091/health.
+    - from:
+        {{- range (.Values.session.networkPolicy.allowedFromNamespaces | default (list "kube-system")) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 9091
+          protocol: TCP
+{{- end }}

@@ -384,6 +384,24 @@ monitoring:
 # v1 keeps Postgres + NATS in-cluster for cost — fine for early customers.
 # ============================================================================
 
+# Agent session pod controls. Session pods are constructed imperatively
+# by the api job-watcher (see packages/api/src/k8s/pod-spec.ts) — the
+# chart only owns the surrounding policies (ServiceAccount, NetworkPolicy).
+session:
+  networkPolicy:
+    # Default-deny ingress for agent-session pods. Allows only the
+    # kubelet readiness probe on the sidecar's :9091 health listener.
+    # The credential-bearing :9090 surface is loopback-only at the bind
+    # level (see sidecar/src/main.rs), so this policy is defense-in-
+    # depth — not the primary control.
+    enabled: true
+    # Namespaces whose pods (and the kubelet running in them) may reach
+    # :9091. On most managed K8s distributions the kubelet probe is
+    # attributed to kube-system; override only if your distribution
+    # routes probes differently.
+    allowedFromNamespaces:
+      - kube-system
+
 infra:
   postgres:
     enabled: true
