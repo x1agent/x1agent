@@ -76,7 +76,6 @@ COPY packages/app/ ./packages/app/
 # different URLs. The installer wires this from .env.local at build time.
 ARG PUBLIC_API_URL=https://api.x1agent.com
 ARG PUBLIC_URL=https://app.x1agent.com
-ARG PUBLIC_NATS_WS_URL=wss://nats.x1agent.com
 # Sentry — DSN is baked into the browser bundle (no runtime config for
 # import.meta.env). Auth token is build-time only for source-map upload;
 # never carried in the runtime image.
@@ -85,7 +84,6 @@ ARG SENTRY_AUTH_TOKEN=
 ARG SENTRY_RELEASE=
 ENV PUBLIC_API_URL=${PUBLIC_API_URL}
 ENV PUBLIC_URL=${PUBLIC_URL}
-ENV PUBLIC_NATS_WS_URL=${PUBLIC_NATS_WS_URL}
 ENV PUBLIC_SENTRY_DSN_APP=${PUBLIC_SENTRY_DSN_APP}
 ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
 ENV SENTRY_RELEASE=${SENTRY_RELEASE}

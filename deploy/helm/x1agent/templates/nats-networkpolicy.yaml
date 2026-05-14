@@ -1,0 +1,83 @@
+{{- if .Values.infra.nats.enabled }}
+# NATS NetworkPolicy. Defense-in-depth on top of the public ingress
+# removal (see ingress.yaml: x1agent-nats-ws was deleted 2026-05-13).
+#
+# The NATS Service is ClusterIP, so external traffic was already
+# bounced at the cluster boundary. This policy adds in-cluster
+# scoping: only pods that legitimately need to reach NATS — the api,
+# session sidecars, and provider deployments — may open connections
+# to nats:4222 and nats:8080.
+#
+# Why bother in-cluster: a future compromised agent container (the
+# untrusted boundary the platform was designed around) sits in the
+# same namespace and would otherwise inherit unrestricted Pod-to-Pod
+# Service reachability. With this policy the agent can talk to its
+# own sidecar over localhost but not to NATS directly — closing the
+# "agent steals a sidecar cert / opens its own NATS connection"
+# escalation path.
+#
+# All three pod selectors below match the standard
+# `app.kubernetes.io/component=<name>` label every component in this
+# chart already carries (see _helpers.tpl selectorLabels). The
+# component value `provider` is intentionally broad — every provider
+# Deployment uses that component label regardless of which domain
+# (messaging, files, graph, etc.) it implements.
+#
+# NetworkPolicy requires a CNI that enforces it. ingress-nginx + the
+# default GKE network plugin both do; OrbStack's kindnet does not, so
+# this policy is effectively a no-op locally. The chart still renders
+# it everywhere so prod gets the protection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats-ingress
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: x1agent
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: nats
+  policyTypes:
+    - Ingress
+  ingress:
+    # Cluster-internal client connections (api + provider gateways).
+    # The api uses mTLS-authenticated 4222 with CN=x1agent-api; the
+    # provider Deployments use CN=x1agent-provider on the same port.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: x1agent
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: x1agent
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: provider
+      ports:
+        - port: 4222
+          protocol: TCP
+        # JetStream cluster + monitoring; not used today but kept open
+        # for the api so a future jstop / health probe doesn't trip.
+        - port: 8222
+          protocol: TCP
+    # Session sidecars publish events on 4222 with CN=session-sidecar.
+    # Job pods carry a different label set than the chart-managed
+    # components — they get plain `app=x1agent component=agent-session`
+    # because the api's job-watcher constructs them imperatively (see
+    # packages/api/src/k8s/pod-spec.ts). If those labels drift, the
+    # policy will silently lock the sidecar out, so keep them in sync.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: x1agent
+              component: agent-session
+      ports:
+        - port: 4222
+          protocol: TCP
+    # WebSocket port (8080) is no longer required by any pod — the
+    # browser bridge in the api uses 4222 too. Left omitted so any pod
+    # trying to use the old browser path is denied at policy level even
+    # if the cluster-internal Service still routes it.
+{{- end }}

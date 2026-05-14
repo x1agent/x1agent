@@ -209,11 +209,10 @@ spec:
             matchLabels:
               component: agent-session
       ports: [{ port: 4222, protocol: TCP }]
-    # WebSocket subscriber: the browser hits :8080 via devspace
-    # port-forward. The traffic still originates from the dev host,
-    # which appears to the cluster as the kubelet IP — allow any
-    # in-cluster source on 8080 in dev.
-    - ports: [{ port: 8080, protocol: TCP }]
+    # NATS WebSocket port 8080 is no longer reached by the browser.
+    # Live-update goes through the api's authenticated /api/ws bridge
+    # (packages/api/src/ws-bridge/), and the api connects to NATS over
+    # 4222 like every other in-cluster client.
 ---
 # ── surrealdb: only graph-surrealdb may connect ─────────────────
 apiVersion: networking.k8s.io/v1

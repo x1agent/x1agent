@@ -35,6 +35,13 @@ api.{{ .Values.baseDomain }}
 *.preview.{{ .Values.baseDomain }}
 {{- end }}
 
-{{- define "x1agent.natsWsHost" -}}
-nats.{{ .Values.baseDomain }}
-{{- end }}
+{{/*
+The natsWsHost helper was removed 2026-05-13. Earlier versions of
+the chart exposed NATS WebSocket directly at `nats.<base-domain>`
+with `no_auth_user: x1agent-api`, allowing any internet client to
+subscribe / publish across every subject as the api super-user. The
+browser now reaches NATS through the authenticated bridge in the
+api at `wss://api.<base-domain>/api/ws`. Do not re-introduce the
+helper without also reinstating the auth_callout flow that v1
+never shipped.
+*/}}

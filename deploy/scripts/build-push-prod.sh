@@ -74,7 +74,6 @@ build_push_app() {
     -f "$ROOT/deploy/docker/app.prod.Dockerfile" \
     --build-arg "PUBLIC_API_URL=https://api.${BASE_DOMAIN}" \
     --build-arg "PUBLIC_URL=https://app.${BASE_DOMAIN}" \
-    --build-arg "PUBLIC_NATS_WS_URL=wss://nats.${BASE_DOMAIN}" \
     --build-arg "PUBLIC_SENTRY_DSN_APP=${PUBLIC_SENTRY_DSN_APP:-}" \
     --build-arg "SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN:-}" \
     --build-arg "SENTRY_RELEASE=${TAG}" \

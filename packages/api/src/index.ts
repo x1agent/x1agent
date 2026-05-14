@@ -272,6 +272,9 @@ const {
   sql: composedSql,
   agents: composedAgents,
   sessions: composedSessions,
+  memberships: composedMemberships,
+  sessionShares: composedSessionShares,
+  tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
   agentEnvBindings: composedAgentEnvBindings,
@@ -929,7 +932,74 @@ scheduler.start();
 
 console.log(`[api] listening on :${PORT}`);
 
+// WebSocket bridge — the browser used to talk to NATS directly over a
+// public WS where it was the `x1agent-api` super-user on every subject.
+// That ingress is gone; the browser now opens an authenticated WS to
+// this api at /api/ws, and this bridge does the auth + per-message
+// whitelist enforcement before relaying to/from NATS.
+//
+// When NATS is disabled or unreachable at boot, we still want the
+// HTTP surface to come up — so `wsBridge` may be null and any
+// /api/ws upgrade attempt returns 503 from the fetch wrapper.
+let wsBridge:
+  | ReturnType<typeof import("./ws-bridge/index.js").buildWsBridge>
+  | null = null;
+if (providerNats) {
+  const { buildWsBridge } = await import("./ws-bridge/index.js");
+  wsBridge = buildWsBridge({
+    tokenizer: composedTokenizer,
+    nats: providerNats,
+    sessions: composedSessions,
+    agents: composedAgents,
+    memberships: composedMemberships,
+    sessionShares: composedSessionShares,
+  });
+  console.log("[ws-bridge] listening on /api/ws");
+} else {
+  console.warn(
+    "[ws-bridge] disabled — providerNats is null; browser live-update will be offline",
+  );
+}
+
 export default {
   port: PORT,
-  fetch: app.fetch,
+  fetch(req: Request, server: import("bun").Server<unknown>) {
+    if (wsBridge) {
+      const handled = wsBridge.tryUpgrade(req, server);
+      if (handled) return handled;
+      // tryUpgrade returns undefined when (a) the path doesn't match
+      // /api/ws (so Hono handles it normally) OR (b) the upgrade
+      // succeeded (Bun has hijacked the connection). In both cases we
+      // fall through to Hono — for case (b) Hono will see a no-op and
+      // return whatever it returns; Bun doesn't actually invoke fetch
+      // again after a successful upgrade.
+    } else {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/ws") {
+        return new Response("nats_bridge_disabled", { status: 503 });
+      }
+    }
+    return app.fetch(req, server);
+  },
+  websocket: {
+    open(ws: import("bun").ServerWebSocket<unknown>) {
+      wsBridge?.websocket.open(
+        ws as import("bun").ServerWebSocket<never>,
+      );
+    },
+    message(
+      ws: import("bun").ServerWebSocket<unknown>,
+      data: string | Buffer,
+    ) {
+      void wsBridge?.websocket.message(
+        ws as import("bun").ServerWebSocket<never>,
+        data,
+      );
+    },
+    close(ws: import("bun").ServerWebSocket<unknown>) {
+      wsBridge?.websocket.close(
+        ws as import("bun").ServerWebSocket<never>,
+      );
+    },
+  },
 };
