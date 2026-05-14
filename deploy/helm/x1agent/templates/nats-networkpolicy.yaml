@@ -6,7 +6,9 @@
 # bounced at the cluster boundary. This policy adds in-cluster
 # scoping: only pods that legitimately need to reach NATS — the api,
 # session sidecars, and provider deployments — may open connections
-# to nats:4222 and nats:8080.
+# to nats:4222. The :8080 WebSocket listener was removed entirely
+# (see nats.yaml); this policy retains the deny-by-default shape on
+# any other port for defense-in-depth.
 #
 # Why bother in-cluster: a future compromised agent container (the
 # untrusted boundary the platform was designed around) sits in the
@@ -76,8 +78,9 @@ spec:
       ports:
         - port: 4222
           protocol: TCP
-    # WebSocket port (8080) is no longer required by any pod — the
-    # browser bridge in the api uses 4222 too. Left omitted so any pod
-    # trying to use the old browser path is denied at policy level even
-    # if the cluster-internal Service still routes it.
+    # WebSocket port (8080) is removed from the NATS config entirely
+    # (see nats.yaml). No allow rule is needed; the deny-by-default
+    # NetworkPolicy shape closes the port at the policy layer too,
+    # so even a regression that re-adds the listener won't get
+    # traffic from anywhere except an explicitly-allowed sender.
 {{- end }}

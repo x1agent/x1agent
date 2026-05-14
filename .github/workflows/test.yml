@@ -53,6 +53,12 @@ jobs:
             echo "=== $pkg ==="
             (cd packages/$pkg && bun test)
           done
+      - name: Helm chart guards (no anonymous NATS super-user mapping)
+        run: |
+          # Pure-source regex guards over the chart templates — no
+          # helm binary required. See deploy/helm/x1agent/tests/ for
+          # the rationale.
+          bun test deploy/helm/x1agent/tests
 
   integration:
     name: Adapter + API integration tests
