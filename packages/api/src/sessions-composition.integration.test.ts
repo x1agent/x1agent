@@ -28,17 +28,23 @@ beforeAll(async () => {
     INSERT INTO users (email, name) VALUES ('member@example.com', 'Member')
     RETURNING id
   `;
-  // Stranger is in the users table but NOT in workspace_members for
-  // 'default' — exercises the non-member gate independently of the
-  // member-vs-admin role check.
-  await dbSql<{ id: string }[]>`
+  // 'other' workspace exists so the stranger has SOMEWHERE to be a
+  // member (sign-in rejects users with zero memberships). They're
+  // intentionally NOT in 'default' — exercises the cross-tenant gate
+  // independently of the member-vs-admin role check.
+  const [otherWs] = await dbSql<{ id: string }[]>`
+    INSERT INTO workspaces (slug, name) VALUES ('other', 'Other')
+    RETURNING id
+  `;
+  const [stranger] = await dbSql<{ id: string }[]>`
     INSERT INTO users (email, name) VALUES ('stranger@example.com', 'Stranger')
     RETURNING id
   `;
   await dbSql`
     INSERT INTO workspace_members (workspace_id, user_id, role)
-    VALUES (${ws!.id}, ${admin!.id}, 'admin'),
-           (${ws!.id}, ${member!.id}, 'member')
+    VALUES (${ws!.id},      ${admin!.id},    'admin'),
+           (${ws!.id},      ${member!.id},   'member'),
+           (${otherWs!.id}, ${stranger!.id}, 'admin')
   `;
 
   process.env.TEST_USER = "admin@example.com";
