@@ -1,3 +1,10 @@
+## [1.27.1](https://github.com/x1agent/x1agent/compare/v1.27.0...v1.27.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **app:** share content + comments live-update from agent ([3aa8131](https://github.com/x1agent/x1agent/commit/3aa81318fe8fd4bb758ca589c2e27053ab141d51)), closes [#132](https://github.com/x1agent/x1agent/issues/132)
+
 # [1.27.0](https://github.com/x1agent/x1agent/compare/v1.26.0...v1.27.0) (2026-05-14)
 
 
