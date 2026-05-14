@@ -95,7 +95,10 @@ metadata:
     cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/permanent-redirect: "https://{{ include "x1agent.appHost" . }}$request_uri"
+    # ingress-nginx 1.9+ validates this annotation as a plain URL — no
+    # nginx variables. Static target lands every apex path at app's
+    # root; path preservation isn't worth the validator escape hatches.
+    nginx.ingress.kubernetes.io/permanent-redirect: "https://{{ include "x1agent.appHost" . }}/"
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   tls:
