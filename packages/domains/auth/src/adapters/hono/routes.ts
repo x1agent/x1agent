@@ -8,6 +8,7 @@ import type { LinkAttemptStore } from "../../ports/link-attempt-store.js";
 import type { OAuthLoginStateStore } from "../../ports/oauth-login-state-store.js";
 import type { PasswordCredentialStore } from "../../ports/password-credential-store.js";
 import type { UserOAuthTokenStore } from "../../ports/user-oauth-token-store.js";
+import type { PendingInvitationAcceptor } from "../../ports/pending-invitation-acceptor.js";
 import {
   signInWithCode,
   completeSignIn,
@@ -109,6 +110,12 @@ export interface AuthRoutesConfig {
     store: UserOAuthTokenStore;
     encrypt: EncryptOAuthToken;
   };
+  /**
+   * X1A-128: forwarded into the sign-in flow so invitees who skip the
+   * email link still land as workspace members on first Google
+   * sign-in. See PendingInvitationAcceptor.
+   */
+  pendingInvitations?: PendingInvitationAcceptor;
 }
 
 function buildCookieHeader(
@@ -272,6 +279,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           platformAdmins: cfg.platformAdmins ?? [],
           accessGate: cfg.accessGate,
           oauthTokens: cfg.oauthTokens,
+          pendingInvitations: cfg.pendingInvitations,
         },
         code,
         redirectUri(),
@@ -319,6 +327,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
             allowedDomains: cfg.allowedDomains ?? [],
             platformAdmins: cfg.platformAdmins ?? [],
             accessGate: cfg.accessGate,
+            pendingInvitations: cfg.pendingInvitations,
           },
           profile,
         );

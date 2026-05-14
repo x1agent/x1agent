@@ -147,6 +147,7 @@ import type postgres from "postgres";
 import type { Context, Hono } from "hono";
 import {
   MembershipGrantorAdapter,
+  PendingInvitationAcceptorAdapter,
   WorkspaceAdminGuard,
   WorkspaceReaderAdapter,
 } from "./invitation-adapters.js";
@@ -462,6 +463,12 @@ export function compose(env: CompositionEnv): Composition {
       store: userOAuthTokenStore,
       encrypt: encryptOAuthToken,
     },
+    // X1A-128: auto-accept any still-active invitations whose email
+    // matches the signing-in user, so an invitee who clicks "Sign in
+    // with Google" instead of the invite link still lands as a
+    // workspace member (otherwise they'd hit the "no workspace
+    // access" empty state).
+    pendingInvitations: new PendingInvitationAcceptorAdapter(env.sql),
   });
 
   const requireAuth = createRequireAuth(tokenizer);
