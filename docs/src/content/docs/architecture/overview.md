@@ -39,6 +39,7 @@ Three paths handle all data flow between agents, clients, and the platform:
 ```mermaid
 sequenceDiagram
     participant B as Browser
+    participant Api as api / ws-bridge
     participant N as NATS
     participant S as Sidecar
     participant A as Agent
@@ -46,22 +47,27 @@ sequenceDiagram
     Note over A,S: Path 1: Passive observation
     A->>S: SSE stream (:3100)
     S->>N: publish x1.session.{id}.events
-    N->>B: WebSocket
+    N->>Api: subscription
+    Api->>B: relay (WebSocket /api/ws)
 
     Note over B,A: Path 2: User input
-    B->>N: publish x1.session.{id}.input
+    B->>Api: WebSocket pub_input
+    Api->>N: JetStream publish x1.session.{id}.input
     N->>S: subscription
     S->>A: POST :8788/inject
 
     Note over A,B: Path 3: Proactive emission
     A->>S: MCP tool call (emit_status, emit_artifact, etc.)
     S->>N: publish x1.session.{id}.events
-    N->>B: WebSocket
+    N->>Api: subscription
+    Api->>B: relay (WebSocket /api/ws)
 ```
 
-**Path 1 (passive observation)** -- The agent runtime produces a stream of typed events (thinking, text, tool calls, results). The sidecar consumes this SSE stream, wraps each event in the [X1Message envelope](/reference/protocol), and publishes to NATS. Clients subscribe via WebSocket.
+The browser never talks to NATS directly. The api hosts a WebSocket bridge at `wss://api.<base-domain>/api/ws` that authenticates the upgrade, authorizes each `subscribe` against [`resolveSessionVisibility`](/architecture/sessions/#visibility), and relays a whitelisted subset of NATS subjects in both directions. NATS is ClusterIP-only and reachable only by the api, providers, and session pods (enforced by `nats-networkpolicy.yaml`). See [NATS mTLS](/configuration/nats-mtls/#browser-bridge) for the bridge's wire protocol + the field-level whitelist.
 
-**Path 2 (user input)** -- The client publishes a message to the session's input subject on NATS. The sidecar subscribes, validates the message, and POSTs to the agent's inject endpoint. The agent runtime feeds this into the conversation as a new user turn.
+**Path 1 (passive observation)** -- The agent runtime produces a stream of typed events (thinking, text, tool calls, results). The sidecar consumes this SSE stream, wraps each event in the [X1Message envelope](/reference/protocol), and publishes to NATS. The bridge subscribes server-side and relays each filtered event to the browser over its authenticated WebSocket.
+
+**Path 2 (user input)** -- The browser sends `pub_input` over its WebSocket. The bridge validates ownership of the session, then JetStream-publishes to the session's input subject. The sidecar subscribes, validates the message, and POSTs to the agent's inject endpoint. The agent runtime feeds this into the conversation as a new user turn.
 
 **Path 3 (proactive emission)** -- The agent calls MCP tools (`emit_status`, `emit_artifact`, `request_input`, `request_permission`) that produce structured events. The sidecar publishes these to NATS. This gives the LLM deliberate control over what it communicates, with typed payloads rather than parsed stdout.
 

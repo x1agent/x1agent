@@ -258,6 +258,14 @@ export interface Composition {
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
   sessions: PostgresSessionRepository;
+  /** Workspace membership table. Exposed so the WS bridge can build
+   * its own AdminGuard / per-connection workspace scope without
+   * round-tripping through one of the route adapters. */
+  memberships: PostgresMembershipRepository;
+  /** Per-user session_user_shares table. Required by the WS bridge to
+   * resolve "is this session visible to this signed-in user" without
+   * going through a route adapter. */
+  sessionShares: PostgresSessionShareRepository;
   /** Doc-commenting persistence — exposed so the comment-wake subscriber
    * can re-verify NATS-supplied routing fields against the DB before
    * publishing a wake. Without this, an authenticated bus client could
@@ -1363,6 +1371,8 @@ export function compose(env: CompositionEnv): Composition {
     sql: env.sql,
     agents,
     sessions,
+    memberships,
+    sessionShares,
     shareComments,
     permissionGrants,
     collections: collectionsRepo,

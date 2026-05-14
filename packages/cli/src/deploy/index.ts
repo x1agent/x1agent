@@ -13,9 +13,10 @@ import {
   findRepoRoot,
   resolveActiveDeploymentInteractive,
 } from "../configure/paths.ts";
-import { defaultPaths, render } from "../install/render.ts";
+import { defaultPaths, deploymentEnv, render } from "../install/render.ts";
 import { runInstallPreflight, reportFailures } from "../install/preflight.ts";
 import { printActiveTargetHeader } from "../active-target.ts";
+import { EnvFile } from "../configure/env-file.ts";
 
 /**
  * Ship code to a configured deployment.
@@ -96,6 +97,14 @@ export async function runDeploy(opts: DeployOptions): Promise<boolean> {
     if (!(await phaseBuildImages(envPath, tag))) return false;
   }
 
+  // ── Phase 1.5: refresh the deployment-scoped kubeconfig ──────────
+  // Writes credentials for THIS deployment's cluster into
+  // installs/<base>/kubeconfig.yaml so the helm upgrade below is
+  // physically incapable of hitting a cluster other than the one
+  // named in the deployment file. The operator's ambient
+  // `kubectx` / `~/.kube/config` selection is ignored.
+  if (!(await phaseEnsureCredentials(envPath))) return false;
+
   // ── Phase 2: helm upgrade (migration runs as pre-upgrade hook) ───
   if (!(await phaseHelmUpgrade(envPath, tag))) return false;
 
@@ -132,6 +141,55 @@ async function phaseBuildImages(
   return true;
 }
 
+async function phaseEnsureCredentials(envPath: string): Promise<boolean> {
+  const env = new EnvFile(envPath);
+  const projectId = env.get("GCP_PROJECT_ID");
+  const region = env.get("GCP_REGION") || "us-central1";
+  if (!projectId) {
+    log.error("GCP_PROJECT_ID missing from deployment file.");
+    return false;
+  }
+  const { kubeconfigPath, baseDomain } = defaultPaths();
+
+  const s = spinner();
+  s.start(
+    `Fetching cluster credentials → ${kubeconfigPath} (cluster: x1agent / ${region} / ${projectId})`,
+  );
+  // Force gcloud to write into the deployment-scoped kubeconfig only.
+  // KUBECONFIG=<path> makes get-credentials read+write that file in
+  // isolation; ~/.kube/config is untouched.
+  const proc = Bun.spawn(
+    [
+      "gcloud",
+      "container",
+      "clusters",
+      "get-credentials",
+      "x1agent",
+      "--region",
+      region,
+      "--project",
+      projectId,
+    ],
+    {
+      env: deploymentEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const stderr = await new Response(proc.stderr).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) {
+    s.stop("Credentials fetch failed.");
+    log.error(stderr.trim());
+    log.error(
+      `Hint: confirm the active gcloud account has container.clusters.get on ${projectId}.`,
+    );
+    return false;
+  }
+  s.stop(`Cluster credentials loaded for ${baseDomain}.`);
+  return true;
+}
+
 async function phaseHelmUpgrade(
   envPath: string,
   tag: string,
@@ -159,7 +217,11 @@ async function phaseHelmUpgrade(
       "--timeout",
       "10m",
     ],
-    { stdout: "inherit", stderr: "inherit" },
+    {
+      env: deploymentEnv(),
+      stdout: "inherit",
+      stderr: "inherit",
+    },
   );
   await proc.exited;
   if (proc.exitCode !== 0) {

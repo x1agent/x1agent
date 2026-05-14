@@ -87,6 +87,22 @@ async function main() {
       // installs/. Used by `mise run deployments`.
       process.exit(runDeployments());
     }
+    case "tfstate-path": {
+      // Resolve the active deployment and print its terraform state
+      // path. Used by mise.toml `terraform:prod:*` tasks to inject
+      // -state=<path> into raw `terraform` invocations so two
+      // deployments can coexist without clobbering each other.
+      // Stdout-only (path), stderr for any errors so callers can do
+      // `STATE=$(bun run src/index.ts tfstate-path)`.
+      try {
+        const { defaultPaths } = await import("./install/render.ts");
+        process.stdout.write(defaultPaths().tfStatePath + "\n");
+        process.exit(0);
+      } catch (err) {
+        process.stderr.write(`tfstate-path: ${(err as Error).message}\n`);
+        process.exit(1);
+      }
+    }
     default: {
       console.error(`Unknown command: ${subcommand}`);
       console.error(

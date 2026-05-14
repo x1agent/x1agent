@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  connect,
-  StringCodec,
-  type JetStreamClient,
-  type NatsConnection,
-} from "nats.ws";
+  openBridge,
+  type BridgeHandle,
+  type BridgeCommentEvent,
+} from "../../lib/wsBridge";
 import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
@@ -35,12 +34,6 @@ interface Props {
   sessionId: string;
 }
 
-const NATS_WS_URL =
-  typeof window !== "undefined"
-    ? ((import.meta as unknown as { env?: { PUBLIC_NATS_WS_URL?: string } })
-        .env?.PUBLIC_NATS_WS_URL ?? "ws://localhost:8080")
-    : "ws://localhost:8080";
-
 const STATUS_COLOR: Record<SessionStatus, string> = {
   pending: "text-fg-muted",
   running: "text-blue-400",
@@ -65,8 +58,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const [verbose, setVerbose] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const ncRef = useRef<NatsConnection | null>(null);
-  const jsRef = useRef<JetStreamClient | null>(null);
+  const bridgeRef = useRef<BridgeHandle | null>(null);
   const seqRef = useRef(0);
   const takePendingPrompt = usePendingPromptStore((s) => s.take);
   const pendingPromptSentRef = useRef(false);
@@ -122,217 +114,158 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    let hbInterval: ReturnType<typeof setInterval> | null = null;
+    let visibilityHandler: (() => void) | null = null;
 
     (async () => {
       await loadInitial(workspaceSlug, sessionId);
       if (cancelled) return;
-      try {
-        const nc = await connect({ servers: NATS_WS_URL });
-        if (cancelled) {
-          await nc.close();
+
+      const handleSessionEvent = (msg: {
+        session_id: string;
+        sequence: number;
+        type: string;
+        payload: unknown;
+        timestamp: string;
+      }) => {
+        // X1A-104: `session.agent_thinking` is transient — it
+        // travels over the same WS channel but is NOT persisted
+        // to the timeline. Route it into the typing-indicator
+        // store and skip `appendEvent` so it doesn't pollute
+        // the durable event list or trigger the dedupe path.
+        if (msg.type === "session.agent_thinking") {
+          const p = (msg.payload ?? {}) as {
+            share_id?: string | null;
+            thread_id?: string | null;
+            event_id?: string | null;
+            wake_source?: string;
+            started_at?: string;
+          };
+          if (typeof p.event_id === "string" && p.event_id) {
+            useTypingIndicatorStore.getState().add(sessionId, {
+              event_id: p.event_id,
+              share_id:
+                typeof p.share_id === "string" ? p.share_id : null,
+              thread_id:
+                typeof p.thread_id === "string" ? p.thread_id : null,
+              started_at:
+                typeof p.started_at === "string"
+                  ? p.started_at
+                  : msg.timestamp,
+              wake_source:
+                typeof p.wake_source === "string"
+                  ? p.wake_source
+                  : "unknown",
+            });
+          }
           return;
         }
-        ncRef.current = nc;
-        // Browser publishes user input via JetStream so a message
-        // typed during the session-pod warmup window (image pull +
-        // sidecar boot, up to ~30s) is buffered on the broker and
-        // delivered once the sidecar's durable consumer comes up.
-        // Without this, NATS-core's at-most-once delivery dropped
-        // any input the user typed before the sidecar subscribed.
-        jsRef.current = nc.jetstream();
-        const sc = StringCodec();
-        const sub = nc.subscribe(`x1.session.${sessionId}.events`);
 
-        (async () => {
-          for await (const m of sub) {
-            if (cancelled) break;
-            try {
-              const msg = JSON.parse(sc.decode(m.data)) as {
-                session_id: string;
-                sequence: number;
-                type: string;
-                payload: unknown;
-                timestamp: string;
-              };
-
-              // X1A-104: `session.agent_thinking` is transient — it
-              // travels over the same WS channel but is NOT persisted
-              // to the timeline. Route it into the typing-indicator
-              // store and skip `appendEvent` so it doesn't pollute
-              // the durable event list or trigger the dedupe path.
-              if (msg.type === "session.agent_thinking") {
-                const p = (msg.payload ?? {}) as {
-                  share_id?: string | null;
-                  thread_id?: string | null;
-                  event_id?: string | null;
-                  wake_source?: string;
-                  started_at?: string;
-                };
-                if (typeof p.event_id === "string" && p.event_id) {
-                  useTypingIndicatorStore.getState().add(sessionId, {
-                    event_id: p.event_id,
-                    share_id:
-                      typeof p.share_id === "string" ? p.share_id : null,
-                    thread_id:
-                      typeof p.thread_id === "string" ? p.thread_id : null,
-                    started_at:
-                      typeof p.started_at === "string"
-                        ? p.started_at
-                        : msg.timestamp,
-                    wake_source:
-                      typeof p.wake_source === "string"
-                        ? p.wake_source
-                        : "unknown",
-                  });
-                }
-                continue;
-              }
-
-              const ev: SessionEventDTO = {
-                id: `nats-${msg.session_id}-${msg.sequence}`,
-                session_id: msg.session_id,
-                seq: msg.sequence,
-                type: msg.type,
-                payload: msg.payload,
-                timestamp: msg.timestamp,
-              };
-
-              // X1A-104 clear-signal: if this agent emission carries
-              // a wake correlation id (`event_id` / `in_reply_to` /
-              // `triggered_by` from X1A-103's propagation contract),
-              // clear the matching indicator. Defense-in-depth on
-              // top of the 60s client TTL — the sweep covers the
-              // pod-death case where no correlated emission ever
-              // arrives.
-              const correlated = extractCorrelatedEventId(
-                ev as unknown as Record<string, unknown>,
-              );
-              if (correlated) {
-                useTypingIndicatorStore
-                  .getState()
-                  .clearByEventId(sessionId, correlated);
-              }
-
-              appendEvent(sessionId, ev);
-            } catch {
-              // drop malformed
-            }
-          }
-        })().catch(() => {});
-
-        // Live comment updates — subscribe to the platform-wide
-        // share-comment NATS subjects so the comments sidebar reflects
-        // new threads/replies/resolves without a refresh. The subjects
-        // are cluster-wide, not per-session, so a single subscription
-        // covers any share the user is viewing. The store's
-        // applyServerEvent is idempotent on (thread_id, seq) so this
-        // is safe even if a comment also arrives via the local POST
-        // (optimistic append).
-        const commentAddedSub = nc.subscribe("agent.share_comment_added");
-        (async () => {
-          for await (const m of commentAddedSub) {
-            if (cancelled) break;
-            try {
-              const p = JSON.parse(sc.decode(m.data)) as {
-                share_id?: string;
-                thread_id?: string;
-                comment_id?: string;
-                actor_user_id?: string | null;
-                actor_session_id?: string | null;
-                comment_scope?: "passage" | "share";
-                anchor?: ShareCommentDTO["anchor"];
-                comment_body?: string;
-                workspace_id?: string;
-                session_id?: string;
-                share_type?: string;
-                parent_comment_id?: string | null;
-              };
-              if (!p.share_id || !p.thread_id || !p.comment_id) continue;
-              // The NATS payload doesn't carry seq or resolved-state —
-              // applyServerEvent dedupes by `id` (UUID), so a partial
-              // DTO is fine. seq=0 is a placeholder; when the operator
-              // posts locally the optimistic-append uses the real seq.
-              const now = new Date().toISOString();
-              const dto: ShareCommentDTO = {
-                id: p.comment_id,
-                share_id: p.share_id,
-                thread_id: p.thread_id,
-                seq: 0,
-                session_id: p.session_id ?? "",
-                share_type: p.share_type ?? "site",
-                scope: p.comment_scope ?? "share",
-                anchor: p.anchor ?? null,
-                body: p.comment_body ?? "",
-                author_user_id: p.actor_user_id ?? null,
-                author_session_id: p.actor_session_id ?? null,
-                resolved_at: null,
-                resolved_by_user_id: null,
-                created_at: now,
-                updated_at: now,
-                // X1A-110 — carried so a reply lands indented under
-                // its parent the moment the NATS event arrives, rather
-                // than only after a full REST refresh.
-                parent_comment_id: p.parent_comment_id ?? null,
-              };
-              useShareCommentsStore.getState().applyServerEvent(dto);
-            } catch {
-              // drop malformed
-            }
-          }
-        })().catch(() => {});
-
-        // Presence / stay-alive: the agent's idle timer starts counting
-        // down as soon as the conversation is quiet. To keep a session
-        // warm while someone is watching but not actively typing, the
-        // browser publishes to `x1.session.{id}.presence`; the sidecar
-        // forwards each ping to the agent's /keepalive endpoint, which
-        // resets the idle timer.
-        //
-        // Cadence:
-        //   - Immediate kickoff ping on subscribe
-        //   - Every 20s thereafter
-        //   - Extra ping on tab refocus (setInterval can stall or skip
-        //     in backgrounded tabs, so re-ping the moment the user
-        //     comes back — matches the upstream pattern)
-        const heartbeat = () => {
-          try {
-            nc.publish(
-              `x1.session.${sessionId}.presence`,
-              sc.encode(JSON.stringify({ at: new Date().toISOString() })),
-            );
-          } catch {
-            // ignore; next tick will retry
-          }
+        const ev: SessionEventDTO = {
+          id: `nats-${msg.session_id}-${msg.sequence}`,
+          session_id: msg.session_id,
+          seq: msg.sequence,
+          type: msg.type,
+          payload: msg.payload,
+          timestamp: msg.timestamp,
         };
-        heartbeat();
-        const hbInterval = setInterval(heartbeat, 20_000);
-        const onVisibilityChange = () => {
-          if (document.visibilityState === "visible") heartbeat();
+
+        // X1A-104 clear-signal: if this agent emission carries
+        // a wake correlation id (`event_id` / `in_reply_to` /
+        // `triggered_by` from X1A-103's propagation contract),
+        // clear the matching indicator.
+        const correlated = extractCorrelatedEventId(
+          ev as unknown as Record<string, unknown>,
+        );
+        if (correlated) {
+          useTypingIndicatorStore
+            .getState()
+            .clearByEventId(sessionId, correlated);
+        }
+
+        appendEvent(sessionId, ev);
+      };
+
+      const handleCommentEvent = (
+        kind: "added" | "resolved",
+        p: BridgeCommentEvent,
+      ) => {
+        if (kind !== "added") {
+          // Thread-resolved relays are passed through here but the
+          // current UI does its own poll-on-toggle; bail until the
+          // store grows a resolved-event handler.
+          return;
+        }
+        // Bridge guarantees these three are present; defense in depth.
+        if (!p.share_id || !p.thread_id || !p.comment_id) return;
+        const now = new Date().toISOString();
+        const dto: ShareCommentDTO = {
+          id: p.comment_id,
+          share_id: p.share_id,
+          thread_id: p.thread_id,
+          seq: 0,
+          session_id: p.session_id ?? "",
+          share_type: p.share_type ?? "site",
+          scope: (p.comment_scope as "passage" | "share" | null) ?? "share",
+          anchor: (p.anchor as ShareCommentDTO["anchor"]) ?? null,
+          body: p.comment_body ?? "",
+          author_user_id: p.actor_user_id,
+          author_session_id: p.actor_session_id,
+          resolved_at: null,
+          resolved_by_user_id: null,
+          created_at: now,
+          updated_at: now,
+          parent_comment_id: p.parent_comment_id,
         };
-        document.addEventListener("visibilitychange", onVisibilityChange);
-        (nc as NatsConnection & { __hbCleanup?: () => void }).__hbCleanup =
-          () => {
-            clearInterval(hbInterval);
-            document.removeEventListener(
-              "visibilitychange",
-              onVisibilityChange,
-            );
-          };
-      } catch (err) {
-        setError(sessionId, `NATS connect failed: ${(err as Error).message}`);
+        useShareCommentsStore.getState().applyServerEvent(dto);
+      };
+
+      const bridge = openBridge({
+        onSessionEvent: handleSessionEvent,
+        onCommentEvent: handleCommentEvent,
+        onOpen: () => {
+          // Heartbeat lives on the open event so a reconnect re-kicks
+          // it from scratch. The bridge client guarantees subscriptions
+          // are re-issued before this fires.
+          if (cancelled) return;
+          bridge.publishPresence(sessionId);
+        },
+      });
+      if (cancelled) {
+        bridge.close();
+        return;
       }
+      bridgeRef.current = bridge;
+      bridge.subscribeSession(sessionId);
+      bridge.subscribeComments();
+
+      // Presence / stay-alive: the agent's idle timer starts counting
+      // down as soon as the conversation is quiet. The browser pings
+      // `x1.session.{id}.presence` through the bridge; the sidecar
+      // forwards each ping to the agent's /keepalive endpoint to
+      // reset the idle timer.
+      //
+      // Cadence: every 20s, plus an extra ping on tab refocus
+      // (setInterval can stall in backgrounded tabs).
+      hbInterval = setInterval(() => {
+        bridge.publishPresence(sessionId);
+      }, 20_000);
+      visibilityHandler = () => {
+        if (document.visibilityState === "visible") {
+          bridge.publishPresence(sessionId);
+        }
+      };
+      document.addEventListener("visibilitychange", visibilityHandler);
     })();
 
     return () => {
       cancelled = true;
-      const nc = ncRef.current as
-        | (NatsConnection & { __hbCleanup?: () => void })
-        | null;
-      if (nc) {
-        nc.__hbCleanup?.();
-        void nc.close();
+      if (hbInterval) clearInterval(hbInterval);
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
       }
-      ncRef.current = null;
+      bridgeRef.current?.close();
+      bridgeRef.current = null;
       // X1A-104: indicators are transient — dropping them on unmount
       // matches the "fresh page load = clean" rule from X1A-103.
       useTypingIndicatorStore.getState().clearAllForSession(sessionId);
@@ -350,9 +283,8 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const USER_INPUT_TTL_MS = 2 * 60 * 1000;
 
   const sendMessage = async (text: string, requestId?: string) => {
-    const js = jsRef.current;
-    if (!js) return;
-    const sc = StringCodec();
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
     const basePayload: Record<string, unknown> = { text };
     const payload: Record<string, unknown> = { ...basePayload };
     if (requestId) {
@@ -362,10 +294,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     // X1A-103: stamp a client-minted event_id so the agent's
     // `session.agent_thinking` indicator and the agent's first reply
     // both carry it through. The frontend (X1A-104) uses it to clear
-    // the right indicator when two wakes overlap. randomUUID is in all
-    // modern browsers; the wider polyfill story isn't worth the bundle
-    // hit for an indicator-correlation id (worst case: indicator
-    // hangs until X1A-104's 60s TTL fires).
+    // the right indicator when two wakes overlap.
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
       payload["event_id"] = crypto.randomUUID();
     }
@@ -374,9 +303,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     // SSE stream on inject, which the sidecar publishes to NATS and
     // the api persists to session_events. The browser picks up that
     // same event via its NATS subscription — so we do NOT add a local
-    // echo here. The round trip is one hop through the pod and costs
-    // ~50–200ms; in exchange the event is durable and survives page
-    // refresh.
+    // echo here.
     const seq = seqRef.current++;
     const msgId = `${sessionId}:${seq}:${Date.now()}`;
     const now = Date.now();
@@ -389,16 +316,11 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       payload,
     };
     try {
-      await js.publish(
-        `x1.session.${sessionId}.input`,
-        sc.encode(JSON.stringify(envelope)),
-        { msgID: msgId },
-      );
+      await bridge.publishInput(envelope, msgId);
     } catch (err) {
-      // JetStream publish errors are the loud-failure signal: stream
-      // full, broker unreachable, or the X1_SESSION stream isn't
-      // bootstrapped on this cluster. Bubble up so the composer can
-      // show "Send failed — retry" instead of pretending it worked.
+      // The bridge raises on JetStream publish failure (broker
+      // unreachable, stream not provisioned, ACK timeout). Bubble up
+      // so the composer can show "Send failed — retry".
       throw new Error(
         `failed to publish user input: ${(err as Error).message}`,
       );
@@ -417,7 +339,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // send; we still guard with a ref for the same-render case.
   useEffect(() => {
     if (pendingPromptSentRef.current) return;
-    if (!ncRef.current) return;
+    if (!bridgeRef.current) return;
     if (!events.some((e) => e.type === "session.started")) return;
     const pending = takePendingPrompt(sessionId);
     if (!pending) return;

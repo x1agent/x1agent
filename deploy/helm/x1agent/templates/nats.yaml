@@ -294,15 +294,15 @@ data:
       ]
     }
 
-    # Browser-facing WebSocket gateway. TLS termination happens at the
-    # ingress (Let's Encrypt cert that browsers trust), so this listener
-    # speaks plain WS — no in-pod TLS. The ingress carries traffic as
-    # https://nats.<base-domain> → ws://nats:8080.
-    #
-    # Auth: no_auth_user maps anonymous WS clients to CN=x1agent-api.
-    # Acceptable for v1 single-user deployments — see ingress.yaml
-    # SECURITY NOTE for the auth_callout follow-up that ties WS clients
-    # to per-session JWTs.
+    # Diagnostic-only WebSocket listener. The browser used to reach this
+    # port through a public Ingress at nats.<base-domain>, which mapped
+    # anonymous clients to CN=x1agent-api — a cluster-wide super-user.
+    # That Ingress is gone (2026-05-13) and browsers now talk to the api
+    # bridge at wss://api.<base-domain>/api/ws, which uses its own mTLS
+    # connection to NATS on :4222. The :8080 listener is left in for
+    # `nats` CLI use inside the cluster; the nats-networkpolicy.yaml
+    # NetworkPolicy denies traffic to either port from any pod that
+    # isn't api, provider, or session-pod.
     websocket {
       port: 8080
       no_tls: true

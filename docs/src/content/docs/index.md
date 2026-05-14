@@ -39,7 +39,7 @@ graph TB
     api --> pg
     api -- "creates Job" --> pod
 
-    browser["Browser"] <-- "WebSocket" --> nats
+    browser["Browser"] <-- "WebSocket" --> api
     browser -- "REST" --> api
 ```
 
