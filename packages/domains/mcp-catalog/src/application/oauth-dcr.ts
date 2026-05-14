@@ -1,5 +1,9 @@
 import { ValidationError } from "@x1agent/kernel";
 import type { AuthorizationServerMetadata } from "./oauth-discovery.js";
+import {
+  safeFetch as defaultSafeFetch,
+  type SafeFetch,
+} from "./ssrf-safe-fetch.js";
 
 /**
  * RFC 7591 Dynamic Client Registration request body.
@@ -45,6 +49,20 @@ export interface RegisterClientInput {
   clientName: string;
 }
 
+export interface RegisterClientOptions {
+  /** Test seam — defaults to the SSRF-safe fetcher. */
+  fetcher?: SafeFetch;
+  /** Optional logger for upstream error bodies. The body is never
+   *  reflected in thrown errors (it can echo submitted secrets or
+   *  leak internal-network responses through redirects), so server-
+   *  side logging is the only place to see it. */
+  logUpstreamError?: (info: {
+    endpoint: string;
+    status: number;
+    body: string;
+  }) => void;
+}
+
 export interface RegisteredClient {
   clientId: string;
   clientSecret: string;
@@ -56,6 +74,7 @@ export interface RegisteredClient {
 
 export async function registerOAuthClient(
   input: RegisterClientInput,
+  options: RegisterClientOptions = {},
 ): Promise<RegisteredClient> {
   const { authorizationServer, redirectUri, clientName } = input;
   if (!authorizationServer.registration_endpoint) {
@@ -64,6 +83,7 @@ export async function registerOAuthClient(
       "authorization server does not advertise a registration_endpoint",
     );
   }
+  const fetcher = options.fetcher ?? defaultSafeFetch;
   const supportedAuth =
     authorizationServer.token_endpoint_auth_methods_supported ?? [];
   // Prefer client_secret_basic per RFC; fall back to client_secret_post.
@@ -86,11 +106,11 @@ export async function registerOAuthClient(
     ...(scopes ? { scope: scopes } : {}),
   };
 
-  let res: Response;
+  let res;
   try {
-    res = await fetch(authorizationServer.registration_endpoint, {
+    res = await fetcher(authorizationServer.registration_endpoint, {
       method: "POST",
-      signal: AbortSignal.timeout(DCR_TIMEOUT_MS),
+      timeoutMs: DCR_TIMEOUT_MS,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -98,21 +118,37 @@ export async function registerOAuthClient(
       body: JSON.stringify(body),
     });
   } catch (err) {
+    // SSRF-guard rejection from safeFetch already comes through as a
+    // ValidationError — keep its details. Other failures surface as a
+    // generic registration error so we don't leak internal status.
+    if (err instanceof ValidationError) throw err;
     throw new ValidationError(
       "registration",
       `DCR fetch failed: ${(err as Error).message}`,
     );
   }
   if (res.status !== 201 && res.status !== 200) {
-    let details = "";
+    // SECURITY: Do NOT reflect upstream response body in the thrown
+    // error. The body can contain (a) the very secrets we submitted
+    // echoed back in a debug payload, or (b) the response from an
+    // internal-network host the SSRF guard would have caught had the
+    // attacker not redirected at exactly the right time. Log it server-
+    // side via the optional logger so an operator can still debug a
+    // real registration failure.
+    let upstreamBody = "";
     try {
-      details = `: ${await res.text()}`;
+      upstreamBody = await res.text();
     } catch {
-      /* ignore */
+      /* ignore — body read failure shouldn't mask the status */
     }
+    options.logUpstreamError?.({
+      endpoint: authorizationServer.registration_endpoint,
+      status: res.status,
+      body: upstreamBody,
+    });
     throw new ValidationError(
       "registration",
-      `DCR returned HTTP ${res.status}${details}`,
+      `DCR returned HTTP ${res.status}`,
     );
   }
 
