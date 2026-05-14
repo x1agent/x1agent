@@ -305,10 +305,18 @@ spec:
       ports: [{ port: 6379, protocol: TCP }]
     # External: github (gh, git), npm/jsr (package installs), Anthropic
     # / OpenAI (LLM calls if not via provider), generic web.
+    #
+    # 169.254.0.0/16 is denied because that's the cloud metadata server
+    # (link-local). On GKE Workload Identity, anything reaching
+    # 169.254.169.254 can mint a GSA token; on dev OrbStack the range
+    # is just unused link-local, but we keep the rule for parity with
+    # the chart template
+    # (deploy/helm/x1agent/templates/agent-session-networkpolicy.yaml).
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
+              - 169.254.0.0/16
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
