@@ -572,11 +572,16 @@ async function phaseWaitAndReport(baseDomain: string): Promise<void> {
   s.start(
     "Waiting for cert-manager Certificates to become Ready (Let's Encrypt DNS-01 takes 1–5 min on first issue)…",
   );
-  // Cert resource names — these come from cert-manager's ingress-shim
-  // (which creates a Certificate from Ingress.spec.tls.secretName) plus
-  // the explicit wildcard preview Certificate. Match what the chart
-  // actually renders.
-  const certsToWait = ["x1agent-app-api-tls", "x1agent-preview-wildcard"];
+  // Discover the public-TLS Certificates the chart actually rendered
+  // instead of hardcoding names — drifts cleanly when previews are
+  // disabled (no preview-wildcard Cert) or when new app/api hosts get
+  // added. Filter out internal-CA certs (NATS mTLS) — they use the
+  // self-signed CA, not Let's Encrypt, and become Ready in seconds.
+  const certsToWait = await listPublicCerts();
+  if (certsToWait.length === 0) {
+    s.stop("No public Certificates found — skipping wait.");
+    return;
+  }
   // Poll up to 10 minutes for all certs.
   const deadline = Date.now() + 10 * 60_000;
   let allReady = false;
@@ -639,6 +644,27 @@ async function readIngressIp(): Promise<string> {
     throw new Error("terraform output ingress_static_ip failed");
   }
   return out;
+}
+
+async function listPublicCerts(): Promise<string[]> {
+  // Returns Certificate names whose issuer is NOT the internal-CA issuer.
+  // jsonpath filters at the kubectl side — keeps the install loop free
+  // of YAML parsing.
+  const proc = Bun.spawn(
+    [
+      "kubectl",
+      "-n",
+      NAMESPACE,
+      "get",
+      "cert",
+      "-o",
+      "jsonpath={range .items[?(@.spec.issuerRef.name!='x1agent-internal-ca-issuer')]}{.metadata.name}{'\\n'}{end}",
+    ],
+    { stdout: "pipe", stderr: "ignore" },
+  );
+  const out = (await new Response(proc.stdout).text()).trim();
+  await proc.exited;
+  return out ? out.split("\n").filter(Boolean) : [];
 }
 
 async function certReady(name: string): Promise<boolean> {
