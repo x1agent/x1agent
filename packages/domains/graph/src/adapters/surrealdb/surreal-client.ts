@@ -2,6 +2,7 @@ import {
   GraphProviderUnreachableError,
   GraphUnauthorizedError,
 } from "../../domain/errors.js";
+import { assertSingleStatement } from "./surreal-query-guard.js";
 
 export interface SurrealClientConfig {
   /** e.g. http://surrealdb:8000 */
@@ -40,7 +41,22 @@ export class SurrealClient {
     return `Basic ${encoded}`;
   }
 
-  async sql(query: string, db: string | null = null): Promise<unknown> {
+  /**
+   * Forwards a SurrealQL body to SurrealDB's `/sql` endpoint.
+   *
+   * `opts.allowMultiStatement` is a Layer 3 defense (see t03 P0 #2):
+   * any path that takes agent-controlled input MUST leave this at
+   * `false` (the default) so a body containing multiple statements is
+   * refused before it reaches the database. Only `provision` and
+   * `deprovision` legitimately send multi-statement DDL bundles; they
+   * pass `{ allowMultiStatement: true }`.
+   */
+  async sql(
+    query: string,
+    db: string | null = null,
+    opts: { allowMultiStatement?: boolean } = {},
+  ): Promise<unknown> {
+    if (!opts.allowMultiStatement) assertSingleStatement(query);
     const headers: Record<string, string> = {
       "Content-Type": "text/plain",
       Accept: "application/json",

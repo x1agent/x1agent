@@ -23,6 +23,7 @@ import type {
   WriteInput,
 } from "../../ports/graph-provider.js";
 import { SurrealClient } from "./surreal-client.js";
+import { assertSafeAgentQuery } from "./surreal-query-guard.js";
 
 /** SurrealDB returns one result envelope per statement: { result, status, ... }. */
 interface SurrealResultEnvelope {
@@ -133,12 +134,17 @@ export class SurrealGraphProvider implements GraphProvider {
   async provision(handle: CollectionHandle): Promise<void> {
     // SurrealDB v3 syntax. DEFINE NAMESPACE IF NOT EXISTS is harmless
     // when the namespace is already there; same for DATABASE.
+    // provision/deprovision are the only paths that legitimately ship
+    // DDL — they opt in to multi-statement bodies (Layer 3, t03 P0 #2).
     await this.client.sql(
       `DEFINE NAMESPACE IF NOT EXISTS ${this.client.cfg.namespace};`,
+      null,
+      { allowMultiStatement: true },
     );
     await this.client.sql(
       `DEFINE DATABASE IF NOT EXISTS ${handle};`,
       this.client.cfg.namespace,
+      { allowMultiStatement: true },
     );
 
     // Seed the record-type registry. Upserts on name so a re-provision
@@ -168,7 +174,9 @@ export class SurrealGraphProvider implements GraphProvider {
         `UPSERT _record_types:${seed.slug} CONTENT { name: ${quote(seed.name)}, slug: ${quote(seed.slug)}, description: ${quote(seed.description)}, icon: ${seed.icon ? quote(seed.icon) : "NONE"}, fields: ${jsonify(seed.fields)}, relationships: ${jsonify(seed.relationships)} };`,
       );
     }
-    await this.client.sql(ddl.join("\n"), handle);
+    await this.client.sql(ddl.join("\n"), handle, {
+      allowMultiStatement: true,
+    });
   }
 
   async deprovision(handle: CollectionHandle): Promise<void> {
@@ -176,6 +184,7 @@ export class SurrealGraphProvider implements GraphProvider {
       await this.client.sql(
         `REMOVE DATABASE IF EXISTS ${handle};`,
         this.client.cfg.namespace,
+        { allowMultiStatement: true },
       );
     } catch (err) {
       // Idempotent — we don't want deprovision-then-deprovision to throw.
@@ -187,6 +196,14 @@ export class SurrealGraphProvider implements GraphProvider {
   }
 
   async query(input: QueryInput): Promise<QueryResult> {
+    // Layer 1 (t03 P0 #2): refuse agent-controlled SurrealQL that
+    // mutates the connection's namespace/db scope or the install's
+    // schema. Without this, `USE DB <foreign>; SELECT ...` smuggled
+    // through here re-points the connection at another workspace's
+    // database before the SELECT runs. Layer 3 (in SurrealClient.sql)
+    // is the structural backstop against future directives we
+    // haven't enumerated.
+    assertSafeAgentQuery(input.query);
     const body = await this.client.sql(input.query, input.collection);
     return { rows: body };
   }

@@ -96,9 +96,12 @@ export class SurrealVectorProvider implements VectorProvider {
   async provision(input: ProvisionInput): Promise<void> {
     // Database + meta row that records dimension + metric so later
     // calls can validate inputs without re-reading the DEFINE INDEX.
+    // provision/deprovision are the only paths that legitimately ship
+    // multi-statement DDL — they opt in to Layer 3 (t03 P0 #2).
     await this.client.sql(
       `DEFINE DATABASE IF NOT EXISTS ${input.namespace};`,
       this.client.cfg.namespace,
+      { allowMultiStatement: true },
     );
     const ddl = [
       `DEFINE TABLE IF NOT EXISTS _vectors SCHEMAFULL;`,
@@ -108,7 +111,9 @@ export class SurrealVectorProvider implements VectorProvider {
       `DEFINE TABLE IF NOT EXISTS _vector_meta SCHEMALESS;`,
       `UPSERT _vector_meta:config SET dimension = ${input.dimension}, metric = ${quote(input.metric)};`,
     ];
-    await this.client.sql(ddl.join("\n"), input.namespace);
+    await this.client.sql(ddl.join("\n"), input.namespace, {
+      allowMultiStatement: true,
+    });
   }
 
   async deprovision(namespace: VectorNamespace): Promise<void> {
@@ -116,6 +121,7 @@ export class SurrealVectorProvider implements VectorProvider {
       await this.client.sql(
         `REMOVE DATABASE IF EXISTS ${namespace};`,
         this.client.cfg.namespace,
+        { allowMultiStatement: true },
       );
     } catch (err) {
       const code = (err as { code?: string })?.code;
