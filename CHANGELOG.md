@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/x1agent/x1agent/compare/v1.26.0...v1.27.0) (2026-05-14)
+
+
+### Features
+
+* **shares:** add read_share MCP tool + content-read api route (PRD 0006 Slice A) ([eff9472](https://github.com/x1agent/x1agent/commit/eff947288a813f0099bf61e2092cc377e62efcd1))
+
 # [1.26.0](https://github.com/x1agent/x1agent/compare/v1.25.2...v1.26.0) (2026-05-14)
 
 
