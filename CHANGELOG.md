@@ -1,3 +1,20 @@
+# [1.28.0](https://github.com/x1agent/x1agent/compare/v1.27.1...v1.28.0) (2026-05-14)
+
+
+### Bug Fixes
+
+* **api:** send strategic-merge-patch Content-Type from platform-secrets store ([6401676](https://github.com/x1agent/x1agent/commit/6401676a9f3e663e9f43e61f98a3f3a8faad32a4))
+* **sessions:** members can trigger and cancel their own sessions (X1A-126) ([7a3352b](https://github.com/x1agent/x1agent/commit/7a3352b01f3ffd8d37c78f4439989f18741e56bc))
+
+
+### Features
+
+* **app:** active members card, role-edit on invitations, hide admin nav from members (X1A-127, X1A-129, X1A-130, X1A-131) ([65e8814](https://github.com/x1agent/x1agent/commit/65e8814f0f55b7c36a5ee45d99ac24d084ad7d99))
+* **auth:** auto-accept pending invitations on first sign-in (X1A-128) ([f7d5b05](https://github.com/x1agent/x1agent/commit/f7d5b05b883743314851f1bab403e6f3ba979aa1))
+* **invitations:** edit pending role + revoke returns row (X1A-129, X1A-130) ([8f3a603](https://github.com/x1agent/x1agent/commit/8f3a603f66953aeca92d88af09e7c4b3a6a79cb9))
+* **mise:** add operator-scratchpad script task ([52e5b08](https://github.com/x1agent/x1agent/commit/52e5b084c3f3ff7cd4785f2adbe38d2ddb2adca4))
+* **workspace-members:** PATCH role + DELETE member API (X1A-127) ([3529e56](https://github.com/x1agent/x1agent/commit/3529e567228c30302f0aa7f8447b2dca6e4e4d45))
+
 ## [1.27.1](https://github.com/x1agent/x1agent/compare/v1.27.0...v1.27.1) (2026-05-14)
 
 
