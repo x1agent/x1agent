@@ -3,6 +3,11 @@ import { ValidationError } from "@x1agent/kernel";
 import type {
   AuthorizationServerMetadata,
 } from "./oauth-discovery.js";
+import {
+  safeFetch as defaultSafeFetch,
+  type SafeFetch,
+  type SafeFetchResponse,
+} from "./ssrf-safe-fetch.js";
 
 /**
  * Authorization Code + PKCE flow primitives for remote_oauth MCPs.
@@ -89,6 +94,11 @@ export type TokenEndpointAuthMethod =
   | "client_secret_basic"
   | "client_secret_post";
 
+export interface OAuthFlowOptions {
+  /** Test seam — defaults to the SSRF-safe fetcher. */
+  fetcher?: SafeFetch;
+}
+
 export interface ExchangeCodeInput {
   authorizationServer: AuthorizationServerMetadata;
   clientId: string;
@@ -108,17 +118,18 @@ async function postForm(
   url: string,
   body: URLSearchParams,
   authHeader: string | null,
-): Promise<Response> {
+  fetcher: SafeFetch,
+): Promise<SafeFetchResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
     Accept: "application/json",
   };
   if (authHeader) headers.Authorization = authHeader;
-  return fetch(url, {
+  return fetcher(url, {
     method: "POST",
-    body,
+    body: body.toString(),
     headers,
-    signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+    timeoutMs: TOKEN_TIMEOUT_MS,
   });
 }
 
@@ -162,7 +173,9 @@ function applyAuth(
 
 export async function exchangeCodeForTokens(
   input: ExchangeCodeInput,
+  options: OAuthFlowOptions = {},
 ): Promise<TokenResponse> {
+  const fetcher = options.fetcher ?? defaultSafeFetch;
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: input.code,
@@ -179,6 +192,7 @@ export async function exchangeCodeForTokens(
     input.authorizationServer.token_endpoint,
     body,
     authHeader,
+    fetcher,
   );
   if (!res.ok) {
     // Don't surface upstream body — auth servers sometimes echo
@@ -205,7 +219,9 @@ export interface RefreshTokensInput {
 
 export async function refreshAccessToken(
   input: RefreshTokensInput,
+  options: OAuthFlowOptions = {},
 ): Promise<TokenResponse> {
+  const fetcher = options.fetcher ?? defaultSafeFetch;
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: input.refreshToken,
@@ -220,6 +236,7 @@ export async function refreshAccessToken(
     input.authorizationServer.token_endpoint,
     body,
     authHeader,
+    fetcher,
   );
   if (!res.ok) {
     throw new ValidationError(
@@ -236,4 +253,3 @@ export async function refreshAccessToken(
   }
   return parsed;
 }
-

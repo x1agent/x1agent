@@ -47,6 +47,7 @@ export type {
 } from "./adapters/s3/s3-storage.js";
 export { GcsStorage } from "./adapters/gcs/gcs-storage.js";
 export { InMemoryUploadStorage } from "./adapters/in-memory-storage.js";
+export { InMemoryUploadRepository } from "./application/fakes.js";
 export { PostgresUploadRepository } from "./adapters/postgres/postgres-upload-repository.js";
 export { InMemoryRateLimiter } from "./adapters/in-memory-rate-limiter.js";
 

@@ -13,8 +13,8 @@ import type {
   GraphRecord,
   RecordProvenance,
 } from "../../domain/record.js";
-import type { CollectionHandle } from "../../domain/collection-handle.js";
 import type {
+  CollectionAddress,
   GraphProvider,
   QueryInput,
   QueryResult,
@@ -23,6 +23,7 @@ import type {
   WriteInput,
 } from "../../ports/graph-provider.js";
 import { SurrealClient } from "./surreal-client.js";
+import { assertSafeAgentQuery } from "./surreal-query-guard.js";
 
 /** SurrealDB returns one result envelope per statement: { result, status, ... }. */
 interface SurrealResultEnvelope {
@@ -122,23 +123,33 @@ function parseRecord(
 
 /**
  * SurrealDB implementation of the GraphProvider port. One SurrealDB
- * database per collection; the handle is the db name. Records live in
- * tables named after their record type slug.
+ * namespace per workspace (`ws_<slug>`); one database per collection
+ * within it (`col_<workspace>_<collection>`). Every per-collection
+ * call pins both via `surreal-ns` and `surreal-db` headers so a
+ * connection-scope directive like `USE NS x DB y` cannot re-point
+ * the session at another tenant's data — see t03 P0 #2 Layer 2.
  */
 export class SurrealGraphProvider implements GraphProvider {
   readonly id = "surrealdb";
 
   constructor(private readonly client: SurrealClient) {}
 
-  async provision(handle: CollectionHandle): Promise<void> {
-    // SurrealDB v3 syntax. DEFINE NAMESPACE IF NOT EXISTS is harmless
-    // when the namespace is already there; same for DATABASE.
+  async provision(address: CollectionAddress): Promise<void> {
+    // Per-workspace namespace bootstrap. DEFINE NAMESPACE IF NOT
+    // EXISTS is idempotent — a workspace's second collection no-ops
+    // the namespace creation and continues straight to DEFINE
+    // DATABASE for the new collection. provision/deprovision are the
+    // only paths that legitimately ship DDL — they opt in to
+    // multi-statement bodies (Layer 3, t03 P0 #2).
     await this.client.sql(
-      `DEFINE NAMESPACE IF NOT EXISTS ${this.client.cfg.namespace};`,
+      `DEFINE NAMESPACE IF NOT EXISTS ${address.namespace};`,
+      null,
+      { allowMultiStatement: true, ns: address.namespace },
     );
     await this.client.sql(
-      `DEFINE DATABASE IF NOT EXISTS ${handle};`,
-      this.client.cfg.namespace,
+      `DEFINE DATABASE IF NOT EXISTS ${address.database};`,
+      null,
+      { allowMultiStatement: true, ns: address.namespace },
     );
 
     // Seed the record-type registry. Upserts on name so a re-provision
@@ -168,14 +179,18 @@ export class SurrealGraphProvider implements GraphProvider {
         `UPSERT _record_types:${seed.slug} CONTENT { name: ${quote(seed.name)}, slug: ${quote(seed.slug)}, description: ${quote(seed.description)}, icon: ${seed.icon ? quote(seed.icon) : "NONE"}, fields: ${jsonify(seed.fields)}, relationships: ${jsonify(seed.relationships)} };`,
       );
     }
-    await this.client.sql(ddl.join("\n"), handle);
+    await this.client.sql(ddl.join("\n"), address.database, {
+      allowMultiStatement: true,
+      ns: address.namespace,
+    });
   }
 
-  async deprovision(handle: CollectionHandle): Promise<void> {
+  async deprovision(address: CollectionAddress): Promise<void> {
     try {
       await this.client.sql(
-        `REMOVE DATABASE IF EXISTS ${handle};`,
-        this.client.cfg.namespace,
+        `REMOVE DATABASE IF EXISTS ${address.database};`,
+        null,
+        { allowMultiStatement: true, ns: address.namespace },
       );
     } catch (err) {
       // Idempotent — we don't want deprovision-then-deprovision to throw.
@@ -187,7 +202,18 @@ export class SurrealGraphProvider implements GraphProvider {
   }
 
   async query(input: QueryInput): Promise<QueryResult> {
-    const body = await this.client.sql(input.query, input.collection);
+    // Layer 1 (t03 P0 #2): refuse agent-controlled SurrealQL that
+    // mutates the connection's namespace/db scope or the install's
+    // schema. Without this, `USE DB <foreign>; SELECT ...` smuggled
+    // through here re-points the connection at another workspace's
+    // database before the SELECT runs. Layer 3 (in SurrealClient.sql)
+    // is the structural backstop against future directives we
+    // haven't enumerated. Layer 2 (per-request `ns` pin below) is the
+    // tenancy isolation that contains a successful Layer 1 bypass.
+    assertSafeAgentQuery(input.query);
+    const body = await this.client.sql(input.query, input.collection.database, {
+      ns: input.collection.namespace,
+    });
     return { rows: body };
   }
 
@@ -205,7 +231,8 @@ export class SurrealGraphProvider implements GraphProvider {
 
     const body = (await this.client.sql(
       createSql,
-      input.collection,
+      input.collection.database,
+      { ns: input.collection.namespace },
     )) as SurrealResultEnvelope[];
     const row = unwrapSingle(body) as
       | Record<string, unknown>
@@ -229,7 +256,9 @@ export class SurrealGraphProvider implements GraphProvider {
       .map((name) => ({ name, type: "string", required: false }));
     const registerSql = `INSERT IGNORE INTO _record_types { id: _record_types:${input.recordType}, name: ${quote(input.recordType)}, slug: ${quote(input.recordType)}, description: '', icon: NONE, fields: ${jsonify(fields)}, relationships: [] };`;
     try {
-      await this.client.sql(registerSql, input.collection);
+      await this.client.sql(registerSql, input.collection.database, {
+        ns: input.collection.namespace,
+      });
     } catch {
       // Registration is best-effort; the write itself succeeded.
     }
@@ -239,10 +268,9 @@ export class SurrealGraphProvider implements GraphProvider {
   async relate(input: RelateInput): Promise<GraphEdge> {
     const props = jsonify(input.properties ?? {});
     const q = `RELATE ${input.from}->${input.edge}->${input.to} CONTENT ${props};`;
-    const body = (await this.client.sql(
-      q,
-      input.collection,
-    )) as SurrealResultEnvelope[];
+    const body = (await this.client.sql(q, input.collection.database, {
+      ns: input.collection.namespace,
+    })) as SurrealResultEnvelope[];
     const row = unwrapSingle(body);
     if (!row || typeof row !== "object")
       throw new InvalidGraphQueryError("RELATE returned no row");
@@ -269,10 +297,9 @@ export class SurrealGraphProvider implements GraphProvider {
     }
     if (wheres.length === 0) return null;
     const q = `SELECT * FROM ${input.recordType} WHERE ${wheres.join(" OR ")} LIMIT 1;`;
-    const body = (await this.client.sql(
-      q,
-      input.collection,
-    )) as SurrealResultEnvelope[];
+    const body = (await this.client.sql(q, input.collection.database, {
+      ns: input.collection.namespace,
+    })) as SurrealResultEnvelope[];
     const rows = unwrapSingle(body);
     if (!Array.isArray(rows) || rows.length === 0) return null;
     return parseRecord(
@@ -282,15 +309,16 @@ export class SurrealGraphProvider implements GraphProvider {
   }
 
   async discover(
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<readonly RecordType[]> {
     const body = (await this.client.sql(
       `SELECT * FROM _record_types ORDER BY slug;`,
-      handle,
+      address.database,
+      { ns: address.namespace },
     )) as SurrealResultEnvelope[];
     const rows = unwrapSingle(body);
     if (!Array.isArray(rows)) {
-      throw new CollectionNotProvisionedError(handle);
+      throw new CollectionNotProvisionedError(address.database);
     }
     return rows
       .map(recordTypeFromEnvelope)

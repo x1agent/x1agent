@@ -28,6 +28,23 @@ export class InvalidGraphQueryError extends DomainError {
   }
 }
 
+/**
+ * Raised when an agent-controlled SurrealQL body contains more than one
+ * statement. Provision / deprovision call-paths legitimately send
+ * multi-statement DDL bundles and bypass this check via the
+ * `allowMultiStatement` option on `SurrealClient.sql`; every other
+ * caller (agent query/write/relate/resolve, vector upsert/search/delete)
+ * is single-statement by construction. See Layer 3 of t03 P0 #2.
+ */
+export class MultiStatementNotAllowedError extends DomainError {
+  readonly code = "graph_multi_statement_not_allowed";
+  constructor() {
+    super(
+      "multi-statement SurrealQL bodies are not allowed on this path; submit one statement per call",
+    );
+  }
+}
+
 export class GraphUnauthorizedError extends DomainError {
   readonly code = "graph_unauthorized";
   constructor(public readonly provider: string, message?: string) {

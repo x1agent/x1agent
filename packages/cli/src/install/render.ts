@@ -179,9 +179,9 @@ export function render(input: RenderInput): RenderResult {
     `    sessionWorkloadIdentityServiceAccount: "x1agent-session@${projectId}.iam.gserviceaccount.com"\n` +
     `    artifactRegistry: ${q(arRepo)}\n` +
     `\n` +
-    `tls:\n` +
-    `  clusterIssuer: x1agent-letsencrypt\n` +
-    `  email: ${q(tlsEmail)}\n` +
+    renderTlsSection(env, tlsEmail) +
+    `\n` +
+    renderPreviewsSection(env) +
     `\n` +
     // Anthropic credential source — drives api Deployment env, the
     // session ServiceAccount's WI annotation, and the GSM ANTHROPIC_API_KEY
@@ -277,6 +277,37 @@ function renderAnthropicSection(env: EnvFile, gcpProjectId: string): string {
   // ExternalSecret binding (left in values.yaml defaults) supplies the
   // env at runtime via GSM.
   return `anthropic:\n  provider: api_key\n`;
+}
+
+function renderTlsSection(env: EnvFile, tlsEmail: string): string {
+  // TLS_SOLVER selects http01 (default — works for any DNS provider) or
+  // dns01 (required for *.preview.<base> wildcards; needs Cloud DNS).
+  // TLS_DNS01_PROJECT only relevant for dns01; defaults to cloud.gcp.projectId
+  // at the chart level when omitted here.
+  const solver = (env.get("TLS_SOLVER") || "http01").toLowerCase();
+  if (solver !== "http01" && solver !== "dns01") {
+    throw new Error(
+      `TLS_SOLVER must be 'http01' or 'dns01', got '${solver}'.`,
+    );
+  }
+  const head =
+    `tls:\n` +
+    `  clusterIssuer: x1agent-letsencrypt\n` +
+    `  email: ${q(tlsEmail)}\n` +
+    `  solver:\n` +
+    `    type: ${solver}\n`;
+  if (solver === "dns01") {
+    const proj = env.get("TLS_DNS01_PROJECT") || "";
+    return head + `    dns01:\n      cloudDNSProject: ${q(proj)}\n`;
+  }
+  return head;
+}
+
+function renderPreviewsSection(env: EnvFile): string {
+  // PREVIEWS_ENABLED gates the *.preview.<baseDomain> wildcard Cert +
+  // Ingress. Disabled by default; only x1agent.com runs preview hosting today.
+  const enabled = (env.get("PREVIEWS_ENABLED") || "false").toLowerCase() === "true";
+  return `previews:\n  enabled: ${enabled}\n`;
 }
 
 function required(env: EnvFile, key: string): string {

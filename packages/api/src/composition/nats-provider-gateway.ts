@@ -5,7 +5,7 @@ import type {
   ProviderRecord,
   ProviderRecordType,
 } from "@x1agent/domain-collections";
-import type { CollectionHandle } from "@x1agent/domain-graph";
+import type { CollectionAddress } from "@x1agent/domain-graph";
 
 interface WireReply {
   ok: boolean;
@@ -26,6 +26,10 @@ interface WireReply {
  * while graph.provision owns record-type seeding. Failure on either
  * surfaces the error; the caller leaves the Postgres row in place so
  * the UI can show "provisioning failed" and the operator retries.
+ *
+ * Every wire body carries both `namespace` (per-workspace SurrealDB
+ * namespace) and `handle` (per-collection database) — see t03 P0 #2
+ * Layer 2.
  */
 type VectorMetric = "cosine" | "l2" | "dot";
 
@@ -64,14 +68,18 @@ export class NatsProviderGateway implements ProviderGateway {
 
   async provision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
     settings: Record<string, unknown>,
   ): Promise<void> {
     void providerType;
     const vector = resolveVectorSettings(settings);
-    await this.request("x1.provider.graph.provision", { handle });
+    await this.request("x1.provider.graph.provision", {
+      namespace: address.namespace,
+      handle: address.database,
+    });
     await this.request("x1.provider.vector.provision", {
-      namespace: handle,
+      namespace: address.namespace,
+      handle: address.database,
       dimension: vector.dimension,
       metric: vector.metric,
     });
@@ -79,7 +87,7 @@ export class NatsProviderGateway implements ProviderGateway {
 
   async deprovision(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<void> {
     void providerType;
     // Deprovision in reverse order so the graph DB is the last thing
@@ -88,18 +96,23 @@ export class NatsProviderGateway implements ProviderGateway {
     // symmetry and makes a future split-provider setup (two different
     // DBs) Just Work.
     await this.request("x1.provider.vector.deprovision", {
-      namespace: handle,
+      namespace: address.namespace,
+      handle: address.database,
     });
-    await this.request("x1.provider.graph.deprovision", { handle });
+    await this.request("x1.provider.graph.deprovision", {
+      namespace: address.namespace,
+      handle: address.database,
+    });
   }
 
   async discover(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
   ): Promise<readonly ProviderRecordType[]> {
     void providerType;
     const result = (await this.request("x1.provider.graph.discover", {
-      handle,
+      namespace: address.namespace,
+      handle: address.database,
     })) as
       | ReadonlyArray<{
           name?: unknown;
@@ -135,7 +148,7 @@ export class NatsProviderGateway implements ProviderGateway {
 
   async listRecords(
     providerType: CollectionProviderType,
-    handle: CollectionHandle,
+    address: CollectionAddress,
     recordType: string,
     limit: number,
   ): Promise<readonly ProviderRecord[]> {
@@ -151,7 +164,8 @@ export class NatsProviderGateway implements ProviderGateway {
     }
     const safeLimit = Math.max(1, Math.min(500, limit));
     const queryResult = (await this.request("x1.provider.graph.query", {
-      handle,
+      namespace: address.namespace,
+      handle: address.database,
       query: `SELECT * FROM ${recordType} ORDER BY _provenance.created_at DESC LIMIT ${safeLimit};`,
       vars: {},
     })) as { rows?: unknown } | null;

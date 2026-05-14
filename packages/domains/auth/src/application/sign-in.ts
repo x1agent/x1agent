@@ -72,8 +72,13 @@ export async function signInWithCode(
   deps: SignInDeps,
   code: string,
   redirectUri: string,
+  options?: { codeVerifier?: string },
 ): Promise<SignInResult> {
-  const rawProfile = await deps.authProvider.exchangeCode(code, redirectUri);
+  const rawProfile = await deps.authProvider.exchangeCode(
+    code,
+    redirectUri,
+    options?.codeVerifier ? { codeVerifier: options.codeVerifier } : undefined,
+  );
   return completeSignIn(deps, rawProfile);
 }
 

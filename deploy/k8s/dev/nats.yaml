@@ -1,9 +1,9 @@
-# DEV — NATS with mTLS on :4222 + plain WebSocket on :8080 for the
-# browser. The browser can't present a client cert easily so the
-# WebSocket path stays open today; it's addressable only from
-# localhost (devspace port-forward) and carries session events only.
-# Prod deploys NATS via the nats-io Helm chart with full mTLS + the
-# WebSocket gateway behind an ingress with its own TLS.
+# DEV — NATS with mTLS on :4222. No WebSocket listener: the browser
+# goes through the api's authenticated ws-bridge at /api/ws (see
+# packages/api/src/ws-bridge/), which holds its own mTLS connection
+# to NATS on :4222. The previous in-cluster WebSocket port was
+# anonymous and is gone — see deploy/helm/x1agent/templates/nats.yaml
+# for the matching chart change (security sweep t01 P0).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -37,13 +37,6 @@ data:
       ca_file:   "/etc/nats-tls/ca.crt"
       verify:    true
       timeout:   2
-    }
-
-    # Browser WebSocket — no client cert. Used only by the session
-    # viewer; auth is enforced upstream in the app layer.
-    websocket {
-      port: 8080
-      no_tls: true
     }
 
     # JetStream — durable, replayable subjects layered over NATS-core.
@@ -88,9 +81,6 @@ spec:
     - name: monitor
       port: 8222
       targetPort: 8222
-    - name: websocket
-      port: 8080
-      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -121,8 +111,6 @@ spec:
               name: client
             - containerPort: 8222
               name: monitor
-            - containerPort: 8080
-              name: websocket
           readinessProbe:
             httpGet:
               path: /healthz

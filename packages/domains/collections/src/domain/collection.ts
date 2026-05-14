@@ -5,7 +5,11 @@ import {
   type UserId,
   type WorkspaceId,
 } from "@x1agent/kernel";
-import type { CollectionHandle } from "@x1agent/domain-graph";
+import {
+  CollectionHandle,
+  WorkspaceNamespace,
+  workspaceNamespaceFromSlug,
+} from "@x1agent/domain-graph";
 
 declare const collectionIdBrand: unique symbol;
 export type CollectionId = string & { readonly [collectionIdBrand]: true };
@@ -51,7 +55,20 @@ export interface Collection {
   slug: CollectionSlug;
   description: string | null;
   providerType: CollectionProviderType;
+  /**
+   * Per-collection database name inside the workspace's SurrealDB
+   * namespace. Paired with `backendNamespace` to fully address the
+   * backing store — see t03 P0 #2 Layer 2.
+   */
   backendHandle: CollectionHandle;
+  /**
+   * SurrealDB namespace that owns this collection. One namespace per
+   * workspace; collections never live in a shared parent namespace.
+   * Derived from the workspace slug at create time and stored on the
+   * row so the api doesn't have to re-join `workspaces` on every
+   * read.
+   */
+  backendNamespace: WorkspaceNamespace;
   settings: Record<string, unknown>;
   createdBy: UserId | null;
   createdAt: Date;
@@ -79,12 +96,36 @@ export class CollectionSlugTakenError extends DomainError {
   }
 }
 
-/** Build the provider-opaque backend handle from workspace + collection
- *  slugs. Kept here so the same construction is reused by tests,
- *  adapters, and the api. `col_<workspace>_<slug>` — underscores only. */
+/**
+ * Build the full (namespace, database) address from workspace +
+ * collection slugs. The namespace is per-workspace (`ws_<slug>`); the
+ * database is per-collection (`col_<workspace>_<slug>`). Returning the
+ * tuple from one function (instead of two callers concatenating into
+ * a single opaque string) is the load-bearing structural change for
+ * t03 P0 #2 Layer 2 — without it there's no place for a per-request
+ * `surreal-ns` pin to come from.
+ */
+export function buildCollectionAddress(
+  workspaceSlug: WorkspaceSlug,
+  collectionSlug: CollectionSlug,
+): { namespace: WorkspaceNamespace; database: CollectionHandle } {
+  return {
+    namespace: workspaceNamespaceFromSlug(workspaceSlug),
+    database: CollectionHandle(
+      `col_${workspaceSlug.replace(/-/g, "_")}_${collectionSlug.replace(/-/g, "_")}`,
+    ),
+  };
+}
+
+/**
+ * @deprecated Use `buildCollectionAddress`. Retained as a thin shim
+ * during the Layer 2 rollout so any caller that still expects just
+ * the database name string keeps compiling — they should be updated
+ * to pass `backendNamespace` too.
+ */
 export function buildBackendHandle(
   workspaceSlug: WorkspaceSlug,
   collectionSlug: CollectionSlug,
 ): string {
-  return `col_${workspaceSlug.replace(/-/g, "_")}_${collectionSlug.replace(/-/g, "_")}`;
+  return buildCollectionAddress(workspaceSlug, collectionSlug).database;
 }

@@ -115,7 +115,12 @@ export function CollectionDetailRoot({ workspaceSlug, collectionSlug }: Props) {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <Row label="Provider" value={collection.provider_type} />
-            <Row label="Handle" value={collection.backend_handle} mono />
+            <Row
+              label="Namespace"
+              value={collection.backend_namespace}
+              mono
+            />
+            <Row label="Database" value={collection.backend_handle} mono />
             <Row
               label="Created"
               value={new Date(collection.created_at).toLocaleString()}
