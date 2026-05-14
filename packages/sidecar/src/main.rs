@@ -173,7 +173,65 @@ async fn main() {
         }
     });
 
-    let app = Router::new()
+    let app = build_credential_router(state.clone());
+    let health = build_health_router();
+
+    // Two listeners — defense by transport scoping:
+    //
+    //   * `127.0.0.1:9090` — the full credential-bearing surface. Every
+    //     route exposed here can mint a GitHub installation token, hand
+    //     out a user's OAuth bearer, spawn child sessions, write to
+    //     Drive/Docs/Sheets/Gmail/Calendar, etc. Localhost-only so a
+    //     compromised peer pod in the cluster cannot reach it even if
+    //     NetworkPolicy is missing or a different CNI doesn't enforce
+    //     ingress. The agent container shares the pod network namespace
+    //     with the sidecar so `http://localhost:9090` from the agent
+    //     still works exactly as before.
+    //
+    //   * `0.0.0.0:9091` — health only. The kubelet's readiness probe
+    //     lives off-pod (kube-system) and needs an off-loopback bind to
+    //     reach us. Nothing on this listener returns credentials or
+    //     mutates state. The Helm `agent-session-default-deny`
+    //     NetworkPolicy further restricts who can dial :9091 — this is
+    //     defense-in-depth; the bind is the architectural guarantee.
+    let cred_listener = tokio::net::TcpListener::bind("127.0.0.1:9090")
+        .await
+        .expect("bind 127.0.0.1:9090");
+    let health_listener = tokio::net::TcpListener::bind("0.0.0.0:9091")
+        .await
+        .expect("bind 0.0.0.0:9091");
+    tracing::info!(
+        "Sidecar listening: credentials on 127.0.0.1:9090, health on 0.0.0.0:9091"
+    );
+
+    let health_server = tokio::spawn(async move {
+        axum::serve(health_listener, health)
+            .await
+            .expect("serve health");
+    });
+    let cred_server = tokio::spawn(async move {
+        axum::serve(cred_listener, app)
+            .await
+            .expect("serve credentials");
+    });
+
+    // If either listener exits, exit the whole sidecar — the agent
+    // depends on both being up.
+    tokio::select! {
+        r = cred_server => { r.expect("credential listener task"); }
+        r = health_server => { r.expect("health listener task"); }
+    }
+}
+
+/// The full sidecar HTTP surface: credential proxy, MCP-fanout routes,
+/// orchestration, shares, cost, etc. Bound to localhost only — see
+/// `main` for why this is a trust-boundary decision, not policy.
+///
+/// Public so an integration test in `tests/` can spin it up against an
+/// in-memory listener and assert routes return without auth (mirroring
+/// production), while the health router refuses the same paths.
+pub fn build_credential_router(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/event", routing::post(handle_event))
         .route("/git/credential", routing::get(git::handle_git_credential))
         .route(
@@ -330,21 +388,31 @@ async fn main() {
             routing::get(cost::handle_session_tree_cost),
         )
         .route("/cost/agent", routing::get(cost::handle_agent_cost))
-        .route("/health", routing::get(|| async { "ok" }))
         // Audit middleware emits one NATS message per request (denylist
-        // for /health and /event). The api side persists those into
+        // for /event; /health is on the separate :9091 router below and
+        // never enters this layer). The api side persists those into
         // audit_events.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             audit::audit_layer,
         ))
-        .with_state(state);
+        .with_state(state)
+}
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:9090")
-        .await
-        .expect("bind :9090");
-    tracing::info!("Sidecar HTTP listening on :9090");
-    axum::serve(listener, app).await.expect("serve");
+/// The "is this pod alive" surface. The kubelet probe targets this
+/// listener on :9091. Deliberately tiny — every additional route here
+/// is potential off-pod attack surface.
+///
+/// No state is captured: the health endpoint must return ok even if
+/// NATS / api are unreachable, because the readiness probe is the
+/// signal we use to roll a stuck sidecar. A liveness probe coupled to
+/// every dependency would turn a NATS hiccup into a session-pod crash
+/// loop.
+pub fn build_health_router() -> Router {
+    Router::new()
+        .route("/health", routing::get(|| async { "ok" }))
+        .route("/healthz", routing::get(|| async { "ok" }))
+        .route("/ready", routing::get(|| async { "ok" }))
 }
 
 async fn handle_event(
@@ -353,4 +421,83 @@ async fn handle_event(
 ) -> &'static str {
     nats_bridge::publish_event(&state, &event.r#type, event.payload).await;
     "ok"
+}
+
+#[cfg(test)]
+mod tests {
+    //! Listener-isolation tests. The credential-bearing routes
+    //! (`/git/credential`, `/user-oauth-token`, `/spawn`, `/files/*`,
+    //! `/docs/*`, ...) all live on the localhost-only :9090 router. The
+    //! kubelet-facing :9091 router serves only `/health{,z}` and
+    //! `/ready`. The first regression we want to catch is "someone adds
+    //! a new credential route to the wrong builder and ships it to
+    //! production accessible cluster-wide."
+    //!
+    //! We can't dial `127.0.0.1:9090` in `cargo test` (no NATS, no api)
+    //! so we exercise the routers in-process via `axum::Router::oneshot`
+    //! and assert that the health surface returns 404 for everything
+    //! that isn't a health path.
+    use super::build_health_router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn status_of(path: &str) -> StatusCode {
+        build_health_router()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .expect("oneshot")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn health_router_serves_health_paths() {
+        assert_eq!(status_of("/health").await, StatusCode::OK);
+        assert_eq!(status_of("/healthz").await, StatusCode::OK);
+        assert_eq!(status_of("/ready").await, StatusCode::OK);
+    }
+
+    /// The :9091 listener is reachable from the kubelet (and, absent the
+    /// NetworkPolicy, from any peer pod). If a credential-bearing route
+    /// ever ends up on this router, the trust-boundary guarantee in
+    /// `main.rs` is silently broken. This test pins the surface: every
+    /// path we know returns credentials or mutates state must 404 here.
+    #[tokio::test]
+    async fn health_router_refuses_credential_routes() {
+        for path in [
+            "/git/credential",
+            "/user-oauth-token",
+            "/spawn",
+            "/files/list",
+            "/files/get",
+            "/files/download",
+            "/files/upload",
+            "/docs/read",
+            "/docs/create",
+            "/calendar/list_events",
+            "/calendar/create_event",
+            "/email/send",
+            "/email/list_threads",
+            "/sheets/read_range",
+            "/share",
+            "/share_comment",
+            "/graph/query",
+            "/graph/write",
+            "/vector/upsert",
+            "/vector/search",
+            "/preview/deploy",
+            "/messaging/post_message",
+            "/event",
+            "/collections",
+            "/cost/session",
+            "/child/abc/inject",
+            "/message-caller",
+        ] {
+            assert_eq!(
+                status_of(path).await,
+                StatusCode::NOT_FOUND,
+                "credential route `{path}` must not be reachable on the :9091 health listener",
+            );
+        }
+    }
 }
