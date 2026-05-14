@@ -1,3 +1,10 @@
+## [1.25.2](https://github.com/x1agent/x1agent/compare/v1.25.1...v1.25.2) (2026-05-14)
+
+
+### Bug Fixes
+
+* **chart:** drop nginx variable from apex-redirect annotation ([3f54c09](https://github.com/x1agent/x1agent/commit/3f54c09c97c08a9cc7de89196ead3dc295ad04f6))
+
 ## [1.25.1](https://github.com/x1agent/x1agent/compare/v1.25.0...v1.25.1) (2026-05-14)
 
 
