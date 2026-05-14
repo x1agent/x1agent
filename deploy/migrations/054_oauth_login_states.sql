@@ -1,4 +1,4 @@
--- Migration 053: oauth_login_states
+-- Migration 054: oauth_login_states
 --
 -- Backing table for OAuthLoginStateStore. Fixes t04 P0 #1
 -- (login-CSRF on /auth/google): the route now mints a state + PKCE
@@ -20,5 +20,5 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
 CREATE INDEX IF NOT EXISTS oauth_login_states_expires_at_idx
   ON oauth_login_states(expires_at);
 
-INSERT INTO schema_migrations (version) VALUES ('053_oauth_login_states')
+INSERT INTO schema_migrations (version) VALUES ('054_oauth_login_states')
   ON CONFLICT DO NOTHING;
