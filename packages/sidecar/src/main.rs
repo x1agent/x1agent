@@ -33,7 +33,6 @@ mod sheets;
 mod share_comments;
 mod shares;
 mod stream;
-mod user_tokens;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -176,10 +175,6 @@ async fn main() {
     let app = Router::new()
         .route("/event", routing::post(handle_event))
         .route("/git/credential", routing::get(git::handle_git_credential))
-        .route(
-            "/user-oauth-token",
-            routing::get(user_tokens::handle_user_token),
-        )
         .route("/spawn", routing::post(orchestration::handle_spawn))
         .route("/spawnable", routing::get(orchestration::handle_spawnable))
         .route(
