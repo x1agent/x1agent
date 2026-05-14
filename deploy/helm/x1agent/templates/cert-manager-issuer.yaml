@@ -12,19 +12,38 @@
 # preview Certificates in x1-previews can use the same issuer without
 # a separate per-namespace Issuer.
 #
-# DNS-01 against Cloud DNS — works for both leaf domains (app.<base>,
-# api.<base>) and wildcards (*.preview.<base>). HTTP-01 wouldn't work
-# for wildcards.
-#
-# Auth: Workload Identity. cert-manager's K8s SA in the cert-manager
-# namespace is annotated to impersonate x1agent-cert-manager GSA, which
-# holds roles/dns.admin on the install's project. No service-account
-# key file ever exists.
+# Solver chosen by tls.solver.type:
+#   - http01: Let's Encrypt fetches a token over HTTP from the cluster's
+#     ingress LB. Works for any DNS provider whose A record points at the
+#     LB. Cannot issue wildcards. Default — no Cloud DNS prerequisite.
+#   - dns01: cert-manager writes a TXT record into Cloud DNS. Required
+#     for *.preview.<base> wildcards. Needs Workload Identity binding the
+#     cert-manager SA to a GSA with roles/dns.admin on a Cloud DNS zone
+#     matching baseDomain.
 #
 # Two issuers shipped — staging + prod. Default to prod; flip to
 # staging when iterating to avoid Let's Encrypt rate limits (5
 # duplicate certs per week per domain set).
-{{ $issuerStaging := printf "%s-staging" .Values.tls.clusterIssuer }}
+{{- $issuerStaging := printf "%s-staging" .Values.tls.clusterIssuer }}
+{{- $solverType := default "http01" .Values.tls.solver.type }}
+{{- if not (or (eq $solverType "http01") (eq $solverType "dns01")) }}
+{{- fail (printf "tls.solver.type must be 'http01' or 'dns01', got %q" $solverType) }}
+{{- end }}
+{{- $dnsProject := default .Values.cloud.gcp.projectId .Values.tls.solver.dns01.cloudDNSProject }}
+{{- if and (eq $solverType "dns01") (not $dnsProject) }}
+{{- fail "tls.solver.type=dns01 requires tls.solver.dns01.cloudDNSProject or cloud.gcp.projectId" }}
+{{- end }}
+{{- define "x1agent.acmeSolvers" -}}
+{{- if eq .solverType "http01" }}
+- http01:
+    ingress:
+      class: {{ .ingressClass | quote }}
+{{- else }}
+- dns01:
+    cloudDNS:
+      project: {{ .dnsProject | quote }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -38,9 +57,7 @@ spec:
     privateKeySecretRef:
       name: {{ printf "%s-account" .Values.tls.clusterIssuer | quote }}
     solvers:
-      - dns01:
-          cloudDNS:
-            project: {{ .Values.cloud.gcp.projectId | quote }}
+      {{- include "x1agent.acmeSolvers" (dict "solverType" $solverType "dnsProject" $dnsProject "ingressClass" .Values.ingress.className) | nindent 6 }}
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -54,9 +71,7 @@ spec:
     privateKeySecretRef:
       name: {{ printf "%s-account" $issuerStaging | quote }}
     solvers:
-      - dns01:
-          cloudDNS:
-            project: {{ .Values.cloud.gcp.projectId | quote }}
+      {{- include "x1agent.acmeSolvers" (dict "solverType" $solverType "dnsProject" $dnsProject "ingressClass" .Values.ingress.className) | nindent 6 }}
 ---
 # NOTE: explicit Certificate for app+api removed. ingress-nginx's
 # cert-manager.io/cluster-issuer annotation on the Ingress causes
