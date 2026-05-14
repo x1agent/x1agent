@@ -7,6 +7,7 @@ export * from "./domain/user.js";
 export * from "./domain/git-identity.js";
 export * from "./domain/person.js";
 export * from "./domain/link-attempt.js";
+export * from "./domain/oauth-login-state.js";
 export * from "./domain/oauth-grant.js";
 
 // Ports
@@ -15,6 +16,11 @@ export type { UserRepository } from "./ports/user-repository.js";
 export type { SessionTokenizer } from "./ports/session-tokenizer.js";
 export type { PersonRepository } from "./ports/person-repository.js";
 export type { LinkAttemptStore } from "./ports/link-attempt-store.js";
+export type { OAuthLoginStateStore } from "./ports/oauth-login-state-store.js";
+export type {
+  AuthorizeUrlOptions,
+  ExchangeCodeOptions,
+} from "./ports/auth-provider.js";
 export type { PasswordCredentialStore } from "./ports/password-credential-store.js";
 export type { AccessGate } from "./ports/access-gate.js";
 export type {
@@ -38,6 +44,7 @@ export { JwtSessionTokenizer } from "./adapters/jwt/jwt-session-tokenizer.js";
 export { PostgresUserRepository } from "./adapters/postgres/postgres-user-repository.js";
 export { PostgresPersonRepository } from "./adapters/postgres/postgres-person-repository.js";
 export { PostgresLinkAttemptStore } from "./adapters/postgres/postgres-link-attempt-store.js";
+export { PostgresOAuthLoginStateStore } from "./adapters/postgres/postgres-oauth-login-state-store.js";
 export { PostgresPasswordCredentialStore } from "./adapters/postgres/postgres-password-credential-store.js";
 export { PostgresAccessGate } from "./adapters/postgres/postgres-access-gate.js";
 export { PostgresUserOAuthTokenStore } from "./adapters/postgres/postgres-user-oauth-token-store.js";

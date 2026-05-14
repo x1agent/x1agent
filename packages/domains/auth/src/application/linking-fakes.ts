@@ -82,3 +82,28 @@ export class InMemoryLinkAttemptStore implements LinkAttemptStore {
     return a;
   }
 }
+
+import type { OAuthLoginStateStore } from "../ports/oauth-login-state-store.js";
+import {
+  type LoginState,
+  type OAuthLoginState,
+} from "../domain/oauth-login-state.js";
+
+export class InMemoryOAuthLoginStateStore implements OAuthLoginStateStore {
+  readonly rows = new Map<string, OAuthLoginState>();
+  async put(attempt: OAuthLoginState): Promise<void> {
+    this.rows.set(attempt.state, { ...attempt });
+  }
+  /**
+   * Atomically mark the row used and return the original (unused)
+   * snapshot. Replays return null.
+   */
+  async consume(state: LoginState): Promise<OAuthLoginState | null> {
+    const row = this.rows.get(state);
+    if (!row) return null;
+    if (row.usedAt) return null;
+    const snapshot = { ...row };
+    row.usedAt = new Date();
+    return snapshot;
+  }
+}

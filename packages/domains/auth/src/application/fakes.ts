@@ -1,5 +1,9 @@
 import { Email, Role, UserId, WorkspaceId } from "@x1agent/kernel";
-import type { AuthProvider } from "../ports/auth-provider.js";
+import type {
+  AuthProvider,
+  AuthorizeUrlOptions,
+  ExchangeCodeOptions,
+} from "../ports/auth-provider.js";
 import type { UserRepository } from "../ports/user-repository.js";
 import type { SessionTokenizer } from "../ports/session-tokenizer.js";
 import type { AuthProfile } from "../domain/auth-profile.js";
@@ -13,15 +17,47 @@ import { InvalidAuthCodeError } from "../domain/errors.js";
 
 export class InMemoryAuthProvider implements AuthProvider {
   readonly id = "fake";
+  /** Test inspector: codeVerifier last seen on exchangeCode, or null. */
+  lastCodeVerifier: string | null = null;
+  /** Test inspector: codeChallenge last seen on getAuthorizeUrl, or null. */
+  lastCodeChallenge: string | null = null;
+  /**
+   * Per-code verifier expectation. When set for a given code, the
+   * exchange throws if the supplied verifier doesn't match. Lets tests
+   * simulate "PKCE verifier mismatch" without standing up real Google.
+   */
+  readonly expectedVerifierByCode = new Map<string, string>();
+
   constructor(private readonly profiles: Map<string, AuthProfile>) {}
 
-  getAuthorizeUrl(redirectUri: string, state?: string): string {
+  getAuthorizeUrl(
+    redirectUri: string,
+    state?: string,
+    options?: AuthorizeUrlOptions,
+  ): string {
     const params = new URLSearchParams({ redirect_uri: redirectUri });
     if (state) params.set("state", state);
+    if (options?.codeChallenge) {
+      params.set("code_challenge", options.codeChallenge);
+      params.set(
+        "code_challenge_method",
+        options.codeChallengeMethod ?? "S256",
+      );
+      this.lastCodeChallenge = options.codeChallenge;
+    }
     return `fake://authorize?${params.toString()}`;
   }
 
-  async exchangeCode(code: string): Promise<AuthProfile> {
+  async exchangeCode(
+    code: string,
+    _redirectUri?: string,
+    options?: ExchangeCodeOptions,
+  ): Promise<AuthProfile> {
+    this.lastCodeVerifier = options?.codeVerifier ?? null;
+    const expected = this.expectedVerifierByCode.get(code);
+    if (expected !== undefined && expected !== options?.codeVerifier) {
+      throw new InvalidAuthCodeError("pkce verifier mismatch");
+    }
     const p = this.profiles.get(code);
     if (!p) throw new InvalidAuthCodeError();
     return p;

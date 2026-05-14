@@ -1,6 +1,10 @@
 import { OAuth2Client } from "google-auth-library";
 import { Email } from "@x1agent/kernel";
-import type { AuthProvider } from "../../ports/auth-provider.js";
+import type {
+  AuthProvider,
+  AuthorizeUrlOptions,
+  ExchangeCodeOptions,
+} from "../../ports/auth-provider.js";
 import type { AuthProfile } from "../../domain/auth-profile.js";
 import { InvalidAuthCodeError } from "../../domain/errors.js";
 
@@ -28,7 +32,11 @@ export class GoogleAuthProvider implements AuthProvider {
     this.scopes = config.scopes ?? DEFAULT_SCOPES;
   }
 
-  getAuthorizeUrl(redirectUri: string, state?: string): string {
+  getAuthorizeUrl(
+    redirectUri: string,
+    state?: string,
+    options?: AuthorizeUrlOptions,
+  ): string {
     const params = new URLSearchParams({
       client_id: this.config.clientId,
       redirect_uri: redirectUri,
@@ -38,12 +46,20 @@ export class GoogleAuthProvider implements AuthProvider {
       prompt: "consent",
     });
     if (state) params.set("state", state);
+    if (options?.codeChallenge) {
+      params.set("code_challenge", options.codeChallenge);
+      params.set(
+        "code_challenge_method",
+        options.codeChallengeMethod ?? "S256",
+      );
+    }
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
 
   async exchangeCode(
     code: string,
     redirectUri: string,
+    options?: ExchangeCodeOptions,
   ): Promise<AuthProfile> {
     let idToken: string;
     let accessToken: string | null = null;
@@ -54,6 +70,7 @@ export class GoogleAuthProvider implements AuthProvider {
       const { tokens } = await this.client.getToken({
         code,
         redirect_uri: redirectUri,
+        ...(options?.codeVerifier ? { codeVerifier: options.codeVerifier } : {}),
       });
       if (!tokens.id_token) throw new InvalidAuthCodeError("no id_token");
       idToken = tokens.id_token;
