@@ -33,15 +33,28 @@ function comment(
 }
 
 describe("groupThreads", () => {
-  it("groups rows by thread_id with comments seq-ordered within each thread", () => {
+  it("groups rows by thread_id with head first, replies by created_at", () => {
+    // Head has parent_comment_id=null; replies point at the head id.
+    // Robust against NATS arrivals where SessionRoot's bridge-synth
+    // path hard-codes seq=0 — a seq-only sort would put the reply
+    // above the head (head.seq>=1 from REST). Parent gate + created_at
+    // gives the right order regardless of seq.
     const rows: ShareCommentDTO[] = [
-      comment("c2", "t1", 2, "reply"),
-      comment("c1", "t1", 1, "first"),
-      comment("c3", "t2", 1, "other thread"),
+      comment("c2", "t1", 0, "bot reply via NATS (no seq)", {
+        parent_comment_id: "c1",
+        created_at: "2026-05-12T00:00:02.000Z",
+      }),
+      comment("c1", "t1", 1, "head from REST", {
+        parent_comment_id: null,
+        created_at: "2026-05-12T00:00:01.000Z",
+      }),
+      comment("c3", "t2", 1, "other thread", {
+        parent_comment_id: null,
+      }),
     ];
     const threads = groupThreads(rows);
     const t1 = threads.find((t) => t.thread_id === "t1")!;
-    expect(t1.comments.map((c) => c.seq)).toEqual([1, 2]);
+    expect(t1.comments.map((c) => c.id)).toEqual(["c1", "c2"]);
     expect(threads).toHaveLength(2);
   });
 

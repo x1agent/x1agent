@@ -149,14 +149,27 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
       if (existing.some((c) => c.id === payload.id)) {
         return s;
       }
+      // Within a thread: parents (parent_comment_id=null) render first,
+      // replies by created_at. Sorting by seq alone breaks for NATS
+      // arrivals because SessionRoot's bridge synth path doesn't carry
+      // seq from the wire — it hard-codes seq=0, which sorts a fresh
+      // reply ABOVE the head (head.seq>=1 from REST). The result was
+      // the new bot reply rendering as if it were the thread head
+      // until a manual refresh brought real seq values in. Created_at
+      // is always present from the server.
+      // Across threads: thread head's created_at, ascending.
       return {
         byShareId: {
           ...s.byShareId,
-          [payload.share_id]: [...existing, payload].sort((a, b) =>
-            a.thread_id === b.thread_id
-              ? a.seq - b.seq
-              : a.created_at.localeCompare(b.created_at),
-          ),
+          [payload.share_id]: [...existing, payload].sort((a, b) => {
+            if (a.thread_id === b.thread_id) {
+              const ap = a.parent_comment_id === null ? 0 : 1;
+              const bp = b.parent_comment_id === null ? 0 : 1;
+              if (ap !== bp) return ap - bp;
+              return a.created_at.localeCompare(b.created_at);
+            }
+            return a.created_at.localeCompare(b.created_at);
+          }),
         },
       };
     });
@@ -177,7 +190,17 @@ export function groupThreads(rows: ShareCommentDTO[]): ShareCommentThread[] {
   }
   const threads: ShareCommentThread[] = [];
   for (const [thread_id, comments] of byThread) {
-    comments.sort((a, b) => a.seq - b.seq);
+    // Parents (parent_comment_id=null) first, then replies by created_at.
+    // Robust against NATS payloads that don't carry seq (head from REST
+    // has seq>=1, NATS-synth reply has seq=0 → seq-sort puts reply above
+    // head → reply renders as thread head). created_at + parent gate
+    // gives deterministic order regardless of seq presence.
+    comments.sort((a, b) => {
+      const ap = a.parent_comment_id === null ? 0 : 1;
+      const bp = b.parent_comment_id === null ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return a.created_at.localeCompare(b.created_at);
+    });
     const head = comments[0]!;
     threads.push({
       thread_id,

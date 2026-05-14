@@ -570,7 +570,7 @@ async function phaseHelmInstall(): Promise<boolean> {
 async function phaseWaitAndReport(baseDomain: string): Promise<void> {
   const s = spinner();
   s.start(
-    "Waiting for cert-manager Certificates to become Ready (Let's Encrypt DNS-01 takes 1–5 min on first issue)…",
+    "Waiting for cert-manager Certificates to become Ready (Let's Encrypt — http-01 usually <1 min, dns-01 1–5 min on first issue)…",
   );
   // Discover the public-TLS Certificates the chart actually rendered
   // instead of hardcoding names — drifts cleanly when previews are

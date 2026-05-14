@@ -183,6 +183,18 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
             .clearByEventId(sessionId, correlated);
         }
 
+        // Live-update the right-rail artifact when the agent re-emits a
+        // share for the same share_id. The artifactPanelStore no-ops if
+        // the open panel doesn't match, so this is cheap on every share.
+        if (msg.type === "agent.share") {
+          const p = msg.payload as { share_id?: string } | null;
+          if (p && typeof p.share_id === "string") {
+            useArtifactPanelStore
+              .getState()
+              .replaceArtifact(p as unknown as AgentSharePayload);
+          }
+        }
+
         appendEvent(sessionId, ev);
       };
 
