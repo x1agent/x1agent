@@ -1,3 +1,12 @@
+## [1.25.1](https://github.com/x1agent/x1agent/compare/v1.25.0...v1.25.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **api:** authenticated WS bridge replaces public NATS exposure ([5e4b06f](https://github.com/x1agent/x1agent/commit/5e4b06f7e87695380963178c5e79e8ced74649c7))
+* **cli:** per-deployment kubeconfig + tfstate isolation ([4f07387](https://github.com/x1agent/x1agent/commit/4f073871e15cf562087058ebd6fbaa04346a4378))
+* **docker:** glob workspace manifests so deploy:prod stops drifting ([b842fa9](https://github.com/x1agent/x1agent/commit/b842fa91be26c435b1412f66aadbfa72e0d91eb4))
+
 # [1.25.0](https://github.com/x1agent/x1agent/compare/v1.24.9...v1.25.0) (2026-05-13)
 
 
