@@ -901,13 +901,20 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     return c.json(rollup);
   });
 
-  // X1A-96 → agent-side fetch of attached uploads. The agent's pod
-  // has API_INTERNAL_TOKEN; when it sees an `[image: <id>]` token in
-  // a user message, it curls this route to read the bytes. The
-  // internal token + cluster-private routing is the only access
-  // control; we deliberately don't scope by session here so the route
-  // stays a simple bytes-by-id lookup. Per-session ACL is a follow-up
-  // when uploads become readable across resume chains.
+  // X1A-96 → upload-bytes fetch. After the t02/t05 P0 fix, the agent
+  // container does NOT have API_INTERNAL_TOKEN and cannot reach this
+  // route directly. The sidecar (which IS the trust boundary) holds
+  // the master token and exposes an `/uploads/read` HTTP route the
+  // agent process calls; that route in turn calls this endpoint with
+  // the sidecar's pod-env user_id + session_id, exactly the same
+  // shape as /git-credential and /user-oauth-token.
+  //
+  // We additionally surface the upload's owning workspace slug back
+  // to the sidecar via the `X-Upload-Workspace-Slug` response header
+  // so the sidecar can apply a workspace-match defense-in-depth check
+  // (its own SESSION_WORKSPACE_SLUG env vs. the upload's). When the
+  // upload has no bound session yet (session_id null), the header is
+  // omitted and the sidecar relies on the user_id check below.
   app.get("/uploads/:id/raw", async (c) => {
     if (!cfg.uploads || !cfg.uploadStorage) {
       return c.json({ error: "uploads_disabled" }, 503);
@@ -919,17 +926,18 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       return c.json({ error: "invalid_id" }, 400);
     }
     // Ownership check (X1A-96 security boundary). The internal token
-    // alone proves "this caller is inside the cluster"; it doesn't
-    // prove "this caller's session is allowed to read this upload."
-    // Without the user_id check, a compromised or buggy agent in
-    // session A could fetch any upload id it learned of — including
-    // ones attached to a different user's session. We require the
-    // caller to name the user_id they're acting as, and refuse if the
-    // upload row's creator doesn't match. 404 (not 403) so the route
-    // never leaks the existence of someone else's upload.
+    // alone proves "this caller is the sidecar"; it doesn't prove
+    // "this caller's session is allowed to read this upload." Without
+    // the user_id check, a compromised sidecar (or a future caller
+    // we add) in session A could fetch any upload id it learned of
+    // — including ones attached to a different user's session. We
+    // require the caller to name the user_id they're acting as, and
+    // refuse if the upload row's creator doesn't match. 404 (not 403)
+    // so the route never leaks the existence of someone else's
+    // upload.
     //
-    // For an extra belt: when the upload row has a session_id set, we
-    // also require the caller's session_id to match (so the same
+    // For an extra belt: when the upload row has a session_id set,
+    // we also require the caller's session_id to match (so the same
     // user's other sessions can't trivially read uploads attached
     // elsewhere). Unattached uploads (session_id null) skip that
     // check since they haven't been bound yet.
@@ -953,15 +961,44 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (upload.status !== "ready" && upload.status !== "attached") {
       return c.json({ error: "upload_not_ready" }, 409);
     }
+
+    // Resolve the upload's owning workspace slug for the sidecar's
+    // defense-in-depth workspace check. Only meaningful when the
+    // upload has a bound session — otherwise no workspace has
+    // "claimed" it and the user_id check above is the boundary.
+    let workspaceSlug: string | null = null;
+    if (upload.sessionId !== null) {
+      try {
+        const session = await cfg.sessions.findById(upload.sessionId as never);
+        if (session) {
+          const agent = await cfg.agents.findById(session.agentId);
+          if (agent && cfg.sql) {
+            const rows = await cfg.sql<{ slug: string }[]>`
+              SELECT slug FROM workspaces WHERE id = ${agent.workspaceId} LIMIT 1
+            `;
+            workspaceSlug = rows[0]?.slug ?? null;
+          }
+        }
+      } catch (err) {
+        // Defense-in-depth header — failure to resolve is non-fatal,
+        // the sidecar will just skip its workspace check. Log so the
+        // operator notices a recurring lookup miss.
+        console.warn(
+          `[uploads/raw] workspace-slug lookup failed for upload ${id}: ${(err as Error).message}`,
+        );
+      }
+    }
+
     const body = await cfg.uploadStorage.readObject(upload.storageKey);
-    return new Response(body, {
-      status: 200,
-      headers: {
-        "Content-Type": upload.mime,
-        "Content-Length": String(upload.sizeBytes),
-        "Cache-Control": "private, no-store",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": upload.mime,
+      "Content-Length": String(upload.sizeBytes),
+      "Cache-Control": "private, no-store",
+    };
+    if (workspaceSlug) {
+      headers["X-Upload-Workspace-Slug"] = workspaceSlug;
+    }
+    return new Response(body, { status: 200, headers });
   });
 
   return app;

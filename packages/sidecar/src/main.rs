@@ -33,6 +33,7 @@ mod sheets;
 mod share_comments;
 mod shares;
 mod stream;
+mod uploads;
 mod user_tokens;
 
 #[derive(Clone)]
@@ -330,6 +331,12 @@ async fn main() {
             routing::get(cost::handle_session_tree_cost),
         )
         .route("/cost/agent", routing::get(cost::handle_agent_cost))
+        // X1A-96 (t02/t05 P0): credential-proxy for upload bytes. The
+        // agent container no longer has API_INTERNAL_TOKEN; it POSTs
+        // here with just `{ upload_id }` and the sidecar relays to
+        // the api's /api/internal/uploads/:id/raw with the master
+        // token + this pod's user_id and session_id.
+        .route("/uploads/read", routing::post(uploads::handle_read_upload))
         .route("/health", routing::get(|| async { "ok" }))
         // Audit middleware emits one NATS message per request (denylist
         // for /health and /event). The api side persists those into

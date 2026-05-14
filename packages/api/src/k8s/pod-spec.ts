@@ -216,13 +216,18 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "SESSION_MODE", value: spec.sessionMode },
     { name: "IDLE_TIMEOUT_MS", value: String(spec.idleTimeoutMs) },
     { name: "SIDECAR_URL", value: "http://localhost:9090" },
-    // X1A-96: agent needs to call back to the api's internal route to
-    // read user-uploaded files when it sees `[image: <uuid>]` tokens
-    // in a message. The internal token is the only auth on that route;
-    // the agent's neighboring sidecar already has the same value, so
-    // exposing it here doesn't widen the trust boundary.
+    // API_URL stays on the agent container so the SDK / tooling can
+    // construct absolute URLs back to the platform if needed. Crucially,
+    // API_INTERNAL_TOKEN is NOT here: that token authorises every
+    // /api/internal/* route (git-credential, user-oauth-token, spawn,
+    // inject, uploads/raw, …) for any user in the install. Putting it
+    // in the agent container collapsed the documented trust boundary
+    // — the agent container is untrusted; the sidecar is the trust
+    // boundary and holds the master credential. The one legitimate
+    // agent → api call (X1A-96 image-upload reads) is now relayed
+    // through the sidecar's /uploads/read route, exactly like git
+    // creds and OAuth tokens. See packages/sidecar/src/uploads.rs.
     { name: "API_URL", value: spec.apiUrl },
-    { name: "API_INTERNAL_TOKEN", value: spec.apiInternalToken },
     { name: "WORKSPACE_NAME", value: spec.workspaceName },
     { name: "WORKSPACE_SYSTEM_PROMPT", value: spec.systemPromptText },
     { name: "PLATFORM_NAME", value: "x1agent" },
