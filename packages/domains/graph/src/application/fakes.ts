@@ -11,8 +11,8 @@ import type {
   GraphRecord,
   RecordProvenance,
 } from "../domain/record.js";
-import type { CollectionHandle } from "../domain/collection-handle.js";
 import type {
+  CollectionAddress,
   GraphProvider,
   QueryInput,
   QueryResult,
@@ -45,6 +45,16 @@ function buildProvenance(input: WriteInput): RecordProvenance {
 }
 
 /**
+ * Map key: full address (`<namespace>/<database>`). Pre-Layer-2 the
+ * key was just the database name; using the address ensures two
+ * workspaces with the same collection slug don't collide in the
+ * fake (mirrors the SurrealDB structural isolation).
+ */
+function key(addr: CollectionAddress): string {
+  return `${addr.namespace}/${addr.database}`;
+}
+
+/**
  * In-memory graph provider for tests. Holds records in arrays; `query`
  * returns a naive JSON snapshot of the matching table (the fake does
  * not parse real SurrealQL). Good enough to drive the application layer
@@ -53,12 +63,12 @@ function buildProvenance(input: WriteInput): RecordProvenance {
  */
 export class InMemoryGraphProvider implements GraphProvider {
   readonly id = "fake";
-  readonly collections = new Map<CollectionHandle, CollectionState>();
+  readonly collections = new Map<string, CollectionState>();
 
-  async provision(handle: CollectionHandle): Promise<void> {
-    if (this.collections.has(handle))
-      throw new CollectionAlreadyProvisionedError(handle);
-    this.collections.set(handle, {
+  async provision(address: CollectionAddress): Promise<void> {
+    if (this.collections.has(key(address)))
+      throw new CollectionAlreadyProvisionedError(address.database);
+    this.collections.set(key(address), {
       records: [],
       edges: [],
       recordTypes: new Map(
@@ -67,13 +77,13 @@ export class InMemoryGraphProvider implements GraphProvider {
     });
   }
 
-  async deprovision(handle: CollectionHandle): Promise<void> {
-    this.collections.delete(handle);
+  async deprovision(address: CollectionAddress): Promise<void> {
+    this.collections.delete(key(address));
   }
 
-  private state(handle: CollectionHandle): CollectionState {
-    const s = this.collections.get(handle);
-    if (!s) throw new CollectionNotProvisionedError(handle);
+  private state(address: CollectionAddress): CollectionState {
+    const s = this.collections.get(key(address));
+    if (!s) throw new CollectionNotProvisionedError(address.database);
     return s;
   }
 
@@ -136,8 +146,8 @@ export class InMemoryGraphProvider implements GraphProvider {
     );
   }
 
-  async discover(handle: CollectionHandle): Promise<readonly RecordType[]> {
-    const s = this.state(handle);
+  async discover(address: CollectionAddress): Promise<readonly RecordType[]> {
+    const s = this.state(address);
     return Array.from(s.recordTypes.values()).sort((a, b) =>
       a.slug.localeCompare(b.slug),
     );

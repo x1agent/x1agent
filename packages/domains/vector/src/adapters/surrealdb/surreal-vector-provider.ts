@@ -1,4 +1,4 @@
-import { SurrealClient } from "@x1agent/domain-graph";
+import { SurrealClient, type WorkspaceNamespace } from "@x1agent/domain-graph";
 import {
   DimensionMismatchError,
   VectorNamespaceNotProvisionedError,
@@ -37,10 +37,12 @@ function quote(s: string): string {
 
 /**
  * SurrealDB vector adapter. Each namespace maps to a `_vectors` table
- * in the corresponding collection database. `provision` defines the
- * table + a VECTOR index sized for the namespace; `upsert` writes rows
- * keyed by caller-supplied id; `search` runs
- * `<||> vector::similarity::cosine` against the index.
+ * in a database that lives inside the workspace's SurrealDB namespace
+ * (`ws_<slug>`). `provision` defines the table + a VECTOR index sized
+ * for the namespace; `upsert` writes rows keyed by caller-supplied id;
+ * `search` runs `<||> vector::similarity::cosine` against the index.
+ * Every call pins `surreal-ns` to the workspace namespace per request
+ * for tenancy isolation — see t03 P0 #2 Layer 2.
  *
  * Metric routing: cosine maps to `cosine`, l2 to `euclidean`, dot to
  * `dot`. SurrealDB v3 returns higher-is-better for cosine and dot;
@@ -63,11 +65,13 @@ export class SurrealVectorProvider implements VectorProvider {
   }
 
   private async metricFor(
+    ns: WorkspaceNamespace,
     namespace: VectorNamespace,
   ): Promise<"cosine" | "l2" | "dot"> {
     const body = (await this.client.sql(
       `SELECT metric FROM _vector_meta:config;`,
       namespace,
+      { ns },
     )) as SurrealResultEnvelope[];
     const rows = unwrap(body);
     if (!Array.isArray(rows) || rows.length === 0)
@@ -78,11 +82,13 @@ export class SurrealVectorProvider implements VectorProvider {
   }
 
   private async dimensionFor(
+    ns: WorkspaceNamespace,
     namespace: VectorNamespace,
   ): Promise<number> {
     const body = (await this.client.sql(
       `SELECT dimension FROM _vector_meta:config;`,
       namespace,
+      { ns },
     )) as SurrealResultEnvelope[];
     const rows = unwrap(body);
     if (!Array.isArray(rows) || rows.length === 0)
@@ -94,14 +100,19 @@ export class SurrealVectorProvider implements VectorProvider {
   }
 
   async provision(input: ProvisionInput): Promise<void> {
-    // Database + meta row that records dimension + metric so later
-    // calls can validate inputs without re-reading the DEFINE INDEX.
-    // provision/deprovision are the only paths that legitimately ship
-    // multi-statement DDL — they opt in to Layer 3 (t03 P0 #2).
+    // Workspace namespace bootstrap. provision/deprovision are the
+    // only paths that legitimately ship multi-statement DDL (Layer 3,
+    // t03 P0 #2). The graph provider's provision also creates the
+    // namespace; calling DEFINE NAMESPACE again here is harmless.
+    await this.client.sql(
+      `DEFINE NAMESPACE IF NOT EXISTS ${input.workspaceNamespace};`,
+      null,
+      { allowMultiStatement: true, ns: input.workspaceNamespace },
+    );
     await this.client.sql(
       `DEFINE DATABASE IF NOT EXISTS ${input.namespace};`,
-      this.client.cfg.namespace,
-      { allowMultiStatement: true },
+      null,
+      { allowMultiStatement: true, ns: input.workspaceNamespace },
     );
     const ddl = [
       `DEFINE TABLE IF NOT EXISTS _vectors SCHEMAFULL;`,
@@ -113,15 +124,19 @@ export class SurrealVectorProvider implements VectorProvider {
     ];
     await this.client.sql(ddl.join("\n"), input.namespace, {
       allowMultiStatement: true,
+      ns: input.workspaceNamespace,
     });
   }
 
-  async deprovision(namespace: VectorNamespace): Promise<void> {
+  async deprovision(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+  ): Promise<void> {
     try {
       await this.client.sql(
         `REMOVE DATABASE IF EXISTS ${namespace};`,
-        this.client.cfg.namespace,
-        { allowMultiStatement: true },
+        null,
+        { allowMultiStatement: true, ns: workspaceNamespace },
       );
     } catch (err) {
       const code = (err as { code?: string })?.code;
@@ -130,20 +145,31 @@ export class SurrealVectorProvider implements VectorProvider {
   }
 
   async upsert(input: UpsertInput): Promise<void> {
-    const dim = await this.dimensionFor(input.namespace);
+    const dim = await this.dimensionFor(
+      input.workspaceNamespace,
+      input.namespace,
+    );
     if (input.vector.length !== dim)
       throw new DimensionMismatchError(dim, input.vector.length);
 
     const sql = `UPSERT _vectors:${quoteId(input.id)} SET embedding = ${JSON.stringify([...input.vector])}, metadata = ${JSON.stringify(input.metadata ?? {})};`;
-    await this.client.sql(sql, input.namespace);
+    await this.client.sql(sql, input.namespace, {
+      ns: input.workspaceNamespace,
+    });
   }
 
   async search(input: SearchInput): Promise<SearchResult> {
-    const dim = await this.dimensionFor(input.namespace);
+    const dim = await this.dimensionFor(
+      input.workspaceNamespace,
+      input.namespace,
+    );
     if (input.vector.length !== dim)
       throw new DimensionMismatchError(dim, input.vector.length);
 
-    const metric = await this.metricFor(input.namespace);
+    const metric = await this.metricFor(
+      input.workspaceNamespace,
+      input.namespace,
+    );
     const fn = this.metricFn(metric);
     const filterWheres = Object.entries(input.filter ?? {}).map(
       ([k, v]) => `metadata.${k} = ${typeof v === "string" ? quote(v) : JSON.stringify(v)}`,
@@ -151,10 +177,9 @@ export class SurrealVectorProvider implements VectorProvider {
     const where = filterWheres.length > 0 ? `WHERE ${filterWheres.join(" AND ")}` : "";
     const topK = Math.max(1, Math.min(1000, input.topK));
     const query = `SELECT id, metadata, ${fn}(embedding, ${JSON.stringify([...input.vector])}) AS score FROM _vectors ${where} ORDER BY score ${metric === "l2" ? "ASC" : "DESC"} LIMIT ${topK};`;
-    const body = (await this.client.sql(
-      query,
-      input.namespace,
-    )) as SurrealResultEnvelope[];
+    const body = (await this.client.sql(query, input.namespace, {
+      ns: input.workspaceNamespace,
+    })) as SurrealResultEnvelope[];
     const rows = unwrap(body);
     if (!Array.isArray(rows)) return { hits: [] };
 
@@ -171,10 +196,15 @@ export class SurrealVectorProvider implements VectorProvider {
     return { hits };
   }
 
-  async delete(namespace: VectorNamespace, id: string): Promise<void> {
+  async delete(
+    workspaceNamespace: WorkspaceNamespace,
+    namespace: VectorNamespace,
+    id: string,
+  ): Promise<void> {
     await this.client.sql(
       `DELETE _vectors:${quoteId(id)};`,
       namespace,
+      { ns: workspaceNamespace },
     );
   }
 }

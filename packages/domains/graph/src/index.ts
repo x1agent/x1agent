@@ -1,11 +1,13 @@
 // Domain
 export * from "./domain/collection-handle.js";
+export * from "./domain/workspace-namespace.js";
 export * from "./domain/errors.js";
 export * from "./domain/record.js";
 export * from "./domain/record-type.js";
 
 // Ports
 export type {
+  CollectionAddress,
   GraphProvider,
   QueryInput,
   QueryResult,

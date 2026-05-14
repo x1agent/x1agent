@@ -4,6 +4,8 @@ import {
   InvalidGraphQueryError,
   MultiStatementNotAllowedError,
 } from "../../domain/errors.js";
+import { WorkspaceNamespace } from "../../domain/workspace-namespace.js";
+import type { CollectionAddress } from "../../ports/graph-provider.js";
 import { SurrealClient } from "./surreal-client.js";
 import { SurrealGraphProvider } from "./surreal-graph-provider.js";
 
@@ -65,7 +67,10 @@ function buildClient(): SurrealClient {
 describe("SurrealGraphProvider.query (Layer 1 — denylist)", () => {
   let mock: ReturnType<typeof installFetchMock>;
   let provider: SurrealGraphProvider;
-  const handle = CollectionHandle("col_workspace_a_ideas");
+  const address: CollectionAddress = {
+    namespace: WorkspaceNamespace("ws_workspace_a"),
+    database: CollectionHandle("col_workspace_a_ideas"),
+  };
 
   beforeEach(() => {
     mock = installFetchMock();
@@ -79,7 +84,7 @@ describe("SurrealGraphProvider.query (Layer 1 — denylist)", () => {
     let thrown: unknown;
     try {
       await provider.query({
-        collection: handle,
+        collection: address,
         query: "USE DB col_workspace_b_ideas; SELECT * FROM person;",
         vars: {},
       });
@@ -94,7 +99,7 @@ describe("SurrealGraphProvider.query (Layer 1 — denylist)", () => {
     let thrown: unknown;
     try {
       await provider.query({
-        collection: handle,
+        collection: address,
         query: "/* USE */ USE DB col_workspace_b_ideas;",
         vars: {},
       });
@@ -113,7 +118,7 @@ describe("SurrealGraphProvider.query (Layer 1 — denylist)", () => {
     ]) {
       let thrown: unknown;
       try {
-        await provider.query({ collection: handle, query: q, vars: {} });
+        await provider.query({ collection: address, query: q, vars: {} });
       } catch (err) {
         thrown = err;
       }
@@ -122,17 +127,49 @@ describe("SurrealGraphProvider.query (Layer 1 — denylist)", () => {
     expect(mock.calls.length).toBe(0);
   });
 
-  it("legitimate single-statement query reaches fetch with the collection handle as surreal-db", async () => {
+  it("legitimate single-statement query pins both surreal-ns AND surreal-db per request (Layer 2)", async () => {
     mock.reply([{ status: "OK", result: [] }]);
     await provider.query({
-      collection: handle,
+      collection: address,
       query: "SELECT * FROM person LIMIT 10;",
       vars: {},
     });
     expect(mock.calls.length).toBe(1);
     expect(mock.calls[0]!.headers["surreal-db"]).toBe("col_workspace_a_ideas");
-    expect(mock.calls[0]!.headers["surreal-ns"]).toBe("x1agent");
+    // surreal-ns pins to the workspace's namespace, not the install-
+    // wide cfg.namespace. This is the tenancy-isolation property.
+    expect(mock.calls[0]!.headers["surreal-ns"]).toBe("ws_workspace_a");
     expect(mock.calls[0]!.body).toContain("SELECT * FROM person");
+  });
+
+  it("cross-namespace isolation — query against workspace A uses A's ns even when DB name collides", async () => {
+    // Two workspaces could each legitimately have a collection named
+    // "ideas". Their database handles end up `col_a_ideas` /
+    // `col_b_ideas` (distinct in practice), but even if a future
+    // change pushed both to the same database string, the namespace
+    // pin still routes the request to the right tenant.
+    mock.reply([{ status: "OK", result: [] }]);
+    const a: CollectionAddress = {
+      namespace: WorkspaceNamespace("ws_a"),
+      database: CollectionHandle("col_shared_name"),
+    };
+    const b: CollectionAddress = {
+      namespace: WorkspaceNamespace("ws_b"),
+      database: CollectionHandle("col_shared_name"),
+    };
+    await provider.query({
+      collection: a,
+      query: "SELECT * FROM person;",
+      vars: {},
+    });
+    await provider.query({
+      collection: b,
+      query: "SELECT * FROM person;",
+      vars: {},
+    });
+    expect(mock.calls.length).toBe(2);
+    expect(mock.calls[0]!.headers["surreal-ns"]).toBe("ws_a");
+    expect(mock.calls[1]!.headers["surreal-ns"]).toBe("ws_b");
   });
 });
 

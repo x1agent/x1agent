@@ -35,6 +35,8 @@ import {
   CollectionHandle,
   SurrealClient,
   SurrealGraphProvider,
+  WorkspaceNamespace,
+  type CollectionAddress,
 } from "@x1agent/domain-graph";
 import {
   SurrealVectorProvider,
@@ -83,6 +85,13 @@ function errReply(err: unknown): ReplyErr {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function address(body: any): CollectionAddress {
+  return {
+    namespace: WorkspaceNamespace(String(body.namespace ?? "")),
+    database: CollectionHandle(String(body.handle ?? "")),
+  };
+}
+
 async function handleGraph(
   subject: string,
   body: any,
@@ -90,15 +99,15 @@ async function handleGraph(
   try {
     switch (subject) {
       case "x1.provider.graph.provision":
-        await graph.provision(CollectionHandle(body.handle));
+        await graph.provision(address(body));
         return okReply({ provisioned: body.handle });
       case "x1.provider.graph.deprovision":
-        await graph.deprovision(CollectionHandle(body.handle));
+        await graph.deprovision(address(body));
         return okReply({ deprovisioned: body.handle });
       case "x1.provider.graph.query":
         return okReply(
           await graph.query({
-            collection: CollectionHandle(body.handle),
+            collection: address(body),
             query: String(body.query ?? ""),
             vars: body.vars ?? {},
           }),
@@ -107,7 +116,7 @@ async function handleGraph(
         const prov = body.provenance ?? {};
         return okReply(
           await graph.write({
-            collection: CollectionHandle(body.handle),
+            collection: address(body),
             recordType: String(body.record_type ?? ""),
             data: body.data ?? {},
             provenance: {
@@ -124,7 +133,7 @@ async function handleGraph(
       case "x1.provider.graph.relate":
         return okReply(
           await graph.relate({
-            collection: CollectionHandle(body.handle),
+            collection: address(body),
             from: String(body.from ?? ""),
             edge: String(body.edge ?? ""),
             to: String(body.to ?? ""),
@@ -134,7 +143,7 @@ async function handleGraph(
       case "x1.provider.graph.resolve":
         return okReply(
           await graph.resolve({
-            collection: CollectionHandle(body.handle),
+            collection: address(body),
             recordType: String(body.record_type ?? ""),
             name: body.name ?? null,
             email: body.email ?? null,
@@ -142,9 +151,7 @@ async function handleGraph(
           }),
         );
       case "x1.provider.graph.discover":
-        return okReply(
-          await graph.discover(CollectionHandle(body.handle)),
-        );
+        return okReply(await graph.discover(address(body)));
       default:
         return {
           ok: false,
@@ -164,20 +171,28 @@ async function handleVector(
   body: any,
 ): Promise<Reply<unknown>> {
   try {
+    // Wire shape: `namespace` is the workspace SurrealDB namespace
+    // (ws_<slug>), `handle` is the per-collection database name.
+    // Pre-Layer-2 the vector wire used `namespace` to mean the
+    // database; the api gateway now sends both fields explicitly.
+    const ws = WorkspaceNamespace(String(body.namespace ?? ""));
+    const ns = VectorNamespace(String(body.handle ?? ""));
     switch (subject) {
       case "x1.provider.vector.provision":
         await vector.provision({
-          namespace: VectorNamespace(body.namespace),
+          workspaceNamespace: ws,
+          namespace: ns,
           dimension: Number(body.dimension),
           metric: body.metric ?? "cosine",
         });
-        return okReply({ provisioned: body.namespace });
+        return okReply({ provisioned: ns });
       case "x1.provider.vector.deprovision":
-        await vector.deprovision(VectorNamespace(body.namespace));
-        return okReply({ deprovisioned: body.namespace });
+        await vector.deprovision(ws, ns);
+        return okReply({ deprovisioned: ns });
       case "x1.provider.vector.upsert":
         await vector.upsert({
-          namespace: VectorNamespace(body.namespace),
+          workspaceNamespace: ws,
+          namespace: ns,
           id: String(body.id ?? ""),
           vector: body.vector,
           metadata: body.metadata ?? {},
@@ -186,17 +201,15 @@ async function handleVector(
       case "x1.provider.vector.search":
         return okReply(
           await vector.search({
-            namespace: VectorNamespace(body.namespace),
+            workspaceNamespace: ws,
+            namespace: ns,
             vector: body.vector,
             topK: Number(body.top_k ?? 10),
             filter: body.filter ?? {},
           }),
         );
       case "x1.provider.vector.delete":
-        await vector.delete(
-          VectorNamespace(body.namespace),
-          String(body.id ?? ""),
-        );
+        await vector.delete(ws, ns, String(body.id ?? ""));
         return okReply({ deleted: body.id });
       default:
         return {

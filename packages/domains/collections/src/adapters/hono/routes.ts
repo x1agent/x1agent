@@ -48,6 +48,7 @@ function serializeCollection(c: Collection) {
     description: c.description,
     provider_type: c.providerType,
     backend_handle: c.backendHandle,
+    backend_namespace: c.backendNamespace,
     settings: c.settings,
     created_by: c.createdBy,
     created_at: c.createdAt.toISOString(),
@@ -147,7 +148,7 @@ export function createCollectionRoutes(cfg: CollectionRoutesConfig): Hono {
     try {
       const records = await cfg.providers.listRecords(
         col.providerType,
-        col.backendHandle,
+        { namespace: col.backendNamespace, database: col.backendHandle },
         c.req.param("type")!,
         limit,
       );
@@ -177,7 +178,10 @@ export function createCollectionRoutes(cfg: CollectionRoutesConfig): Hono {
     if (!col || col.workspaceId !== wsId)
       return c.json({ error: "collection_not_found" }, 404);
     try {
-      const types = await cfg.providers.discover(col.providerType, col.backendHandle);
+      const types = await cfg.providers.discover(col.providerType, {
+        namespace: col.backendNamespace,
+        database: col.backendHandle,
+      });
       return c.json({ record_types: types });
     } catch (err) {
       const e = err as Error & { code?: string };

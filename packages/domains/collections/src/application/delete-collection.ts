@@ -1,5 +1,5 @@
 import type { UserId, WorkspaceId } from "@x1agent/kernel";
-import { CollectionHandle } from "@x1agent/domain-graph";
+import { CollectionHandle, WorkspaceNamespace } from "@x1agent/domain-graph";
 import {
   CollectionNotFoundError,
   type CollectionId,
@@ -46,9 +46,9 @@ export async function deleteCollection(
   if (c.workspaceId !== cmd.workspaceId)
     throw new CollectionWrongWorkspaceError();
 
-  await deps.providers.deprovision(
-    c.providerType,
-    CollectionHandle(c.backendHandle),
-  );
+  await deps.providers.deprovision(c.providerType, {
+    namespace: WorkspaceNamespace(c.backendNamespace),
+    database: CollectionHandle(c.backendHandle),
+  });
   await deps.collections.delete(c.id);
 }

@@ -15,6 +15,8 @@ export interface CreateCollectionInput {
   description: string | null;
   providerType: CollectionProviderType;
   backendHandle: string;
+  /** Per-workspace SurrealDB namespace — see t03 P0 #2 Layer 2. */
+  backendNamespace: string;
   settings: Record<string, unknown>;
   createdBy: UserId | null;
 }

@@ -30,6 +30,12 @@ export interface AttachedCollectionForPod {
   slug: string;
   /** Provider-opaque backing-store id the adapter uses in NATS calls. */
   backend_handle: string;
+  /**
+   * Per-workspace SurrealDB namespace this collection lives in. The
+   * sidecar relays it on every NATS call so the provider pins
+   * `surreal-ns` for tenancy isolation — see t03 P0 #2 Layer 2.
+   */
+  backend_namespace: string;
   /** "surrealdb" | future providers. */
   provider_type: string;
   is_default: boolean;
