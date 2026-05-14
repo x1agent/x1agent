@@ -129,7 +129,7 @@ export async function runInstallUp(): Promise<boolean> {
 async function phaseTerraformCluster(): Promise<boolean> {
   const s = spinner();
   s.start("terraform: cluster + IAM + GSM placeholders + AR + DNS + IP…");
-  const { envPath, terraformDir } = defaultPaths();
+  const { envPath, terraformDir, tfStatePath } = defaultPaths();
   try {
     renderTerraformVars({ envPath, terraformDir });
   } catch (err) {
@@ -149,6 +149,7 @@ async function phaseTerraformCluster(): Promise<boolean> {
     return false;
   }
   // Targeted apply for the cluster pass.
+  const stateFlags = ["-state=" + tfStatePath, "-state-out=" + tfStatePath];
   const targets = [
     "google_container_cluster.x1agent",
     "google_container_node_pool.primary",
@@ -181,6 +182,7 @@ async function phaseTerraformCluster(): Promise<boolean> {
     "apply",
     "-auto-approve",
     "-input=false",
+    ...stateFlags,
     ...targets.flatMap((t) => ["-target=" + t]),
   ];
   if (
@@ -196,10 +198,17 @@ async function phaseTerraformCluster(): Promise<boolean> {
 async function phaseTerraformFull(): Promise<boolean> {
   const s = spinner();
   s.start("terraform: full apply (creates ClusterSecretStore now CRDs exist)…");
-  const { terraformDir } = defaultPaths();
+  const { terraformDir, tfStatePath } = defaultPaths();
   if (
     !(await run(
-      ["terraform", "apply", "-auto-approve", "-input=false"],
+      [
+        "terraform",
+        "apply",
+        "-auto-approve",
+        "-input=false",
+        "-state=" + tfStatePath,
+        "-state-out=" + tfStatePath,
+      ],
       { cwd: terraformDir },
       "terraform apply (full)",
     ))
@@ -619,9 +628,9 @@ async function run(
 }
 
 async function readIngressIp(): Promise<string> {
-  const { terraformDir } = defaultPaths();
+  const { terraformDir, tfStatePath } = defaultPaths();
   const proc = Bun.spawn(
-    ["terraform", "output", "-raw", "ingress_static_ip"],
+    ["terraform", "output", "-state=" + tfStatePath, "-raw", "ingress_static_ip"],
     { cwd: terraformDir, stdout: "pipe", stderr: "pipe" },
   );
   const out = (await new Response(proc.stdout).text()).trim();

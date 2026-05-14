@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { EnvFile } from "../configure/env-file.ts";
 import { findRepoRoot, resolveActiveDeployment } from "../configure/paths.ts";
@@ -31,16 +31,53 @@ export function defaultPaths(): {
   envPath: string;
   chartDir: string;
   terraformDir: string;
+  tfStatePath: string;
+  kubeconfigPath: string;
+  baseDomain: string;
 } {
   const root = findRepoRoot();
   // envPath resolves to the ACTIVE deployment file. Throws helpfully
   // when no deployment exists yet — caller surfaces the error.
-  const { path } = resolveActiveDeployment();
+  const { path, baseDomain } = resolveActiveDeployment();
+  // Per-deployment side-car files. Both live next to the install
+  // config in installs/<baseDomain>/.
+  //
+  //   terraform.tfstate — per-deployment TF state so two installs
+  //     don't fight over the shared state file in deploy/terraform/.
+  //   kubeconfig.yaml — per-deployment kubeconfig so every helm /
+  //     kubectl call the CLI makes is physically scoped to the right
+  //     cluster, regardless of what the user's ambient
+  //     `kubectx` / `~/.kube/config` is set to.
+  const sideCarDir = resolve(root, "installs", baseDomain);
+  mkdirSync(sideCarDir, { recursive: true });
   return {
     envPath: path,
     chartDir: resolve(root, "deploy/helm/x1agent"),
     terraformDir: resolve(root, "deploy/terraform/gcp"),
+    tfStatePath: resolve(sideCarDir, "terraform.tfstate"),
+    kubeconfigPath: resolve(sideCarDir, "kubeconfig.yaml"),
+    baseDomain,
   };
+}
+
+/**
+ * Env block to pass into every Bun.spawn for helm / kubectl / gcloud
+ * commands the CLI runs against the active deployment. Forces
+ * KUBECONFIG to the deployment-scoped file so the operator's ambient
+ * `kubectx` selection is physically ignored — the CLI cannot accidentally
+ * apply x1agent.com's chart to the atomic.health cluster (or vice versa).
+ *
+ * Pair every spawn that talks to k8s with this env. Pass through
+ * process.env so PATH / HOME / gcloud SDK config still work.
+ */
+export function deploymentEnv(): Record<string, string> {
+  const { kubeconfigPath } = defaultPaths();
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) out[k] = v;
+  }
+  out.KUBECONFIG = kubeconfigPath;
+  return out;
 }
 
 /**

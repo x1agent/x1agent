@@ -252,7 +252,8 @@ depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
-cd ../../deploy/terraform/gcp && terraform plan
+TFSTATE=$(bun run src/index.ts tfstate-path)
+cd ../../deploy/terraform/gcp && terraform plan -state="$TFSTATE"
 """
 
 [tasks."terraform:prod:apply:cluster"]
@@ -261,7 +262,9 @@ depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
+TFSTATE=$(bun run src/index.ts tfstate-path)
 cd ../../deploy/terraform/gcp && terraform apply \\
+  -state="$TFSTATE" -state-out="$TFSTATE" \\
   -target=google_container_cluster.x1agent \\
   -target=google_container_node_pool.primary \\
   -target=google_service_account.api \\
@@ -282,13 +285,17 @@ depends = ["configure:check"]
 env = { KUBECONFIG = "" }
 run = """
 cd packages/cli && bun run src/index.ts install:render-tfvars
-cd ../../deploy/terraform/gcp && terraform apply
+TFSTATE=$(bun run src/index.ts tfstate-path)
+cd ../../deploy/terraform/gcp && terraform apply -state="$TFSTATE" -state-out="$TFSTATE"
 """
 
 [tasks."terraform:prod:destroy"]
 description = "terraform destroy — wipes the active deployment's GCP infra (type-to-confirm via terraform's own prompt)"
 env = { KUBECONFIG = "" }
-run = "cd deploy/terraform/gcp && terraform destroy"
+run = """
+TFSTATE=$(cd packages/cli && bun run src/index.ts tfstate-path)
+cd deploy/terraform/gcp && terraform destroy -state="$TFSTATE" -state-out="$TFSTATE"
+"""
 
 # ----------------------------------------------------------------------------
 # Deprecation stubs — old names that used to exist before the *:prod

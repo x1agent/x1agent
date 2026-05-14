@@ -60,14 +60,11 @@ resource "google_dns_record_set" "preview_wildcard" {
   rrdatas      = [google_compute_address.ingress.address]
 }
 
-# nats.<base-domain> — public WebSocket endpoint for browsers to receive
-# session events. Same ingress IP; the chart's nats-ws ingress routes
-# the host to the in-cluster NATS Service on port 8080.
-resource "google_dns_record_set" "nats" {
-  count        = var.create_dns_zone ? 1 : 0
-  name         = "nats.${var.base_domain}."
-  managed_zone = google_dns_managed_zone.x1agent[0].name
-  type         = "A"
-  ttl          = 300
-  rrdatas      = [google_compute_address.ingress.address]
-}
+# nats.<base-domain> DNS record removed 2026-05-13 along with the
+# public NATS WebSocket Ingress in the chart. The DNS name resolved to
+# the ingress IP, which routed to NATS on port 8080 with `no_auth_user:
+# x1agent-api` — P0 unauthenticated full-perms exposure. Browsers now
+# reach NATS via the api's authenticated bridge at api.<base-domain>/api/ws.
+#
+# Existing deployments: terraform destroys this record on next apply
+# (orphan, no consumer). Safe to remove.
