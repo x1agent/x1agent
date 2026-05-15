@@ -479,8 +479,22 @@ async function launchSession(
     // docs/architecture/orchestration.md § Server-driven wakes:
     // platform injects user.message per wake kind when events fire,
     // orchestrator ends its turn between wakes. No blocking tool.
+    // Resolution order: per-agent override → kind default. Override is
+    // stored on agents.idle_timeout_seconds; null means "use default".
+    // Defaults: orchestrators park on NATS for days (7 d cap is a
+    // backstop, not a working number); workers + scheduled agents
+    // get 1h — long enough that an interactive session doesn't time
+    // out on a quick coffee break, short enough that a forgotten tab
+    // doesn't burn the workspace's compute budget overnight. See
+    // docs/architecture/orchestration.md § Server-driven wakes for
+    // the long-term wake model that lets orchestrators idle
+    // indefinitely.
     idleTimeoutMs:
-      agent.kind === "orchestrator" ? 7 * 24 * 60 * 60 * 1000 : 900_000,
+      agent.idleTimeoutSeconds !== null
+        ? agent.idleTimeoutSeconds * 1000
+        : agent.kind === "orchestrator"
+          ? 7 * 24 * 60 * 60 * 1000
+          : 60 * 60 * 1000,
     maxTurns: 200,
     repos,
     collections,

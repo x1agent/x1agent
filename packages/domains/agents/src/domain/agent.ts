@@ -76,6 +76,15 @@ export interface Agent {
    * the agent's workspace; the application layer enforces that.
    */
   scheduledRunAsUserId: UserId | null;
+  /**
+   * Per-agent override for the agent process's idle timeout, in
+   * seconds. NULL = use the platform default (15 min for workers /
+   * scheduled, 7 days for orchestrators) resolved in
+   * packages/api/src/k8s/job-watcher.ts. Minimum enforced at the
+   * write boundary is 30 s; maximum is 7 days (604800 s) so a runaway
+   * setting can't strand an agent pod forever.
+   */
+  idleTimeoutSeconds: number | null;
   createdAt: Date;
   updatedAt: Date;
   /**

@@ -71,6 +71,7 @@ function serialize(a: Agent) {
     model: a.model,
     created_by: a.createdBy,
     scheduled_run_as_user_id: a.scheduledRunAsUserId,
+    idle_timeout_seconds: a.idleTimeoutSeconds,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
   };
@@ -94,6 +95,21 @@ function errBody(err: unknown) {
   if (err instanceof DomainError)
     return { error: err.code, message: err.message };
   return { error: "internal_error", message: "unexpected failure" };
+}
+
+/**
+ * Clamp idle_timeout_seconds from a JSON-decoded body value.
+ * - null / empty string / unparseable → null (use platform default).
+ * - Numbers under 30 → 30 (matches DB CHECK constraint).
+ * - Numbers over 604800 (7 d) → 604800 (cap so a typo can't strand
+ *   a session pod for years).
+ * Mirrors the agents.idle_timeout_seconds CHECK in migration 055.
+ */
+function clampIdleTimeoutSeconds(raw: unknown): number | null {
+  if (raw === null || raw === "" || raw === undefined) return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(30, Math.min(604_800, Math.floor(n)));
 }
 
 export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
@@ -132,6 +148,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       heartbeat_md?: string;
       schedule?: string | null;
       scheduled_run_as_user_id?: string | null;
+      idle_timeout_seconds?: number | string | null;
     };
     if (!body.slug || !body.name || !body.runtime_type) {
       return c.json({ error: "missing_fields" }, 400);
@@ -165,6 +182,10 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
                   body.scheduled_run_as_user_id === ""
                 ? null
                 : UserId(body.scheduled_run_as_user_id),
+          idleTimeoutSeconds:
+            body.idle_timeout_seconds === undefined
+              ? undefined
+              : clampIdleTimeoutSeconds(body.idle_timeout_seconds),
         },
       );
       return c.json({ agent: serialize(a) }, 201);
@@ -253,6 +274,9 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
             body.scheduled_run_as_user_id === ""
               ? null
               : UserId(String(body.scheduled_run_as_user_id)),
+        }),
+        ...(body.idle_timeout_seconds !== undefined && {
+          idleTimeoutSeconds: clampIdleTimeoutSeconds(body.idle_timeout_seconds),
         }),
       };
       const a = await updateAgent(

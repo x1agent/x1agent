@@ -35,6 +35,11 @@ export interface CreateAgentInput {
    * the agent has no schedule + no remote_oauth MCPs.
    */
   scheduledRunAsUserId?: UserId | null;
+  /**
+   * Per-agent idle-timeout override in seconds. Null = use platform
+   * default. Clamped to [30, 604800] at the api boundary.
+   */
+  idleTimeoutSeconds?: number | null;
   createdBy: UserId | null;
 }
 
@@ -54,6 +59,8 @@ export interface UpdateAgentInput {
   visibility?: "private" | "workspace" | "via_grants";
   /** Same convention. */
   scheduledRunAsUserId?: UserId | null;
+  /** Same convention — null clears, undefined leaves untouched. */
+  idleTimeoutSeconds?: number | null;
 }
 
 export interface AgentRepository {
