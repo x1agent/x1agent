@@ -4,6 +4,7 @@ import {
   ChevronsUpDown,
   Database,
   FileText,
+  Globe,
   LayoutGrid,
   LogOut,
   MoreVertical,
@@ -148,6 +149,7 @@ export function AppSidebar() {
         // link — keeping it out of the rail keeps the rail focused on
         // configuration surfaces, not transient state.
         { title: "Agents", url: `${navBase}/agents`, icon: Bot },
+        { title: "Environments", url: `${navBase}/environments`, icon: Globe },
         { title: "Shares", url: `${navBase}/shares`, icon: FileText },
         // Collections live behind a graph provider — hide the entry
         // when the deployment ships without one (see capabilitiesStore).
