@@ -33,6 +33,7 @@ interface Row {
   visibility: string;
   created_by: string | null;
   scheduled_run_as_user_id: string | null;
+  idle_timeout_seconds: number | null;
   created_at: Date | string;
   updated_at: Date | string;
   last_scheduler_tick_at: Date | string | null;
@@ -58,6 +59,7 @@ function toAgent(r: Row): Agent {
     scheduledRunAsUserId: r.scheduled_run_as_user_id
       ? UserId(r.scheduled_run_as_user_id)
       : null,
+    idleTimeoutSeconds: r.idle_timeout_seconds,
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
     lastSchedulerTickAt: r.last_scheduler_tick_at
@@ -70,6 +72,7 @@ const SELECT = `
   id, workspace_id, slug, name, runtime_type, kind, system_prompt,
   heartbeat_md, schedule, is_active, image_id, model,
   owner_user_id, visibility, created_by, scheduled_run_as_user_id,
+  idle_timeout_seconds,
   created_at, updated_at, last_scheduler_tick_at
 `;
 
@@ -89,7 +92,8 @@ export class PostgresAgentRepository implements AgentRepository {
       INSERT INTO agents
         (workspace_id, slug, name, runtime_type, kind, system_prompt,
          heartbeat_md, schedule, image_id, model,
-         owner_user_id, visibility, created_by, scheduled_run_as_user_id)
+         owner_user_id, visibility, created_by, scheduled_run_as_user_id,
+         idle_timeout_seconds)
       VALUES
         (${input.workspaceId}, ${input.slug}, ${input.name},
          ${input.runtimeType}, ${input.kind ?? "worker"},
@@ -98,7 +102,8 @@ export class PostgresAgentRepository implements AgentRepository {
          ${input.createdBy /* default ownership = creator */},
          ${input.visibility ?? "workspace"},
          ${input.createdBy},
-         ${runAs})
+         ${runAs},
+         ${input.idleTimeoutSeconds ?? null})
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
     return toAgent(rows[0]!);
@@ -158,6 +163,7 @@ export class PostgresAgentRepository implements AgentRepository {
         owner_user_id = ${patch.ownerUserId === undefined ? this.sql`owner_user_id` : patch.ownerUserId},
         visibility    = COALESCE(${patch.visibility ?? null}, visibility),
         scheduled_run_as_user_id = ${patch.scheduledRunAsUserId === undefined ? this.sql`scheduled_run_as_user_id` : patch.scheduledRunAsUserId},
+        idle_timeout_seconds = ${patch.idleTimeoutSeconds === undefined ? this.sql`idle_timeout_seconds` : patch.idleTimeoutSeconds},
         last_scheduler_tick_at = ${scheduleIncluded ? this.sql`now()` : this.sql`last_scheduler_tick_at`},
         updated_at    = now()
       WHERE id = ${id}

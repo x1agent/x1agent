@@ -46,6 +46,12 @@ export interface CreateAgentInput {
    * Validated to be a workspace member when `members` dep is wired.
    */
   scheduledRunAsUserId?: UserId | null;
+  /**
+   * Per-agent idle-timeout override in seconds. Null = use platform
+   * default (1 h for workers / scheduled, 7 d for orchestrators).
+   * Clamping happens at the api boundary.
+   */
+  idleTimeoutSeconds?: number | null;
 }
 
 export async function createAgent(
@@ -87,6 +93,7 @@ export async function createAgent(
     imageId: input.imageId ?? null,
     model: input.model ?? null,
     scheduledRunAsUserId: runAs,
+    idleTimeoutSeconds: input.idleTimeoutSeconds ?? null,
     createdBy: input.actor,
   });
 }

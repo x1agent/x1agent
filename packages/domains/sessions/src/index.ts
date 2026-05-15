@@ -94,6 +94,10 @@ export {
   type AnthropicSessionSummarizerOptions,
 } from "./adapters/anthropic/anthropic-session-summarizer.js";
 export {
+  VertexAnthropicSessionSummarizer,
+  type VertexAnthropicSessionSummarizerOptions,
+} from "./adapters/anthropic/vertex-anthropic-session-summarizer.js";
+export {
   OpenAISessionSummarizer,
   type OpenAISessionSummarizerOptions,
 } from "./adapters/openai/openai-session-summarizer.js";

@@ -143,6 +143,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
   const [model, setModel] = useState<string>("");
+  // Per-agent idle timeout in seconds. Empty string = use platform
+  // default (1 h workers / scheduled, 7 d orchestrators).
+  const [idleTimeoutSeconds, setIdleTimeoutSeconds] = useState<string>("");
   // Model catalog comes from /api/capabilities/anthropic/models so the
   // frontend doesn't hardcode model ids. Empty list = upstream
   // unreachable; UI falls back to a free-text input.
@@ -257,6 +260,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         (existing as { scheduled_run_as_user_id?: string | null })
           .scheduled_run_as_user_id ?? "",
       );
+      const its = (existing as { idle_timeout_seconds?: number | null })
+        .idle_timeout_seconds;
+      setIdleTimeoutSeconds(its == null ? "" : String(its));
     }
   }, [existing]);
 
@@ -312,6 +318,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           heartbeat_md: heartbeatMd,
           schedule: schedule.trim() ? schedule.trim() : null,
           scheduled_run_as_user_id: scheduledRunAsUserId || null,
+          idle_timeout_seconds: idleTimeoutSeconds.trim() === ""
+            ? null
+            : Number(idleTimeoutSeconds),
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${slugInput.trim()}`;
       } else if (existing) {
@@ -326,6 +335,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           image_id: imageId === "" ? null : imageId,
           model: model.trim() === "" ? null : model.trim(),
           scheduled_run_as_user_id: scheduledRunAsUserId || null,
+          idle_timeout_seconds: idleTimeoutSeconds.trim() === ""
+            ? null
+            : Number(idleTimeoutSeconds),
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
@@ -677,6 +689,36 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       service account or another member.
                     </p>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Idle timeout</CardTitle>
+                  <CardDescription>
+                    How long the session pod waits for input before shutting itself down.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Label htmlFor="agent-idle-timeout">Seconds (blank = default)</Label>
+                  <input
+                    id="agent-idle-timeout"
+                    type="number"
+                    min={30}
+                    max={604800}
+                    step={30}
+                    value={idleTimeoutSeconds}
+                    onChange={(e) => setIdleTimeoutSeconds(e.target.value)}
+                    placeholder={kind === "orchestrator" ? "604800 (default: 7 days)" : "3600 (default: 1 hour)"}
+                    className="w-full rounded border border-border bg-bg-input px-2 py-1.5 text-sm"
+                  />
+                  <p className="text-xs text-fg-faint">
+                    Range 30 s – 604800 s (7 days). Blank uses the platform default:{" "}
+                    <strong>1 hour</strong> for worker / scheduled agents,{" "}
+                    <strong>7 days</strong> for orchestrators. Bump it for interactive
+                    sessions that idle while you read or step away; lower it for cron
+                    agents that should die quickly after their work.
+                  </p>
                 </CardContent>
               </Card>
 
