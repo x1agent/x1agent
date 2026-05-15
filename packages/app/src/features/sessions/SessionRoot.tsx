@@ -387,6 +387,18 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       artifact: evt.payload as AgentSharePayload,
     });
     if (params.get("mode") === "fullscreen") maximizeArtifact();
+    // Scroll the matching share pill to the center of the timeline so
+    // the user lands on the share they followed in, not at the bottom
+    // of the conversation. The pill is tagged with `data-share-id` by
+    // SharePill. Use requestAnimationFrame so the EventStream has
+    // finished its initial layout (and its own jump-to-bottom) first;
+    // our center-scroll wins on the next paint.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-share-id="${CSS.escape(target)}"]`,
+      );
+      if (el) el.scrollIntoView({ behavior: "auto", block: "center" });
+    });
   }, [events, sessionId, workspaceSlug, showArtifact, maximizeArtifact]);
 
   const disabled =

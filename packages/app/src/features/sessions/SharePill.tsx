@@ -86,7 +86,7 @@ export function SharePill({ event, workspaceSlug, sessionId }: Props) {
   const threads = groupThreads(rows).slice(0, 3);
 
   return (
-    <div className="py-1">
+    <div className="py-1" data-share-id={payload.share_id}>
       <div
         className={
           "group inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition " +
