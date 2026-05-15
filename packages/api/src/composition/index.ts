@@ -124,7 +124,8 @@ import {
   type RedisBranchMinter,
   type RedisBranchRepository,
 } from "@x1agent/agent-resources-redis";
-import type * as k8s from "@kubernetes/client-node";
+import * as k8s from "@kubernetes/client-node";
+import { K8sJobTerminator } from "../k8s/job-terminator.js";
 import { NatsProviderGateway } from "./nats-provider-gateway.js";
 import type { NatsConnection } from "nats";
 import {
@@ -530,6 +531,18 @@ export function compose(env: CompositionEnv): Composition {
     enabledModels: async () => listEnabledOverrides(env.sql),
   });
 
+  // X1A-70 — Pause now deletes the K8s Job so the pod actually
+  // stops. Skips the wire-up when the api isn't running in-cluster
+  // (no kubeconfig); cancel still flips the DB row, just doesn't
+  // terminate the pod (which doesn't exist on a non-k8s host
+  // anyway).
+  const jobTerminator = env.kubeConfig
+    ? new K8sJobTerminator(
+        env.kubeConfig.makeApiClient(k8s.BatchV1Api),
+        env.sharedResourcesNamespace ?? "x1agent",
+      )
+    : undefined;
+
   const sessionsConfig = {
     agents,
     sessions,
@@ -543,6 +556,7 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
     getActor,
     clock: systemClock,
+    jobs: jobTerminator,
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
