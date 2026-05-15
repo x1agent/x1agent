@@ -127,29 +127,34 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
   const editHref = `/workspaces/${workspaceSlug}/agents/${agent.slug}/edit`;
 
   return (
-    <AppShell
-      breadcrumbs={breadcrumbs}
-      actions={
-        canManage ? (
-          <Button variant="outline" size="sm" asChild>
-            <a href={editHref}>Edit</a>
-          </Button>
-        ) : undefined
-      }
-    >
-      <div className="max-w-3xl space-y-6 p-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-fg">{agent.name}</h1>
-          <div className="mt-1 flex items-center gap-2 text-xs text-fg-faint">
-            <code className="font-mono">{agent.slug}</code>
-            <span>·</span>
-            <span>{agent.runtime_type}</span>
-            <span>·</span>
-            <AgentRuntimeBadge
-              isActive={agent.is_active}
-              sessions={sessions}
-            />
+    <AppShell breadcrumbs={breadcrumbs}>
+      <div className="mx-auto max-w-3xl space-y-6 p-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-2xl font-semibold text-fg">
+              {agent.name}
+            </h1>
+            <div className="mt-1 flex items-center gap-2 text-xs text-fg-faint">
+              <code className="font-mono">{agent.slug}</code>
+              <span>·</span>
+              <span>{agent.runtime_type}</span>
+              <span>·</span>
+              <AgentRuntimeBadge
+                isActive={agent.is_active}
+                sessions={sessions}
+              />
+            </div>
           </div>
+          {canManage && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              asChild
+            >
+              <a href={editHref}>Edit</a>
+            </Button>
+          )}
         </div>
 
         <SpawnSessionCard workspaceSlug={workspaceSlug} agentId={agent.id} />
