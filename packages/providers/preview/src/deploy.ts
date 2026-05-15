@@ -90,6 +90,77 @@ export class DeployError extends Error {
   }
 }
 
+export interface TeardownInputs {
+  slug: string;
+  previewNamespace: string;
+}
+
+export interface TeardownResult {
+  slug: string;
+  /** Names of K8s resources deleted (best-effort; missing items skipped). */
+  deleted: string[];
+}
+
+/**
+ * Inverse of deployPreview — removes the per-preview Deployment,
+ * Service, Ingress, and Secret bundle from `previewNamespace`. Used
+ * by the workspace UI's "Delete environment" button (routed via NATS
+ * from the api).
+ *
+ * Idempotent: missing resources are skipped without raising. Errors
+ * other than 404 surface as DeployError("teardown_failed", …) so the
+ * caller can decide whether to retry or surface to the operator.
+ */
+export async function teardownPreview(
+  kc: k8s.KubeConfig,
+  inputs: TeardownInputs,
+): Promise<TeardownResult> {
+  const clients = makeClients(kc);
+  const deleted: string[] = [];
+
+  const tryDelete = async (
+    name: string,
+    fn: () => Promise<unknown>,
+  ): Promise<void> => {
+    try {
+      await fn();
+      deleted.push(name);
+    } catch (err) {
+      const code = (err as { code?: number }).code;
+      if (code === 404 || code === undefined) return;
+      throw new DeployError("teardown_failed", `${name}: ${(err as Error).message}`);
+    }
+  };
+
+  await tryDelete(`ingress/${inputs.slug}`, () =>
+    clients.networking.deleteNamespacedIngress({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  await tryDelete(`service/${inputs.slug}`, () =>
+    clients.core.deleteNamespacedService({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  await tryDelete(`deployment/${inputs.slug}`, () =>
+    clients.apps.deleteNamespacedDeployment({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  const secretName = `preview-secrets-${inputs.slug}`.slice(0, 63);
+  await tryDelete(`secret/${secretName}`, () =>
+    clients.core.deleteNamespacedSecret({
+      name: secretName,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+
+  return { slug: inputs.slug, deleted };
+}
+
 /**
  * Ask the api to mint a GitHub App installation token. Returns
  * `{ username, password }` where password is `ghs_xxx`. Throws

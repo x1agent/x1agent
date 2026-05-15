@@ -535,6 +535,10 @@ export function compose(env: CompositionEnv): Composition {
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
+    // Used by DELETE /:id to fire x1.provider.preview.teardown before
+    // dropping the row, so the cluster Deployment/Service/Ingress goes
+    // away with the row instead of dangling.
+    natsConnection: env.natsConnection,
   });
 
   const agentRoutes = createAgentRoutes({

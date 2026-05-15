@@ -54,6 +54,13 @@ export interface PreviewEnvironmentRoutesConfig {
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
+  /**
+   * Fires `x1.provider.preview.teardown` with the env's slug before the
+   * row is dropped, so the provider removes the cluster Deployment /
+   * Service / Ingress / Secret. When absent, DELETE drops the row only
+   * and leaves the K8s resources dangling.
+   */
+  natsConnection?: import("nats").NatsConnection;
 }
 
 function serialize(e: PreviewEnvironment) {
@@ -183,16 +190,41 @@ export function createPreviewEnvironmentRoutes(
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const envId = PreviewEnvironmentId(c.req.param("id")!);
     try {
       await cfg.adminGuard.requireWorkspaceAdmin(wsId, actor.userId);
-      // Note: row delete only. Tearing down the cluster Deployment /
-      // Service / Ingress is the next slice (NATS request to the
-      // preview provider). v1 row delete leaves the K8s resources
-      // dangling until the provider's reaper sweep cleans them up.
-      await cfg.repository.delete(
-        PreviewEnvironmentId(c.req.param("id")!),
+      // Read the env first so we know the slug to pass to the
+      // provider's teardown. NotFound short-circuits to 404 before any
+      // teardown attempt.
+      const env = await getPreviewEnvironmentById(
+        { repository: cfg.repository },
         wsId,
+        envId,
       );
+
+      // Tell the provider to delete the cluster Deployment / Service /
+      // Ingress / Secret. Best-effort: if the NATS request fails, we
+      // log + proceed to drop the row anyway. The alternative — leaving
+      // a tombstone with K8s resources still up but no row — is a worse
+      // half-state for the operator.
+      if (cfg.natsConnection) {
+        try {
+          const { JSONCodec } = await import("nats");
+          const jc = JSONCodec();
+          await cfg.natsConnection.request(
+            "x1.provider.preview.teardown",
+            jc.encode({ slug: env.slug }),
+            { timeout: 30_000 },
+          );
+        } catch (err) {
+          console.warn(
+            "[preview-environments] teardown NATS request failed:",
+            (err as Error).message,
+          );
+        }
+      }
+
+      await cfg.repository.delete(envId, wsId);
       return c.body(null, 204);
     } catch (err) {
       return c.json(errBody(err), errStatus(err) as 400);
