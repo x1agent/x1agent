@@ -1,5 +1,6 @@
 import type { UserId, WorkspaceId } from "@x1agent/kernel";
 import type { AdminGuard } from "../ports/admin-guard.js";
+import type { PlatformAdminGuard } from "../ports/platform-admin-guard.js";
 import type { SessionShareRepository } from "../ports/session-share-repository.js";
 import type { Session, SessionId } from "../domain/session.js";
 
@@ -24,9 +25,14 @@ import type { Session, SessionId } from "../domain/session.js";
  * A session is visible to actor `U` when the session's agent lives in
  * workspace `W` AND one of:
  *
- *   1. `U` is a workspace admin/owner of `W`,
+ *   1. `U` is a *platform* admin (deployment-wide tier),
  *   2. `U` triggered the session (owner), or
  *   3. an explicit `session_user_shares` row exists for `(session, U)`.
+ *
+ * Note: workspace admins do NOT bypass this rule. Workspace admin is
+ * about managing the workspace (editing agents, members, settings),
+ * not about reading every member's private session history. Read
+ * access is governed by ownership + explicit sharing only.
  *
  * The caller MUST have already confirmed the session's agent belongs to
  * the URL-scoped workspace — this helper does not re-do that check, by
@@ -45,16 +51,27 @@ import type { Session, SessionId } from "../domain/session.js";
 
 export type SessionVisibilityReason =
   | "owner"
-  | "workspace_admin"
+  | "platform_admin"
   | "user_share";
 // Future: | "group_share"
 
 export interface SessionVisibilityDeps {
-  adminGuard: AdminGuard;
   /**
-   * Optional. When omitted, the helper degrades to owner+admin only —
-   * useful for code paths that genuinely don't need share-table reads
-   * (none today, but it keeps the dependency optional in tests).
+   * Carried for callers that still need the workspace-admin guard for
+   * unrelated checks; the visibility helper itself no longer consults
+   * it. Kept optional so call sites that don't have one don't have to
+   * fabricate a stub.
+   */
+  adminGuard?: AdminGuard;
+  /**
+   * Platform-admin bypass. Optional — when omitted, no one bypasses
+   * (safer default than the previous workspace-admin bypass).
+   */
+  platformAdminGuard?: PlatformAdminGuard;
+  /**
+   * Optional. When omitted, the helper degrades to owner+platform-admin
+   * only — useful for code paths that genuinely don't need share-table
+   * reads (none today, but it keeps the dependency optional in tests).
    */
   shares?: SessionShareRepository;
 }
@@ -82,12 +99,13 @@ export async function resolveSessionVisibility(
     return { visible: true, reason: "owner" };
   }
 
-  // Workspace admin/owner — bypass.
-  try {
-    await deps.adminGuard.assertAdmin(actor, workspaceId);
-    return { visible: true, reason: "workspace_admin" };
-  } catch {
-    // Not admin; fall through to the share-table check.
+  // Platform-admin bypass. Workspace admin is NOT enough — that role
+  // is for managing the workspace, not reading every user's session
+  // history.
+  if (deps.platformAdminGuard) {
+    if (await deps.platformAdminGuard.isPlatformAdmin(actor)) {
+      return { visible: true, reason: "platform_admin" };
+    }
   }
 
   if (deps.shares) {
@@ -119,18 +137,28 @@ export type SessionListMode =
   | { mode: "user"; userId: UserId };
 
 export interface PickSessionListModeDeps {
-  adminGuard: AdminGuard;
+  /**
+   * Kept on the dep shape for symmetry with SessionVisibilityDeps; the
+   * helper itself no longer reads it. Workspace admins do not unlock
+   * cross-user list mode — only platform admins do.
+   */
+  adminGuard?: AdminGuard;
+  /**
+   * Platform-admin bypass. Optional — when omitted, every caller gets
+   * `{ mode: 'user' }`, which is the safe default.
+   */
+  platformAdminGuard?: PlatformAdminGuard;
 }
 
 export async function pickSessionListMode(
   deps: PickSessionListModeDeps,
   actor: UserId,
-  workspaceId: WorkspaceId,
+  _workspaceId: WorkspaceId,
 ): Promise<SessionListMode> {
-  try {
-    await deps.adminGuard.assertAdmin(actor, workspaceId);
-    return { mode: "all" };
-  } catch {
-    return { mode: "user", userId: actor };
+  if (deps.platformAdminGuard) {
+    if (await deps.platformAdminGuard.isPlatformAdmin(actor)) {
+      return { mode: "all" };
+    }
   }
+  return { mode: "user", userId: actor };
 }
