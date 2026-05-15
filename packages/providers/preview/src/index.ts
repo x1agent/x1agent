@@ -86,6 +86,7 @@ async function main() {
   const registryAddress = requireEnv("REGISTRY_ADDRESS");
   const registryInsecure = process.env.REGISTRY_INSECURE === "true";
   const buildNamespace = process.env.BUILD_NAMESPACE || "x1agent";
+  const buildServiceAccount = process.env.BUILD_SERVICE_ACCOUNT || undefined;
   const previewNamespace = process.env.PREVIEW_NAMESPACE || "x1-previews";
   const previewDomain =
     process.env.PREVIEW_DOMAIN || "preview.local.x1agent.dev";
@@ -177,6 +178,7 @@ async function main() {
         registryAddress,
         registryInsecure,
         buildNamespace,
+        buildServiceAccount,
         previewNamespace,
         previewDomain,
         tlsSecretName,

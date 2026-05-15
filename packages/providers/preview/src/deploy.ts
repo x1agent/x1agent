@@ -47,6 +47,11 @@ export interface DeployInputs {
   registryInsecure: boolean;
   /** Namespace the Kaniko Job runs in. */
   buildNamespace: string;
+  /**
+   * Optional KSA the Kaniko Pod runs as. Required for Artifact Registry
+   * pushes (KSA must be Workload-Identity-bound to a writer GSA).
+   */
+  buildServiceAccount?: string;
   /** Namespace the Deployment / Service / Ingress go into. */
   previewNamespace: string;
   /** The domain pattern; slug fills the subdomain (e.g. 'preview.local.x1agent.dev'). */
@@ -264,6 +269,7 @@ export async function deployPreview(
     destination: image,
     insecureRegistry: inputs.registryInsecure,
     accessToken: token,
+    serviceAccountName: inputs.buildServiceAccount,
   });
   try {
     await clients.batch.createNamespacedJob({

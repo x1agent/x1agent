@@ -69,6 +69,15 @@ export interface KanikoBuildInputs {
    * seeing the long-lived app private key.
    */
   accessToken: string;
+  /**
+   * Optional KSA name the Kaniko Pod runs under. When the destination
+   * is Artifact Registry, this KSA must be Workload-Identity-bound to
+   * a GSA with roles/artifactregistry.writer on the target repo, so
+   * Kaniko's push uses the GCE metadata server for auth (no JSON key).
+   * Falls back to the namespace's `default` SA when empty — fine for
+   * the dev in-cluster HTTP registry.
+   */
+  serviceAccountName?: string;
 }
 
 export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
@@ -119,6 +128,9 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
         metadata: { labels },
         spec: {
           restartPolicy: "Never",
+          ...(inputs.serviceAccountName
+            ? { serviceAccountName: inputs.serviceAccountName }
+            : {}),
           securityContext: {
             seccompProfile: { type: "RuntimeDefault" },
           },

@@ -256,3 +256,39 @@ describe("buildKanikoJob — secure registry path", () => {
     expect(args).not.toContain("--skip-tls-verify");
   });
 });
+
+describe("buildKanikoJob — serviceAccountName", () => {
+  it("sets serviceAccountName on the pod spec when provided (Workload Identity for AR push)", () => {
+    const j = buildKanikoJob({
+      jobName: "preview-build-wi",
+      namespace: "x1agent",
+      gitUrl: "https://github.com/acme/app.git",
+      gitRef: "refs/heads/main",
+      dockerfilePath: "./Dockerfile",
+      buildContext: ".",
+      destination:
+        "us-central1-docker.pkg.dev/proj/x1agent/preview-images/wi:abc",
+      insecureRegistry: false,
+      accessToken: "ghs_x",
+      serviceAccountName: "x1agent-preview-build",
+    });
+    expect(j.spec?.template.spec?.serviceAccountName).toBe(
+      "x1agent-preview-build",
+    );
+  });
+
+  it("omits serviceAccountName when undefined (falls back to namespace default SA)", () => {
+    const j = buildKanikoJob({
+      jobName: "preview-build-default-sa",
+      namespace: "x1agent",
+      gitUrl: "https://github.com/acme/app.git",
+      gitRef: "refs/heads/main",
+      dockerfilePath: "./Dockerfile",
+      buildContext: ".",
+      destination: "x1-registry.x1agent.svc.cluster.local:5000/x:abc",
+      insecureRegistry: true,
+      accessToken: "ghs_x",
+    });
+    expect(j.spec?.template.spec?.serviceAccountName).toBeUndefined();
+  });
+});
