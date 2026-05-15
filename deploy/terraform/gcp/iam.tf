@@ -102,6 +102,36 @@ resource "google_service_account_iam_binding" "eso_wi" {
   depends_on = [google_container_cluster.x1agent]
 }
 
+# Preview build GSA — what the Kaniko Job Pods impersonate via Workload
+# Identity to push the built preview image to Artifact Registry. Scoped
+# to artifactregistry.writer on the install's AR repo, nothing more.
+# Separate from the api/session/eso GSAs so a compromised build pod
+# can only write images — not read GSM secrets, not call Vertex, not
+# manipulate other resources in the project.
+resource "google_service_account" "preview_build" {
+  account_id   = "x1agent-preview-build"
+  display_name = "x1agent preview build (Kaniko)"
+  description  = "Workload Identity GSA for the Kaniko Pods that build preview-deploy images."
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_service_account_iam_binding" "preview_build_wi" {
+  service_account_id = google_service_account.preview_build.name
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "serviceAccount:${var.project_id}.svc.id.goog[${var.namespace}/${var.preview_build_k8s_service_account}]",
+  ]
+  depends_on = [google_container_cluster.x1agent]
+}
+
+resource "google_artifact_registry_repository_iam_member" "preview_build_writer" {
+  location   = google_artifact_registry_repository.x1agent.location
+  repository = google_artifact_registry_repository.x1agent.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.preview_build.email}"
+}
+
 # Session-pod WI binding. The K8s SA `x1agent-session` in the install
 # namespace impersonates `x1agent-session@<project>.iam.gserviceaccount.com`.
 # The Helm chart creates that K8s SA and the api spawns Jobs with

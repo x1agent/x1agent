@@ -90,6 +90,12 @@ variable "session_k8s_service_account" {
   default     = "x1agent-session"
 }
 
+variable "preview_build_k8s_service_account" {
+  description = "K8s ServiceAccount the Kaniko Job Pods run as. Must match the Helm chart."
+  type        = string
+  default     = "x1agent-preview-build"
+}
+
 variable "eso_namespace" {
   description = "Namespace where External Secrets Operator runs. Standard chart default is 'external-secrets'."
   type        = string
