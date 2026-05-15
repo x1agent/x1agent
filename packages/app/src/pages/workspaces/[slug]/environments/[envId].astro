@@ -1,0 +1,14 @@
+---
+import Layout from "../../../../layouts/Layout.astro";
+import { EnvironmentDetailRoot } from "../../../../features/environments/EnvironmentDetailRoot";
+
+const { slug, envId } = Astro.params;
+---
+
+<Layout title={`Environment · ${slug} · x1agent`}>
+  <EnvironmentDetailRoot
+    client:only="react"
+    workspaceSlug={slug ?? ""}
+    envId={envId ?? ""}
+  />
+</Layout>
