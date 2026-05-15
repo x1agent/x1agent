@@ -1,3 +1,20 @@
+# [1.31.0](https://github.com/x1agent/x1agent/compare/v1.30.0...v1.31.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **agent:** clarify request_permission is platform-internal scopes only ([f1225ea](https://github.com/x1agent/x1agent/commit/f1225eaa31339388fd0b33d3b7f364f789623692))
+* **api:** honour google oauth scope hierarchy in user-oauth-token check ([377b80f](https://github.com/x1agent/x1agent/commit/377b80f7677101f8d629be022bf7c17909d906a0))
+* **api:** soft-skip zone-3 MCPs without an OAuth token instead of failing the session ([182ddcf](https://github.com/x1agent/x1agent/commit/182ddcf7ba6f65cfc5b6baf184acb79512ad7077))
+* **google-workspace:** include shared drives on every Drive API call ([f8c9b0b](https://github.com/x1agent/x1agent/commit/f8c9b0b5db126fb633b14f40cc6646aa8820f7dd))
+
+
+### Features
+
+* **agents:** per-agent idle timeout override + UI knob ([406c8ba](https://github.com/x1agent/x1agent/commit/406c8ba608b415352c822c5c6f59a0a0d90496b6))
+* **api:** summarizer prefers vertex → anthropic api key → openai ([3f3bf4e](https://github.com/x1agent/x1agent/commit/3f3bf4e15f582a639d59d740e2581318b50c2f25))
+* **app:** collapse session cost to a [$] button by default, persist visibility ([d152be7](https://github.com/x1agent/x1agent/commit/d152be7fd466f0035944ba8b12b21f3466f93648))
+
 # [1.30.0](https://github.com/x1agent/x1agent/compare/v1.29.0...v1.30.0) (2026-05-15)
 
 
