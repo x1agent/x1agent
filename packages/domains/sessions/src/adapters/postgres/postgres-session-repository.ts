@@ -129,9 +129,20 @@ export class PostgresSessionRepository implements SessionRepository {
     agentId: AgentId,
     limit: number,
   ): Promise<readonly Session[]> {
+    // Show only the head of each resume chain. When a user pauses and
+    // resumes a session, the prior row is superseded by a new one
+    // pointing at it via `resumed_from`. Listing both turns one logical
+    // conversation into N entries on the UI; we hide the predecessors
+    // so the user sees one row per chain. The partial index
+    // `sessions_resumed_from_idx` makes the NOT EXISTS lookup an
+    // index-only probe.
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM sessions
       WHERE agent_id = ${agentId}
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions resumed_by
+          WHERE resumed_by.resumed_from = sessions.id
+        )
       ORDER BY triggered_at DESC
       LIMIT ${limit}
     `;
@@ -142,6 +153,7 @@ export class PostgresSessionRepository implements SessionRepository {
     workspaceId: WorkspaceId,
     limit: number,
   ): Promise<readonly Session[]> {
+    // Chain-head filter, see listByAgent for rationale.
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(
         SELECT
@@ -152,6 +164,10 @@ export class PostgresSessionRepository implements SessionRepository {
       FROM sessions
       JOIN agents ON agents.id = sessions.agent_id
       WHERE agents.workspace_id = ${workspaceId}
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions resumed_by
+          WHERE resumed_by.resumed_from = sessions.id
+        )
       ORDER BY sessions.triggered_at DESC
       LIMIT ${limit}
     `;
@@ -169,6 +185,7 @@ export class PostgresSessionRepository implements SessionRepository {
     // The LEFT JOIN can't multiply rows because the share row is
     // pinned to ${userId} and (session_id, user_id) is unique, so no
     // DISTINCT is needed.
+    // Chain-head filter, see listByAgent for rationale.
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(
         SELECT
@@ -185,6 +202,10 @@ export class PostgresSessionRepository implements SessionRepository {
         AND (
           sessions.triggered_by_user_id = ${userId}
           OR session_user_shares.id IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions resumed_by
+          WHERE resumed_by.resumed_from = sessions.id
         )
       ORDER BY sessions.triggered_at DESC
       LIMIT ${limit}
