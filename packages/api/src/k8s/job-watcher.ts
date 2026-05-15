@@ -394,10 +394,11 @@ async function launchSession(
   // Zone-3 remote_oauth attachments: resolve the active user's
   // tokens for each, mint a per-attachment K8s Secret holding the
   // bearer, return the descriptors pod-spec needs to emit sibling
-  // proxy containers. If any token can't be resolved (no consent or
-  // refresh failed) we fail the session here so the user sees a
-  // clear "Connect <Provider>" message instead of the agent
-  // mysteriously failing on first tool call.
+  // proxy containers. Attachments whose user has not OAuth-consented
+  // are soft-skipped inside mintRemoteOAuthBearers (the agent boots
+  // without that MCP's tools); the outer catch here only fires on
+  // infrastructure failures (K8s API errors, catalog lookup blowing
+  // up, etc.) — those still fail the session loudly.
   let remoteOAuthAttachments: import("./pod-spec.js").RemoteOAuthAttachmentForPod[] = [];
   try {
     remoteOAuthAttachments = await mintRemoteOAuthBearers(
@@ -1006,9 +1007,16 @@ async function mintRemoteOAuthBearers(
       catalogEntryName: r.catalogName,
     });
     if (!resolved) {
-      throw new Error(
-        `Connect ${r.catalogName} to continue — no valid OAuth token for the active user. Open the agent's MCP & env tab and click Connect.`,
+      // Soft-skip: spawn the session without this MCP rather than
+      // failing the whole turn. The agent simply won't get this MCP's
+      // tools mounted. Tier C (X1A-followup) will surface an in-session
+      // "Connect <provider>" dialog and resume automatically; until
+      // then, the operator runs the agent, notices the missing tools,
+      // and clicks Connect on the agent's MCP & env tab.
+      console.warn(
+        `[jobs] zone-3 token missing for session ${session.id} mcp=${r.catalogName} — proceeding without it; agent will not have ${r.catalogName} tools in this session`,
       );
+      continue;
     }
     const port = BASE_PORT + portCursor;
     portCursor++;
