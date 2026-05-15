@@ -7,6 +7,35 @@ import {
   type SessionTreeCost,
 } from "../../stores/costStore";
 
+// Preference key for whether the cost block renders expanded ($X.XX
+// visible) or collapsed (just a `[$]` chip). Default is collapsed so
+// the cost UI isn't conspicuous; users who care about spend toggle it
+// open once and the choice persists across sessions + reloads. The
+// data still fetches in both states so an expand click feels instant.
+const COST_VISIBILITY_STORAGE_KEY = "x1agent.cost.visible";
+
+function readCostVisibilityPref(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(COST_VISIBILITY_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCostVisibilityPref(visible: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      COST_VISIBILITY_STORAGE_KEY,
+      visible ? "1" : "0",
+    );
+  } catch {
+    // localStorage can throw in private-browsing / quota cases. The
+    // toggle still works in-page; the preference just doesn't persist.
+  }
+}
+
 interface Props {
   workspaceSlug: string;
   sessionId: string;
@@ -142,6 +171,39 @@ export function SessionCostBlock({
     };
   }, [treeOpen]);
 
+  // Collapsed = `[$]` chip; expanded = full block. Preference persists
+  // across sessions via localStorage. Initial render uses the read
+  // helper, then a one-shot effect reconciles in case the initial
+  // value differs (e.g. when the component renders SSR-side).
+  const [visible, setVisible] = useState<boolean>(() =>
+    readCostVisibilityPref(),
+  );
+  useEffect(() => {
+    setVisible(readCostVisibilityPref());
+  }, []);
+  const toggleVisible = () => {
+    setVisible((v) => {
+      const next = !v;
+      writeCostVisibilityPref(next);
+      return next;
+    });
+  };
+
+  if (!visible) {
+    return (
+      <button
+        type="button"
+        onClick={toggleVisible}
+        aria-label="Show session cost"
+        title="Show session cost"
+        className="inline-flex items-center justify-center rounded-md border border-border-soft bg-surface-muted/40 px-2 py-1 text-xs font-medium text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
+        data-testid="session-cost-block-collapsed"
+      >
+        $
+      </button>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
@@ -149,7 +211,16 @@ export function SessionCostBlock({
       data-testid="session-cost-block"
     >
       <div className="flex items-center gap-2 whitespace-nowrap text-xs">
-        <span className="text-fg-faint">Cost</span>
+        <button
+          type="button"
+          onClick={toggleVisible}
+          aria-label="Hide session cost"
+          title="Hide session cost"
+          className="rounded text-fg-faint hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong"
+          data-testid="session-cost-block-hide"
+        >
+          Cost
+        </button>
         {live ? (
           <span
             className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
