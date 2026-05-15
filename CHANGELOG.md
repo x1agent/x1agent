@@ -1,3 +1,19 @@
+# [1.29.0](https://github.com/x1agent/x1agent/compare/v1.28.0...v1.29.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **api:** flip pending→running on session.started event (X1A-66) ([b72fc38](https://github.com/x1agent/x1agent/commit/b72fc3887c5e0b5dd545f1a4931c2604a61f42ed))
+* **app:** client-side status pill flips pending→running on session.started (X1A-66) ([e81089f](https://github.com/x1agent/x1agent/commit/e81089fc297293091480b40b73ad5356d4b66160))
+
+
+### Features
+
+* **api:** wire K8sJobTerminator into session-cancel composition (X1A-70) ([18aea3b](https://github.com/x1agent/x1agent/commit/18aea3b1f481ec91375826d6f4d6f7f552ad6559))
+* **app:** cache-buster on share content URLs for live-update (X1A-92) ([b8e4a5f](https://github.com/x1agent/x1agent/commit/b8e4a5f1759ed5e2d2dbf4c339231d2d252564a4))
+* **sessions:** Pause kills the K8s Job + clearer dup-tick errors (X1A-70) ([4969e9c](https://github.com/x1agent/x1agent/commit/4969e9c4cc244bf159922b61cc96937f05ad917d))
+* **sidecar:** emit updated_at_ms on agent.share + harden path normalization ([fc67765](https://github.com/x1agent/x1agent/commit/fc67765f47d35d048091bd1fab0dd67f06e73f71))
+
 # [1.28.0](https://github.com/x1agent/x1agent/compare/v1.27.1...v1.28.0) (2026-05-14)
 
 
