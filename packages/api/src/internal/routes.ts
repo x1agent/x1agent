@@ -183,6 +183,97 @@ export function resolveSpawnModel(
   return enabled.has(trimmed) ? trimmed : null;
 }
 
+/**
+ * Map from a narrow Google OAuth scope → the set of broader scopes
+ * that, in Google's hierarchy, fully cover it. The intent is that
+ * a user who granted the broader scope should not be told their
+ * permission is insufficient when a provider asks for a narrower
+ * variant. The provider could ask for the broader scope directly,
+ * but the conventional ask is "the least permission I need" — so the
+ * platform meets it where it is.
+ *
+ * Only Google scopes need this today because Google ships the
+ * fan-out of `.readonly`, `.metadata.readonly`, etc. as separate
+ * strings; other providers either don't fan out or are listed once
+ * verbatim already. Extend per provider when the same problem shows
+ * up elsewhere.
+ *
+ * Sourced from Google's published OAuth scope docs:
+ *   https://developers.google.com/identity/protocols/oauth2/scopes
+ */
+const GOOGLE_SCOPE_IMPLICATIONS: Record<string, readonly string[]> = {
+  // Drive — full read+write covers every narrower drive.* variant.
+  "https://www.googleapis.com/auth/drive.readonly": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  "https://www.googleapis.com/auth/drive.metadata": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  "https://www.googleapis.com/auth/drive.metadata.readonly": [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.metadata",
+    "https://www.googleapis.com/auth/drive.readonly",
+  ],
+  "https://www.googleapis.com/auth/drive.file": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  // Sheets / Docs — read covered by full read+write.
+  "https://www.googleapis.com/auth/spreadsheets.readonly": [
+    "https://www.googleapis.com/auth/spreadsheets",
+  ],
+  "https://www.googleapis.com/auth/documents.readonly": [
+    "https://www.googleapis.com/auth/documents",
+  ],
+  // Calendar — read variants covered by full calendar; events variants
+  // similarly covered by the parent calendar scope.
+  "https://www.googleapis.com/auth/calendar.readonly": [
+    "https://www.googleapis.com/auth/calendar",
+  ],
+  "https://www.googleapis.com/auth/calendar.events": [
+    "https://www.googleapis.com/auth/calendar",
+  ],
+  "https://www.googleapis.com/auth/calendar.events.readonly": [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+  ],
+  // Gmail — gmail.modify is read + send + trash; gmail.readonly is
+  // strictly read. Modify covers readonly; full mail covers both.
+  "https://www.googleapis.com/auth/gmail.readonly": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.send": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.compose": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.modify": [
+    "https://mail.google.com/",
+  ],
+};
+
+/**
+ * Returns true when `requested` is either present in `granted` verbatim
+ * or implied by some scope that is. Lets a user who consented to a
+ * broader scope (`drive`) satisfy a provider asking for a narrower
+ * variant (`drive.readonly`). For non-Google providers this collapses
+ * to the original exact-match check since the implications table is
+ * Google-only today.
+ */
+function scopeIsCovered(
+  requested: string,
+  granted: readonly string[],
+): boolean {
+  if (granted.includes(requested)) return true;
+  const implicators = GOOGLE_SCOPE_IMPLICATIONS[requested];
+  if (!implicators) return false;
+  return implicators.some((s) => granted.includes(s));
+}
+
 function requireInternalToken(token: string): MiddlewareHandler {
   return async (c, next) => {
     if (!token) {
@@ -941,7 +1032,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       );
     }
 
-    if (scope && !blob.scopesGranted.includes(scope)) {
+    if (scope && !scopeIsCovered(scope, blob.scopesGranted)) {
       return c.json(
         {
           error: "permission_required",
