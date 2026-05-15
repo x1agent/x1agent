@@ -174,6 +174,18 @@ export function isShareCommentWakePayload(
   payload: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!payload) return false;
+  // X1A-133 — SDK-native classification wins over kind-based detection
+  // because new wakes drop the prose preamble and may not stamp `kind`
+  // on the version that reaches the events bus.
+  const origin = payload["origin"];
+  if (
+    origin &&
+    typeof origin === "object" &&
+    (origin as { kind?: unknown }).kind === "channel" &&
+    (origin as { server?: unknown }).server === "share-comments"
+  ) {
+    return true;
+  }
   const kind = payload["kind"];
   return kind === "comment_added" || kind === "comment_resolved";
 }
@@ -261,6 +273,19 @@ export async function startSessionEventSubscriber(
       // trip for an event we'll discard. Also skip the summarizer +
       // token-usage paths below — those only apply to durable rows.
       if (TRANSIENT_EVENT_TYPES.has(parsed.type)) {
+        continue;
+      }
+      // X1A-133 — share-comment wakes belong in the comment thread,
+      // not in the session timeline. Defense in depth: the agent
+      // already suppresses the .events emit for these, but if a stale
+      // agent build reaches a new api we still want them filtered out
+      // before they pollute session_events.
+      if (
+        parsed.type === "user.message" &&
+        isShareCommentWakePayload(
+          parsed.payload as Record<string, unknown> | null | undefined,
+        )
+      ) {
         continue;
       }
 

@@ -4,13 +4,16 @@ import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
 import { AgentId, type AgentRepository } from "@x1agent/domain-agents";
 import type {
   AgentCostWindow,
+  JobTerminator,
   SessionEventRepository,
   SessionRepository,
   TokenUsageRepository,
 } from "@x1agent/domain-sessions";
 import {
+  NotYourChildError,
   SessionId,
   appendSessionEvent,
+  cancelChildSession,
   spawnChildSession,
 } from "@x1agent/domain-sessions";
 import {
@@ -18,8 +21,15 @@ import {
   findActiveGrant,
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
-import { writeShareFiles } from "../shares/storage.js";
+import {
+  getMimeType,
+  readShareFile,
+  readStagingFile,
+  writeShareFiles,
+  writeStagingFiles,
+} from "../shares/storage.js";
 import { StringCodec, JSONCodec } from "nats";
+import { randomUUID } from "node:crypto";
 import type {
   UploadRepository,
   UploadStorage,
@@ -81,6 +91,13 @@ export interface InternalRoutesConfig {
    */
   uploads?: UploadRepository;
   uploadStorage?: UploadStorage;
+  /**
+   * Optional K8s Job terminator shared with the human-cancel path.
+   * When wired, `cancel_session` from an orchestrator (X1A-118) also
+   * deletes the child's K8s Job so the pod actually stops — without
+   * this the cancel is purely a DB flip.
+   */
+  jobs?: JobTerminator;
   /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
@@ -440,6 +457,228 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
 
     const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
     return c.json({ ok: true, total_size: totalSize });
+  });
+
+  // Read a share's content back to its producing session (X1A-32).
+  //
+  // The sidecar's /read_share route forwards here in local-dev (no GCS).
+  // The sidecar already authenticates with the internal token; we just
+  // need to confirm the share belongs to the named session (same
+  // cross-session guard as the workspace-scoped /:shareId/content route)
+  // before reading the bytes off disk.
+  //
+  // Returns { share_id, path?, mime_type, size, content_b64 } on
+  // success. Empty `?path=` falls back to `index.html` — matches
+  // writeShareFiles for single-file shares.
+  app.get("/sessions/:sessionId/shares/:shareId/content", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const shareId = c.req.param("shareId")!;
+    const requestedPath = c.req.query("path") ?? "";
+
+    const session = await cfg.sessions.findById(sessionId);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+
+    // 5000 matches the workspace-scoped read route. Shares are sparse
+    // relative to message events, so the cap is effectively unbounded
+    // in practice.
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    const sharedHere = events.some((e) => {
+      if (e.type !== "agent.share") return false;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      return payload?.share_id === shareId;
+    });
+
+    if (!sharedHere) {
+      // Disambiguate "exists in another session" (403) from "doesn't
+      // exist anywhere" (404) when sql is wired, so the sidecar can
+      // surface a useful error to the agent.
+      if (cfg.sql) {
+        const rows = await cfg.sql<{ session_id: string }[]>`
+          SELECT session_id
+          FROM session_events
+          WHERE type = 'agent.share'
+            AND (payload->>'share_id') = ${shareId}
+          LIMIT 1
+        `;
+        if (rows.length > 0) {
+          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        }
+      }
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const filePath = requestedPath || "index.html";
+    const bytes = readShareFile(sessionId, shareId, filePath);
+    if (!bytes) return c.json({ error: "file_not_found" }, 404);
+    return c.json({
+      share_id: shareId,
+      path: requestedPath || undefined,
+      mime_type: getMimeType(filePath),
+      size: bytes.length,
+      content_b64: bytes.toString("base64"),
+    });
+  });
+
+  // Orchestrator → child cancel. The parent's sidecar calls this when
+  // the orchestrator invokes the `cancel_session` MCP tool (X1A-118).
+  // Authorization is the parent → child relationship, not user RBAC:
+  // the body carries the caller session_id and we refuse unless the
+  // target child's parent_session_id matches it. Idempotent — a second
+  // cancel on an already-terminal session returns `cancelled: false`.
+  app.post("/sessions/:childId/cancel-by-parent", async (c) => {
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      reason?: string | null;
+    };
+    if (!body.parent_session_id) {
+      return c.json(
+        { error: "missing_fields", need: ["parent_session_id"] },
+        400,
+      );
+    }
+    try {
+      const result = await cancelChildSession(
+        {
+          sessions: cfg.sessions,
+          events: cfg.events,
+          clock: systemClock,
+          jobs: cfg.jobs,
+        },
+        body.parent_session_id as SessionId,
+        childId,
+        typeof body.reason === "string" ? body.reason : null,
+      );
+      return c.json({
+        ok: true,
+        cancelled: result.cancelled,
+        session: {
+          id: result.session.id,
+          status: result.session.status,
+          completed_at: result.session.completedAt?.toISOString() ?? null,
+        },
+      });
+    } catch (err) {
+      if (err instanceof NotYourChildError) {
+        return c.json({ error: "not_your_child" }, 403);
+      }
+      if (err instanceof DomainError) {
+        const status = err.code === "session_not_found" ? 404 : 400;
+        return c.json(
+          { error: err.code, message: err.message },
+          status as 400,
+        );
+      }
+      throw err;
+    }
+  });
+
+  // Orchestrator → child snapshot transfer (X1A-63). The parent's
+  // sidecar POSTs the file bytes here after validating the local
+  // /workspace source path. We confirm parent → child, persist the
+  // bytes to a per-stage directory on disk, then publish a NATS
+  // message on the child's `.input` subject with kind=parent_staging
+  // so the child's sidecar fetches and materializes the files into
+  // `/workspace/{dest_path}`. Snapshot semantics — no subscription.
+  app.post("/sessions/:childId/share-to-child", async (c) => {
+    if (!cfg.natsConnection) {
+      return c.json({ error: "parent_staging_unavailable" }, 503);
+    }
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      dest_path?: string | null;
+      files?: { path: string; content: string }[];
+    };
+    if (!body.parent_session_id || !Array.isArray(body.files)) {
+      return c.json(
+        {
+          error: "missing_fields",
+          need: ["parent_session_id", "files"],
+        },
+        400,
+      );
+    }
+    if (body.files.length === 0) {
+      return c.json({ error: "no_files" }, 400);
+    }
+
+    const child = await cfg.sessions.findById(childId);
+    if (!child) return c.json({ error: "session_not_found" }, 404);
+    if (child.parentSessionId !== body.parent_session_id) {
+      return c.json({ error: "not_your_child" }, 403);
+    }
+    if (child.status === "complete" || child.status === "failed") {
+      return c.json({ error: "child_not_live" }, 410);
+    }
+
+    const stageId = randomUUID();
+    const result = writeStagingFiles(childId, stageId, body.files);
+
+    // Resolve destination. When the parent named one, use it verbatim;
+    // otherwise default to the first file's relative path. The sidecar
+    // side enforces traversal safety again before writing to
+    // /workspace, so a malformed dest_path can't escape the volume.
+    const destPath =
+      typeof body.dest_path === "string" && body.dest_path.trim() !== ""
+        ? body.dest_path.trim()
+        : (result.paths[0] ?? "");
+
+    const sc = StringCodec();
+    const envelope = {
+      session_id: childId,
+      timestamp: new Date().toISOString(),
+      type: "user.message",
+      payload: {
+        // The text is what /inject sees; the sidecar suppresses the
+        // /inject post on parent_staging events so this string never
+        // reaches the SDK. It exists so an older sidecar that lacks
+        // the staging branch falls back to a useful wake instead of
+        // a cryptic empty inject.
+        text: `Parent staged ${result.paths.length} file(s) at /workspace/${destPath}`,
+        kind: "parent_staging",
+        source: "platform",
+        event_id: stageId,
+        stage_id: stageId,
+        dest_path: destPath,
+        paths: result.paths,
+        from_session_id: body.parent_session_id,
+      },
+    };
+    cfg.natsConnection.publish(
+      `x1.session.${childId}.input`,
+      sc.encode(JSON.stringify(envelope)),
+    );
+
+    return c.json({
+      ok: true,
+      stage_id: stageId,
+      dest_path: destPath,
+      files: result.paths,
+      total_size: result.totalSize,
+    });
+  });
+
+  // Sidecar fetch of a single staged file (X1A-63). The child's
+  // sidecar pulls each path out of staging into /workspace/{dest_path}
+  // on receipt of the parent_staging NATS notification.
+  app.get("/sessions/:sessionId/staging/:stageId/content", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const stageId = c.req.param("stageId")!;
+    const filePath = c.req.query("path") ?? "";
+    if (!filePath) return c.json({ error: "missing_path" }, 400);
+    const bytes = readStagingFile(sessionId, stageId, filePath);
+    if (!bytes) return c.json({ error: "file_not_found" }, 404);
+    return c.json({
+      stage_id: stageId,
+      path: filePath,
+      mime_type: getMimeType(filePath),
+      size: bytes.length,
+      content_b64: bytes.toString("base64"),
+    });
   });
 
   // Child → parent explicit signal. The child's sidecar calls this

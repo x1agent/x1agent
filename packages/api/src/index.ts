@@ -287,6 +287,7 @@ const {
   quietHints: composedQuietHints,
   uploadRoutes,
   tickUploadsCleanup,
+  jobTerminator: composedJobTerminator,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -903,6 +904,32 @@ if (
     quietHints: composedQuietHints,
   });
   registerCleanup(() => watchdog.stop());
+}
+
+// Silent-worker reaper (X1A-28). Cancels worker sessions whose
+// session_events stream has been silent past the configured threshold
+// — distinct from the activity watchdog (which fires a wake to the
+// parent at 5 min); the reaper is the hard termination after that.
+// Default 30 min silence; configurable via env.
+if (process.env.SILENT_WORKER_REAPER !== "disabled") {
+  const { startSilentWorkerReaper } = await import(
+    "./orchestration/silent-worker-reaper.js"
+  );
+  const reaper = startSilentWorkerReaper({
+    sql: composedSql,
+    agents: composedAgents,
+    sessions: composedSessions,
+    events: sessionEvents,
+    jobs: composedJobTerminator,
+    quietHints: composedQuietHints,
+    intervalMs: Number(
+      process.env.SILENT_WORKER_REAPER_INTERVAL_MS || 120_000,
+    ),
+    silenceThresholdMs: Number(
+      process.env.SILENT_WORKER_REAPER_THRESHOLD_MS || 30 * 60_000,
+    ),
+  });
+  registerCleanup(() => reaper.stop());
 }
 
 // Checkup timer — cadence-driven "just checking in" for

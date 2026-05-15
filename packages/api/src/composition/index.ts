@@ -294,6 +294,13 @@ export interface Composition {
   uploadRoutes: Hono;
   /** Periodic cleanup tick for the uploads subsystem. */
   tickUploadsCleanup: () => Promise<import("@x1agent/domain-uploads").CleanupResult>;
+  /**
+   * K8s Job terminator shared by the human-Pause path and the silent-
+   * worker reaper (X1A-28). Undefined when the api isn't running in-
+   * cluster — cancel still flips the DB row, just doesn't delete the
+   * pod (which doesn't exist on a non-k8s host).
+   */
+  jobTerminator?: K8sJobTerminator;
 }
 
 export interface CompositionEnv {
@@ -819,6 +826,9 @@ export function compose(env: CompositionEnv): Composition {
     // so the route can look the row up + stream the bytes.
     uploads: uploads.repository,
     uploadStorage: uploads.storage,
+    // X1A-118 — parent-initiated cancel routed through the internal
+    // /cancel-by-parent route shares the same terminator as Pause.
+    jobs: jobTerminator,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -1410,5 +1420,8 @@ export function compose(env: CompositionEnv): Composition {
     quietHints,
     uploadRoutes,
     tickUploadsCleanup,
+    // X1A-28 — exposed so the api index can wire the silent-worker
+    // reaper to the same K8s Job terminator the human Pause path uses.
+    jobTerminator,
   };
 }
