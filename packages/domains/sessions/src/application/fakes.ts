@@ -38,7 +38,11 @@ export class InMemorySessionRepository implements SessionRepository {
         r.triggeredAt.getTime() === input.triggeredAt.getTime(),
     );
     if (clash)
-      throw new SessionDuplicateTickError(input.agentId, input.triggeredAt);
+      throw new SessionDuplicateTickError(
+        input.agentId,
+        input.triggeredAt,
+        input.triggeredBy,
+      );
     const session: Session = {
       id: SessionId(nextId()),
       agentId: input.agentId,

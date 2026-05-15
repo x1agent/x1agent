@@ -105,7 +105,14 @@ export class PostgresSessionRepository implements SessionRepository {
       return toSession(rows[0]!);
     } catch (err) {
       if (isUniqueViolation(err)) {
-        throw new SessionDuplicateTickError(input.agentId, input.triggeredAt);
+        // Forward triggeredBy so the error message disambiguates a
+        // scheduler-tick collision from a user-Resume race or an
+        // agent-spawn race (X1A-70).
+        throw new SessionDuplicateTickError(
+          input.agentId,
+          input.triggeredAt,
+          input.triggeredBy,
+        );
       }
       throw err;
     }
