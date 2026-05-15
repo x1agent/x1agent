@@ -253,6 +253,16 @@ export function render(input: RenderInput): RenderResult {
     `    image:\n` +
     `      repository: ${q(arRepo + "/messaging-slack")}\n` +
     `      tag: ${q(tag)}\n` +
+    // preview provider — only relevant when previews.enabled=true. The
+    // chart's render is gated on that top-level toggle; we always
+    // populate the image + WI annotation so the operator can flip
+    // previews on without re-running install:plan.
+    `  preview:\n` +
+    `    image:\n` +
+    `      repository: ${q(arRepo + "/preview")}\n` +
+    `      tag: ${q(tag)}\n` +
+    `    buildServiceAccountAnnotations:\n` +
+    `      iam.gke.io/gcp-service-account: ${q(`x1agent-preview-build@${projectId}.iam.gserviceaccount.com`)}\n` +
     // Override the chart's literal default with the install-config value.
     // Generated + rotated via deploy/scripts/rotate-surrealdb-password.sh.
     // When unset we omit the key so the chart's `| default ...` runs —
