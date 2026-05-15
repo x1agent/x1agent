@@ -230,6 +230,7 @@ export function render(input: RenderInput): RenderResult {
     `  sheets: ${q(env.get("PROVIDER_SHEETS") || "none")}\n` +
     `  calendar: ${q(env.get("PROVIDER_CALENDAR") || "none")}\n` +
     `  email: ${q(env.get("PROVIDER_EMAIL") || "none")}\n` +
+    `  messaging: ${q(env.get("PROVIDER_MESSAGING") || "none")}\n` +
     // Per-kind image repos — pinned to the same Artifact Registry as
     // api/app. The graph-surrealdb image is built + pushed by the
     // install orchestrator's build phase; tag tracks api.
@@ -244,6 +245,13 @@ export function render(input: RenderInput): RenderResult {
     `  googleWorkspace:\n` +
     `    image:\n` +
     `      repository: ${q(arRepo + "/google-workspace")}\n` +
+    `      tag: ${q(tag)}\n` +
+    // messaging-slack provider — one Deployment subscribes to
+    // x1.provider.messaging.*. Only renders when providers.messaging
+    // is "slack" (set via PROVIDER_MESSAGING in the install file).
+    `  messagingSlack:\n` +
+    `    image:\n` +
+    `      repository: ${q(arRepo + "/messaging-slack")}\n` +
     `      tag: ${q(tag)}\n` +
     // Override the chart's literal default with the install-config value.
     // Generated + rotated via deploy/scripts/rotate-surrealdb-password.sh.

@@ -323,6 +323,7 @@ providers:
   sheets: none
   calendar: none
   email: none
+  messaging: none
 
   # Per-kind config — only the block matching `graph` is consumed. New
   # graph kinds (e.g. neo4j) add their own block here + a sibling
@@ -356,6 +357,19 @@ providers:
   # capability gates (PROVIDER_FILES, PROVIDER_DOCS, …) are set in
   # the install file's config block.
   googleWorkspace:
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+
+  # Messaging provider — Slack. One Deployment subscribes to
+  # x1.provider.messaging.* and posts to Slack via SLACK_BOT_TOKEN
+  # from the ESO-synced x1agent-secrets bundle.
+  messagingSlack:
     image:
       repository: ""
       tag: latest

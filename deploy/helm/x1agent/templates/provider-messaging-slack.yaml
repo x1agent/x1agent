@@ -1,0 +1,84 @@
+{{- /*
+Messaging provider — Slack.
+
+One Deployment subscribes to x1.provider.messaging.* and translates
+the agent's `post_message` MCP tool call into a Slack chat.postMessage.
+
+Render gating: providers.messaging == "slack". The api capability gate
+(PROVIDER_MESSAGING) is set in the install file — when this template
+renders, that env var must also be "slack" so the api advertises the
+matching MCP tool to agents.
+
+Auth: SLACK_BOT_TOKEN sourced from the ESO-synced x1agent-secrets
+bundle. Phase 1 — a single workspace-level bot token. Per-workspace
+OAuth is Phase 2.
+*/}}
+{{- if eq (default "none" .Values.providers.messaging) "slack" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: messaging-slack
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "messaging-slack") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: messaging-slack
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.providers.messagingSlack.replicas | default 1 }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "messaging-slack") | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "messaging-slack") | nindent 8 }}
+    spec:
+      containers:
+        - name: provider
+          image: "{{ .Values.providers.messagingSlack.image.repository }}:{{ .Values.providers.messagingSlack.image.tag | default .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.providers.messagingSlack.image.pullPolicy | default "Always" | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: tls://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+          # SLACK_BOT_TOKEN comes from the ESO-synced x1agent-secrets
+          # bundle. When the GSM value is unset (a fresh install that
+          # hasn't yet pasted in a token), the pod starts with an
+          # empty token and every post_message returns a Slack auth
+          # error — answered but functionally broken until the
+          # operator populates the secret.
+          envFrom:
+            - secretRef:
+                name: x1agent-secrets
+          resources: {{- toYaml .Values.providers.messagingSlack.resources | nindent 12 }}
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-provider-client-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: client.crt
+              - key: tls.key
+                path: client.key
+{{- end }}
