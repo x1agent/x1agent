@@ -538,24 +538,36 @@ function CommentRow({
   const author = formatAuthor(comment, currentUserId);
   const isUser = !comment.author_session_id;
   const isReply = comment.parent_comment_id !== null;
+  // X1A-72.4 — self-author distinction. Match the timeline's user.message
+  // shape: right-aligned, soft elevated bubble. Other-human + agent
+  // comments keep the flat full-width row so the operator scans a thread
+  // and immediately sees which were theirs.
+  const isSelf =
+    !!currentUserId &&
+    comment.author_user_id != null &&
+    comment.author_user_id === currentUserId;
   const wrapperClass = isFirst ? "" : "mt-2";
 
-  // Slack-style: same full-width row for everyone. Author is conveyed
-  // by the name label only. `data-author-kind` stays stable as a hook
-  // for future accent treatments (avatar / colour on name).
   return (
     <div
-      className={`${wrapperClass} block w-full text-[13px]`}
+      className={`${wrapperClass} block w-full text-[13px] ${
+        isSelf ? "flex flex-col items-end" : ""
+      }`}
       data-comment-author={
         isUser
           ? comment.author_user_id ?? "unknown"
           : comment.author_session_id
       }
       data-author-kind={isUser ? "user" : "agent"}
+      data-self={isSelf ? "true" : "false"}
       data-comment-id={comment.id}
       data-is-reply={isReply ? "true" : "false"}
     >
-      <div className="mb-0.5 flex items-baseline gap-2">
+      <div
+        className={`mb-0.5 flex items-baseline gap-2 ${
+          isSelf ? "justify-end" : ""
+        }`}
+      >
         <span className="text-[12px] font-semibold text-fg-muted">
           {author}
         </span>
@@ -563,7 +575,15 @@ function CommentRow({
           {formatRelativeTime(comment.created_at)}
         </span>
       </div>
-      <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
+      <div
+        className={
+          isSelf
+            ? "max-w-[85%] rounded-2xl bg-bg-elevated/70 px-3 py-1.5"
+            : ""
+        }
+      >
+        <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
+      </div>
     </div>
   );
 }
