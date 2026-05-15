@@ -962,6 +962,43 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
     const previewYaml = await ghRes.text();
 
+    // Extract metadata.name from the yaml for an immediate "I'm
+    // provisioning" upsert before the long-running NATS request. The
+    // provider does the full schema validation; we only need the slug
+    // here so the workspace UI can render a row right away. Regex
+    // tolerates quoted and unquoted forms; falls back to no-early-row
+    // when the shape doesn't match (provider's parse will fail with a
+    // crisp message either way).
+    const slugMatch = previewYaml.match(
+      /(^|\n)metadata:\s*\n\s+name:\s*['"]?([a-z][a-z0-9-]{0,62})['"]?\s*(\n|$)/,
+    );
+    const earlySlug = slugMatch?.[2];
+    if (cfg.previewEnvironments && earlySlug) {
+      try {
+        const { upsertPreviewEnvironment } = await import(
+          "@x1agent/domain-preview-environments"
+        );
+        await upsertPreviewEnvironment(
+          { repository: cfg.previewEnvironments },
+          {
+            workspaceId: agent.workspaceId,
+            slug: earlySlug,
+            repoFullName: body.repo_full_name,
+            branch: body.branch,
+            deploy: { status: "provisioning" },
+          },
+        );
+      } catch (earlyErr) {
+        // Non-fatal — operator just won't see the row until the deploy
+        // resolves. If this fires for a slug-taken conflict, the
+        // provider's reply will surface the same error to the agent.
+        console.warn(
+          "[preview-deploy] early upsert failed:",
+          (earlyErr as Error).message,
+        );
+      }
+    }
+
     // NATS request/reply to the provider. Timeout covers a full
     // Kaniko build + Deployment ready — hence 20 minutes.
     const jc = JSONCodec();
@@ -1010,20 +1047,21 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
               },
             );
           } else {
-            // Failure path — we don't always know the slug (the spec may
-            // have failed to parse before metadata.name was read). Only
-            // record the failed deploy when the provider hands us a
-            // slug we can key on; otherwise the agent's failure reply
-            // is enough — there's no row to attach the failure to yet.
+            // Failure path. Prefer the slug from the provider's reply
+            // (set when the parse succeeded but a later step failed);
+            // fall back to the earlySlug we grabbed before the NATS
+            // request so the in-progress row doesn't sit at
+            // status=provisioning forever after an invalid_preview_spec.
             const failed = result as
               & { ok: false; code: string; message: string }
               & { slug?: string };
-            if (failed.slug) {
+            const slug = failed.slug ?? earlySlug;
+            if (slug) {
               await upsertPreviewEnvironment(
                 { repository: cfg.previewEnvironments },
                 {
                   workspaceId: agent.workspaceId,
-                  slug: failed.slug,
+                  slug,
                   repoFullName: body.repo_full_name,
                   branch: body.branch,
                   deploy: {
