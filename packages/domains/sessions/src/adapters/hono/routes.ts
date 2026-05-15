@@ -473,6 +473,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       return c.json({ error: scope.error }, 404);
     }
     const afterRaw = c.req.query("after_seq");
+    const beforeRaw = c.req.query("before_seq");
     const limitRaw = c.req.query("limit");
     const limit = Math.max(
       1,
@@ -480,6 +481,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     );
     const events = await cfg.events.listBySession(scope.session.id, {
       afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
+      beforeSeq: beforeRaw !== undefined ? Number(beforeRaw) : undefined,
       limit,
     });
 
