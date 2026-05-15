@@ -16,7 +16,11 @@
 //! it so a buggy or malicious agent cannot exfiltrate host files.
 
 use crate::AppState;
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::{Path as AxumPath, Query, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,7 +46,7 @@ const MAX_TOTAL_SIZE: u64 = 200 * 1024 * 1024; // 200 MB per share
 /// joins it onto `/workspace` to get the absolute path. This isolates
 /// the leading-slash + absolute-path handling that has bitten subdir
 /// shares before (see X1A-23).
-fn normalize_request_path(raw: &str) -> Result<String, String> {
+pub fn normalize_request_path(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("path is empty".into());
@@ -482,6 +486,188 @@ pub async fn handle_share(
     }))
 }
 
+#[derive(Deserialize)]
+pub struct ReadShareQuery {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ReadShareResponse {
+    pub share_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub mime_type: String,
+    pub size: u64,
+    pub content_b64: String,
+}
+
+#[derive(Serialize)]
+pub struct ReadShareError {
+    pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// GET /read_share/{share_id} — read back the content of a share this
+/// session previously published. PRD 0006 Slice A scope: only the
+/// producing session can read its own past output.
+///
+/// Two backends, mirroring the write path:
+///   - GCS in prod (`GCS_ARTIFACTS_BUCKET` set): fetch directly via the
+///     GCE metadata server. The pod SA needs `storage.objectViewer`.
+///   - api service in local dev: forward to the internal route which
+///     reads the bytes off the share directory. The api enforces the
+///     cross-session guard there.
+///
+/// Response shape mirrors the workspace `/:shareId/content` route so
+/// the agent dispatcher handles both surfaces identically.
+pub async fn handle_read_share(
+    State(state): State<Arc<AppState>>,
+    AxumPath(share_id): AxumPath<String>,
+    Query(q): Query<ReadShareQuery>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let path = q.path.unwrap_or_default();
+    let gcs_bucket = std::env::var("GCS_ARTIFACTS_BUCKET").unwrap_or_default();
+    if !gcs_bucket.is_empty() {
+        match read_from_gcs(&gcs_bucket, &state.session_id, &share_id, &path).await {
+            Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+            Err((status, err)) => (status, Json(err)).into_response(),
+        }
+    } else {
+        match read_from_api(&state, &share_id, &path).await {
+            Ok((status, body)) => axum::http::Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap_or_else(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "body build failed",
+                    )
+                        .into_response()
+                }),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(ReadShareError {
+                    error: "upstream_failed".into(),
+                    message: Some(e),
+                }),
+            )
+                .into_response(),
+        }
+    }
+}
+
+async fn read_from_gcs(
+    bucket: &str,
+    session_id: &str,
+    share_id: &str,
+    requested_path: &str,
+) -> Result<ReadShareResponse, (StatusCode, ReadShareError)> {
+    let file_path = if requested_path.is_empty() {
+        "index.html".to_string()
+    } else {
+        requested_path.to_string()
+    };
+    let token = get_gce_token().await.ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ReadShareError {
+            error: "gcs_auth_failed".into(),
+            message: None,
+        },
+    ))?;
+    let object_name = format!(
+        "sessions/{}/shares/{}/{}",
+        session_id, share_id, file_path
+    );
+    let url = format!(
+        "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
+        bucket,
+        urlencoding::encode(&object_name)
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                ReadShareError {
+                    error: "gcs_fetch_failed".into(),
+                    message: Some(e.to_string()),
+                },
+            )
+        })?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err((
+            StatusCode::NOT_FOUND,
+            ReadShareError {
+                error: "file_not_found".into(),
+                message: None,
+            },
+        ));
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err((
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            ReadShareError {
+                error: "gcs_fetch_failed".into(),
+                message: Some(format!("status {}", status)),
+            },
+        ));
+    }
+    let bytes = resp.bytes().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            ReadShareError {
+                error: "gcs_fetch_failed".into(),
+                message: Some(e.to_string()),
+            },
+        )
+    })?;
+    let path_for_response =
+        if requested_path.is_empty() { None } else { Some(requested_path.to_string()) };
+    Ok(ReadShareResponse {
+        share_id: share_id.to_string(),
+        path: path_for_response,
+        mime_type: guess_content_type(&file_path),
+        size: bytes.len() as u64,
+        content_b64: base64_encode(&bytes),
+    })
+}
+
+async fn read_from_api(
+    state: &Arc<AppState>,
+    share_id: &str,
+    requested_path: &str,
+) -> Result<(StatusCode, bytes::Bytes), String> {
+    let mut url = format!(
+        "{}/api/internal/sessions/{}/shares/{}/content",
+        state.api_url.trim_end_matches('/'),
+        state.session_id,
+        urlencoding::encode(share_id),
+    );
+    if !requested_path.is_empty() {
+        url.push_str(&format!("?path={}", urlencoding::encode(requested_path)));
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-Internal-Token", &state.api_internal_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let body = resp.bytes().await.map_err(|e| e.to_string())?;
+    Ok((status, body))
+}
+
 /// Upload every file to a GCS bucket under
 /// `sessions/{session_id}/shares/{share_id}/{rel_path}`, using an
 /// access token minted from the pod's service account via the GCE
@@ -596,6 +782,27 @@ async fn get_gce_token() -> Option<String> {
         .ok()?;
     let body: serde_json::Value = resp.json().await.ok()?;
     body["access_token"].as_str().map(|s| s.to_string())
+}
+
+/// Collect files for an orchestrator → child transfer. Returns
+/// `(rel_path, bytes)` tuples — same caps + skip rules as the
+/// regular share collector, minus the ShareFileEntry metadata since
+/// the child-staging route on the api side only needs the raw bytes.
+pub fn collect_files_for_transfer(
+    abs_path: &std::path::Path,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let collected = collect_files(abs_path, abs_path)?;
+    Ok(collected
+        .into_iter()
+        .map(|(rel, content, _)| (rel, content))
+        .collect())
+}
+
+/// Public re-export of the internal base64 encoder for use by the
+/// orchestration handlers. Kept here so the same hand-rolled encoder
+/// is the only one in the binary.
+pub fn base64_encode_public(data: &[u8]) -> String {
+    base64_encode(data)
 }
 
 /// Hand-rolled base64 encoder. We don't pull in a crate for this — the

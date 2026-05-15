@@ -50,6 +50,21 @@ pub struct QuietHintRequest {
 }
 
 #[derive(Deserialize)]
+pub struct CancelSessionRequest {
+    pub child_session_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ShareToChildRequest {
+    pub child_session_id: String,
+    pub source_path: String,
+    #[serde(default)]
+    pub dest_path: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct PreviewDeployRequest {
     pub repo_full_name: String,
     pub branch: String,
@@ -296,6 +311,135 @@ pub async fn handle_preview_deploy(
         .send()
         .await;
     relay_json(res).await
+}
+
+/// Orchestrator → child cancel (X1A-118). The orchestrator's
+/// `cancel_session` MCP tool POSTs here with the target child
+/// session id. The sidecar forwards to the api with the orchestrator's
+/// own session id stamped as `parent_session_id`. Authorization is
+/// the parent → child relationship on the api side — the agent
+/// container never has the internal token.
+///
+/// Idempotent: a cancel call on an already-terminal child returns
+/// `cancelled: false` rather than an error, so racing wakes don't
+/// trip the orchestrator.
+pub async fn handle_cancel_session(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CancelSessionRequest>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/cancel-by-parent",
+        state.api_url.trim_end_matches('/'),
+        urlencoding::encode(&req.child_session_id),
+    );
+    let body = serde_json::json!({
+        "parent_session_id": state.session_id,
+        "reason": req.reason,
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        .send()
+        .await;
+    relay_json(res).await
+}
+
+/// Orchestrator → child snapshot copy (X1A-63). The orchestrator names
+/// a file or folder under its own `/workspace` plus a child session
+/// id; the api confirms the child belongs to this orchestrator,
+/// resolves the child's workspace volume, and stages a snapshot copy
+/// into `/workspace/{dest_path}` on the child pod.
+///
+/// Snapshot semantics ONLY — explicitly not a live-link / subscription.
+/// A second call with the same source_path re-stages a fresh snapshot;
+/// the child sees the new bytes the next time it opens the file.
+pub async fn handle_share_to_child(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ShareToChildRequest>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    // Validate source path against the workspace root. Reuses the
+    // share-route's normalization so traversal and absolute-outside
+    // paths fail the same way (`..` is rejected; absolute paths must
+    // start with /workspace).
+    let rel_source = match crate::shares::normalize_request_path(&req.source_path) {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_source_path",
+                &e,
+            );
+        }
+    };
+    let abs_source = std::path::PathBuf::from("/workspace").join(&rel_source);
+    let canonical = match abs_source.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "source_not_accessible",
+                &e.to_string(),
+            )
+        }
+    };
+    if !canonical.starts_with("/workspace") {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "source_outside_workspace",
+            "",
+        );
+    }
+
+    // Read the file(s) and base64-encode for the API forward — same
+    // wire shape as upload_to_api in shares.rs, just routed to the
+    // child-staging endpoint instead of the share-write one.
+    let collected = match crate::shares::collect_files_for_transfer(&canonical) {
+        Ok(c) => c,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "collect_failed",
+                &e,
+            );
+        }
+    };
+    if collected.is_empty() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "no_files",
+            "source path is empty",
+        );
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/share-to-child",
+        state.api_url.trim_end_matches('/'),
+        urlencoding::encode(&req.child_session_id),
+    );
+    let body = serde_json::json!({
+        "parent_session_id": state.session_id,
+        "dest_path": req.dest_path,
+        "files": collected
+            .iter()
+            .map(|(path, content)| serde_json::json!({
+                "path": path,
+                "content": crate::shares::base64_encode_public(content),
+            }))
+            .collect::<Vec<_>>(),
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(60))
+        .send()
+        .await;
+    relay_json(res).await.into_response()
 }
 
 pub async fn handle_spawnable(
