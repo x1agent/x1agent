@@ -28,6 +28,9 @@ COPY --from=deps --chown=agent:agent /app/package.json /app/bun.lock /app/tsconf
 COPY --chown=agent:agent packages/kernel/ ./packages/kernel/
 COPY --chown=agent:agent packages/shared/ ./packages/shared/
 COPY --chown=agent:agent packages/observability/ ./packages/observability/
+# Provider imports `@x1agent/domain-messaging` for its port types.
+# Same shape as graph-surrealdb's Dockerfile.
+COPY --chown=agent:agent packages/domains/ ./packages/domains/
 COPY --chown=agent:agent packages/providers/messaging-slack/ ./packages/providers/messaging-slack/
 
 USER agent
