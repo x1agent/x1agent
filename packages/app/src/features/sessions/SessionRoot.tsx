@@ -50,10 +50,17 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     eventsBySession,
     errorBySession,
     loadInitial,
+    loadOlder,
     appendEvent,
     setError,
     setSession,
   } = useSessionDetailStore();
+  const hasOlder = useSessionDetailStore(
+    (s) => s.hasOlderBySession[sessionId] ?? false,
+  );
+  const loadingOlder = useSessionDetailStore(
+    (s) => s.loadingOlderBySession[sessionId] ?? false,
+  );
 
   const [verbose, setVerbose] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -539,6 +546,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           agentId={agent?.id}
           sessionId={sessionId}
           tailSlot={<MainTimelineTypingIndicators sessionId={sessionId} />}
+          hasOlder={hasOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={() => loadOlder(workspaceSlug, sessionId)}
         />
 
         <div className="px-4 pt-3 pb-[60px]">

@@ -202,8 +202,24 @@ interface SessionDetailState {
   compactItemsBySession: Record<string, CompactItem[]>;
   statusBySession: Record<string, ConnStatus>;
   errorBySession: Record<string, string | null>;
+  /**
+   * X1A-72.3 — has the server confirmed there are older events the
+   * client hasn't fetched yet? `true` whenever the most recent
+   * loadInitial / loadOlder returned exactly INITIAL_TAIL_LIMIT
+   * events (i.e. we likely hit the cap, more probably exists).
+   */
+  hasOlderBySession: Record<string, boolean>;
+  /** Mutex-style guard — prevents fan-out on rapid scroll-to-top. */
+  loadingOlderBySession: Record<string, boolean>;
 
   loadInitial(workspaceSlug: string, sessionId: string): Promise<void>;
+  /**
+   * X1A-72.3 — fetch the window of events strictly older than the
+   * oldest event currently in the store, and prepend them. No-op if
+   * `hasOlderBySession[sessionId]` is false or another loadOlder is
+   * already in flight for this session.
+   */
+  loadOlder(workspaceSlug: string, sessionId: string): Promise<void>;
   /**
    * Append one event to the session's stream. Dedup is by the
    * `(seq, type)` tuple — any event with a combination we already
@@ -236,7 +252,18 @@ interface SessionDetailState {
  * `appendEvent` de-dupes by `(seq, type)` so the REST replay and the
  * live NATS stream can overlap without double-rendering.
  */
-export const useSessionDetailStore = create<SessionDetailState>((set) => ({
+// X1A-72.3 — initial tail size. 100 events is enough to render the
+// "what's happening right now" view without blocking paint on
+// thousand-event sessions. Scrolling up triggers loadOlder for the
+// next window. The same constant guards the "has older?" decision —
+// if the server returned exactly this many, more probably exists.
+const INITIAL_TAIL_LIMIT = 100;
+// Sentinel for "I want the latest events" via the unified before_seq
+// pagination shape. session_events.seq is BIGINT so any value within
+// Number.MAX_SAFE_INTEGER round-trips cleanly to Postgres.
+const FUTURE_SEQ_SENTINEL = Number.MAX_SAFE_INTEGER;
+
+export const useSessionDetailStore = create<SessionDetailState>((set, get) => ({
   sessionsById: {},
   agentsBySession: {},
   parentBySession: {},
@@ -245,6 +272,8 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
   compactItemsBySession: {},
   statusBySession: {},
   errorBySession: {},
+  hasOlderBySession: {},
+  loadingOlderBySession: {},
 
   async loadInitial(workspaceSlug, sessionId) {
     set((s) => ({
@@ -255,8 +284,13 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
       errorBySession: { ...s.errorBySession, [sessionId]: null },
     }));
     try {
+      // X1A-72.3 — fetch only the tail of the event stream so big
+      // sessions don't block paint. Use the unified before_seq+limit
+      // shape: a sentinel future seq + limit=N returns the latest N
+      // events, oldest-first. Scrolling up triggers loadOlder for the
+      // preceding window.
       const res = await apiFetch<SessionEventListResponse>(
-        `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/events`,
+        `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/events?before_seq=${FUTURE_SEQ_SENTINEL}&limit=${INITIAL_TAIL_LIMIT}`,
       );
 
       // When this session resumes a prior one, fetch the prior
@@ -325,12 +359,85 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           ...s.compactItemsBySession,
           [sessionId]: compactTimeline(merged),
         },
+        // We hit the cap → there's almost certainly older history we
+        // didn't fetch. Resume-stitched events (negative seq prior
+        // events + divider) are local-only; the gate is about the
+        // CURRENT session's history, so check the API result, not the
+        // merged list.
+        hasOlderBySession: {
+          ...s.hasOlderBySession,
+          [sessionId]: res.events.length >= INITIAL_TAIL_LIMIT,
+        },
       }));
     } catch (err) {
       set((s) => ({
         statusBySession: { ...s.statusBySession, [sessionId]: "error" },
         errorBySession: {
           ...s.errorBySession,
+          [sessionId]: (err as Error).message,
+        },
+      }));
+    }
+  },
+
+  async loadOlder(workspaceSlug, sessionId) {
+    const s = get();
+    if (!s.hasOlderBySession[sessionId]) return;
+    if (s.loadingOlderBySession[sessionId]) return;
+    const cur = s.eventsBySession[sessionId] ?? [];
+    // Anchor: first event whose seq is >= 0. Negative seqs are the
+    // resume-stitched prior-session events (synthesised client-side);
+    // we never page through those.
+    const firstReal = cur.find((e) => e.seq >= 0);
+    if (!firstReal) return;
+    set((prev) => ({
+      loadingOlderBySession: {
+        ...prev.loadingOlderBySession,
+        [sessionId]: true,
+      },
+    }));
+    try {
+      const res = await apiFetch<SessionEventListResponse>(
+        `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/events?before_seq=${firstReal.seq}&limit=${INITIAL_TAIL_LIMIT}`,
+      );
+      set((prev) => {
+        const existing = prev.eventsBySession[sessionId] ?? [];
+        // Dedup against the existing window in case of overlap (the
+        // server returns up to `limit` events with seq < firstReal.seq;
+        // anything we already have is dropped). Same (seq, type) key
+        // appendEvent uses.
+        const seen = new Set(existing.map((e) => `${e.seq}:${e.type}`));
+        const fresh = res.events.filter(
+          (e) => !seen.has(`${e.seq}:${e.type}`),
+        );
+        // Merge then sort ascending — the prior-session prepend at
+        // loadInitial used negative seqs so this sort still places the
+        // resume divider + prior events at the top.
+        const next = [...fresh, ...existing].sort((a, b) => a.seq - b.seq);
+        return {
+          eventsBySession: { ...prev.eventsBySession, [sessionId]: next },
+          compactItemsBySession: {
+            ...prev.compactItemsBySession,
+            [sessionId]: compactTimeline(next),
+          },
+          hasOlderBySession: {
+            ...prev.hasOlderBySession,
+            [sessionId]: res.events.length >= INITIAL_TAIL_LIMIT,
+          },
+          loadingOlderBySession: {
+            ...prev.loadingOlderBySession,
+            [sessionId]: false,
+          },
+        };
+      });
+    } catch (err) {
+      set((prev) => ({
+        loadingOlderBySession: {
+          ...prev.loadingOlderBySession,
+          [sessionId]: false,
+        },
+        errorBySession: {
+          ...prev.errorBySession,
           [sessionId]: (err as Error).message,
         },
       }));

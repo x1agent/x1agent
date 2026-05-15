@@ -36,6 +36,15 @@ interface Props {
    * than a one-off indicator hook.
    */
   tailSlot?: React.ReactNode;
+  /**
+   * X1A-72.3 — pagination knobs. When `hasOlder` is true, an
+   * "Older events" affordance renders at the top of the stream and
+   * scroll-to-top triggers `onLoadOlder`. `loadingOlder` suppresses
+   * re-entrant calls and surfaces a faint indicator.
+   */
+  hasOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => void;
 }
 
 /**
@@ -103,6 +112,12 @@ function ToolGroupPill({
 // the scroll position is left alone — the user is reading something.
 const STICK_TO_BOTTOM_PX = 120;
 
+// Distance from the top within which scrolling triggers a fetch for
+// older events. 200px gives the user time to reverse without losing
+// the prepended window; a 0px threshold made the fetch race the
+// scrollbar release.
+const NEAR_TOP_PX = 200;
+
 export function EventStream({
   events,
   verbose,
@@ -112,6 +127,9 @@ export function EventStream({
   sessionId,
   compactItems,
   tailSlot,
+  hasOlder,
+  loadingOlder,
+  onLoadOlder,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -120,6 +138,12 @@ export function EventStream({
   const stickRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
   const initialJumpDoneRef = useRef(false);
+  // X1A-72.3 — pagination scroll anchor. Before older events are
+  // prepended, record (scrollHeight, scrollTop). After the DOM grows,
+  // restore scrollTop = scrollTop + Δheight so the viewport stays
+  // anchored to whatever the user was reading instead of jumping.
+  const preLoadOlderHeightRef = useRef<number | null>(null);
+  const eventsLengthRef = useRef(events.length);
 
   const isNearBottom = useCallback((): boolean => {
     const el = scrollRef.current;
@@ -128,10 +152,26 @@ export function EventStream({
   }, []);
 
   const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
     const near = isNearBottom();
     stickRef.current = near;
     setAtBottom((prev) => (prev === near ? prev : near));
-  }, [isNearBottom]);
+    // X1A-72.3 — auto-fetch older events when the user scrolls to the
+    // top. Skip if we're still doing the initial mount-jump (scrollTop
+    // hasn't settled), if no more is known to exist, or if a fetch
+    // is in flight.
+    if (
+      initialJumpDoneRef.current &&
+      hasOlder &&
+      !loadingOlder &&
+      onLoadOlder &&
+      el.scrollTop < NEAR_TOP_PX
+    ) {
+      preLoadOlderHeightRef.current = el.scrollHeight;
+      onLoadOlder();
+    }
+  }, [isNearBottom, hasOlder, loadingOlder, onLoadOlder]);
 
   const jumpToBottom = useCallback((smooth: boolean) => {
     const el = scrollRef.current;
@@ -159,12 +199,27 @@ export function EventStream({
   // Follow new events ONLY if the user is already near the bottom.
   // This is the fix for the screen-grab: previously this effect always
   // scrollIntoView'd, yanking the viewport on every incoming message.
-  useEffect(() => {
+  // X1A-72.3 — also handles the load-older case: if a pre-prepend
+  // scrollHeight was recorded, the events array grew via prepend (not
+  // append), so adjust scrollTop by the height delta to keep the
+  // viewport anchored on whatever the user was reading.
+  useLayoutEffect(() => {
     if (!initialJumpDoneRef.current) return;
-    if (!stickRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    const grew = events.length > eventsLengthRef.current;
+    eventsLengthRef.current = events.length;
+    if (preLoadOlderHeightRef.current !== null) {
+      // Prepend path: restore the user's position relative to the
+      // bottom of the loaded window so the viewport doesn't jump.
+      const delta = el.scrollHeight - preLoadOlderHeightRef.current;
+      preLoadOlderHeightRef.current = null;
+      if (delta > 0) el.scrollTop = el.scrollTop + delta;
+      return;
+    }
+    if (grew && stickRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [events.length]);
 
   // Fall back to the inline grouper when the parent didn't supply
@@ -266,6 +321,14 @@ export function EventStream({
         className="flex-1 overflow-y-auto"
         data-testid={verbose ? "event-stream-verbose" : "event-stream-compact"}
       >
+        {(hasOlder || loadingOlder) && (
+          <div
+            className="py-2 text-center text-[11px] text-fg-faint"
+            data-testid="load-older-indicator"
+          >
+            {loadingOlder ? "Loading older events…" : "↑ Scroll up to load older"}
+          </div>
+        )}
         {inner}
         {tailSlot}
         <div ref={bottomRef} />
