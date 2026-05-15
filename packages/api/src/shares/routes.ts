@@ -18,6 +18,7 @@ import {
   type AdminGuard,
 } from "@x1agent/domain-sessions";
 import { getMimeType, readShareFile } from "./storage.js";
+import { buildStoredZip } from "./zip.js";
 
 /**
  * Workspace-scoped read side of the share subsystem.
@@ -255,6 +256,95 @@ export function createWorkspaceShareRoutes(
     });
   });
 
+  // Bundle every file in the share as a zip. The UI's "download" icon
+  // points here so an operator can pull the whole share in one click
+  // rather than fetching files one at a time.
+  //
+  // Source of truth for the file list is the share's `agent.share` event
+  // payload (`files[].path`), not the on-disk directory — that way we
+  // never include stray bytes (e.g. partially-written transient files)
+  // and the bundle is reproducible from the persisted event.
+  //
+  // Declared BEFORE the `/:shareId/*` wildcard so Hono matches it
+  // ahead of the per-file proxy.
+  app.get("/:shareId/_download.zip", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const shareId = c.req.param("shareId")!;
+    const sessionId = scope.session.id;
+
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    let title = "share";
+    let files: { path: string }[] = [];
+    for (const e of events) {
+      if (e.type !== "agent.share") continue;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      if (payload?.share_id !== shareId) continue;
+      const fs = Array.isArray(payload.files) ? payload.files : [];
+      files = fs
+        .map((f) => (f && typeof f === "object" ? (f as { path?: unknown }) : null))
+        .filter((f): f is { path: string } => !!f && typeof f.path === "string");
+      if (typeof payload.title === "string" && payload.title) {
+        title = payload.title;
+      }
+    }
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const entries: { path: string; bytes: Buffer }[] = [];
+    if (cfg.gcsArtifactsBucket) {
+      const token = await fetchGcsToken();
+      if (!token) {
+        return c.json({ error: "gcs_auth_failed" }, 500);
+      }
+      for (const f of files) {
+        const objectName = `sessions/${sessionId}/shares/${shareId}/${f.path}`;
+        const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${cfg.gcsArtifactsBucket}/o/${encodeURIComponent(objectName)}?alt=media`;
+        const res = await fetch(gcsUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        entries.push({
+          path: f.path,
+          bytes: Buffer.from(await res.arrayBuffer()),
+        });
+      }
+    } else {
+      for (const f of files) {
+        const bytes = readShareFile(sessionId, shareId, f.path);
+        if (!bytes) continue;
+        entries.push({ path: f.path, bytes });
+      }
+    }
+    if (entries.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const zip = buildStoredZip(entries);
+    const safeTitle = title.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) ||
+      "share";
+    return new Response(new Uint8Array(zip), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${safeTitle}.zip"`,
+        "Content-Length": String(zip.length),
+        "Cache-Control": "no-store",
+      },
+    });
+  });
+
   // Stream a single file out of the share. For sites (share_type: "site")
   // this serves the HTML entry point and all its static assets; for all
   // other types the UI fetches a single known path.
@@ -449,6 +539,19 @@ export function createWorkspaceSharesIndexRoutes(
  * pointless when the caller wants JSON, and base64 is the lowest-fric
  * encoding for binary shares (PDF, PNG) over a JSON channel.
  */
+async function fetchGcsToken(): Promise<string | null> {
+  try {
+    const tokenRes = await fetch(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      { headers: { "Metadata-Flavor": "Google" } },
+    );
+    const tokenBody = (await tokenRes.json()) as { access_token?: string };
+    return tokenBody.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function readFromGcsAsJson(
   bucket: string,
   sessionId: string,

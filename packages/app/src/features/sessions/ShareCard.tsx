@@ -208,12 +208,12 @@ function ShareHeader({
   onToggleMaximize?: () => void;
 }) {
   const Icon = TYPE_ICONS[payload.share_type] ?? FileText;
-  const downloadPath = payload.entry_point || payload.files[0]?.path || "";
+  // Whole-share zip — see ArtifactPanel header for the same rationale.
   const downloadUrl = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
-    downloadPath,
+    "_download.zip",
     shareContentVersion(payload),
   );
 
