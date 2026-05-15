@@ -225,12 +225,25 @@ export function render(input: RenderInput): RenderResult {
     `providers:\n` +
     `  graph: ${q(env.get("PROVIDER_GRAPH") || "none")}\n` +
     `  vector: ${q(env.get("PROVIDER_VECTOR") || "none")}\n` +
+    `  files: ${q(env.get("PROVIDER_FILES") || "none")}\n` +
+    `  docs: ${q(env.get("PROVIDER_DOCS") || "none")}\n` +
+    `  sheets: ${q(env.get("PROVIDER_SHEETS") || "none")}\n` +
+    `  calendar: ${q(env.get("PROVIDER_CALENDAR") || "none")}\n` +
+    `  email: ${q(env.get("PROVIDER_EMAIL") || "none")}\n` +
     // Per-kind image repos — pinned to the same Artifact Registry as
     // api/app. The graph-surrealdb image is built + pushed by the
     // install orchestrator's build phase; tag tracks api.
     `  graphSurrealdb:\n` +
     `    image:\n` +
     `      repository: ${q(arRepo + "/graph-surrealdb")}\n` +
+    `      tag: ${q(tag)}\n` +
+    // google-workspace provider — one Deployment subscribes to all
+    // five Google domains (Drive/Docs/Sheets/Calendar/Gmail). The
+    // chart only renders the Deployment when any of providers.{files,
+    // docs,sheets,calendar,email} is "googleworkspace".
+    `  googleWorkspace:\n` +
+    `    image:\n` +
+    `      repository: ${q(arRepo + "/google-workspace")}\n` +
     `      tag: ${q(tag)}\n` +
     // Override the chart's literal default with the install-config value.
     // Generated + rotated via deploy/scripts/rotate-surrealdb-password.sh.
