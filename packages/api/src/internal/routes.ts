@@ -106,6 +106,14 @@ export interface InternalRoutesConfig {
    */
   sql?: import("postgres").Sql<Record<string, unknown>>;
   /**
+   * Durable preview environment store. When present, the preview-deploy
+   * route upserts a row at two points: status=provisioning before the
+   * NATS request, status=ready|failed after the reply lands. The agent
+   * sees the same response shape as before; the row is a side effect
+   * the UI consumes through the workspace `/preview-environments` list.
+   */
+  previewEnvironments?: import("@x1agent/domain-preview-environments").PreviewEnvironmentRepository;
+  /**
    * User-scoped OAuth token substrate. When present, exposes
    * looks up the user's stored grant for a provider, refreshes the
    * access token if it's near expiry, returns a fresh access_token.
@@ -974,6 +982,69 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       const result = jc.decode(reply.data) as
         | { ok: true; url: string; slug: string; image: string; job_name: string }
         | { ok: false; code: string; message: string };
+
+      // Side-effect: upsert the durable preview environment row so the
+      // workspace UI's Environments list reflects this deploy. We only
+      // fire this when the repository is wired in composition; older
+      // installs without it keep the old "URL returned, nothing
+      // persisted" shape and get a UI list once they upgrade.
+      if (cfg.previewEnvironments) {
+        try {
+          const { upsertPreviewEnvironment } = await import(
+            "@x1agent/domain-preview-environments"
+          );
+          if (result.ok) {
+            await upsertPreviewEnvironment(
+              { repository: cfg.previewEnvironments },
+              {
+                workspaceId: agent.workspaceId,
+                slug: result.slug,
+                repoFullName: body.repo_full_name,
+                branch: body.branch,
+                deploy: {
+                  status: "ready",
+                  sha: body.commit_sha,
+                  url: result.url,
+                  imageRef: result.image,
+                },
+              },
+            );
+          } else {
+            // Failure path — we don't always know the slug (the spec may
+            // have failed to parse before metadata.name was read). Only
+            // record the failed deploy when the provider hands us a
+            // slug we can key on; otherwise the agent's failure reply
+            // is enough — there's no row to attach the failure to yet.
+            const failed = result as
+              & { ok: false; code: string; message: string }
+              & { slug?: string };
+            if (failed.slug) {
+              await upsertPreviewEnvironment(
+                { repository: cfg.previewEnvironments },
+                {
+                  workspaceId: agent.workspaceId,
+                  slug: failed.slug,
+                  repoFullName: body.repo_full_name,
+                  branch: body.branch,
+                  deploy: {
+                    status: "failed",
+                    sha: body.commit_sha,
+                    statusReason: result.message,
+                  },
+                },
+              );
+            }
+          }
+        } catch (upsertErr) {
+          // Persistence of the side-effect must not block the agent's
+          // response. Log + swallow.
+          console.warn(
+            "[preview-deploy] upsert failed:",
+            (upsertErr as Error).message,
+          );
+        }
+      }
+
       if (!result.ok) {
         const status =
           result.code === "invalid_preview_spec" ? 400 : 502;

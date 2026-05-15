@@ -36,6 +36,10 @@ import {
   createAgentRoutes,
 } from "@x1agent/domain-agents";
 import {
+  PostgresPreviewEnvironmentRepository,
+  createPreviewEnvironmentRoutes,
+} from "@x1agent/domain-preview-environments";
+import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
   PostgresTokenUsageRepository,
@@ -180,6 +184,8 @@ export interface Composition {
   /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
   workspaceCreateRoutes: Hono;
   agentRoutes: Hono;
+  /** /api/workspaces/:slug/preview-environments — durable preview env list + admin mutations. */
+  previewEnvironmentRoutes: Hono;
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
   workspaceTokenUsageRoutes: Hono;
@@ -515,6 +521,22 @@ export function compose(env: CompositionEnv): Composition {
     return w?.id ?? null;
   };
 
+  const previewEnvironments = new PostgresPreviewEnvironmentRepository(env.sql);
+  const previewEnvironmentRoutes = createPreviewEnvironmentRoutes({
+    repository: previewEnvironments,
+    adminGuard: {
+      requireWorkspaceAdmin: async (workspaceId, userId) => {
+        await new WorkspaceAdminGuard(memberships).requireWorkspaceAdmin(
+          workspaceId,
+          userId,
+        );
+      },
+    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
   const agentRoutes = createAgentRoutes({
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
@@ -829,6 +851,9 @@ export function compose(env: CompositionEnv): Composition {
     // X1A-118 — parent-initiated cancel routed through the internal
     // /cancel-by-parent route shares the same terminator as Pause.
     jobs: jobTerminator,
+    // Durable preview environment side-effect on preview-deploy.
+    // Same repository the workspace UI list endpoint reads from.
+    previewEnvironments,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -1360,6 +1385,7 @@ export function compose(env: CompositionEnv): Composition {
     publicInvitationRoutes,
     workspaceCreateRoutes,
     agentRoutes,
+    previewEnvironmentRoutes,
     sessionRoutes,
     workspaceSessionRoutes,
     workspaceTokenUsageRoutes,

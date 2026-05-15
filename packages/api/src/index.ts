@@ -255,6 +255,7 @@ const {
   workspaceCreateRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  previewEnvironmentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
   workspaceTokenUsageRoutes,
@@ -441,6 +442,10 @@ app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route(
+  "/api/workspaces/:slug/preview-environments",
+  previewEnvironmentRoutes,
+);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);

@@ -15,3 +15,7 @@ export * from "./application/get-preview-environment.js";
 
 // Adapters
 export { PostgresPreviewEnvironmentRepository } from "./adapters/postgres/postgres-preview-environment-repository.js";
+export {
+  createPreviewEnvironmentRoutes,
+  type PreviewEnvironmentRoutesConfig,
+} from "./adapters/hono/routes.js";
