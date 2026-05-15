@@ -1,3 +1,24 @@
+# [1.30.0](https://github.com/x1agent/x1agent/compare/v1.29.0...v1.30.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **chart:** allow session sidecar to publish on x1.provider.{graph,vector}.> ([5b901d9](https://github.com/x1agent/x1agent/commit/5b901d979e72c3d9208c44dbf598758ff1e3fb00))
+* **chart:** include packages/domains/ in messaging-slack image ([e848059](https://github.com/x1agent/x1agent/commit/e8480598c411181ebd8011b2624783c5c3022fd6))
+* **chart:** widen session sidecar publish allowlist to all x1.provider.> ([b1029d5](https://github.com/x1agent/x1agent/commit/b1029d5123d99d91476dd965005d4bf42450a70a))
+* **mise:** collapse duplicate `tasks.script` into the per-deployment runner ([c52f6a1](https://github.com/x1agent/x1agent/commit/c52f6a10f27d7ad789c05513ca4f419544098d31))
+
+
+### Features
+
+* **agent:** cancel_session + share_to_child MCP tools, suppress share-comment timeline emit ([17f4b89](https://github.com/x1agent/x1agent/commit/17f4b89cc3bdb9eb9d16abb1291faac6b05acd75))
+* **api:** orchestrator MCP fan-out + silent-worker reaper + wake envelope ([a4b2019](https://github.com/x1agent/x1agent/commit/a4b20193019703fdf9a39ac87c3f93ff369a4784))
+* **chart:** ship google-workspace provider as a chart-rendered Deployment ([3850f23](https://github.com/x1agent/x1agent/commit/3850f233f5306d0214738b6819c063810ac34c9a))
+* **chart:** ship messaging-slack provider as a chart-rendered Deployment ([ab96046](https://github.com/x1agent/x1agent/commit/ab96046bc7e1990b82775982ccc06987e1417107))
+* **mise:** add `mise run script <name>` for per-deployment ad-hoc scripts ([9d46daa](https://github.com/x1agent/x1agent/commit/9d46daa694c30ec72e969ba53a857888f341b3a3))
+* **sessions:** parent-initiated cancelChildSession use case ([f478079](https://github.com/x1agent/x1agent/commit/f47807941b4df2b4f298c58219ceb1af1a46e806))
+* **sidecar:** cancel_session + share_to_child + read_share + wake envelope ([6d72320](https://github.com/x1agent/x1agent/commit/6d723206d9b8a694dc68c854c0e90eb00adf6e6d))
+
 # [1.29.0](https://github.com/x1agent/x1agent/compare/v1.28.0...v1.29.0) (2026-05-15)
 
 
