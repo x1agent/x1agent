@@ -13,6 +13,7 @@ import {
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
 import { ComposerShell } from "./ComposerShell";
+import { CommentBody } from "./CommentBody";
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -627,10 +628,10 @@ function ClippableBody({
     <div>
       <div
         ref={ref}
-        className="leading-snug text-fg whitespace-pre-wrap"
+        className="leading-snug text-fg"
         style={expanded ? undefined : collapsedStyle}
       >
-        {body}
+        <CommentBody body={body} />
       </div>
       {overflows && (
         <button

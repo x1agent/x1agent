@@ -9,6 +9,7 @@ import {
 } from "../../stores/shareCommentsStore";
 import { useAuthStore } from "../../stores/authStore";
 import { TYPE_ICONS, formatSize, type AgentSharePayload } from "./ShareCard";
+import { CommentBody } from "./CommentBody";
 
 // Stable module-level empty array — see CLAUDE.md "Frontend state management"
 // selector foot-gun rule. Returning a fresh `[]` inside a zustand selector
@@ -228,9 +229,13 @@ function ThreadSnippets({
                   "Open full view →" link below is the right escape
                   hatch for long bodies — two competing click targets
                   for "show me more" would be confusing. */}
-              {latest.body.length > 240
-                ? latest.body.slice(0, 240) + "…"
-                : latest.body}
+              <CommentBody
+                body={
+                  latest.body.length > 240
+                    ? latest.body.slice(0, 240) + "…"
+                    : latest.body
+                }
+              />
             </div>
           </div>
         );
