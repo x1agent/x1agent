@@ -152,6 +152,7 @@ import {
   WorkspaceAdminGuard,
   WorkspaceReaderAdapter,
 } from "./invitation-adapters.js";
+import { EmailListPlatformAdminGuard } from "./platform-admin-guard.js";
 import { createInternalRoutes } from "../internal/routes.js";
 import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
 import { createWorkspaceMembersRoutes } from "../workspace-members/routes.js";
@@ -269,6 +270,10 @@ export interface Composition {
    * resolve "is this session visible to this signed-in user" without
    * going through a route adapter. */
   sessionShares: PostgresSessionShareRepository;
+  /** Platform-admin bypass for session/share visibility. Exposed so the
+   * WS bridge can plumb it through resolveSessionVisibility without
+   * rebuilding the adapter. */
+  platformAdminGuard: import("@x1agent/domain-sessions").PlatformAdminGuard;
   /** Doc-commenting persistence — exposed so the comment-wake subscriber
    * can re-verify NATS-supplied routing fields against the DB before
    * publishing a wake. Without this, an authenticated bus client could
@@ -373,6 +378,15 @@ export interface CompositionEnv {
 
 export function compose(env: CompositionEnv): Composition {
   const users = new PostgresUserRepository(env.sql);
+  // X1A-? — session visibility is gated by *platform* admin, not
+  // workspace admin. A workspace admin manages the workspace (agents,
+  // members, settings) but does not bypass per-user filters on
+  // session/share visibility. One shared instance — same admin list,
+  // same user lookup, reused across every visibility-consuming route.
+  const platformAdminGuard = new EmailListPlatformAdminGuard(
+    env.platformAdmins,
+    users,
+  );
   const persons = new PostgresPersonRepository(env.sql);
   const linkAttempts = new PostgresLinkAttemptStore(env.sql);
   const loginStates = new PostgresOAuthLoginStateStore(env.sql);
@@ -555,6 +569,9 @@ export function compose(env: CompositionEnv): Composition {
     sessions,
     events: sessionEvents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    // Platform admins (and ONLY platform admins) bypass the per-user
+    // session visibility filter. Workspace admins do not.
+    platformAdminGuard,
     // Lets non-admin sharees read sessions they were granted; without
     // this the only ways through loadScoped are owner + admin.
     shares: sessionShares,
@@ -637,6 +654,7 @@ export function compose(env: CompositionEnv): Composition {
     events: sessionEvents,
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    platformAdminGuard,
     // Lets non-admin sharees fetch the share index + artefacts for
     // sessions granted to them. Mirrors the wiring on
     // workspaceSessionRoutes' loadScoped.
@@ -655,6 +673,7 @@ export function compose(env: CompositionEnv): Composition {
   const workspaceSharesIndexRoutes = createWorkspaceSharesIndexRoutes({
     sql: env.sql,
     adminGuard: new WorkspaceAdminGuard(memberships),
+    platformAdminGuard,
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
@@ -1412,6 +1431,7 @@ export function compose(env: CompositionEnv): Composition {
     sessions,
     memberships,
     sessionShares,
+    platformAdminGuard,
     shareComments,
     permissionGrants,
     collections: collectionsRepo,

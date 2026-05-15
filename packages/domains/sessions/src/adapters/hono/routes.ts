@@ -47,6 +47,14 @@ export interface SessionRoutesConfig {
   events: SessionEventRepository;
   adminGuard: AdminGuard;
   /**
+   * Platform-admin bypass. When provided, platform admins see every
+   * session in the workspace list and can read any session by id.
+   * Optional; when absent every read goes through the per-user filter.
+   * Workspace admin alone is not enough — that role is for managing
+   * the workspace, not reading every user's session history.
+   */
+  platformAdminGuard?: import("../../ports/platform-admin-guard.js").PlatformAdminGuard;
+  /**
    * Optional — when provided, session detail / events allow owner +
    * sharees through, not just workspace admins. Required for the
    * "sessions are private by default" policy. Composition root wires
@@ -318,7 +326,10 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     // else sees only what they own + what's explicitly shared with
     // them. See `session-visibility.ts` for the rule + extension point.
     const listMode = await pickSessionListMode(
-      { adminGuard: cfg.adminGuard },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+      },
       actor.userId,
       wsId,
     );
@@ -414,7 +425,11 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     // Single visibility primitive — see `session-visibility.ts`. Add
     // group-share support there, not here.
     const decision = await resolveSessionVisibility(
-      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+        shares: cfg.shares,
+      },
       actorId,
       session,
       agent.workspaceId,

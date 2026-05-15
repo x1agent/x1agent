@@ -43,6 +43,7 @@ import {
   resolveSessionVisibility,
   type PostgresSessionRepository,
   type PostgresSessionShareRepository,
+  type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
 import type { PostgresAgentRepository } from "@x1agent/domain-agents";
 import type { PostgresMembershipRepository } from "@x1agent/domain-workspaces";
@@ -64,6 +65,8 @@ export interface WsBridgeDeps {
   agents: PostgresAgentRepository;
   memberships: PostgresMembershipRepository;
   sessionShares: PostgresSessionShareRepository;
+  /** Platform-admin bypass for session visibility. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   cookieName?: string;
 }
 
@@ -181,7 +184,11 @@ export function buildWsBridge(deps: WsBridgeDeps) {
     const agent = await deps.agents.findById(session.agentId);
     if (!agent) return { ok: false, code: "not_found" };
     const decision = await resolveSessionVisibility(
-      { adminGuard, shares: deps.sessionShares },
+      {
+        adminGuard,
+        platformAdminGuard: deps.platformAdminGuard,
+        shares: deps.sessionShares,
+      },
       actor,
       session,
       agent.workspaceId,

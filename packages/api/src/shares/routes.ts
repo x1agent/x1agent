@@ -16,6 +16,7 @@ import {
   type SessionRepository,
   type SessionShareRepository,
   type AdminGuard,
+  type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
 import { getMimeType, readShareFile } from "./storage.js";
 import { buildStoredZip } from "./zip.js";
@@ -40,6 +41,8 @@ export interface WorkspaceShareRoutesConfig {
   events: SessionEventRepository;
   agents: AgentRepository;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass for session visibility. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   /**
    * Per-user share grants — used by the visibility check so a non-admin
    * sharee can fetch the artefacts of a session granted to them. Without
@@ -121,7 +124,11 @@ export function createWorkspaceShareRoutes(
     // which meant a session owner could see the event stream but not
     // the share artefacts that the session emitted (X1A-9).
     const decision = await resolveSessionVisibility(
-      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+        shares: cfg.shares,
+      },
       actorId,
       session,
       agent.workspaceId,
@@ -431,6 +438,8 @@ export function createWorkspaceShareRoutes(
 export interface WorkspaceSharesIndexConfig {
   sql: postgres.Sql<Record<string, unknown>>;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -467,7 +476,10 @@ export function createWorkspaceSharesIndexRoutes(
     // index on (session_id, user_id) means the LEFT JOIN cannot fan
     // out, so DISTINCT isn't needed.
     const listMode = await pickSessionListMode(
-      { adminGuard: cfg.adminGuard },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+      },
       actor.userId,
       wsId,
     );
