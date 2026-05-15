@@ -367,6 +367,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // stays canonical: paste the URL → someone else lands on the same view.
   const showArtifact = useArtifactPanelStore((s) => s.show);
   const maximizeArtifact = useArtifactPanelStore((s) => s.maximize);
+  const setCommentsCollapsed = useArtifactPanelStore(
+    (s) => s.setCommentsCollapsed,
+  );
   const deepLinkAppliedRef = useRef(false);
   useEffect(() => {
     if (deepLinkAppliedRef.current) return;
@@ -387,6 +390,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       artifact: evt.payload as AgentSharePayload,
     });
     if (params.get("mode") === "fullscreen") maximizeArtifact();
+    // Comments sidebar starts collapsed when the user navigates directly
+    // to a share (deep-link or fullscreen). They opened the share to
+    // read it; if they want comments, they can expand from the gutter.
+    setCommentsCollapsed(true);
     // Scroll the matching share pill to the center of the timeline so
     // the user lands on the share they followed in, not at the bottom
     // of the conversation. The pill is tagged with `data-share-id` by
@@ -399,7 +406,14 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       );
       if (el) el.scrollIntoView({ behavior: "auto", block: "center" });
     });
-  }, [events, sessionId, workspaceSlug, showArtifact, maximizeArtifact]);
+  }, [
+    events,
+    sessionId,
+    workspaceSlug,
+    showArtifact,
+    maximizeArtifact,
+    setCommentsCollapsed,
+  ]);
 
   const disabled =
     !session ||
