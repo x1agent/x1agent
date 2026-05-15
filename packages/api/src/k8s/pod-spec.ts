@@ -360,6 +360,12 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
   // bind it immediately. Keep the names coupled so the reaper can
   // find the PVC from a known Job name.
   const pvcName = jobName;
+  // X1A-28a — parallel workers must NEVER share a /workspace mount.
+  // Every worker session gets its own pod with its own emptyDir, so
+  // concurrent `bun install` / `git clone` / writeFile across siblings
+  // can't deadlock on a shared filesystem. Orchestrators get a PVC so
+  // the SDK transcript survives pod restarts; workers are disposable
+  // and a fresh emptyDir per pod is the right shape.
   const workspaceVolume = isOrchestrator
     ? {
         name: "workspace",

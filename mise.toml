@@ -499,30 +499,22 @@ run = "claude --print .claude/commands/review.md"
 description = "Run commitlint on the last commit message"
 run = "npx --no-install commitlint --last"
 
-# Operator scratchpad — run any gitignored shell script under installs/.
-# Names resolve to installs/<name> or installs/<name>.sh. Extra args after
-# the name are forwarded to the script verbatim.
-#   mise run script recovery
-#   mise run script recovery --dry-run
+# Per-deployment script runner. Each install owns a gitignored
+# `installs/<deployment>/scripts/` folder for ad-hoc kubectl/psql/
+# surreal diagnostics and data-repair shims that don't belong in
+# the public chart. Invoke by name:
+#
+#   mise run script <name> [args...]   # e.g. mise run script find-bad-collection-handles
+#
+# Resolves the active deployment via X1AGENT_DEPLOYMENT env or the
+# single non-example file under installs/. Exports KUBECONFIG +
+# NAMESPACE + X1AGENT_DEPLOYMENT for the script; inner scripts can
+# re-invoke existing affordances like `mise run psql:prod` if they
+# want the standard psql-into-postgres path. Scripts are isolated
+# by directory: if the active deployment is x1agent.com but you ask
+# for a script that only exists under x1agent.atomic.health/scripts/,
+# the runner errors out — no accidental cross-cluster execution.
 [tasks.script]
-description = "Run a gitignored shell script from installs/ (operator scratchpad)"
-run = """
-name="{{arg(name='name')}}"
-extra="{{arg(name='args', var=true, default='')}}"
-if [ -z "$name" ]; then
-  echo "usage: mise run script <name> [args...]" >&2
-  echo "available:" >&2
-  find installs -maxdepth 2 -name "*.sh" -type f 2>/dev/null | sed 's|^|  |' >&2 || true
-  exit 2
-fi
-script="installs/${name}"
-if [ ! -f "$script" ]; then
-  if [ -f "${script}.sh" ]; then
-    script="${script}.sh"
-  else
-    echo "not found: installs/${name} (or .sh)" >&2
-    exit 2
-  fi
-fi
-exec bash "$script" $extra
-"""
+description = "Run a per-deployment script under installs/<deployment>/scripts/ with cluster credentials wired"
+env = { KUBECONFIG = "" }
+run = "deploy/scripts/run-installs-script.sh {{arg(name='args', var=true, default='')}}"

@@ -61,6 +61,61 @@ export function readShareFile(
   return readFileSync(full);
 }
 
+/**
+ * Per-session staging area for X1A-63 (`share_to_child`). Each stage
+ * has its own id under the child's directory so a re-stage at the
+ * same dest_path doesn't clobber a previous transfer mid-fetch.
+ *
+ * Layout:
+ *   sessions/{child_session_id}/staging/{stage_id}/{rel_path...}
+ */
+export const stagingDir = (): string =>
+  process.env.X1_STAGING_DIR || sharesDir();
+
+export function writeStagingFiles(
+  childSessionId: string,
+  stageId: string,
+  files: readonly ShareFilePayload[],
+): { totalSize: number; paths: string[] } {
+  const root = resolve(
+    stagingDir(),
+    "sessions",
+    childSessionId,
+    "staging",
+    stageId,
+  );
+  mkdirSync(root, { recursive: true });
+  let totalSize = 0;
+  const paths: string[] = [];
+  for (const file of files) {
+    const full = safeJoin(root, file.path);
+    if (!full) continue;
+    mkdirSync(dirname(full), { recursive: true });
+    const buf = Buffer.from(file.content, "base64");
+    writeFileSync(full, buf);
+    totalSize += buf.length;
+    paths.push(file.path);
+  }
+  return { totalSize, paths };
+}
+
+export function readStagingFile(
+  childSessionId: string,
+  stageId: string,
+  filePath: string,
+): Buffer | null {
+  const root = resolve(
+    stagingDir(),
+    "sessions",
+    childSessionId,
+    "staging",
+    stageId,
+  );
+  const full = safeJoin(root, filePath);
+  if (!full || !existsSync(full)) return null;
+  return readFileSync(full);
+}
+
 const MIME_BY_EXT: Record<string, string> = {
   html: "text/html",
   htm: "text/html",

@@ -1,0 +1,113 @@
+{{- /*
+Google Workspace provider — Drive / Docs / Sheets / Calendar / Gmail.
+
+One Deployment subscribes to five NATS subject trees:
+
+  x1.provider.files.*       — Drive read + write paths
+  x1.provider.docs.*        — Docs read + edit
+  x1.provider.sheets.*      — Sheets read + edit
+  x1.provider.calendar.*    — Calendar list / create / update / delete
+  x1.provider.email.*       — Gmail list / get / send / trash
+
+Auth model: per-call user OAuth. The provider holds NO long-lived
+Google tokens — every outbound Google API call mints a fresh
+access_token via the api's `/api/internal/user-oauth-token` route
+(scoped to the calling session's user + provider). That route needs
+GOOGLE_OAUTH_CLIENT_ID + _SECRET (read from the ESO-synced
+x1agent-secrets bundle) plus API_INTERNAL_TOKEN to authenticate the
+provider to the api.
+
+Render gating: any of providers.{files,docs,sheets,calendar,email}
+set to "googleworkspace" enables this Deployment. The api capability
+gates (PROVIDER_FILES, PROVIDER_DOCS, …) are set independently in
+the install file — when this template renders, those env vars must
+also be set so the api advertises the matching MCP tools to agents.
+*/}}
+{{- $gw := or
+    (eq (default "none" .Values.providers.files) "googleworkspace")
+    (eq (default "none" .Values.providers.docs) "googleworkspace")
+    (eq (default "none" .Values.providers.sheets) "googleworkspace")
+    (eq (default "none" .Values.providers.calendar) "googleworkspace")
+    (eq (default "none" .Values.providers.email) "googleworkspace")
+}}
+{{- if $gw }}
+---
+# Headless Service — gives the Deployment a stable DNS entry inside
+# the cluster, mirroring graph-surrealdb's shape. No external traffic
+# reaches the provider; all RPC is over NATS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: google-workspace
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "google-workspace") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: google-workspace
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.providers.googleWorkspace.replicas | default 1 }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "google-workspace") | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "google-workspace") | nindent 8 }}
+    spec:
+      containers:
+        - name: provider
+          image: "{{ .Values.providers.googleWorkspace.image.repository }}:{{ .Values.providers.googleWorkspace.image.tag | default .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.providers.googleWorkspace.image.pullPolicy | default "Always" | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: tls://nats:4222
+            # Same mTLS pattern as graph-surrealdb — see api.yaml.
+            # Cert-manager issues nats-provider-client-tls; the Secret
+            # items projection renames tls.* → client.* so the
+            # provider's hardcoded /etc/nats-tls paths work unchanged.
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            # Per-call OAuth-token mint endpoint. Provider POSTs here
+            # with the session's user_id; api refreshes the user's
+            # stored Google refresh_token if expiring and returns a
+            # fresh access_token. Provider never persists the token.
+            - name: X1_API_URL
+              value: http://api:30001
+          # API_INTERNAL_TOKEN + GOOGLE_OAUTH_CLIENT_ID +
+          # GOOGLE_OAUTH_CLIENT_SECRET come from the ESO-synced
+          # x1agent-secrets bundle. Same Secret the api consumes; the
+          # bundle is workspace-blind so a single ESO sync covers
+          # every component that needs the OAuth client credentials.
+          envFrom:
+            - secretRef:
+                name: x1agent-secrets
+          resources: {{- toYaml .Values.providers.googleWorkspace.resources | nindent 12 }}
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-provider-client-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: client.crt
+              - key: tls.key
+                path: client.key
+{{- end }}

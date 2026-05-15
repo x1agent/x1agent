@@ -526,6 +526,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "cancel_session",
+      description:
+        "Cancel a child session you spawned. Use when the child has gone off-task, hit an unrecoverable error, or is no longer needed. Idempotent — a second cancel on the same child returns `cancelled: false` instead of erroring, so racing state-change wakes from the watchdog won't trip you up. The K8s Job backing the child is also deleted so the pod actually stops; without this a long-running stuck child keeps burning tokens. Returns `{ ok, cancelled, session: { id, status, completed_at } }`. A 403 means the session isn't yours to cancel (i.e. wasn't spawned by you). A 404 means the session id doesn't exist.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: {
+            type: "string",
+            description:
+              "The session id returned by spawn_session — the child you want to terminate.",
+          },
+          reason: {
+            type: "string",
+            description:
+              "Optional short note recorded on the session.cancelled_by_parent event. Helps the timeline reader understand why the orchestrator pulled the plug.",
+          },
+        },
+        required: ["child_session_id"],
+      },
+    },
+    {
+      name: "share_to_child",
+      description:
+        "Snapshot a file or folder from THIS session's /workspace into a child session's /workspace at the named dest_path. Snapshot semantics ONLY — the child gets a copy of the bytes at the moment of the call; subsequent edits in this session do NOT propagate. A second call with the same source_path re-stages a fresh snapshot at the same dest. Use this to hand a child agent the artifacts it needs to work on — a generated spec, a CSV, a directory of code — without committing through git. Returns `{ ok, files, total_size }` on success. The child must already exist and have been spawned by you; a 403 means the session isn't yours.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: {
+            type: "string",
+            description: "The child session id (returned by spawn_session).",
+          },
+          source_path: {
+            type: "string",
+            description:
+              "Path under /workspace to copy (file or directory). Same rules as the `share` tool — relative or `/workspace/...` accepted; `..` rejected.",
+          },
+          dest_path: {
+            type: "string",
+            description:
+              "Optional destination path under the child's /workspace. Defaults to the source path's basename. Example: source_path='out/report.md', dest_path='inputs/report.md'.",
+          },
+        },
+        required: ["child_session_id", "source_path"],
+      },
+    },
+    {
       name: "preview_deploy",
       description:
         "Deploy the current branch of an attached repo to a preview environment. The platform reads `.x1agent/preview.yaml` at the root of the repo's checked-out tree at commit_sha, builds a Docker image via Kaniko, pushes it to the in-cluster registry, applies a Deployment + Service + Ingress, and returns the public URL. Blocks until the preview is reachable (usually 1–3 minutes). Returns { ok, url, slug, image } on success or { ok: false, code, message } on failure. The resulting URL is stable for the lifetime of the preview and is what humans will bookmark — prefer writing the URL into your session summary share.",
@@ -1291,6 +1337,70 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `spawn_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "cancel_session": {
+      try {
+        const res = await fetch(`${sidecarUrl}/cancel_session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_session_id: String(a?.child_session_id ?? ""),
+            reason: typeof a?.reason === "string" ? a.reason : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `cancel_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "share_to_child": {
+      try {
+        const res = await fetch(`${sidecarUrl}/share_to_child`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_session_id: String(a?.child_session_id ?? ""),
+            source_path: String(a?.source_path ?? ""),
+            dest_path:
+              typeof a?.dest_path === "string" && a.dest_path.trim() !== ""
+                ? a.dest_path
+                : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `share_to_child failed: ${(err as Error).message}`,
             },
           ],
           isError: true,

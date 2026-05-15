@@ -313,9 +313,17 @@ config:
 providers:
   # Singleton domains. "none" disables the capability + skips the
   # provider Deployment. Today the only graph kind is surrealdb, which
-  # also implements vector — so vector is locked to graph in v1.
+  # also implements vector — so vector is locked to graph in v1. The
+  # files/docs/sheets/calendar/email kinds are wired by the
+  # google-workspace provider (a single Deployment serves all five).
   graph: none
   vector: none
+  files: none
+  docs: none
+  sheets: none
+  calendar: none
+  email: none
+  messaging: none
 
   # Per-kind config — only the block matching `graph` is consumed. New
   # graph kinds (e.g. neo4j) add their own block here + a sibling
@@ -341,6 +349,35 @@ providers:
     storageClass: ""
     # Default for v1; rotate via GSM + ESO before going live.
     rootPassword: "x1agent-surreal-root"
+
+  # Google Workspace provider — Drive / Docs / Sheets / Calendar /
+  # Gmail. One Deployment subscribes to all five subject trees. Set
+  # any of providers.{files,docs,sheets,calendar,email} to
+  # "googleworkspace" to render the Deployment; per-domain api
+  # capability gates (PROVIDER_FILES, PROVIDER_DOCS, …) are set in
+  # the install file's config block.
+  googleWorkspace:
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+
+  # Messaging provider — Slack. One Deployment subscribes to
+  # x1.provider.messaging.* and posts to Slack via SLACK_BOT_TOKEN
+  # from the ESO-synced x1agent-secrets bundle.
+  messagingSlack:
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
 
 # ============================================================================
 # Telemetry — OpenTelemetry collector + per-pod env wiring

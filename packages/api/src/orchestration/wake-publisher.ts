@@ -454,6 +454,31 @@ export async function publishCommentAddedWake(
     payload: {
       text: formatCommentAddedWakeText(opts),
       kind: "comment_added",
+      // X1A-133 — SDK-native origin envelope. Share-comment wakes are
+      // a `channel` origin (the share-comments thread), distinct from
+      // peer/coordinator/task-notification slices (PRD 0007). The
+      // agent reads origin.kind/origin.server to classify the wake
+      // without parsing the prose preamble.
+      origin: {
+        kind: "channel" as const,
+        server: "share-comments",
+        // Channel identity — the thread is the smallest addressable
+        // unit; share is the parent. Carrying both lets the agent
+        // reply without re-fetching context.
+        share_id: opts.shareId,
+        thread_id: opts.threadId,
+      },
+      // X1A-133 — server-synthesised wake (vs human-typed user message).
+      // Forward-compatible plumbing the agent + harness can use today
+      // to skip pill rendering / timeline persistence; future slices
+      // (peer / coordinator / task-notification) reuse the same flag.
+      is_synthetic: true,
+      // X1A-133 — share-comments don't pill at all per the locked
+      // render contract; the agent decides whether to query the LLM
+      // based on `should_query`. v1 default: true (act on every new
+      // comment); later slices may toggle for shouldQuery:false drops.
+      priority: "normal" as const,
+      should_query: true,
       // X1A-103: comment_id IS the event_id for share-comment wakes.
       // Locked source→event_id mapping per the X1A-103 spec.
       event_id: opts.commentId,
@@ -508,6 +533,21 @@ export async function publishCommentResolvedWake(
     payload: {
       text: formatCommentResolvedWakeText(opts),
       kind: "comment_resolved",
+      // X1A-133 — same origin envelope as comment_added wakes (see
+      // publishCommentAddedWake for the contract). The harness routes
+      // resolve transitions through the share-comments channel.
+      origin: {
+        kind: "channel" as const,
+        server: "share-comments",
+        share_id: opts.shareId,
+        thread_id: opts.threadId,
+      },
+      is_synthetic: true,
+      priority: "normal" as const,
+      // Resolve transitions are informational — let the agent decide
+      // whether to react, but default to suppressing the LLM call
+      // since the thread is closed.
+      should_query: !opts.resolved,
       // X1A-103: msgId doubles as event_id (a resolve transition has
       // no comment_id of its own — the msgId IS the resolve event).
       event_id: msgId,
@@ -524,24 +564,22 @@ export async function publishCommentResolvedWake(
 export function formatCommentAddedWakeText(
   opts: CommentAddedWakeOpts,
 ): string {
-  const shortShare = opts.shareId.slice(0, 8);
-  const lines = [
-    `[wake: new comment on share ${shortShare}]`,
+  // X1A-133 — terse body, no `[wake: ...]` preamble. The harness
+  // classifies share-comment wakes by the SDK-native origin envelope,
+  // not by parsing a text prefix. The agent reads `origin` to know
+  // this is a channel/share-comments wake and reads `share_id` +
+  // `thread_id` from the envelope to scope its reply.
+  const lines: string[] = [
+    `${opts.authorDisplay} commented on this share:`,
     "",
-    `Author: ${opts.authorDisplay}`,
-    `Thread id: ${opts.threadId}`,
-    `Scope: ${opts.scope}`,
+    opts.body,
   ];
   if (opts.scope === "passage" && opts.anchorQuote) {
-    lines.push(`Anchor: "${opts.anchorQuote}"`);
-  } else {
-    lines.push("Anchor: On this share");
+    lines.push("", `Anchored to: "${opts.anchorQuote}"`);
   }
-  lines.push("", "Body:", opts.body);
   lines.push(
     "",
-    `To reply, call: share_comment(share_id="${opts.shareId}", thread_id="${opts.threadId}", text="...")`,
-    `To resolve, call: share_comment_resolve(thread_id="${opts.threadId}")`,
+    `Reply with share_comment(thread_id="${opts.threadId}", text="...")`,
   );
   return lines.join("\n");
 }
@@ -549,18 +587,12 @@ export function formatCommentAddedWakeText(
 export function formatCommentResolvedWakeText(
   opts: CommentResolvedWakeOpts,
 ): string {
-  const shortShare = opts.shareId.slice(0, 8);
+  // X1A-133 — same brevity rule as formatCommentAddedWakeText. The
+  // resolve transition is informational; share-comment renderers
+  // never pill it, and `should_query: false` on resolves keeps the
+  // agent from spending a turn on an empty acknowledgment.
   const verb = opts.resolved ? "resolved" : "reopened";
-  return [
-    `[wake: comment thread ${verb} on share ${shortShare}]`,
-    "",
-    `Thread id: ${opts.threadId}`,
-    `${opts.resolved ? "Resolved" : "Reopened"} by: ${opts.resolverDisplay}`,
-    "",
-    opts.resolved
-      ? "Nothing required — informational. The human (or another agent) marked this thread done."
-      : "Thread was previously resolved and is now reopened. The human (or another agent) may want a fresh look.",
-  ].join("\n");
+  return `${opts.resolverDisplay} ${verb} this comment thread.`;
 }
 
 /**
