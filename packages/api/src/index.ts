@@ -22,6 +22,7 @@ import {
   AnthropicSessionSummarizer,
   OpenAISessionSummarizer,
   StubSessionSummarizer,
+  VertexAnthropicSessionSummarizer,
   DEFAULT_SUMMARY_CONFIG,
   type SessionSummarizer,
   type MaybeUpdateSessionSummaryConfig,
@@ -41,32 +42,59 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
  * Build the SessionSummarizer for this process.
  *
  * Selection order:
- *   1. ANTHROPIC_API_KEY (when ANTHROPIC_PROVIDER is unset or "api_key").
- *   2. OPENAI_API_KEY — fallback so an install with an OpenAI key (e.g.
- *      the one already used for collection embeddings) can light up
- *      summaries without also acquiring an Anthropic key.
- *   3. Stub — no creds available; session.summary stays NULL and the UI
- *      falls back to the id hash.
+ *   1. Vertex Anthropic — when ANTHROPIC_PROVIDER="vertex" AND both
+ *      ANTHROPIC_VERTEX_PROJECT_ID and CLOUD_ML_REGION are set. The
+ *      Workload Identity token is minted per-call from the GCE
+ *      metadata server; if the pod isn't on GKE or the SA lacks
+ *      aiplatform.user, individual calls return null but the
+ *      composition still selects this path (other paths likely have
+ *      identical credentials and would also fail).
+ *   2. Anthropic direct API — when ANTHROPIC_API_KEY is set, regardless
+ *      of ANTHROPIC_PROVIDER. This is the fallback for a Vertex-
+ *      configured install whose Vertex creds aren't usable (e.g.
+ *      regional outage) but an API key is also wired.
+ *   3. OpenAI — when OPENAI_API_KEY is set. Lets a deployment using
+ *      OpenAI for embeddings light up summaries without acquiring
+ *      Anthropic credentials.
+ *   4. Stub — no creds anywhere; session.summary stays NULL and the
+ *      UI falls back to the id hash.
  *
- * Vertex routing for the Anthropic side is still on the X1A-7 follow-up
- * list; until that ships, a Vertex-only install can opt into OpenAI by
- * setting OPENAI_API_KEY.
+ * Selection is one-time at boot. Per-call failures inside the chosen
+ * summarizer are swallowed — a missed summary is not a fatal state
+ * and the next scheduled summary refresh tries again.
  */
 function buildSessionSummarizer(): SessionSummarizer {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const anthropicProvider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
-  if (
-    anthropicProvider === "api_key" &&
-    anthropicKey &&
-    anthropicKey.trim()
-  ) {
-    const model =
-      process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
-    console.log("[summarizer] using anthropic api-key path");
-    return new AnthropicSessionSummarizer({ apiKey: anthropicKey, model });
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const summaryModel = process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
+
+  if (anthropicProvider === "vertex") {
+    const projectId = process.env.ANTHROPIC_VERTEX_PROJECT_ID?.trim();
+    const region = process.env.CLOUD_ML_REGION?.trim();
+    if (projectId && region) {
+      console.log(
+        `[summarizer] using anthropic vertex path (project=${projectId} region=${region})`,
+      );
+      return new VertexAnthropicSessionSummarizer({
+        projectId,
+        region,
+        model: summaryModel,
+      });
+    }
+    console.warn(
+      "[summarizer] ANTHROPIC_PROVIDER=vertex but ANTHROPIC_VERTEX_PROJECT_ID / CLOUD_ML_REGION unset — falling through",
+    );
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY;
+  if (anthropicKey && anthropicKey.trim()) {
+    console.log("[summarizer] using anthropic api-key path");
+    return new AnthropicSessionSummarizer({
+      apiKey: anthropicKey,
+      model: summaryModel,
+    });
+  }
+
   if (openaiKey && openaiKey.trim()) {
     const model = process.env.OPENAI_SUMMARY_MODEL?.trim() || undefined;
     console.log("[summarizer] using openai api-key path");
@@ -74,7 +102,7 @@ function buildSessionSummarizer(): SessionSummarizer {
   }
 
   console.log(
-    "[summarizer] no anthropic or openai api key — session summaries disabled",
+    "[summarizer] no anthropic vertex / api key / openai key — session summaries disabled",
   );
   return new StubSessionSummarizer();
 }
