@@ -26,7 +26,7 @@ The preview provider lives at `packages/providers/preview/` and subscribes to `x
 Previews are off by default because the wildcard certificate requires DNS-01 ACME, which not every install has Cloud DNS for. To turn them on:
 
 1. **Set `PREVIEWS_ENABLED=true`** in `installs/<base-domain>.local`. Re-run `mise run install:plan` to regenerate the values file.
-2. **Switch to DNS-01 TLS** in the same install file: `TLS_SOLVER_TYPE=dns01` and `TLS_DNS01_PROJECT=<gcp-project-id>` (often the same as `GCP_PROJECT_ID`). The chart fails fast if previews are enabled without DNS-01 — wildcards can't issue via http01.
+2. **Switch to DNS-01 TLS** in the same install file: `TLS_SOLVER=dns01` and `TLS_DNS01_PROJECT=<gcp-project-id>` (often the same as `GCP_PROJECT_ID`). The chart fails fast if previews are enabled without DNS-01 — wildcards can't issue via http01.
 3. **Add the wildcard DNS record** at your registrar: `*.preview.<base-domain>` A-records pointing at the cluster's ingress static IP (the same IP `app.<base>` and `api.<base>` use).
 4. **Run `mise run install:prod`**. The orchestrator does the rest:
    - Terraform creates the `x1agent-preview-build` GSA with `roles/artifactregistry.writer` on the install's AR repo.
