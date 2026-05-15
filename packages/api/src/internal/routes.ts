@@ -961,7 +961,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     void sc;
     try {
       const reply = await cfg.natsConnection.request(
-        "x1.providers.preview.provision",
+        "x1.provider.preview.provision",
         jc.encode({
           preview_yaml: previewYaml,
           repo_full_name: body.repo_full_name,

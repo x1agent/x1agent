@@ -8,7 +8,7 @@ initOtel({ serviceName: "x1agent-provider-preview" });
  * requests from the api, builds an image via Kaniko, applies
  * Deployment/Service/Ingress, and returns the public URL.
  *
- * NATS subject: `x1.providers.preview.provision`
+ * NATS subject: `x1.provider.preview.provision`
  * Request shape:
  *   {
  *     preview_yaml: string,
@@ -118,7 +118,7 @@ async function main() {
   const jc = JSONCodec<ProvisionRequest>();
   const jcReply = JSONCodec<ProvisionReply>();
 
-  const subject = "x1.providers.preview.provision";
+  const subject = "x1.provider.preview.provision";
   const sub = nc.subscribe(subject, { queue: "preview-provisioners" });
   console.log(`[preview] subscribed to ${subject}`);
 
