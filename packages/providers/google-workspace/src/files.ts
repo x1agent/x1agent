@@ -28,6 +28,20 @@ const DRIVE_READONLY_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly";
 const DRIVE_WRITE_SCOPE = "https://www.googleapis.com/auth/drive";
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
+
+/**
+ * Every Drive v3 call (list, get, get-media, patch, update, delete)
+ * that needs to operate on files in a Shared Drive — or even just to
+ * succeed against a file the user accesses via a Shared Drive — must
+ * carry `supportsAllDrives=true`. Without it, Google returns 404 for
+ * files outside My Drive even when the token is fine. Mirrors
+ * lattice-os/packages/sidecar/src/drive.rs which passes this flag on
+ * every call.
+ */
+function withSharedDrives(url: URL): URL {
+  url.searchParams.set("supportsAllDrives", "true");
+  return url;
+}
 const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 
 export interface ListFilesRequest {
@@ -134,9 +148,17 @@ export async function handleList(
   url.searchParams.set("pageSize", String(req.page_size ?? 50));
   url.searchParams.set(
     "fields",
-    req.fields ?? "files(id,name,mimeType,modifiedTime,size,webViewLink),nextPageToken",
+    req.fields ?? "files(id,name,mimeType,modifiedTime,size,webViewLink,driveId),nextPageToken",
   );
   if (req.query) url.searchParams.set("q", req.query);
+  // Drive v3 defaults to `corpora=user` (My Drive only). Without
+  // these two params, a user who has access to files via a Shared
+  // Drive — the common pattern for org/workspace artefacts — sees
+  // an empty list even though their token is fine and they can open
+  // the same files in the Drive UI. Matches lattice-os's working
+  // pattern at packages/sidecar/src/drive.rs:262.
+  url.searchParams.set("includeItemsFromAllDrives", "true");
+  url.searchParams.set("supportsAllDrives", "true");
 
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -191,7 +213,9 @@ export async function handleGet(
     throw err;
   }
 
-  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`);
+  const url = withSharedDrives(
+    new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`),
+  );
   url.searchParams.set(
     "fields",
     "id,name,mimeType,modifiedTime,size,webViewLink",
@@ -248,7 +272,9 @@ export async function handleDownload(
     throw err;
   }
 
-  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`);
+  const url = withSharedDrives(
+    new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`),
+  );
   url.searchParams.set("alt", "media");
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -428,7 +454,7 @@ export async function handleUpload(
     Buffer.from(tail, "utf8"),
   ]);
 
-  const url = new URL(`${DRIVE_UPLOAD_BASE}/files`);
+  const url = withSharedDrives(new URL(`${DRIVE_UPLOAD_BASE}/files`));
   url.searchParams.set("uploadType", "multipart");
   url.searchParams.set("fields", FILE_FIELDS);
   const resp = await fetch(url, {
@@ -491,8 +517,8 @@ export async function handleUpdateContent(
   if ("ok" in minted && minted.ok === false) return minted;
   const token = (minted as { token: string }).token;
 
-  const url = new URL(
-    `${DRIVE_UPLOAD_BASE}/files/${encodeURIComponent(req.file_id)}`,
+  const url = withSharedDrives(
+    new URL(`${DRIVE_UPLOAD_BASE}/files/${encodeURIComponent(req.file_id)}`),
   );
   url.searchParams.set("uploadType", "media");
   url.searchParams.set("fields", FILE_FIELDS);
@@ -543,7 +569,9 @@ export async function handleUpdateMetadata(
   // — the file's `parents` field on the body is read-only on update.
   // For a simple "replace parent" UX we look up the current parent and
   // pass both addParents and removeParents in one PATCH.
-  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`);
+  const url = withSharedDrives(
+    new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`),
+  );
   url.searchParams.set("fields", FILE_FIELDS);
 
   if (req.parent_folder_id !== undefined) {
@@ -551,7 +579,7 @@ export async function handleUpdateMetadata(
     // and the alternative (asking the agent to know current parents) is
     // worse.
     const meta = await fetch(
-      `${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}?fields=parents`,
+      `${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}?fields=parents&supportsAllDrives=true`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     if (!meta.ok) return driveErrorReply(meta.status, await meta.text());
@@ -605,7 +633,7 @@ export async function handleCreateFolder(
   };
   if (req.parent_folder_id) body.parents = [req.parent_folder_id];
 
-  const url = new URL(`${DRIVE_BASE}/files`);
+  const url = withSharedDrives(new URL(`${DRIVE_BASE}/files`));
   url.searchParams.set("fields", FILE_FIELDS);
   const resp = await fetch(url, {
     method: "POST",
@@ -644,7 +672,9 @@ export async function handleTrash(
   // Trash, not delete. Reversible from the user's Drive UI; an
   // accidental destructive action by an agent is recoverable. Hard
   // delete is intentionally not exposed.
-  const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`);
+  const url = withSharedDrives(
+    new URL(`${DRIVE_BASE}/files/${encodeURIComponent(req.file_id)}`),
+  );
   const resp = await fetch(url, {
     method: "PATCH",
     headers: {
