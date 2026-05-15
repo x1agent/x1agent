@@ -318,4 +318,31 @@ describe("isShareCommentWakeEvent", () => {
     expect(isShareCommentWakeEvent(undefined)).toBe(false);
     expect(isShareCommentWakeEvent("plain string")).toBe(false);
   });
+
+  // X1A-133 — new wakes drop the prose preamble and stamp the SDK-
+  // native origin envelope (PRD 0007) instead. The classifier must
+  // recognise both shapes so timelines stay quiet through the
+  // transition window.
+  it("matches payloads tagged with origin={kind:channel, server:share-comments}", () => {
+    expect(
+      isShareCommentWakeEvent({
+        origin: { kind: "channel", server: "share-comments" },
+        is_synthetic: true,
+        text: "human commented on this share",
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT match other channel origins (forward-compat for PRD 0007 slices)", () => {
+    expect(
+      isShareCommentWakeEvent({
+        origin: { kind: "channel", server: "slack-thread" },
+      }),
+    ).toBe(false);
+    expect(
+      isShareCommentWakeEvent({
+        origin: { kind: "peer", server: "share-comments" },
+      }),
+    ).toBe(false);
+  });
 });
