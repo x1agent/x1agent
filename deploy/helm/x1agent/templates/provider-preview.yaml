@@ -1,0 +1,238 @@
+{{- /*
+Preview provider — listens on x1.provider.preview.provision, builds the
+caller's repo with Kaniko, and applies a Deployment + Service + Ingress
+into the previews namespace at <slug>.preview.<baseDomain>.
+
+Render-gated on `previews.enabled`. Same gate covers:
+  - The previews namespace itself
+  - The wildcard Certificate (was preview-ingress.yaml; folded in here)
+  - Cross-namespace RBAC for the provider's ServiceAccount
+  - The provider Service + Deployment
+
+Two ServiceAccounts:
+  - x1agent-preview          (provider Pod; spawns Kaniko Jobs,
+                              applies Deployment/Service/Ingress/Secret)
+  - x1agent-preview-build    (Kaniko Job Pod; pushes images to the
+                              registry. On GKE, annotate with the
+                              workload-identity GSA that has
+                              roles/artifactregistry.writer)
+
+The provider's ServiceAccount needs roles in BOTH namespaces. Cross-namespace
+RBAC is expressed as a Role in the target namespace + a RoleBinding with the
+subject ServiceAccount in the source namespace.
+*/}}
+{{- if .Values.previews.enabled }}
+{{- if ne (default "http01" .Values.tls.solver.type) "dns01" }}
+{{- fail "previews.enabled=true requires tls.solver.type=dns01 — wildcard certs cannot be issued via http01" }}
+{{- end }}
+{{- $previewNs := default "x1-previews" .Values.providers.preview.previewNamespace }}
+{{- $buildNs := default .Release.Namespace .Values.providers.preview.buildNamespace }}
+{{- $previewDomain := default (printf "preview.%s" .Values.baseDomain) .Values.providers.preview.previewDomain }}
+{{- $registry := default (printf "%s/preview-images" .Values.cloud.gcp.artifactRegistry) .Values.providers.preview.registry.address }}
+---
+# Preview workload namespace. Helm tracks it so `helm uninstall` deletes
+# it cleanly along with the rest of the chart. K8s blocks deletion if
+# any previews are still live, which is the desired behavior.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $previewNs | quote }}
+  labels:
+    {{- include "x1agent.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: x1agent
+---
+# Wildcard certificate. Lives in the preview namespace so the Secret
+# cert-manager produces is reachable by each per-preview Ingress that
+# the provider creates at runtime. Issued via DNS-01 (cluster issuer)
+# because http01 cannot issue wildcards.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: x1agent-preview-wildcard
+  namespace: {{ $previewNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  secretName: x1agent-preview-wildcard-tls
+  issuerRef:
+    name: {{ .Values.tls.clusterIssuer | quote }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ printf "*.preview.%s" .Values.baseDomain | quote }}
+    - {{ printf "preview.%s" .Values.baseDomain | quote }}
+---
+# Provider ServiceAccount — applies manifests in both namespaces, owns
+# Kaniko Job lifecycle.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x1agent-preview
+  namespace: {{ .Release.Namespace | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+---
+# Kaniko build ServiceAccount — runs the actual `docker build` Pod.
+# Workload-Identity-bind it to a GSA with roles/artifactregistry.writer
+# on the preview-images repo by setting
+# providers.preview.buildServiceAccountAnnotations in values.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x1agent-preview-build
+  namespace: {{ $buildNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+  {{- with .Values.providers.preview.buildServiceAccountAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+# Role in the build namespace — provider creates / monitors Kaniko Jobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: x1agent-preview-build
+  namespace: {{ $buildNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs", "jobs/status"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: x1agent-preview-build
+  namespace: {{ $buildNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: x1agent-preview-build
+subjects:
+  - kind: ServiceAccount
+    name: x1agent-preview
+    namespace: {{ .Release.Namespace | quote }}
+---
+# Role in the preview namespace — provider creates / replaces / deletes
+# the Deployment, Service, Ingress, and per-preview Secret bundle that
+# carries workspace-secret values.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: x1agent-preview-deploy
+  namespace: {{ $previewNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: x1agent-preview-deploy
+  namespace: {{ $previewNs | quote }}
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: x1agent-preview-deploy
+subjects:
+  - kind: ServiceAccount
+    name: x1agent-preview
+    namespace: {{ .Release.Namespace | quote }}
+---
+# Headless Service — gives the Deployment a stable DNS name; no
+# external traffic. All RPC is over NATS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: preview
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "preview") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preview
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.providers.preview.replicas | default 1 }}
+  selector:
+    matchLabels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "preview") | nindent 6 }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "x1agent.selectorLabels" (dict "ctx" . "component" "preview") | nindent 8 }}
+    spec:
+      serviceAccountName: x1agent-preview
+      containers:
+        - name: provider
+          image: "{{ .Values.providers.preview.image.repository | default (printf "%s/preview" .Values.cloud.gcp.artifactRegistry) }}:{{ .Values.providers.preview.image.tag | default .Values.images.api.tag }}"
+          imagePullPolicy: {{ .Values.providers.preview.image.pullPolicy | default "Always" | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NATS_URL
+              value: tls://nats:4222
+            - name: NATS_CA_FILE
+              value: /etc/nats-tls/ca.crt
+            - name: NATS_CLIENT_CERT
+              value: /etc/nats-tls/client.crt
+            - name: NATS_CLIENT_KEY
+              value: /etc/nats-tls/client.key
+            - name: API_URL
+              value: http://api:30001
+            - name: REGISTRY_ADDRESS
+              value: {{ $registry | quote }}
+            - name: REGISTRY_INSECURE
+              value: {{ .Values.providers.preview.registry.insecure | default false | quote }}
+            - name: BUILD_NAMESPACE
+              value: {{ $buildNs | quote }}
+            - name: BUILD_SERVICE_ACCOUNT
+              value: x1agent-preview-build
+            - name: PREVIEW_NAMESPACE
+              value: {{ $previewNs | quote }}
+            - name: PREVIEW_DOMAIN
+              value: {{ $previewDomain | quote }}
+            - name: TLS_SECRET_NAME
+              value: x1agent-preview-wildcard-tls
+          # API_INTERNAL_TOKEN comes from the ESO-synced x1agent-secrets
+          # bundle (same Secret the api consumes). The provider POSTs to
+          # /api/internal/git-credential to mint short-lived GitHub App
+          # installation tokens for Kaniko's git-clone step.
+          envFrom:
+            - secretRef:
+                name: x1agent-secrets
+          resources: {{- toYaml .Values.providers.preview.resources | nindent 12 }}
+          volumeMounts:
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+      volumes:
+        - name: nats-tls
+          secret:
+            secretName: nats-provider-client-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: client.crt
+              - key: tls.key
+                path: client.key
+{{- end }}
