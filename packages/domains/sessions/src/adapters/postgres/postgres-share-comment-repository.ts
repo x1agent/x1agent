@@ -136,11 +136,51 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
   async listByShare(
     sessionId: SessionId,
     shareId: string,
+    opts: { threadLimit?: number; beforeThreadFirstSeq?: number } = {},
   ): Promise<readonly ShareComment[]> {
+    // Default path: every row on the share. Used by the agent-side
+    // wake plumbing + NATS subscribers, which need the full window.
+    if (opts.threadLimit === undefined) {
+      const rows = await this.sql<Row[]>`
+        SELECT ${this.sql.unsafe(SELECT)}
+        FROM share_comments
+        WHERE session_id = ${sessionId} AND share_id = ${shareId}
+        ORDER BY thread_id, seq ASC
+      `;
+      return rows.map(toComment);
+    }
+
+    // Operator sidebar path: thread-level pagination. Two queries —
+    // pick the latest N thread_ids first (small index-friendly
+    // aggregate), then fetch all comments belonging to those threads.
+    const limit = Math.max(1, Math.min(500, opts.threadLimit));
+    const before = opts.beforeThreadFirstSeq;
+    const heads = before !== undefined
+      ? await this.sql<{ thread_id: string }[]>`
+          SELECT thread_id
+          FROM share_comments
+          WHERE session_id = ${sessionId} AND share_id = ${shareId}
+          GROUP BY thread_id
+          HAVING min(seq) < ${before}
+          ORDER BY min(seq) DESC
+          LIMIT ${limit}
+        `
+      : await this.sql<{ thread_id: string }[]>`
+          SELECT thread_id
+          FROM share_comments
+          WHERE session_id = ${sessionId} AND share_id = ${shareId}
+          GROUP BY thread_id
+          ORDER BY min(seq) DESC
+          LIMIT ${limit}
+        `;
+    if (heads.length === 0) return [];
+    const threadIds = heads.map((h) => h.thread_id);
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)}
       FROM share_comments
-      WHERE session_id = ${sessionId} AND share_id = ${shareId}
+      WHERE session_id = ${sessionId}
+        AND share_id = ${shareId}
+        AND thread_id = ANY(${threadIds}::uuid[])
       ORDER BY thread_id, seq ASC
     `;
     return rows.map(toComment);

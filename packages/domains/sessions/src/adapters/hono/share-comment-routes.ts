@@ -205,10 +205,21 @@ export function createShareCommentRoutes(
   };
 
   // ── GET /  — list comments on this share ─────────────────────────
+  // X1A-72.4 — thread-level pagination. Default load (no params) is
+  // backward-compatible: every comment row on the share, ordered by
+  // (thread_id, seq). With `?thread_limit=N` the response is scoped
+  // to the latest N threads by first-comment seq; `?before_thread_first_seq=`
+  // pages through older windows.
   app.get("/", async (c) => {
     const ctx = await loadCtx(c);
     if ("error" in ctx) return c.json({ error: ctx.error }, 404);
-    const rows = await cfg.comments.listByShare(ctx.sessionId, ctx.shareId);
+    const limitRaw = c.req.query("thread_limit");
+    const beforeRaw = c.req.query("before_thread_first_seq");
+    const rows = await cfg.comments.listByShare(ctx.sessionId, ctx.shareId, {
+      threadLimit: limitRaw !== undefined ? Number(limitRaw) : undefined,
+      beforeThreadFirstSeq:
+        beforeRaw !== undefined ? Number(beforeRaw) : undefined,
+    });
     return c.json({
       comments: rows.map(serialiseComment),
       share_id: ctx.shareId,
