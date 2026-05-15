@@ -11,6 +11,7 @@ import {
 } from "@x1agent/domain-agents";
 import {
   SessionAlreadyTerminalError,
+  SessionDuplicateTickError,
   SessionId,
   SessionNotFoundError,
 } from "../domain/session.js";
@@ -352,6 +353,113 @@ describe("cancelSession", () => {
         s.id,
       ),
     ).rejects.toBeTruthy();
+  });
+
+  it("terminates the backing K8s Job when the session was running (X1A-70)", async () => {
+    const a = await makeAgent();
+    const allow = new AllowAllAdmin();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: allow, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    // Pretend the job-watcher launched the pod and flipped to running.
+    await sessions.updateStatus(s.id, { status: "running" });
+
+    const terminated: string[] = [];
+    const jobs = {
+      async terminateForSession(id: SessionId) {
+        terminated.push(id);
+      },
+    };
+
+    const cancelled = await cancelSession(
+      { agents, sessions, adminGuard: allow, clock, jobs },
+      ACTOR,
+      s.id,
+    );
+    expect(cancelled.status).toBe("complete");
+    expect(terminated).toEqual([s.id]);
+  });
+
+  it("does NOT terminate the Job when the session was still pending (no Job to kill yet)", async () => {
+    const a = await makeAgent();
+    const allow = new AllowAllAdmin();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: allow, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    // Status stays pending — job-watcher hasn't launched yet.
+
+    const terminated: string[] = [];
+    const jobs = {
+      async terminateForSession(id: SessionId) {
+        terminated.push(id);
+      },
+    };
+
+    await cancelSession(
+      { agents, sessions, adminGuard: allow, clock, jobs },
+      ACTOR,
+      s.id,
+    );
+    expect(terminated).toEqual([]);
+  });
+
+  it("swallows Job-terminate errors so a K8s blip doesn't break cancel (X1A-70)", async () => {
+    const a = await makeAgent();
+    const allow = new AllowAllAdmin();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: allow, clock },
+      { actor: ACTOR, agentId: a.id },
+    );
+    await sessions.updateStatus(s.id, { status: "running" });
+
+    const jobs = {
+      async terminateForSession() {
+        throw new Error("k8s api flake");
+      },
+    };
+    const cancelled = await cancelSession(
+      { agents, sessions, adminGuard: allow, clock, jobs },
+      ACTOR,
+      s.id,
+    );
+    // DB-side cancel is the source of truth; reconciler picks up the
+    // straggler on its next tick.
+    expect(cancelled.status).toBe("complete");
+    expect(cancelled.errorMessage).toBe("cancelled");
+  });
+});
+
+describe("SessionDuplicateTickError messages (X1A-70)", () => {
+  // The error class is shared across scheduler ticks, user Resumes,
+  // and agent spawn races. The message text disambiguates so the
+  // operator sees the right framing.
+  const agentId = "test-agent" as never;
+  const at = new Date("2026-05-14T22:00:00Z");
+
+  it("scheduler tick message mentions scheduler", () => {
+    const err = new SessionDuplicateTickError(agentId, at, "scheduler");
+    expect(err.message).toContain("scheduler tick");
+    expect(err.message).toContain(agentId);
+  });
+
+  it("user (Resume) message mentions concurrent Resume, not scheduler", () => {
+    const err = new SessionDuplicateTickError(agentId, at, "user");
+    expect(err.message).toContain("Resume");
+    expect(err.message).not.toContain("scheduler");
+  });
+
+  it("agent spawn message mentions concurrent spawn", () => {
+    const err = new SessionDuplicateTickError(agentId, at, "agent");
+    expect(err.message).toContain("concurrent spawn");
+    expect(err.message).not.toContain("scheduler");
+  });
+
+  it("falls back to a generic message when the source is unknown", () => {
+    const err = new SessionDuplicateTickError(agentId, at);
+    expect(err.message).toContain("already exists");
+    expect(err.message).toContain(agentId);
   });
 });
 

@@ -63,6 +63,14 @@ export interface SessionRoutesConfig {
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
   clock?: Clock;
+  /**
+   * Optional — when provided, cancelling a running session also
+   * deletes the backing K8s Job so the pod actually stops. Without
+   * this, Pause is purely cosmetic (the DB row flips but the pod
+   * keeps executing until its idle timeout). Composition root wires
+   * this from the job-watcher. X1A-70.
+   */
+  jobs?: import("../../application/cancel-session.js").JobTerminator;
 }
 
 function serialize(s: Session) {
@@ -261,6 +269,7 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
           sessions: cfg.sessions,
           adminGuard: cfg.adminGuard,
           clock,
+          jobs: cfg.jobs,
         },
         actor.userId,
         SessionId(c.req.param("sessionId")!),

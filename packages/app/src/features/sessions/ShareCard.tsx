@@ -59,6 +59,17 @@ export interface AgentSharePayload {
   files: ShareFileEntry[];
   total_size: number;
   entry_point?: string | null;
+  /**
+   * Milliseconds since epoch at the moment the sidecar finished
+   * persisting this revision. Used as a content cache-buster
+   * (`?v=<updated_at_ms>`) so an in-place share update renders new
+   * bytes instead of the cached version. See X1A-92.
+   *
+   * Optional because older `agent.share` events on disk predate the
+   * field. Renderers fall back to the event's seq/timestamp from the
+   * surrounding SessionEventDTO when missing.
+   */
+  updated_at_ms?: number;
 }
 
 export function shareUrl(
@@ -66,6 +77,7 @@ export function shareUrl(
   sessionId: string,
   shareId: string,
   path = "",
+  version?: number | string | null,
 ): string {
   // Cookies ride: localhost:4322 and localhost:30001 share the same
   // registrable domain so a SameSite=Lax session cookie is sent on
@@ -74,7 +86,40 @@ export function shareUrl(
   // credentials: "include" so they're covered too; <img> tags get
   // crossOrigin="use-credentials" below. The api's CORS block already
   // allows credentials from the app origin.
-  return `${API_BASE}/api/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${shareId}/${path}`;
+  //
+  // `version` appends a `?v=<n>` cache-buster. When an agent updates
+  // an existing share (same share_id, new file bytes), bumping the
+  // version forces <img>, <iframe>, and fetch() to bypass the
+  // browser's HTTP cache and pull the new bytes. See X1A-92.
+  const url = `${API_BASE}/api/workspaces/${workspaceSlug}/sessions/${sessionId}/shares/${shareId}/${path}`;
+  if (version === undefined || version === null) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(String(version))}`;
+}
+
+/**
+ * Pick the freshest cache-buster signal we have for a share payload.
+ *
+ * Order of preference:
+ *   1. The payload's own `updated_at_ms` (set by the sidecar on every
+ *      publish — see X1A-92). Newest sidecar; most reliable.
+ *   2. The surrounding event's `seq` (monotonically increasing per
+ *      session — distinguishes events even on legacy payloads).
+ *   3. Nothing — render without `?v=`.
+ *
+ * Either signal works as a cache-key because both are guaranteed to
+ * change between an original share and an update with the same
+ * share_id.
+ */
+export function shareContentVersion(
+  payload: AgentSharePayload,
+  fallbackSeq?: number,
+): number | undefined {
+  if (typeof payload.updated_at_ms === "number" && payload.updated_at_ms > 0) {
+    return payload.updated_at_ms;
+  }
+  if (typeof fallbackSeq === "number") return fallbackSeq;
+  return undefined;
 }
 
 export function formatSize(bytes: number): string {
@@ -169,6 +214,7 @@ function ShareHeader({
     sessionId,
     payload.share_id,
     downloadPath,
+    shareContentVersion(payload),
   );
 
   return (
@@ -214,11 +260,13 @@ function ShareHeader({
 // ── Image ────────────────────────────────────────────────────────
 
 function ImageShare({ payload, workspaceSlug, sessionId }: SubProps) {
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    version,
   );
   return (
     <img
@@ -240,6 +288,7 @@ function ImageShare({ payload, workspaceSlug, sessionId }: SubProps) {
 
 function SvgShare({ payload, workspaceSlug, sessionId }: SubProps) {
   const [svg, setSvg] = useState<string | null>(null);
+  const version = shareContentVersion(payload);
   const src = useMemo(
     () =>
       shareUrl(
@@ -247,8 +296,9 @@ function SvgShare({ payload, workspaceSlug, sessionId }: SubProps) {
         sessionId,
         payload.share_id,
         payload.files[0]?.path || "",
+        version,
       ),
-    [workspaceSlug, sessionId, payload.share_id, payload.files],
+    [workspaceSlug, sessionId, payload.share_id, payload.files, version],
   );
 
   useEffect(() => {
@@ -277,11 +327,13 @@ function SiteShare({
   sessionId,
   maximized,
 }: SubProps) {
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.entry_point || "index.html",
+    version,
   );
   return (
     <iframe
@@ -331,11 +383,13 @@ function CsvShare({
   maximized,
 }: SubProps) {
   const [rows, setRows] = useState<string[][]>([]);
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    version,
   );
 
   useEffect(() => {
@@ -401,11 +455,13 @@ function JsonShare({
   maximized,
 }: SubProps) {
   const [data, setData] = useState<unknown>(null);
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    version,
   );
   const isJsonl = (payload.files[0]?.path || "").endsWith(".jsonl");
 
@@ -449,11 +505,13 @@ function JsonShare({
 
 function CodeShare({ payload, workspaceSlug, sessionId }: SubProps) {
   const [content, setContent] = useState<string | null>(null);
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    version,
   );
 
   useEffect(() => {
@@ -481,11 +539,13 @@ function DocumentShare({
   fillParent,
 }: SubProps) {
   const [content, setContent] = useState<string | null>(null);
+  const version = shareContentVersion(payload);
   const src = shareUrl(
     workspaceSlug,
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    version,
   );
 
   useEffect(() => {
@@ -524,6 +584,7 @@ function ArchiveShare({ payload, workspaceSlug, sessionId }: SubProps) {
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    shareContentVersion(payload),
   );
   return (
     <a
@@ -554,6 +615,7 @@ function GenericFileShare({ payload, workspaceSlug, sessionId }: SubProps) {
     sessionId,
     payload.share_id,
     payload.files[0]?.path || "",
+    shareContentVersion(payload),
   );
   return (
     <a

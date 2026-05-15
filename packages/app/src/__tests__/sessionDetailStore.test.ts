@@ -89,3 +89,83 @@ describe("sessionDetailStore.compactItemsBySession", () => {
     expect(after!.length).toBe(2);
   });
 });
+
+describe("sessionDetailStore status transitions (X1A-66)", () => {
+  function seedPendingSession() {
+    useSessionDetailStore.setState({
+      sessionsById: {
+        [SID]: {
+          id: SID,
+          agent_id: "agent-a",
+          triggered_by: "user",
+          triggered_by_user_id: "user-1",
+          parent_session_id: null,
+          parent_agent_id: null,
+          resumed_from: null,
+          triggered_at: "2026-01-01T00:00:00Z",
+          status: "pending",
+          completed_at: null,
+          error_message: null,
+          created_at: "2026-01-01T00:00:00Z",
+          summary: null,
+          summary_event_seq: null,
+          summary_started_at: null,
+          summary_failed_at: null,
+          model_override: null,
+        } as never,
+      },
+    });
+  }
+
+  it("flips status from pending to running when session.started arrives", () => {
+    seedPendingSession();
+    const { appendEvent } = useSessionDetailStore.getState();
+    appendEvent(SID, ev("session.started", 1));
+    const session =
+      useSessionDetailStore.getState().sessionsById[SID];
+    expect(session!.status).toBe("running");
+  });
+
+  it("does not change status when session.started arrives on a non-pending session", () => {
+    seedPendingSession();
+    // Pre-set to running — a second session.started (e.g. from a
+    // pod-restart event we haven't shipped yet) should NOT regress
+    // the row back to running-from-something-else. Idempotent.
+    useSessionDetailStore.setState((s) => ({
+      sessionsById: {
+        ...s.sessionsById,
+        [SID]: { ...(s.sessionsById[SID] as never), status: "running" },
+      },
+    }));
+    const { appendEvent } = useSessionDetailStore.getState();
+    appendEvent(SID, ev("session.started", 1));
+    expect(
+      useSessionDetailStore.getState().sessionsById[SID]!.status,
+    ).toBe("running");
+  });
+
+  it("does not flip a terminal session back to running on a stale session.started", () => {
+    seedPendingSession();
+    useSessionDetailStore.setState((s) => ({
+      sessionsById: {
+        ...s.sessionsById,
+        [SID]: { ...(s.sessionsById[SID] as never), status: "complete" },
+      },
+    }));
+    const { appendEvent } = useSessionDetailStore.getState();
+    appendEvent(SID, ev("session.started", 1));
+    expect(
+      useSessionDetailStore.getState().sessionsById[SID]!.status,
+    ).toBe("complete");
+  });
+
+  it("still flips to complete / failed on terminal events", () => {
+    seedPendingSession();
+    const { appendEvent } = useSessionDetailStore.getState();
+    appendEvent(SID, ev("session.started", 1));
+    appendEvent(SID, ev("session.completed", 2));
+    expect(
+      useSessionDetailStore.getState().sessionsById[SID]!.status,
+    ).toBe("complete");
+  });
+});

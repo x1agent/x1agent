@@ -11,11 +11,24 @@ import {
 } from "../domain/session.js";
 import { isTerminal } from "../domain/status.js";
 
+/**
+ * Terminates the K8s Job backing a session. Optional dep — installs
+ * that wire the job watcher provide it; tests pass a no-op. Errors
+ * during termination are logged and swallowed: the DB-side cancel is
+ * the source of truth, and the reconciler's "job disappeared" branch
+ * picks up any stragglers on the next tick. X1A-70.
+ */
+export interface JobTerminator {
+  terminateForSession(sessionId: SessionId): Promise<void>;
+}
+
 export interface CancelSessionDeps {
   agents: AgentRepository;
   sessions: SessionRepository;
   adminGuard: AdminGuard;
   clock: Clock;
+  /** Optional. When wired, cancel also deletes the K8s Job so the pod stops. */
+  jobs?: JobTerminator;
 }
 
 /**
@@ -25,10 +38,13 @@ export interface CancelSessionDeps {
  * clean exit, not an agent crash. If the session is already terminal
  * the call is an error.
  *
- * TODO: when the session is `running`, also terminate the K8s Job
- * driving it. Today the DB row flips but the pod keeps executing
- * until its idle-timeout. The Job watcher should delete the Job when
- * status crosses to terminal so the pod stops on cancel.
+ * When the session was running, we ALSO terminate the backing K8s
+ * Job so the pod actually stops (X1A-70). Without this, Pause was
+ * purely cosmetic — the DB row flipped but the pod kept executing
+ * until its idle timeout, burning tokens for nothing. Termination
+ * happens AFTER the DB flip so a delete failure can't leave us
+ * advertising the session as complete while the pod's still racing
+ * to write events; reconciler picks up the straggler on next tick.
  */
 export async function cancelSession(
   deps: CancelSessionDeps,
@@ -52,9 +68,26 @@ export async function cancelSession(
     throw new SessionAlreadyTerminalError(sessionId, session.status);
   }
 
-  return deps.sessions.updateStatus(sessionId, {
+  const wasRunning = session.status === "running";
+
+  const updated = await deps.sessions.updateStatus(sessionId, {
     status: "complete",
     completedAt: deps.clock.now(),
     errorMessage: "cancelled",
   });
+
+  // Fire-and-log: a K8s API blip must not block the cancel response.
+  // Idempotent — the reconciler's "job disappeared" handling treats
+  // the gone-Job case as a no-op.
+  if (wasRunning && deps.jobs) {
+    try {
+      await deps.jobs.terminateForSession(sessionId);
+    } catch (err) {
+      console.warn(
+        `[cancel-session] Job terminate failed for ${sessionId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  return updated;
 }

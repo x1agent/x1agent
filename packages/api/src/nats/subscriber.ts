@@ -369,6 +369,29 @@ export async function startSessionEventSubscriber(
         }
       }
 
+      // X1A-66 — when the agent emits `session.started`, flip the
+      // session row from pending → running here. The job-watcher
+      // already does this when it launches the pod, but its tick
+      // interval (5s default) can leave the row at `pending` for up
+      // to one tick after the agent has actually started speaking.
+      // This handler closes that race: by the time the FIRST event
+      // from the pod hits NATS, the agent is provably running, so the
+      // row should reflect it without waiting for the next watcher
+      // tick. Idempotent — only flips pending → running, ignores any
+      // session already past pending (running, complete, failed).
+      if (parsed.type === "session.started") {
+        try {
+          const session = await opts.sessions.findById(sessionId);
+          if (session && session.status === "pending") {
+            await opts.sessions.updateStatus(sessionId, { status: "running" });
+          }
+        } catch (err) {
+          console.warn(
+            `[nats] session.started status-flip failed for ${sessionId}: ${(err as Error).message}`,
+          );
+        }
+      }
+
       // Terminal events flip sessions.status so the UI and listing
       // queries see "done" immediately. Idempotent — running → terminal
       // transitions only, and a second terminal event on the same row
