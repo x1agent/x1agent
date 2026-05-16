@@ -1,3 +1,10 @@
+## [1.34.1](https://github.com/x1agent/x1agent/compare/v1.34.0...v1.34.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* **sessions:** use unprefixed Vertex host when CLOUD_ML_REGION=global ([5f231d4](https://github.com/x1agent/x1agent/commit/5f231d47b7a145e2d56fe8041a973f169284f88b))
+
 # [1.34.0](https://github.com/x1agent/x1agent/compare/v1.33.0...v1.34.0) (2026-05-16)
 
 
