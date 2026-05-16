@@ -487,7 +487,16 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />
-      <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
+      {/* iOS Safari quirk: with `100svh` (smallest viewport), opening
+          the on-screen keyboard makes the page taller than the visible
+          area, the browser auto-scrolls to keep the composer in view,
+          and after the keyboard dismisses the scroll offset doesn't
+          reset — leaves a 150–200px gap at the bottom that doesn't
+          reclaim. `100dvh` follows the actual visible viewport
+          including the keyboard, so the layout shrinks while the
+          keyboard is open and grows back when it closes, no stuck
+          scroll. */}
+      <div className="flex h-[calc(100dvh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
           <div className="min-w-0 flex-1">
