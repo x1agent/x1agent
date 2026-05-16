@@ -79,4 +79,16 @@ export interface PreviewEnvironmentRepository {
    * row.
    */
   delete(id: PreviewEnvironmentId, workspaceId: WorkspaceId): Promise<void>;
+
+  /**
+   * Replace the env-var-names list for an env. Each name is a
+   * workspace-scoped binding the env opts into; resolution to actual
+   * secret values happens at preview-deploy time via the env-bindings
+   * + workspace-secrets join.
+   */
+  setEnvVarNames(
+    id: PreviewEnvironmentId,
+    workspaceId: WorkspaceId,
+    envVarNames: readonly string[],
+  ): Promise<PreviewEnvironment>;
 }

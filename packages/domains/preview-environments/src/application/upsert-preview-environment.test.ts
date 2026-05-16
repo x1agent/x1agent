@@ -48,6 +48,7 @@ class FakeRepo implements PreviewEnvironmentRepository {
       lastDeployStatus: input.deploy.status,
       lastDeployStatusReason: input.deploy.statusReason,
       lastDeployAt: input.deploy.at,
+      envVarNames: existing?.envVarNames ?? [],
       createdAt: existing?.createdAt ?? new Date(),
       updatedAt: new Date(),
     };
@@ -57,8 +58,13 @@ class FakeRepo implements PreviewEnvironmentRepository {
   async findById() { return null; }
   async findBySlug() { return null; }
   async listForWorkspace() { return []; }
-  async rename() { throw new Error("not used"); }
+  async rename(): Promise<PreviewEnvironment> {
+    throw new Error("not used");
+  }
   async delete() { /* not used */ }
+  async setEnvVarNames(): Promise<PreviewEnvironment> {
+    throw new Error("not used");
+  }
 }
 
 describe("upsertPreviewEnvironment", () => {

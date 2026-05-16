@@ -28,8 +28,16 @@ interface Row {
   last_deploy_status: string;
   last_deploy_status_reason: string | null;
   last_deploy_at: Date | string | null;
+  env_var_names: unknown;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+function parseEnvVarNames(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((x): x is string => typeof x === "string");
+  }
+  return [];
 }
 
 function toEnv(r: Row): PreviewEnvironment {
@@ -49,6 +57,7 @@ function toEnv(r: Row): PreviewEnvironment {
     lastDeployStatus: status,
     lastDeployStatusReason: r.last_deploy_status_reason,
     lastDeployAt: r.last_deploy_at ? new Date(r.last_deploy_at) : null,
+    envVarNames: parseEnvVarNames(r.env_var_names),
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
   };
@@ -58,6 +67,7 @@ const SELECT = `
   id, workspace_id, slug, title, repo_full_name, branch,
   last_deploy_sha, last_deploy_url, last_deploy_image_ref,
   last_deploy_status, last_deploy_status_reason, last_deploy_at,
+  env_var_names,
   created_at, updated_at
 `;
 
@@ -185,5 +195,34 @@ export class PostgresPreviewEnvironmentRepository
       DELETE FROM preview_environments
       WHERE id = ${id} AND workspace_id = ${workspaceId};
     `;
+  }
+
+  async setEnvVarNames(
+    id: PreviewEnvironmentId,
+    workspaceId: WorkspaceId,
+    envVarNames: readonly string[],
+  ): Promise<PreviewEnvironment> {
+    // De-dupe + preserve order; trim entries; drop empties.
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const raw of envVarNames) {
+      const v = typeof raw === "string" ? raw.trim() : "";
+      if (v === "" || seen.has(v)) continue;
+      seen.add(v);
+      list.push(v);
+    }
+    const rows = await this.sql<Row[]>`
+      UPDATE preview_environments
+      SET env_var_names = ${this.sql.json(list)}::jsonb
+      WHERE id = ${id} AND workspace_id = ${workspaceId}
+      RETURNING ${this.sql.unsafe(SELECT)};
+    `;
+    if (rows.length === 0) {
+      const { PreviewEnvironmentNotFoundError } = await import(
+        "../../domain/errors.js"
+      );
+      throw new PreviewEnvironmentNotFoundError({ id });
+    }
+    return toEnv(rows[0]!);
   }
 }

@@ -77,6 +77,7 @@ function serialize(e: PreviewEnvironment) {
     last_deploy_status: e.lastDeployStatus,
     last_deploy_status_reason: e.lastDeployStatusReason,
     last_deploy_at: e.lastDeployAt?.toISOString() ?? null,
+    env_var_names: e.envVarNames,
     created_at: e.createdAt.toISOString(),
     updated_at: e.updatedAt.toISOString(),
   };
@@ -156,6 +157,37 @@ export function createPreviewEnvironmentRoutes(
         { repository: cfg.repository },
         wsId,
         PreviewEnvironmentId(c.req.param("id")!),
+      );
+      return c.json({ preview_environment: serialize(env) });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+  });
+
+  // Replace the env-var-names list (workspace-scoped bindings the env
+  // wants injected at deploy time). Admin-only.
+  app.put("/:id/env-vars", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      env_var_names?: unknown;
+    };
+    if (!Array.isArray(body.env_var_names)) {
+      return c.json(
+        { error: "missing_fields", message: "env_var_names must be an array" },
+        400,
+      );
+    }
+    try {
+      await cfg.adminGuard.requireWorkspaceAdmin(wsId, actor.userId);
+      const env = await cfg.repository.setEnvVarNames(
+        PreviewEnvironmentId(c.req.param("id")!),
+        wsId,
+        body.env_var_names.filter(
+          (x): x is string => typeof x === "string",
+        ),
       );
       return c.json({ preview_environment: serialize(env) });
     } catch (err) {

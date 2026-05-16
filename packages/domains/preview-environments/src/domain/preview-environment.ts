@@ -80,6 +80,13 @@ export interface PreviewEnvironment {
   lastDeployStatus: DeployStatus;
   lastDeployStatusReason: string | null;
   lastDeployAt: Date | null;
+  /**
+   * Workspace-scoped env-binding names this environment opts into.
+   * Resolved at preview-deploy time against `env_bindings` (scope='workspace')
+   * → `workspace_secrets`; the resolved values are injected into the
+   * preview pod via a per-preview K8s Secret bundle. Empty by default.
+   */
+  envVarNames: string[];
   createdAt: Date;
   updatedAt: Date;
 }
