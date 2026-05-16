@@ -539,13 +539,13 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     });
   });
 
-  // Lightweight "what are this session's children doing right now?"
-  // endpoint. The session-detail GET above already returns `children`
-  // alongside events, but the client polls this one separately so the
-  // active-workers counter stays accurate as workers come up and
-  // finish — the parent's NATS stream doesn't carry child-lifecycle
-  // events, and the event-result sniffer only catches the initial
-  // spawn. Same visibility primitives as the parent route.
+  // Lightweight poll endpoint. Returns both the live children list
+  // (counter accuracy — parent NATS stream doesn't carry child
+  // lifecycle events) AND the current session record (summary +
+  // status updates the cached SessionDTO never sees otherwise — the
+  // detail page used to render "no summary yet" forever even after
+  // the periodic summarizer wrote one). One round trip, one cache
+  // refresh per tick.
   app.get("/:sessionId/children", async (c) => {
     const actor = cfg.getActor(c);
     if (!actor) return c.json({ error: "unauthenticated" }, 401);
@@ -570,6 +570,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
         .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
     );
     return c.json({
+      session: serialize(scope.session),
       children: childRows
         .filter((r) => byId.has(r.agentId))
         .map((r) => ({

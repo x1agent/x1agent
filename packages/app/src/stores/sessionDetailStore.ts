@@ -455,7 +455,10 @@ export const useSessionDetailStore = create<SessionDetailState>((set, get) => ({
 
   async loadChildren(workspaceSlug, sessionId) {
     try {
-      const res = await apiFetch<{ children: ChildRef[] }>(
+      const res = await apiFetch<{
+        session?: SessionDTO;
+        children: ChildRef[];
+      }>(
         `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/children`,
       );
       // Server is source-of-truth for current status. Merge server
@@ -464,6 +467,11 @@ export const useSessionDetailStore = create<SessionDetailState>((set, get) => ({
       // any sniffer-only placeholder row that the server doesn't yet
       // see (race window between spawn and DB commit) is preserved
       // so the counter doesn't briefly flicker down to zero.
+      //
+      // The response also carries the current session record. Refresh
+      // sessionsById so summary updates (written by the periodic
+      // summarizer on the server) and any other server-driven
+      // status changes flow into the live page without a reload.
       set((s) => {
         const existing = s.childrenBySession[sessionId] ?? [];
         const incomingById = new Map(res.children.map((c) => [c.id, c]));
@@ -472,11 +480,15 @@ export const useSessionDetailStore = create<SessionDetailState>((set, get) => ({
         for (const c of existing) {
           if (!incomingById.has(c.id)) merged.push(c);
         }
+        const nextSessions = res.session
+          ? { ...s.sessionsById, [sessionId]: res.session }
+          : s.sessionsById;
         return {
           childrenBySession: {
             ...s.childrenBySession,
             [sessionId]: merged,
           },
+          sessionsById: nextSessions,
         };
       });
     } catch {

@@ -59,7 +59,12 @@ describe("MainTimelineTypingIndicators", () => {
     expect(queryByRole("status")).toBeNull();
   });
 
-  it("renders one pill per overlapping main-scoped wake", () => {
+  it("collapses overlapping main-scoped wakes into a single pill", () => {
+    // Reported regression: two concurrent main wakes rendered as two
+    // pill stacks, which read as duplicate UI. The store still tracks
+    // each wake (so per-wake clear correlation keeps working), but
+    // the surface only shows one set of dots regardless of how many
+    // are in flight.
     const started = new Date(Date.now()).toISOString();
     useTypingIndicatorStore.getState().add(SESSION, {
       event_id: "wake-a",
@@ -78,7 +83,7 @@ describe("MainTimelineTypingIndicators", () => {
     const { container } = render(
       <MainTimelineTypingIndicators sessionId={SESSION} />,
     );
-    expect(container.querySelectorAll('[role="status"]').length).toBe(2);
+    expect(container.querySelectorAll('[role="status"]').length).toBe(1);
   });
 });
 

@@ -3,9 +3,14 @@ import Layout from "../../../../layouts/Layout.astro";
 import { SessionRoot } from "../../../../features/sessions/SessionRoot";
 
 const { slug, id } = Astro.params;
+// Server-side baseline title — short id so the browser tab can be
+// told apart from every other open session. SessionRoot upgrades
+// this client-side once the session record loads (summary, agent
+// name) via the useDocumentTitle hook.
+const shortId = (id ?? "").slice(0, 8);
 ---
 
-<Layout title={`session · x1agent`}>
+<Layout title={`${shortId} · session · ${slug} · x1agent`}>
   <SessionRoot
     client:only="react"
     workspaceSlug={slug ?? ""}
