@@ -1,3 +1,42 @@
+# [1.33.0](https://github.com/x1agent/x1agent/compare/v1.32.0...v1.33.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **agent:** probe sidecar health on :9091, not :9090 ([c7248c5](https://github.com/x1agent/x1agent/commit/c7248c51a5869421eca605e647af0cd6b7cc6294))
+* **api:** reject preview-deploy for repos not linked to the agent ([83e4623](https://github.com/x1agent/x1agent/commit/83e46233fa02cad3690ff75814f4c881a032b4fc)), closes [#139](https://github.com/x1agent/x1agent/issues/139)
+* **api:** typecheck-clean uploads + job-watcher + uploads-raw response ([1acb0b1](https://github.com/x1agent/x1agent/commit/1acb0b128fe91a14d1605de5ef5a36cf6fbabff5))
+* **app:** style Delete button as an actual destructive button ([02fdb45](https://github.com/x1agent/x1agent/commit/02fdb45004d45c5ead7c3f672241f4218fa774d5))
+* **chart:** hybrid TLS solver — preview wildcard on DNS-01, app/api on HTTP-01 ([ea05f4d](https://github.com/x1agent/x1agent/commit/ea05f4d0052b8ccbd5f2fc4577d0d91d2bc83bc7))
+* **composition:** hoist workspaceBindingRepo above internalRoutes (TDZ) ([95005f8](https://github.com/x1agent/x1agent/commit/95005f89ad4535fb780f2df9577b27b556a6e621))
+* **composition:** hoist workspaceSecrets{Repo,Service} above internalRoutes (TDZ) ([8e9d452](https://github.com/x1agent/x1agent/commit/8e9d452633c4033850ae423661281a1efe6ff23d))
+* **domains:** real prod typecheck errors that bun-test let through ([de63a9a](https://github.com/x1agent/x1agent/commit/de63a9a3d0240b636f42b80e8d327dad82eec05e)), closes [#139](https://github.com/x1agent/x1agent/issues/139)
+* **migrations/058:** drop now() from partial-index predicate ([421baa9](https://github.com/x1agent/x1agent/commit/421baa9843ff129df13f314b9139a75558f3f290))
+* **preview:** make kaniko pod unpack base images + fix bun TLS to k8s API ([9f96262](https://github.com/x1agent/x1agent/commit/9f96262c6ff23272a671338b04730e8c4be928da))
+* **preview:** rename NATS subject from x1.providers.preview to x1.provider.preview ([f18c6d2](https://github.com/x1agent/x1agent/commit/f18c6d2d91514c47a914a4ba0b0b427ab4bd253d))
+
+
+### Features
+
+* **admin:** New-workspace button on /admin/workspaces ([896eca5](https://github.com/x1agent/x1agent/commit/896eca55acff1413d84a53db2012a6afdfeb0563))
+* **api:** pre-deploy upsert with status=provisioning ([1c8fbd9](https://github.com/x1agent/x1agent/commit/1c8fbd95f655d6b38cd33f16e85aae4382128475))
+* **api:** preview-environments routes + provider deploy upsert ([8cafa96](https://github.com/x1agent/x1agent/commit/8cafa963035a529dd4d9ae03deb97cc11e97729c))
+* **api:** right-size session pod resources ([b47721b](https://github.com/x1agent/x1agent/commit/b47721b29a00fbb3bdd723b04a635ce37eb09e00))
+* **api:** wire workspace env-bindings into composition + mount route ([4c56aad](https://github.com/x1agent/x1agent/commit/4c56aadfeb7aa1f48ee9de28dc49d4d838f318f4))
+* **app:** access-grants panel under workspace settings → Members ([a5c9ab0](https://github.com/x1agent/x1agent/commit/a5c9ab0b55edf456d932df7c5e13f8698786c193))
+* **app:** env-bindings UI — workspace settings panel + preview-env picker ([fc422d9](https://github.com/x1agent/x1agent/commit/fc422d9c25aff99962b7f65ff902ebf8f5c8e54c))
+* **app:** environment detail page with rename + delete ([0345e82](https://github.com/x1agent/x1agent/commit/0345e82700c7763b3bbe35900870d645de413464))
+* **app:** Environments sidebar entry + workspace list page ([26f55ef](https://github.com/x1agent/x1agent/commit/26f55efda57e31eeffbc67cdd5aba838188e9db7))
+* **chart:** preview provider template — namespace, RBAC, cert, deployment ([9d05e3c](https://github.com/x1agent/x1agent/commit/9d05e3c25ffa992d5db8176603a8f0f606c7273f))
+* **cli:** render providers.preview block in install values ([ecf3c44](https://github.com/x1agent/x1agent/commit/ecf3c44e607479d4e4f98a3d087806a5da40282d))
+* **env-bindings,image-builder:** preview-deploy resolves workspace bindings + image-catalog Kaniko gets a writer SA ([5f5fdd4](https://github.com/x1agent/x1agent/commit/5f5fdd42d1b4642a3c9528c990812063e09ccb65))
+* **env-bindings:** workspace-scope bindings + preview env-var-names ([aeb04e5](https://github.com/x1agent/x1agent/commit/aeb04e5bd739af14a52bfdb28e7734d73d89e5b3))
+* **preview-environments:** new domain package + migration ([f935846](https://github.com/x1agent/x1agent/commit/f9358467e1b35954231c719fb0631f52b3ffb7dd))
+* **preview:** plumb buildServiceAccount through the Kaniko Job spec ([f662d75](https://github.com/x1agent/x1agent/commit/f662d752e480df5f1e6d6239b791bf1b029bd424))
+* **preview:** teardown subject + slug in failure replies + delete fires teardown ([4cd2bff](https://github.com/x1agent/x1agent/commit/4cd2bff0e30bdbc52f3290d268ba7bea19a083f1))
+* **terraform/gcp:** preview build GSA with AR writer + WI binding ([288d2d4](https://github.com/x1agent/x1agent/commit/288d2d41d34254baea6a4107074e93aad8d48b8a))
+* **workspaces:** per-workspace access grants — domain + email allowlists ([42a15cd](https://github.com/x1agent/x1agent/commit/42a15cdbc1c0c26a8be6e3a99bcc7e8086e5210e))
+
 # [1.32.0](https://github.com/x1agent/x1agent/compare/v1.31.0...v1.32.0) (2026-05-16)
 
 
