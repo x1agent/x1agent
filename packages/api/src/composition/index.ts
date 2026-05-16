@@ -92,7 +92,10 @@ import jwt from "jsonwebtoken";
 import {
   BindingService,
   PostgresBindingRepository,
+  PostgresWorkspaceBindingRepository,
+  WorkspaceBindingService,
   createAgentEnvRoutes,
+  createWorkspaceEnvRoutes,
 } from "@x1agent/domain-agent-env";
 import {
   PostgresCollectionRepository,
@@ -222,6 +225,8 @@ export interface Composition {
   agentMcpAttachmentRoutes: Hono;
   /** /api/workspaces/:slug/agents/:agentId/env — Zone-2 agent env bindings. */
   agentEnvRoutes: Hono;
+  /** /api/workspaces/:slug/env-bindings — workspace-scoped env-var bindings. */
+  workspaceEnvRoutes: Hono;
   /** /auth/mcp/* — browser redirects for the OAuth flow. */
   mcpOAuthRoutes: Hono;
   /** /api/users/me/mcp-tokens — JSON status endpoints for the UI. */
@@ -526,9 +531,9 @@ export function compose(env: CompositionEnv): Composition {
     repository: previewEnvironments,
     adminGuard: {
       requireWorkspaceAdmin: async (workspaceId, userId) => {
-        await new WorkspaceAdminGuard(memberships).requireWorkspaceAdmin(
-          workspaceId,
+        await new WorkspaceAdminGuard(memberships).assertAdmin(
           userId,
+          workspaceId,
         );
       },
     },
@@ -1143,6 +1148,40 @@ export function compose(env: CompositionEnv): Composition {
     requireAgent,
   });
 
+  // Workspace-scoped env bindings. Same env_bindings table, scope='workspace'.
+  // Preview environments + agent sessions opt into these by name; the resolver
+  // at preview-deploy time joins env_bindings + workspace_secrets to mint the
+  // per-preview Secret bundle.
+  const workspaceBindingRepo = new PostgresWorkspaceBindingRepository(env.sql);
+  const workspaceBindingService = new WorkspaceBindingService(
+    workspaceBindingRepo,
+    async (workspaceId, secretName) => {
+      const blob = await workspaceSecretsRepo.getBlob(
+        workspaceId,
+        secretName as unknown as Parameters<typeof workspaceSecretsRepo.getBlob>[1],
+      );
+      return blob !== null;
+    },
+  );
+  const workspaceEnvRoutes = createWorkspaceEnvRoutes({
+    service: workspaceBindingService,
+    resolveWorkspace: async (slug) => {
+      const w = await workspaces.findBySlug(slug);
+      return w?.id ?? null;
+    },
+    requireAuth,
+    requireWorkspaceAdmin: async (workspaceId, userId) => {
+      await new WorkspaceAdminGuard(memberships).assertAdmin(
+        userId as never,
+        workspaceId as never,
+      );
+    },
+    getActor: (c) => {
+      const actor = getActor(c);
+      return actor ? { userId: actor.userId, email: actor.email } : null;
+    },
+  });
+
   const collectionsWorkspaceReader: CollectionsWorkspaceReader = {
     async getIdBySlug(slug) {
       const w = await workspaces.findBySlug(slug);
@@ -1411,6 +1450,7 @@ export function compose(env: CompositionEnv): Composition {
     mcpCatalogRoutes,
     agentMcpAttachmentRoutes,
     agentEnvRoutes,
+    workspaceEnvRoutes,
     mcpOAuthRoutes,
     mcpUserTokenRoutes,
     collectionRoutes,

@@ -277,6 +277,7 @@ const {
   mcpCatalogRoutes,
   agentMcpAttachmentRoutes,
   agentEnvRoutes,
+  workspaceEnvRoutes,
   mcpOAuthRoutes,
   mcpUserTokenRoutes,
   collectionRoutes,
@@ -483,6 +484,7 @@ app.route(
   agentMcpAttachmentRoutes,
 );
 app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
+app.route("/api/workspaces/:slug/env-bindings", workspaceEnvRoutes);
 // Browser-redirect OAuth flows for remote_oauth MCPs:
 //   /auth/mcp/start/:slug/:name      — initiate
 //   /auth/mcp/callback/:slug/:name   — provider redirects here
