@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isTouchTablet } from "../lib/device";
 
 /**
  * Volumetric nebula shader — ported 1:1 from the marketing site's
@@ -245,12 +246,23 @@ export function RailCanvas() {
     let cancelled = false;
     const start = performance.now();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Touch tablets (iPad / Android tablet) — render a single frame
+    // and re-draw only on resize / theme change. The continuous
+    // rAF loop pegs the GPU and tanks scroll latency on iPad even
+    // when nothing on the page is moving. `reduced` is honoured the
+    // same way; `staticMode` is the broader "no animation" gate.
+    const staticMode = reduced || isTouchTablet();
 
     let scrollY = window.scrollY || 0;
     const onScroll = () => {
       scrollY = window.scrollY || 0;
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    if (!staticMode) {
+      // In staticMode the canvas is drawn once and re-drawn only on
+      // theme/resize/visibility; tracking scroll position would just
+      // burn cycles for a value the next draw won't use.
+      window.addEventListener("scroll", onScroll, { passive: true });
+    }
 
     let mouseTargetX = 0;
     let mouseTargetY = 0;
@@ -263,7 +275,7 @@ export function RailCanvas() {
       mouseTargetX = (x - 0.5) * 2;
       mouseTargetY = (y - 0.5) * 2;
     };
-    if (!reduced) {
+    if (!staticMode) {
       window.addEventListener("mousemove", onMouseMove, { passive: true });
     }
 
@@ -280,43 +292,63 @@ export function RailCanvas() {
       }
     }
 
+    function drawOnce() {
+      if (cancelled) return;
+      if (!visible) return;
+      const docH = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const progress = Math.max(0, Math.min(1, scrollY / docH));
+
+      if (!staticMode) {
+        mouseX += (mouseTargetX - mouseX) * 0.05;
+        mouseY += (mouseTargetY - mouseY) * 0.05;
+      }
+
+      resize();
+      gl!.viewport(0, 0, canvas!.width, canvas!.height);
+      if (theme.isDark) gl!.clearColor(0.024, 0.02, 0.016, 1.0);
+      else gl!.clearColor(0.925, 0.898, 0.839, 1.0);
+      gl!.clear(gl!.COLOR_BUFFER_BIT);
+      gl!.useProgram(prog);
+      gl!.uniform2f(uRes, canvas!.width, canvas!.height);
+      gl!.uniform1f(uTime, staticMode ? 0 : (performance.now() - start) / 1000);
+      gl!.uniform1f(uScroll, progress * 4.5);
+      gl!.uniform2f(uMouse, mouseX, mouseY);
+      gl!.uniform3f(uBlue, theme.blue[0], theme.blue[1], theme.blue[2]);
+      gl!.uniform3f(uPurple, theme.purple[0], theme.purple[1], theme.purple[2]);
+      gl!.uniform3f(uPeach, theme.peach[0], theme.peach[1], theme.peach[2]);
+      gl!.uniform3f(uPink, theme.pink[0], theme.pink[1], theme.pink[2]);
+      gl!.uniform3f(uHue, theme.hue[0], theme.hue[1], theme.hue[2]);
+      gl!.uniform1f(uIntensity, theme.intensity);
+      gl!.uniform1f(uIsDark, theme.isDark);
+      gl!.drawArrays(gl!.TRIANGLES, 0, 6);
+    }
+
     function frame() {
       if (cancelled) return;
-      if (visible) {
-        const docH = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-        const progress = Math.max(0, Math.min(1, scrollY / docH));
-
-        if (!reduced) {
-          mouseX += (mouseTargetX - mouseX) * 0.05;
-          mouseY += (mouseTargetY - mouseY) * 0.05;
-        }
-
-        resize();
-        gl!.viewport(0, 0, canvas!.width, canvas!.height);
-        if (theme.isDark) gl!.clearColor(0.024, 0.02, 0.016, 1.0);
-        else gl!.clearColor(0.925, 0.898, 0.839, 1.0);
-        gl!.clear(gl!.COLOR_BUFFER_BIT);
-        gl!.useProgram(prog);
-        gl!.uniform2f(uRes, canvas!.width, canvas!.height);
-        gl!.uniform1f(uTime, reduced ? 0 : (performance.now() - start) / 1000);
-        gl!.uniform1f(uScroll, progress * 4.5);
-        gl!.uniform2f(uMouse, mouseX, mouseY);
-        gl!.uniform3f(uBlue, theme.blue[0], theme.blue[1], theme.blue[2]);
-        gl!.uniform3f(uPurple, theme.purple[0], theme.purple[1], theme.purple[2]);
-        gl!.uniform3f(uPeach, theme.peach[0], theme.peach[1], theme.peach[2]);
-        gl!.uniform3f(uPink, theme.pink[0], theme.pink[1], theme.pink[2]);
-        gl!.uniform3f(uHue, theme.hue[0], theme.hue[1], theme.hue[2]);
-        gl!.uniform1f(uIntensity, theme.intensity);
-        gl!.uniform1f(uIsDark, theme.isDark);
-        gl!.drawArrays(gl!.TRIANGLES, 0, 6);
-      }
+      drawOnce();
       raf = requestAnimationFrame(frame);
+    }
+
+    // Schedule a redraw on demand — used by resize / theme / visibility
+    // transitions in staticMode so the canvas still reflects current
+    // state without spinning the GPU between events.
+    function scheduleRedraw() {
+      if (cancelled) return;
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        drawOnce();
+      });
     }
 
     const io = new IntersectionObserver(
       (entries) =>
         entries.forEach((e) => {
+          const becameVisible = !visible && e.isIntersecting;
           visible = e.isIntersecting;
+          // staticMode draws once per visibility transition. The
+          // running loop owns this otherwise.
+          if (staticMode && becameVisible) scheduleRedraw();
         }),
       { threshold: 0 },
     );
@@ -324,20 +356,32 @@ export function RailCanvas() {
 
     const mo = new MutationObserver(() => {
       theme = readTheme();
+      if (staticMode) scheduleRedraw();
     });
     mo.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-theme"],
     });
 
-    wrap.dataset.shader = "on";
-    raf = requestAnimationFrame(frame);
+    // Resize → redraw in staticMode (the rAF loop covers it otherwise).
+    const onResize = () => {
+      if (staticMode) scheduleRedraw();
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+
+    wrap.dataset.shader = staticMode ? "static" : "on";
+    if (staticMode) {
+      scheduleRedraw();
+    } else {
+      raf = requestAnimationFrame(frame);
+    }
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(raf);
+      if (raf) cancelAnimationFrame(raf);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("resize", onResize);
       io.disconnect();
       mo.disconnect();
       gl.deleteProgram(prog);
