@@ -139,11 +139,21 @@ export function EventStream({
   const [atBottom, setAtBottom] = useState(true);
   const initialJumpDoneRef = useRef(false);
   // X1A-72.3 — pagination scroll anchor. Before older events are
-  // prepended, record (scrollHeight, scrollTop). After the DOM grows,
-  // restore scrollTop = scrollTop + Δheight so the viewport stays
-  // anchored to whatever the user was reading instead of jumping.
+  // prepended, record scrollHeight. After the DOM grows, restore
+  // scrollTop = scrollTop + Δheight so the viewport stays anchored
+  // to whatever the user was reading instead of jumping.
+  //
+  // We also track the first event's seq + the previous length so a
+  // NATS append landing DURING an in-flight loadOlder doesn't
+  // consume the anchor early: an append leaves events[0] identity
+  // unchanged, a prepend changes it. Only when events[0] changes
+  // (and the height has actually grown) do we apply the prepend
+  // anchor restore.
   const preLoadOlderHeightRef = useRef<number | null>(null);
   const eventsLengthRef = useRef(events.length);
+  const firstEventKeyRef = useRef<string | number | null>(
+    events[0] ? `${events[0].seq}:${events[0].type}` : null,
+  );
 
   const isNearBottom = useCallback((): boolean => {
     const el = scrollRef.current;
@@ -199,17 +209,23 @@ export function EventStream({
   // Follow new events ONLY if the user is already near the bottom.
   // This is the fix for the screen-grab: previously this effect always
   // scrollIntoView'd, yanking the viewport on every incoming message.
-  // X1A-72.3 — also handles the load-older case: if a pre-prepend
-  // scrollHeight was recorded, the events array grew via prepend (not
-  // append), so adjust scrollTop by the height delta to keep the
-  // viewport anchored on whatever the user was reading.
+  // X1A-72.3 — also handles the load-older case: a prepend grows the
+  // array AND swaps events[0] identity; an append grows the array
+  // but leaves events[0] unchanged. Only on prepend do we apply the
+  // anchor restore. This stops a NATS append racing with an
+  // in-flight loadOlder from consuming the anchor prematurely.
   useLayoutEffect(() => {
     if (!initialJumpDoneRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
     const grew = events.length > eventsLengthRef.current;
+    const firstKey = events[0]
+      ? `${events[0].seq}:${events[0].type}`
+      : null;
+    const firstChanged = firstKey !== firstEventKeyRef.current;
     eventsLengthRef.current = events.length;
-    if (preLoadOlderHeightRef.current !== null) {
+    firstEventKeyRef.current = firstKey;
+    if (preLoadOlderHeightRef.current !== null && grew && firstChanged) {
       // Prepend path: restore the user's position relative to the
       // bottom of the loaded window so the viewport doesn't jump.
       const delta = el.scrollHeight - preLoadOlderHeightRef.current;
@@ -217,6 +233,9 @@ export function EventStream({
       if (delta > 0) el.scrollTop = el.scrollTop + delta;
       return;
     }
+    // Pure-append path: follow the new event only if the user is at
+    // the bottom. The anchor ref stays set if loadOlder is still
+    // in flight — the next prepend will consume it.
     if (grew && stickRef.current) {
       el.scrollTop = el.scrollHeight;
     }
