@@ -73,8 +73,15 @@ export class VertexAnthropicSessionSummarizer implements SessionSummarizer {
     this.model = opts.model ?? DEFAULT_MODEL;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
     this.metadataBaseUrl = opts.metadataBaseUrl ?? DEFAULT_METADATA_BASE_URL;
+    // Vertex AI's global endpoint is unprefixed (aiplatform.googleapis.com
+    // with `locations/global/...` in the path). Every other region uses the
+    // per-region host shape. The Claude Code SDK handles this transparently;
+    // we have to do it by hand because we build the URL ourselves.
     this.vertexBaseUrl =
-      opts.vertexBaseUrl ?? `https://${opts.region}-aiplatform.googleapis.com`;
+      opts.vertexBaseUrl ??
+      (opts.region === "global"
+        ? "https://aiplatform.googleapis.com"
+        : `https://${opts.region}-aiplatform.googleapis.com`);
   }
 
   async summarize(events: readonly SessionEvent[]): Promise<string | null> {
