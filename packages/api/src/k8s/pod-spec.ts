@@ -220,6 +220,11 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "AGENT_PROMPT", value: spec.agentPrompt },
     { name: "MAX_TURNS", value: String(spec.maxTurns) },
     { name: "SESSION_MODE", value: spec.sessionMode },
+    // Lets the agent runtime branch the system prompt by kind. Without
+    // it the prompt has to assume worst-case (mention all the
+    // orchestrator-only tools to everyone), which confused small models
+    // into pretending they could spawn or pull when they couldn't.
+    { name: "AGENT_KIND", value: spec.agentKind },
     { name: "IDLE_TIMEOUT_MS", value: String(spec.idleTimeoutMs) },
     { name: "SIDECAR_URL", value: "http://localhost:9090" },
     // API_URL stays on the agent container so the SDK / tooling can

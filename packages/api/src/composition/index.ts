@@ -907,6 +907,12 @@ export function compose(env: CompositionEnv): Composition {
     natsConnection: env.natsConnection,
     quietHints,
     sql: env.sql,
+    // Needed by /sessions/:id/pull-for-parent — execs `tar` in the
+    // child + parent session pods. Same namespace + kubeconfig the
+    // job-watcher uses (read from process.env to avoid threading
+    // another field through CompositionEnv just for this route).
+    kubeConfig: env.kubeConfig,
+    namespace: process.env.K8S_NAMESPACE ?? "x1agent",
     // helper hits /api/internal/user-oauth-token to mint a fresh
     // access token for a (user, provider) on every outbound provider
     // → external-API call. Refreshers map provider id → adapter that

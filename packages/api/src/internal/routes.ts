@@ -29,6 +29,8 @@ import {
   writeStagingFiles,
 } from "../shares/storage.js";
 import { StringCodec, JSONCodec } from "nats";
+import type { KubeConfig } from "@kubernetes/client-node";
+import { pullFromChild } from "../k8s/pull-from-child.js";
 import { randomUUID } from "node:crypto";
 import type {
   UploadRepository,
@@ -98,6 +100,13 @@ export interface InternalRoutesConfig {
    * this the cancel is purely a DB flip.
    */
   jobs?: JobTerminator;
+  /**
+   * In-cluster K8s client + namespace — needed by
+   * `/sessions/:id/pull-for-parent` to exec `tar` in the child + parent
+   * pods. When absent, the pull-from-child route returns 503.
+   */
+  kubeConfig?: KubeConfig;
+  namespace?: string;
   /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
@@ -788,6 +797,59 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       size: bytes.length,
       content_b64: bytes.toString("base64"),
     });
+  });
+
+  // Orchestrator → child workspace pull (inverse of share-to-child).
+  // The parent's sidecar POSTs here when the orchestrator invokes
+  // `pull_from_child`. We exec `tar` in both pods to snapshot the
+  // child's /workspace into the parent's /workspace/workers/<child>/.
+  // Worker-driven `share` was unreliable on small models (Haiku) which
+  // narrate calling the tool but don't emit the structured call — the
+  // orchestrator-pulls direction sidesteps that entirely.
+  app.post("/sessions/:childId/pull-for-parent", async (c) => {
+    if (!cfg.kubeConfig || !cfg.namespace) {
+      return c.json({ error: "pull_unavailable", message: "k8s client not wired" }, 503);
+    }
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      paths?: string[];
+    };
+    if (!body.parent_session_id || typeof body.parent_session_id !== "string") {
+      return c.json({ error: "missing_fields", need: ["parent_session_id"] }, 400);
+    }
+
+    const child = await cfg.sessions.findById(childId);
+    if (!child) return c.json({ error: "child_not_found" }, 404);
+    if (child.parentSessionId !== body.parent_session_id) {
+      return c.json({ error: "not_your_child" }, 403);
+    }
+    const parent = await cfg.sessions.findById(body.parent_session_id as SessionId);
+    if (!parent || parent.status === "complete" || parent.status === "failed") {
+      return c.json({ error: "parent_not_live" }, 410);
+    }
+
+    try {
+      const result = await pullFromChild({
+        kubeConfig: cfg.kubeConfig,
+        namespace: cfg.namespace,
+        parentSessionId: body.parent_session_id,
+        childSessionId: childId as unknown as string,
+        paths: Array.isArray(body.paths) ? body.paths : undefined,
+      });
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "pull_failed";
+      const status =
+        code === "child_workspace_unavailable" ? 410
+          : code === "workspace_too_large" ? 413
+          : code === "parent_pod_missing" ? 404
+          : 502;
+      return c.json(
+        { error: code, message: (err as Error).message },
+        status,
+      );
+    }
   });
 
   // Child → parent explicit signal. The child's sidecar calls this
