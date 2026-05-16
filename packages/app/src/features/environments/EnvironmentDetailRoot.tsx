@@ -289,7 +289,7 @@ export function EnvironmentDetailRoot({ workspaceSlug, envId }: Props) {
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
-                className="text-sm text-red-300 hover:text-red-200"
+                className="inline-flex items-center rounded-md border border-red-500/60 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-200 hover:bg-red-500/20 hover:text-red-100"
               >
                 Delete environment
               </button>
