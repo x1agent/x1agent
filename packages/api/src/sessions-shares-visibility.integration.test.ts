@@ -376,13 +376,19 @@ describe("X1A-9 — per-session shares list visibility", () => {
 });
 
 describe("X1A-9 — workspace shares index visibility", () => {
-  it("admin sees every share in the workspace", async () => {
+  it("workspace admin does NOT see every share — admin role is workspace-management only", async () => {
+    // Post platform-admin refactor: workspace admin is for editing
+    // agents / members / settings, not reading other users' shares.
+    // Cross-user list mode is gated by the platform-admin guard,
+    // wired from the install-time platformAdmins email list. CAROL
+    // is admin in WS_A but not a platform admin and not a sharee on
+    // aliceSession, so Alice's share is no longer in her view.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(app, "http://api.test/api/workspaces/ws-a/shares", c);
     expect(r.status).toBe(200);
     const shareIds = (r.body.shares as { share_id: string }[]).map((s) => s.share_id);
-    expect(shareIds).toContain(aliceShareId);
+    expect(shareIds).not.toContain(aliceShareId);
   });
 
   it("non-admin sees only shares from sessions visible to them", async () => {
