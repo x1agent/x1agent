@@ -13,6 +13,7 @@ import {
 import { useArtifactPanelStore } from "../../stores/artifactPanelStore";
 import { useAuthStore } from "../../stores/authStore";
 import { ComposerShell } from "./ComposerShell";
+import { CommentBody } from "./CommentBody";
 
 // Module-level stable empty array — required to avoid the
 // useSyncExternalStore foot-gun where `?? []` inside a selector
@@ -287,6 +288,7 @@ export function ArtifactCommentsSidebar({
           currentUserId={currentUserId}
           justPostedIds={justPostedIds}
           onOpenThread={setActiveThreadId}
+          shareKey={key}
         />
       )}
 
@@ -324,6 +326,7 @@ function ThreadList({
   currentUserId,
   justPostedIds,
   onOpenThread,
+  shareKey,
 }: {
   rows: ShareCommentDTO[];
   threads: ReturnType<typeof groupThreads>;
@@ -334,41 +337,78 @@ function ThreadList({
   /** Channel-mode caller — entering a thread swaps the sidebar to the
    *  focused thread-detail view. */
   onOpenThread: (threadId: string) => void;
+  shareKey: { workspaceSlug: string; sessionId: string; shareId: string };
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // Distance-from-bottom threshold (px). Anything within this counts
   // as "at the bottom" — accounts for sub-pixel rounding and a small
   // affordance so the user doesn't have to be pixel-perfect.
   const AT_BOTTOM_PX = 32;
+  // X1A-72.4 — distance-from-top threshold for triggering load-older.
+  const NEAR_TOP_PX = 120;
   const wasAtBottomRef = useRef(true);
   const lastCountRef = useRef(rows.length);
+  const preLoadOlderHeightRef = useRef<number | null>(null);
+
+  const hasOlder = useShareCommentsStore(
+    (s) => s.hasOlderByShareId[shareKey.shareId] ?? false,
+  );
+  const loadingOlder = useShareCommentsStore(
+    (s) => s.loadingOlderByShareId[shareKey.shareId] ?? false,
+  );
+  const loadOlder = useShareCommentsStore((s) => s.loadOlder);
 
   // Track whether the user is currently pinned to the bottom. Updated
   // on scroll; consumed in the layout effect below to decide whether
-  // a count bump should auto-scroll.
+  // a count bump should auto-scroll. Also drives the load-older
+  // trigger when the user scrolls to the top.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     const onScroll = () => {
       const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
       wasAtBottomRef.current = dist <= AT_BOTTOM_PX;
+      if (
+        hasOlder &&
+        !loadingOlder &&
+        el.scrollTop < NEAR_TOP_PX &&
+        rows.length > 0
+      ) {
+        preLoadOlderHeightRef.current = el.scrollHeight;
+        void loadOlder(shareKey);
+      }
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     // Initial state — first paint with rows already present.
     onScroll();
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [hasOlder, loadingOlder, loadOlder, shareKey, rows.length]);
 
-  // When the row count grows, if the user was at the bottom before,
-  // smooth-scroll the new row into view. Shrinking (resolve/un-resolve
-  // doesn't shrink, but redundancy doesn't hurt) is a no-op.
+  // When the row count grows:
+  //   - If a pre-prepend height was recorded, restore scrollTop by the
+  //     delta so the viewport stays anchored on whatever was on screen
+  //     before the prepend (X1A-72.4).
+  //   - Otherwise, if user was at the bottom, smooth-scroll the new
+  //     row into view.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     const prev = lastCountRef.current;
     lastCountRef.current = rows.length;
-    if (rows.length > prev && wasAtBottomRef.current) {
-      // requestAnimationFrame so the DOM is committed before we measure.
+    if (rows.length <= prev) return;
+    if (preLoadOlderHeightRef.current !== null) {
+      // Prepend path. Use rAF so the DOM is committed before we measure
+      // the new scrollHeight.
+      const beforeHeight = preLoadOlderHeightRef.current;
+      preLoadOlderHeightRef.current = null;
+      requestAnimationFrame(() => {
+        const delta = el.scrollHeight - beforeHeight;
+        if (delta > 0) el.scrollTop = el.scrollTop + delta;
+      });
+      return;
+    }
+    if (wasAtBottomRef.current) {
+      // Append (new live comment) path.
       requestAnimationFrame(() => {
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       });
@@ -381,6 +421,16 @@ function ThreadList({
       className="flex-1 overflow-auto px-3 py-3"
       data-testid="comment-thread-list"
     >
+      {(hasOlder || loadingOlder) && rows.length > 0 && (
+        <div
+          className="mb-1 py-1 text-center text-[11px] text-fg-faint"
+          data-testid="comments-load-older-indicator"
+        >
+          {loadingOlder
+            ? "Loading older threads…"
+            : "↑ Scroll up to load older"}
+        </div>
+      )}
       {loading && rows.length === 0 && (
         <div className="text-[12px] text-fg-faint">Loading…</div>
       )}
@@ -537,24 +587,36 @@ function CommentRow({
   const author = formatAuthor(comment, currentUserId);
   const isUser = !comment.author_session_id;
   const isReply = comment.parent_comment_id !== null;
+  // X1A-72.4 — self-author distinction. Match the timeline's user.message
+  // shape: right-aligned, soft elevated bubble. Other-human + agent
+  // comments keep the flat full-width row so the operator scans a thread
+  // and immediately sees which were theirs.
+  const isSelf =
+    !!currentUserId &&
+    comment.author_user_id != null &&
+    comment.author_user_id === currentUserId;
   const wrapperClass = isFirst ? "" : "mt-2";
 
-  // Slack-style: same full-width row for everyone. Author is conveyed
-  // by the name label only. `data-author-kind` stays stable as a hook
-  // for future accent treatments (avatar / colour on name).
   return (
     <div
-      className={`${wrapperClass} block w-full text-[13px]`}
+      className={`${wrapperClass} block w-full text-[13px] ${
+        isSelf ? "flex flex-col items-end" : ""
+      }`}
       data-comment-author={
         isUser
           ? comment.author_user_id ?? "unknown"
           : comment.author_session_id
       }
       data-author-kind={isUser ? "user" : "agent"}
+      data-self={isSelf ? "true" : "false"}
       data-comment-id={comment.id}
       data-is-reply={isReply ? "true" : "false"}
     >
-      <div className="mb-0.5 flex items-baseline gap-2">
+      <div
+        className={`mb-0.5 flex items-baseline gap-2 ${
+          isSelf ? "justify-end" : ""
+        }`}
+      >
         <span className="text-[12px] font-semibold text-fg-muted">
           {author}
         </span>
@@ -562,7 +624,15 @@ function CommentRow({
           {formatRelativeTime(comment.created_at)}
         </span>
       </div>
-      <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
+      <div
+        className={
+          isSelf
+            ? "max-w-[85%] rounded-2xl bg-bg-elevated/70 px-3 py-1.5"
+            : ""
+        }
+      >
+        <ClippableBody body={comment.body} initialExpanded={initialExpanded} />
+      </div>
     </div>
   );
 }
@@ -627,10 +697,10 @@ function ClippableBody({
     <div>
       <div
         ref={ref}
-        className="leading-snug text-fg whitespace-pre-wrap"
+        className="leading-snug text-fg"
         style={expanded ? undefined : collapsedStyle}
       >
-        {body}
+        <CommentBody body={body} />
       </div>
       {overflows && (
         <button

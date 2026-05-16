@@ -50,10 +50,17 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     eventsBySession,
     errorBySession,
     loadInitial,
+    loadOlder,
     appendEvent,
     setError,
     setSession,
   } = useSessionDetailStore();
+  const hasOlder = useSessionDetailStore(
+    (s) => s.hasOlderBySession[sessionId] ?? false,
+  );
+  const loadingOlder = useSessionDetailStore(
+    (s) => s.loadingOlderBySession[sessionId] ?? false,
+  );
 
   const [verbose, setVerbose] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -367,6 +374,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // stays canonical: paste the URL → someone else lands on the same view.
   const showArtifact = useArtifactPanelStore((s) => s.show);
   const maximizeArtifact = useArtifactPanelStore((s) => s.maximize);
+  const setCommentsCollapsed = useArtifactPanelStore(
+    (s) => s.setCommentsCollapsed,
+  );
   const deepLinkAppliedRef = useRef(false);
   useEffect(() => {
     if (deepLinkAppliedRef.current) return;
@@ -387,7 +397,30 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       artifact: evt.payload as AgentSharePayload,
     });
     if (params.get("mode") === "fullscreen") maximizeArtifact();
-  }, [events, sessionId, workspaceSlug, showArtifact, maximizeArtifact]);
+    // Comments sidebar starts collapsed when the user navigates directly
+    // to a share (deep-link or fullscreen). They opened the share to
+    // read it; if they want comments, they can expand from the gutter.
+    setCommentsCollapsed(true);
+    // Scroll the matching share pill to the center of the timeline so
+    // the user lands on the share they followed in, not at the bottom
+    // of the conversation. The pill is tagged with `data-share-id` by
+    // SharePill. Use requestAnimationFrame so the EventStream has
+    // finished its initial layout (and its own jump-to-bottom) first;
+    // our center-scroll wins on the next paint.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-share-id="${CSS.escape(target)}"]`,
+      );
+      if (el) el.scrollIntoView({ behavior: "auto", block: "center" });
+    });
+  }, [
+    events,
+    sessionId,
+    workspaceSlug,
+    showArtifact,
+    maximizeArtifact,
+    setCommentsCollapsed,
+  ]);
 
   const disabled =
     !session ||
@@ -513,6 +546,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           agentId={agent?.id}
           sessionId={sessionId}
           tailSlot={<MainTimelineTypingIndicators sessionId={sessionId} />}
+          hasOlder={hasOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={() => loadOlder(workspaceSlug, sessionId)}
         />
 
         <div className="px-4 pt-3 pb-[60px]">

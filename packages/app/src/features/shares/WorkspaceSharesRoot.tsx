@@ -175,10 +175,15 @@ function ShareRow({
   workspaceSlug: string;
 }) {
   const Icon = TYPE_ICONS[entry.share_type] ?? FileText;
-  const sessionHref = `/workspaces/${workspaceSlug}/sessions/${entry.session_id}`;
+  // Open the share full-screen rather than parking the user at the
+  // bottom of the originating session. The canonical fullscreen route
+  // is `?share=<id>&mode=fullscreen` on the session page.
+  const shareHref =
+    `/workspaces/${workspaceSlug}/sessions/${entry.session_id}` +
+    `?share=${encodeURIComponent(entry.share_id)}&mode=fullscreen`;
   return (
     <a
-      href={sessionHref}
+      href={shareHref}
       className="group flex flex-col rounded-lg border border-border-soft bg-bg-elevated/20 p-4 transition-colors hover:border-border-strong hover:bg-bg-elevated/60"
     >
       <div className="mb-2 flex items-center gap-2">

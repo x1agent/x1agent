@@ -48,6 +48,12 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
 
   const [selectedInstall, setSelectedInstall] = useState<number | null>(null);
   const [branchDraft, setBranchDraft] = useState<Record<string, string>>({});
+  // X1A-86 — enterprise-scale list cleanup. The "Available" picker
+  // grew unbounded for orgs with many repos; paginate to 5 by default
+  // (10 on toggle) and add a fuzzy filter the user can type into.
+  const [search, setSearch] = useState("");
+  const [pageSize, setPageSize] = useState<5 | 10>(5);
+  const [page, setPage] = useState(0);
   // Per-row "Push allowed" pre-attach choice. Defaults to true on each
   // row so the common case (agent will commit + push) just works; the
   // sidecar's credential helper still gates access to the actual token,
@@ -93,6 +99,30 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
     );
     return all.filter((r) => !attached.has(r.full_name));
   }, [activeInstall, reposById, agentState?.repos]);
+
+  // Substring fuzzy match against the full_name (org/repo). Case-
+  // insensitive; whitespace-trimmed; empty query matches everything.
+  const filteredRepos = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return availableRepos;
+    return availableRepos.filter((r) =>
+      r.full_name.toLowerCase().includes(q),
+    );
+  }, [availableRepos, search]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRepos.length / pageSize));
+  // Clamp page index when filter or size shrinks the result set.
+  const safePage = Math.min(page, pageCount - 1);
+  const pagedRepos = useMemo(
+    () => filteredRepos.slice(safePage * pageSize, (safePage + 1) * pageSize),
+    [filteredRepos, safePage, pageSize],
+  );
+
+  // Reset paging when the user changes the search or page size — easier
+  // to reason about than letting the page index drift mid-typing.
+  useEffect(() => {
+    setPage(0);
+  }, [search, pageSize, activeInstall]);
 
   if (!config?.configured) return null;
   if (!agentId) {
@@ -309,8 +339,39 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
               </div>
             )}
             {availableRepos.length > 0 && (
+              <div className="mb-2 flex items-center gap-2">
+                <Input
+                  className="h-8 flex-1 text-sm"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={`Search ${availableRepos.length} repos…`}
+                  aria-label="Search available repos"
+                />
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v) as 5 | 10)}
+                >
+                  <SelectTrigger
+                    className="h-8 w-24 text-xs"
+                    aria-label="Repos per page"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5 / page</SelectItem>
+                    <SelectItem value="10">10 / page</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {availableRepos.length > 0 && filteredRepos.length === 0 && (
+              <div className="text-sm text-fg-faint">
+                No repos match "{search.trim()}".
+              </div>
+            )}
+            {pagedRepos.length > 0 && (
               <ul className="divide-y divide-border-soft rounded-md border border-border-soft">
-                {availableRepos.map((repo) => (
+                {pagedRepos.map((repo) => (
                   <li
                     key={repo.full_name}
                     className="flex items-center gap-3 px-3 py-2 text-sm"
@@ -372,6 +433,40 @@ export function AgentReposSection({ workspaceSlug, agentId }: Props) {
                   </li>
                 ))}
               </ul>
+            )}
+            {pageCount > 1 && (
+              <div className="mt-2 flex items-center justify-between text-xs text-fg-faint">
+                <div>
+                  {filteredRepos.length} match
+                  {filteredRepos.length === 1 ? "" : "es"}
+                  {" · "}
+                  page {safePage + 1} of {pageCount}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={safePage === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={safePage >= pageCount - 1}
+                    onClick={() =>
+                      setPage((p) => Math.min(pageCount - 1, p + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         )}

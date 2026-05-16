@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -57,7 +57,34 @@ export function AgentEnvBindingsCard({
   const [envName, setEnvName] = useState("");
   const [secretName, setSecretName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // X1A-86 — bindings list grows unbounded for an agent with many
+  // operator-injected credentials. Paginate to 5 by default (10 on
+  // toggle), with a search filter over env_name + secret_name.
+  const [search, setSearch] = useState("");
+  const [pageSize, setPageSize] = useState<5 | 10>(5);
+  const [page, setPage] = useState(0);
   const { confirm, dialog } = useConfirm();
+
+  const filteredBindings = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return bindings;
+    return bindings.filter(
+      (b) =>
+        b.env_name.toLowerCase().includes(q) ||
+        b.secret_name.toLowerCase().includes(q),
+    );
+  }, [bindings, search]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredBindings.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const pagedBindings = filteredBindings.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
+  useEffect(() => {
+    setPage(0);
+  }, [search, pageSize, bindings.length]);
 
   useEffect(() => {
     if (!canManage) return;
@@ -148,28 +175,97 @@ export function AgentEnvBindingsCard({
             </div>
           )}
           {bindings.length > 0 && (
-            <ul className="divide-y divide-border-soft">
-              {bindings.map((b) => (
-                <li
-                  key={b.id}
-                  className="flex items-center justify-between py-3"
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <Input
+                  className="h-8 flex-1 text-sm"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={`Search ${bindings.length} binding${bindings.length === 1 ? "" : "s"}…`}
+                  aria-label="Search env bindings"
+                />
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v) as 5 | 10)}
                 >
-                  <div className="font-mono text-sm">
-                    <span className="text-fg">{b.env_name}</span>
-                    <span className="mx-2 text-fg-faint">←</span>
-                    <span className="text-fg-muted">${"{"}{b.secret_name}{"}"}</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onRemove(b)}
+                  <SelectTrigger
+                    className="h-8 w-24 text-xs"
+                    aria-label="Bindings per page"
                   >
-                    Unlink
-                  </Button>
-                </li>
-              ))}
-            </ul>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5 / page</SelectItem>
+                    <SelectItem value="10">10 / page</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {filteredBindings.length === 0 && (
+                <div className="text-sm text-fg-faint">
+                  No bindings match "{search.trim()}".
+                </div>
+              )}
+              {pagedBindings.length > 0 && (
+                <ul className="divide-y divide-border-soft">
+                  {pagedBindings.map((b) => (
+                    <li
+                      key={b.id}
+                      className="flex items-center justify-between py-3"
+                    >
+                      <div className="font-mono text-sm">
+                        <span className="text-fg">{b.env_name}</span>
+                        <span className="mx-2 text-fg-faint">←</span>
+                        <span className="text-fg-muted">
+                          ${"{"}{b.secret_name}{"}"}
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRemove(b)}
+                      >
+                        Unlink
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pageCount > 1 && (
+                <div className="mt-2 flex items-center justify-between text-xs text-fg-faint">
+                  <div>
+                    {filteredBindings.length} match
+                    {filteredBindings.length === 1 ? "" : "es"}
+                    {" · "}
+                    page {safePage + 1} of {pageCount}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      disabled={safePage === 0}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      disabled={safePage >= pageCount - 1}
+                      onClick={() =>
+                        setPage((p) => Math.min(pageCount - 1, p + 1))
+                      }
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

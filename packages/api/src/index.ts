@@ -305,6 +305,7 @@ const {
   sessions: composedSessions,
   memberships: composedMemberships,
   sessionShares: composedSessionShares,
+  platformAdminGuard: composedPlatformAdminGuard,
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
@@ -1023,6 +1024,7 @@ if (providerNats) {
     agents: composedAgents,
     memberships: composedMemberships,
     sessionShares: composedSessionShares,
+    platformAdminGuard: composedPlatformAdminGuard,
   });
   console.log("[ws-bridge] listening on /api/ws");
 } else {

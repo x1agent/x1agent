@@ -9,6 +9,7 @@ import {
 } from "../../stores/shareCommentsStore";
 import { useAuthStore } from "../../stores/authStore";
 import { TYPE_ICONS, formatSize, type AgentSharePayload } from "./ShareCard";
+import { CommentBody } from "./CommentBody";
 
 // Stable module-level empty array — see CLAUDE.md "Frontend state management"
 // selector foot-gun rule. Returning a fresh `[]` inside a zustand selector
@@ -86,7 +87,7 @@ export function SharePill({ event, workspaceSlug, sessionId }: Props) {
   const threads = groupThreads(rows).slice(0, 3);
 
   return (
-    <div className="py-1">
+    <div className="py-1" data-share-id={payload.share_id}>
       <div
         className={
           "group inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition " +
@@ -201,6 +202,10 @@ function ThreadSnippets({
     >
       {threads.map((t, i) => {
         const latest = t.comments[t.comments.length - 1]!;
+        const isSelf =
+          !!currentUserId &&
+          latest.author_user_id != null &&
+          latest.author_user_id === currentUserId;
         return (
           <div
             key={t.thread_id}
@@ -208,6 +213,7 @@ function ThreadSnippets({
               "px-2.5 py-1.5 text-[13px] " +
               (i > 0 ? "mt-1 border-t border-border-soft pt-2.5" : "")
             }
+            data-self={isSelf ? "true" : "false"}
           >
             {t.scope === "passage" && t.anchor?.selection.quoted_text && (
               // Passage-anchored: the quoted source text tells the reader
@@ -218,19 +224,35 @@ function ThreadSnippets({
                 {t.anchor.selection.quoted_text}
               </blockquote>
             )}
-            <div className="leading-snug text-fg">
-              <span className="mr-1.5 font-semibold text-fg-muted">
+            <div
+              className={`leading-snug text-fg ${
+                isSelf ? "flex flex-col items-end" : ""
+              }`}
+            >
+              <span
+                className={`mr-1.5 font-semibold text-fg-muted ${
+                  isSelf ? "self-end" : ""
+                }`}
+              >
                 {snippetAuthor(latest, currentUserId)}
               </span>
-              {/* Snippet preview keeps its inline, one-shot 240-char
-                  truncation. The fullscreen sidebar owns the
-                  toggleable See-more/See-less affordance; here the
-                  "Open full view →" link below is the right escape
-                  hatch for long bodies — two competing click targets
-                  for "show me more" would be confusing. */}
-              {latest.body.length > 240
-                ? latest.body.slice(0, 240) + "…"
-                : latest.body}
+              <div
+                className={
+                  isSelf
+                    ? "max-w-[85%] rounded-2xl bg-bg-elevated/70 px-3 py-1.5"
+                    : ""
+                }
+              >
+                {/* Snippet preview keeps its inline, one-shot 240-char
+                    truncation. */}
+                <CommentBody
+                  body={
+                    latest.body.length > 240
+                      ? latest.body.slice(0, 240) + "…"
+                      : latest.body
+                  }
+                />
+              </div>
             </div>
           </div>
         );

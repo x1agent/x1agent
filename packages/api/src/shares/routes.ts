@@ -16,8 +16,10 @@ import {
   type SessionRepository,
   type SessionShareRepository,
   type AdminGuard,
+  type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
 import { getMimeType, readShareFile } from "./storage.js";
+import { buildStoredZip } from "./zip.js";
 
 /**
  * Workspace-scoped read side of the share subsystem.
@@ -39,6 +41,8 @@ export interface WorkspaceShareRoutesConfig {
   events: SessionEventRepository;
   agents: AgentRepository;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass for session visibility. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   /**
    * Per-user share grants — used by the visibility check so a non-admin
    * sharee can fetch the artefacts of a session granted to them. Without
@@ -120,7 +124,11 @@ export function createWorkspaceShareRoutes(
     // which meant a session owner could see the event stream but not
     // the share artefacts that the session emitted (X1A-9).
     const decision = await resolveSessionVisibility(
-      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+        shares: cfg.shares,
+      },
       actorId,
       session,
       agent.workspaceId,
@@ -255,6 +263,115 @@ export function createWorkspaceShareRoutes(
     });
   });
 
+  // Bundle every file in the share as a zip. The UI's "download" icon
+  // points here so an operator can pull the whole share in one click
+  // rather than fetching files one at a time.
+  //
+  // Source of truth for the file list is the share's `agent.share` event
+  // payload (`files[].path`), not the on-disk directory — that way we
+  // never include stray bytes (e.g. partially-written transient files)
+  // and the bundle is reproducible from the persisted event.
+  //
+  // Declared BEFORE the `/:shareId/*` wildcard so Hono matches it
+  // ahead of the per-file proxy.
+  app.get("/:shareId/_download.zip", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const shareId = c.req.param("shareId")!;
+    const sessionId = scope.session.id;
+
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    let title = "share";
+    let files: { path: string }[] = [];
+    for (const e of events) {
+      if (e.type !== "agent.share") continue;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      if (payload?.share_id !== shareId) continue;
+      const fs = Array.isArray(payload.files) ? payload.files : [];
+      files = fs
+        .map((f) => (f && typeof f === "object" ? (f as { path?: unknown }) : null))
+        .filter((f): f is { path: string } => !!f && typeof f.path === "string");
+      if (typeof payload.title === "string" && payload.title) {
+        title = payload.title;
+      }
+    }
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    // Zip-Slip guard. Share file paths come from the `agent.share`
+    // event payload, which originates inside the (untrusted) agent
+    // container. The read side is already safe — `readShareFile` /
+    // GCS reject traversal — but the entry name we put INTO the zip
+    // is what a downstream extractor honours. A malicious agent could
+    // emit `path: "../../../tmp/pwned"` and turn the operator's
+    // download click into an arbitrary file-write on extract.
+    //
+    // Reject absolute paths, backslashes, and any segment that is "."
+    // or "..". Same set of rules the OWASP Zip-Slip guidance lists.
+    const isSafeZipPath = (p: string): boolean => {
+      if (!p || p.includes("\\") || p.startsWith("/")) return false;
+      if (p.includes("\0")) return false;
+      return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+    };
+    files = files.filter((f) => isSafeZipPath(f.path));
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const entries: { path: string; bytes: Buffer }[] = [];
+    if (cfg.gcsArtifactsBucket) {
+      const token = await fetchGcsToken();
+      if (!token) {
+        return c.json({ error: "gcs_auth_failed" }, 500);
+      }
+      for (const f of files) {
+        const objectName = `sessions/${sessionId}/shares/${shareId}/${f.path}`;
+        const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${cfg.gcsArtifactsBucket}/o/${encodeURIComponent(objectName)}?alt=media`;
+        const res = await fetch(gcsUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        entries.push({
+          path: f.path,
+          bytes: Buffer.from(await res.arrayBuffer()),
+        });
+      }
+    } else {
+      for (const f of files) {
+        const bytes = readShareFile(sessionId, shareId, f.path);
+        if (!bytes) continue;
+        entries.push({ path: f.path, bytes });
+      }
+    }
+    if (entries.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const zip = buildStoredZip(entries);
+    const safeTitle = title.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) ||
+      "share";
+    return new Response(new Uint8Array(zip), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${safeTitle}.zip"`,
+        "Content-Length": String(zip.length),
+        "Cache-Control": "no-store",
+      },
+    });
+  });
+
   // Stream a single file out of the share. For sites (share_type: "site")
   // this serves the HTML entry point and all its static assets; for all
   // other types the UI fetches a single known path.
@@ -341,6 +458,8 @@ export function createWorkspaceShareRoutes(
 export interface WorkspaceSharesIndexConfig {
   sql: postgres.Sql<Record<string, unknown>>;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -377,7 +496,10 @@ export function createWorkspaceSharesIndexRoutes(
     // index on (session_id, user_id) means the LEFT JOIN cannot fan
     // out, so DISTINCT isn't needed.
     const listMode = await pickSessionListMode(
-      { adminGuard: cfg.adminGuard },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+      },
       actor.userId,
       wsId,
     );
@@ -449,6 +571,19 @@ export function createWorkspaceSharesIndexRoutes(
  * pointless when the caller wants JSON, and base64 is the lowest-fric
  * encoding for binary shares (PDF, PNG) over a JSON channel.
  */
+async function fetchGcsToken(): Promise<string | null> {
+  try {
+    const tokenRes = await fetch(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      { headers: { "Metadata-Flavor": "Google" } },
+    );
+    const tokenBody = (await tokenRes.json()) as { access_token?: string };
+    return tokenBody.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function readFromGcsAsJson(
   bucket: string,
   sessionId: string,
