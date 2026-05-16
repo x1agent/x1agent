@@ -539,6 +539,48 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     });
   });
 
+  // Lightweight "what are this session's children doing right now?"
+  // endpoint. The session-detail GET above already returns `children`
+  // alongside events, but the client polls this one separately so the
+  // active-workers counter stays accurate as workers come up and
+  // finish — the parent's NATS stream doesn't carry child-lifecycle
+  // events, and the event-result sniffer only catches the initial
+  // spawn. Same visibility primitives as the parent route.
+  app.get("/:sessionId/children", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const childRows = await cfg.sessions.listChildren(scope.session.id);
+    const childAgentIds = Array.from(
+      new Set(childRows.map((r) => r.agentId)),
+    );
+    const childAgents = await Promise.all(
+      childAgentIds.map((id) => cfg.agents.findById(id)),
+    );
+    const byId = new Map(
+      childAgents
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
+    );
+    return c.json({
+      children: childRows
+        .filter((r) => byId.has(r.agentId))
+        .map((r) => ({
+          id: r.id,
+          status: r.status,
+          triggered_at: r.triggeredAt.toISOString(),
+          agent: byId.get(r.agentId)!,
+        })),
+    });
+  });
+
   // Resume a terminal session. Creates a new pending session in the
   // same workspace that points at the original via `resumed_from`; the
   // job-watcher assembles `/workspace/session_history.md` at spawn
