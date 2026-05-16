@@ -13,6 +13,7 @@ import { WorkspaceSlackPanel } from "./WorkspaceSlackPanel";
 import { WorkspaceSecurityPoliciesPanel } from "./WorkspaceSecurityPoliciesPanel";
 import { MembersPanel } from "./MembersPanel";
 import { AccessGrantsPanel } from "./AccessGrantsPanel";
+import { WorkspaceEnvBindingsPanel } from "./WorkspaceEnvBindingsPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { WorkspaceSettingsOverview } from "./WorkspaceSettingsOverview";
 import { AnalyticsRoot } from "../analytics/AnalyticsRoot";
@@ -130,6 +131,10 @@ function renderPanel({
       );
     case "/infrastructure/registry":
       return <ContainerRegistryPanel slug={workspaceSlug} />;
+    case "/integrations/env-bindings":
+      return (
+        <WorkspaceEnvBindingsPanel slug={workspaceSlug} canManage={canManage} />
+      );
     case "/integrations/environment-variables":
       return (
         <WorkspaceSecretsPanel slug={workspaceSlug} canManage={canManage} />

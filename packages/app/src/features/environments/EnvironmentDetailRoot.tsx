@@ -44,6 +44,7 @@ export function EnvironmentDetailRoot({ workspaceSlug, envId }: Props) {
   const loadById = usePreviewEnvironmentsStore((s) => s.loadById);
   const rename = usePreviewEnvironmentsStore((s) => s.rename);
   const remove = usePreviewEnvironmentsStore((s) => s.delete);
+  const setEnvVarNames = usePreviewEnvironmentsStore((s) => s.setEnvVarNames);
 
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -252,6 +253,16 @@ export function EnvironmentDetailRoot({ workspaceSlug, envId }: Props) {
           </Field>
         </section>
 
+        <EnvVarsSection
+          slug={workspaceSlug}
+          envId={env.id}
+          selected={env.env_var_names ?? []}
+          canManage={canManage}
+          onSave={async (names) => {
+            await setEnvVarNames(workspaceSlug, env.id, names);
+          }}
+        />
+
         {canManage && (
           <section className="space-y-3 rounded-lg border border-red-500/30 bg-red-500/5 p-5">
             <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
@@ -298,5 +309,134 @@ export function EnvironmentDetailRoot({ workspaceSlug, envId }: Props) {
         )}
       </div>
     </AppShell>
+  );
+}
+
+import {
+  useWorkspaceEnvBindingsStore,
+  type WorkspaceEnvBindingDTO,
+} from "../../stores/workspaceEnvBindingsStore";
+
+const EMPTY_BINDINGS: WorkspaceEnvBindingDTO[] = [];
+
+interface EnvVarsSectionProps {
+  slug: string;
+  envId: string;
+  selected: string[];
+  canManage: boolean;
+  onSave: (names: string[]) => Promise<void>;
+}
+
+function EnvVarsSection({
+  slug,
+  envId,
+  selected,
+  canManage,
+  onSave,
+}: EnvVarsSectionProps) {
+  void envId;
+  const bindings = useWorkspaceEnvBindingsStore(
+    (s) => s.byWorkspace[slug] ?? EMPTY_BINDINGS,
+  );
+  const bindingsStatus = useWorkspaceEnvBindingsStore(
+    (s) => s.status[slug] ?? "idle",
+  );
+  const loadBindings = useWorkspaceEnvBindingsStore(
+    (s) => s.loadForWorkspace,
+  );
+  const [picked, setPicked] = useState<Set<string>>(new Set(selected));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (bindingsStatus === "idle") loadBindings(slug);
+  }, [bindingsStatus, slug, loadBindings]);
+  useEffect(() => {
+    setPicked(new Set(selected));
+  }, [selected.join(",")]);
+
+  const dirty =
+    picked.size !== selected.length ||
+    selected.some((n) => !picked.has(n));
+
+  const toggle = (name: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await onSave([...picked]);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="space-y-3 rounded-lg border border-border-soft bg-bg-elevated/30 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-fg">Environment variables</h2>
+          <p className="mt-1 text-xs text-fg-muted">
+            Workspace bindings this preview opts into. Selected names land
+            in the per-preview pod's env (resolved against the workspace
+            secret store at deploy time). Manage bindings under
+            {" "}<a
+              href={`/workspaces/${slug}/settings/integrations/env-bindings`}
+              className="text-accent hover:underline"
+            >Settings → Integrations → Env bindings</a>.
+          </p>
+        </div>
+        {canManage && dirty && (
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy}
+            className="shrink-0 rounded-md bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg/90 disabled:opacity-50"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        )}
+      </div>
+      {err && <p className="text-sm text-red-300">{err}</p>}
+      {bindings.length === 0 ? (
+        <p className="text-sm text-fg-muted">
+          No workspace bindings yet. Add some under
+          {" "}<a
+            href={`/workspaces/${slug}/settings/integrations/env-bindings`}
+            className="text-accent hover:underline"
+          >Settings → Integrations → Env bindings</a>{" "}
+          and they'll show here.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {bindings.map((b) => (
+            <li key={b.id}>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-bg-elevated">
+                <input
+                  type="checkbox"
+                  checked={picked.has(b.env_name)}
+                  disabled={!canManage}
+                  onChange={() => toggle(b.env_name)}
+                  className="size-4 rounded border-border-soft"
+                />
+                <span className="font-mono text-sm text-fg">{b.env_name}</span>
+                <span className="text-xs text-fg-faint">
+                  ← secret:{b.secret_name}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

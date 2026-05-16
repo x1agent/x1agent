@@ -66,6 +66,13 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
     title: "Integrations",
     items: [
       {
+        title: "Env bindings",
+        pathSuffix: "/integrations/env-bindings",
+        icon: KeyRound,
+        description:
+          "Map env vars to workspace secrets. Agents + previews opt in by name.",
+      },
+      {
         title: "Environment variables",
         pathSuffix: "/integrations/environment-variables",
         icon: KeyRound,

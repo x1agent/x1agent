@@ -20,6 +20,7 @@ export interface PreviewEnvironmentDTO {
   last_deploy_status: DeployStatus;
   last_deploy_status_reason: string | null;
   last_deploy_at: string | null;
+  env_var_names?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +37,11 @@ interface PreviewEnvironmentsState {
   loadById(workspaceSlug: string, id: string): Promise<void>;
   rename(workspaceSlug: string, id: string, title: string): Promise<void>;
   delete(workspaceSlug: string, id: string): Promise<void>;
+  setEnvVarNames(
+    workspaceSlug: string,
+    id: string,
+    envVarNames: string[],
+  ): Promise<void>;
 }
 
 const setForKey = <T>(
@@ -130,6 +136,29 @@ export const usePreviewEnvironmentsStore = create<PreviewEnvironmentsState>(
                 s.byWorkspace,
                 workspaceSlug,
                 list.filter((e) => e.id !== id),
+              )
+            : s.byWorkspace,
+        };
+      });
+    },
+
+    async setEnvVarNames(workspaceSlug, id, envVarNames) {
+      const res = await apiFetch<{
+        preview_environment: PreviewEnvironmentDTO;
+      }>(
+        `/api/workspaces/${workspaceSlug}/preview-environments/${id}/env-vars`,
+        { method: "PUT", body: JSON.stringify({ env_var_names: envVarNames }) },
+      );
+      set((s) => {
+        const list = s.byWorkspace[workspaceSlug];
+        const updated = res.preview_environment;
+        return {
+          byId: setForKey(s.byId, id, updated),
+          byWorkspace: list
+            ? setForKey(
+                s.byWorkspace,
+                workspaceSlug,
+                list.map((e) => (e.id === id ? updated : e)),
               )
             : s.byWorkspace,
         };
