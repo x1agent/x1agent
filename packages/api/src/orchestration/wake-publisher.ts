@@ -579,7 +579,10 @@ export function formatCommentAddedWakeText(
   }
   lines.push(
     "",
-    `Reply with share_comment(thread_id="${opts.threadId}", text="...")`,
+    `Reply ONLY with share_comment(thread_id="${opts.threadId}", text="..."), then end the turn.`,
+    "Do not narrate your work on the main session timeline (no progress text, no status lines, no acknowledgments).",
+    "The user is reading the comment thread; everything they need to see goes inside share_comment.",
+    "If acting on the feedback requires tool calls (e.g. updating the share), do them, then post one final share_comment summarising the change.",
   );
   return lines.join("\n");
 }

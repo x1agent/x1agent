@@ -199,6 +199,13 @@ export interface RawCommentEvent {
   session_id?: unknown;
   share_type?: unknown;
   parent_comment_id?: unknown;
+  // Server-stamped insertion time. Browser uses this to sort
+  // live-arriving comments against REST-loaded ones with a single
+  // clock. Optional on the wire for forward-compat; the bridge
+  // forwards null when absent and the client falls back to its
+  // own clock (the pre-fix behaviour) so a mid-deploy mismatch
+  // degrades gracefully instead of dropping the event.
+  created_at?: unknown;
   // Resolved-thread variants.
   transitioned_at?: unknown;
   resolved?: unknown;
@@ -221,6 +228,7 @@ export interface CommentEventForBrowser {
   session_id: string | null;
   share_type: string | null;
   parent_comment_id: string | null;
+  created_at: string | null;
   transitioned_at: string | null;
   resolved: boolean | null;
   resolved_by_user_id: string | null;
@@ -260,6 +268,7 @@ export function filterCommentEvent(
     session_id: asStringOrNull(raw.session_id),
     share_type: asStringOrNull(raw.share_type),
     parent_comment_id: asStringOrNull(raw.parent_comment_id),
+    created_at: asStringOrNull(raw.created_at),
     transitioned_at: asStringOrNull(raw.transitioned_at),
     resolved:
       typeof raw.resolved === "boolean" ? raw.resolved : null,

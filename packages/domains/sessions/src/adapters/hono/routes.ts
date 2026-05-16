@@ -539,6 +539,49 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     });
   });
 
+  // Lightweight poll endpoint. Returns both the live children list
+  // (counter accuracy — parent NATS stream doesn't carry child
+  // lifecycle events) AND the current session record (summary +
+  // status updates the cached SessionDTO never sees otherwise — the
+  // detail page used to render "no summary yet" forever even after
+  // the periodic summarizer wrote one). One round trip, one cache
+  // refresh per tick.
+  app.get("/:sessionId/children", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const childRows = await cfg.sessions.listChildren(scope.session.id);
+    const childAgentIds = Array.from(
+      new Set(childRows.map((r) => r.agentId)),
+    );
+    const childAgents = await Promise.all(
+      childAgentIds.map((id) => cfg.agents.findById(id)),
+    );
+    const byId = new Map(
+      childAgents
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
+    );
+    return c.json({
+      session: serialize(scope.session),
+      children: childRows
+        .filter((r) => byId.has(r.agentId))
+        .map((r) => ({
+          id: r.id,
+          status: r.status,
+          triggered_at: r.triggeredAt.toISOString(),
+          agent: byId.get(r.agentId)!,
+        })),
+    });
+  });
+
   // Resume a terminal session. Creates a new pending session in the
   // same workspace that points at the original via `resumed_from`; the
   // job-watcher assembles `/workspace/session_history.md` at spawn

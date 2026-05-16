@@ -273,9 +273,9 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
               const ap = a.parent_comment_id === null ? 0 : 1;
               const bp = b.parent_comment_id === null ? 0 : 1;
               if (ap !== bp) return ap - bp;
-              return a.created_at.localeCompare(b.created_at);
+              return compareCreatedAt(a.created_at, b.created_at);
             }
-            return a.created_at.localeCompare(b.created_at);
+            return compareCreatedAt(a.created_at, b.created_at);
           }),
         },
       };
@@ -306,7 +306,7 @@ export function groupThreads(rows: ShareCommentDTO[]): ShareCommentThread[] {
       const ap = a.parent_comment_id === null ? 0 : 1;
       const bp = b.parent_comment_id === null ? 0 : 1;
       if (ap !== bp) return ap - bp;
-      return a.created_at.localeCompare(b.created_at);
+      return compareCreatedAt(a.created_at, b.created_at);
     });
     const head = comments[0]!;
     threads.push({
@@ -322,10 +322,26 @@ export function groupThreads(rows: ShareCommentDTO[]): ShareCommentThread[] {
   // already seq-ascending above, so the whole sidebar reads top-to-
   // bottom in submission order.
   return threads.sort((a, b) => {
-    const at = a.comments[0]!.created_at;
-    const bt = b.comments[0]!.created_at;
-    return at.localeCompare(bt);
+    return compareCreatedAt(
+      a.comments[0]!.created_at,
+      b.comments[0]!.created_at,
+    );
   });
+}
+
+/**
+ * Compare two ISO-8601 created_at strings as instants. Lexicographic
+ * comparison happens to work for canonical UTC strings (Z suffix),
+ * but it breaks the second a payload arrives with an offset suffix
+ * or a missing Z — and we'd rather be wrong about strict equality
+ * than wrong about order. NaN-on-parse falls back to 0 so a
+ * malformed timestamp doesn't randomly reorder the list.
+ */
+function compareCreatedAt(a: string, b: string): number {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
+  return ta - tb;
 }
 
 /** Count unresolved threads. Used by the SharePill comment-chip. */

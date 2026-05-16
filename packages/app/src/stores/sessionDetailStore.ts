@@ -238,6 +238,15 @@ interface SessionDetailState {
   setStatus(sessionId: string, status: ConnStatus): void;
   setError(sessionId: string, msg: string | null): void;
   /**
+   * X1A-60 — refresh the children list from the server. The parent's
+   * NATS stream doesn't carry child-lifecycle events, and the
+   * agent.tool_result sniffer that drives appendEvent only sees the
+   * initial spawn. SessionRoot polls this while the session is
+   * running/pending so the counter actually tracks workers coming
+   * up and finishing.
+   */
+  loadChildren(workspaceSlug: string, sessionId: string): Promise<void>;
+  /**
    * Replace the cached session record. Used after a mutation that
    * changes the session's status (e.g. POST /cancel) so the detail
    * page reflects the new state without re-fetching.
@@ -441,6 +450,50 @@ export const useSessionDetailStore = create<SessionDetailState>((set, get) => ({
           [sessionId]: (err as Error).message,
         },
       }));
+    }
+  },
+
+  async loadChildren(workspaceSlug, sessionId) {
+    try {
+      const res = await apiFetch<{
+        session?: SessionDTO;
+        children: ChildRef[];
+      }>(
+        `/api/workspaces/${workspaceSlug}/sessions/${sessionId}/children`,
+      );
+      // Server is source-of-truth for current status. Merge server
+      // rows over whatever the spawn-result sniffer left in the
+      // store: server wins on every field for rows it knows about,
+      // any sniffer-only placeholder row that the server doesn't yet
+      // see (race window between spawn and DB commit) is preserved
+      // so the counter doesn't briefly flicker down to zero.
+      //
+      // The response also carries the current session record. Refresh
+      // sessionsById so summary updates (written by the periodic
+      // summarizer on the server) and any other server-driven
+      // status changes flow into the live page without a reload.
+      set((s) => {
+        const existing = s.childrenBySession[sessionId] ?? [];
+        const incomingById = new Map(res.children.map((c) => [c.id, c]));
+        const merged: ChildRef[] = [];
+        for (const c of res.children) merged.push(c);
+        for (const c of existing) {
+          if (!incomingById.has(c.id)) merged.push(c);
+        }
+        const nextSessions = res.session
+          ? { ...s.sessionsById, [sessionId]: res.session }
+          : s.sessionsById;
+        return {
+          childrenBySession: {
+            ...s.childrenBySession,
+            [sessionId]: merged,
+          },
+          sessionsById: nextSessions,
+        };
+      });
+    } catch {
+      // Soft-fail: stale counter is better than a broken render. The
+      // next poll will retry.
     }
   },
 

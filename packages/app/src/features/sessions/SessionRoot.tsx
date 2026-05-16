@@ -51,6 +51,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     errorBySession,
     loadInitial,
     loadOlder,
+    loadChildren,
     appendEvent,
     setError,
     setSession,
@@ -217,7 +218,14 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         }
         // Bridge guarantees these three are present; defense in depth.
         if (!p.share_id || !p.thread_id || !p.comment_id) return;
-        const now = new Date().toISOString();
+        // Server-stamped time if the bridge carried it; only fall back
+        // to client wall-clock when an older api version doesn't yet
+        // emit created_at on the wire. The fallback path is the
+        // pre-fix behaviour and races vs server time, which is what
+        // produced visibly-wrong thread ordering when REST-loaded
+        // (server-time) and NATS-delivered (client-time) comments
+        // were interleaved.
+        const stamp = p.created_at ?? new Date().toISOString();
         const dto: ShareCommentDTO = {
           id: p.comment_id,
           share_id: p.share_id,
@@ -232,8 +240,8 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           author_session_id: p.actor_session_id,
           resolved_at: null,
           resolved_by_user_id: null,
-          created_at: now,
-          updated_at: now,
+          created_at: stamp,
+          updated_at: stamp,
           parent_comment_id: p.parent_comment_id,
         };
         useShareCommentsStore.getState().applyServerEvent(dto);
@@ -290,6 +298,27 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       useTypingIndicatorStore.getState().clearAllForSession(sessionId);
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
+
+  // X1A-60 — poll the children list while the parent is alive. The
+  // parent's NATS stream doesn't fire when a child's lifecycle
+  // changes, and the spawn-result sniffer in sessionDetailStore is
+  // best-effort (races on subscribe, bails on payload-shape drift).
+  // 4s is a balance: tight enough to feel live, sparse enough that
+  // a long-running orchestrator doesn't generate one request per
+  // second forever. Stops when the session is no longer running.
+  useEffect(() => {
+    if (!session) return;
+    const alive =
+      session.status === "running" || session.status === "pending";
+    if (!alive) return;
+    // Fire immediately so the counter is correct on landing, then
+    // every 4 seconds.
+    void loadChildren(workspaceSlug, sessionId);
+    const id = setInterval(() => {
+      void loadChildren(workspaceSlug, sessionId);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [workspaceSlug, sessionId, session?.status, loadChildren]);
 
   // User input TTL: drop messages older than this on the consumer.
   // 2 min is "long enough to cover pod warmup (~30s typical, ~2min

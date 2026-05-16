@@ -31,15 +31,9 @@ uniform vec3  uHue;
 uniform float uIntensity;
 uniform float uIsDark;
 
-// IQ-style sinless hash. The legacy fract(sin(dot(...)) * c) version
-// works but sin() is one of the slowest ops on Apple GPUs — and the
-// fbm chain below calls hash 16× per pixel. Bit-mixing via fract +
-// dot + add is visually equivalent for noise patterns and roughly
-// an order of magnitude cheaper.
 float hash(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
+  p = fract(p * vec2(127.1, 311.7));
+  return fract(sin(dot(p, p + 17.13)) * 43758.5453);
 }
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -82,13 +76,7 @@ void main() {
   float density = n1 * 0.55 + n2 * 0.30 + n3 * 0.15;
   density = pow(clamp(density, 0.0, 1.0), 1.35);
 
-  // Re-use n1 as the colour field driver instead of a separate fbm
-  // pass. n1 is sampled at scale 1.4 vs the original colorField's 0.9
-  // — slightly higher frequency, but the smoothstep windows below
-  // soften that and the visible tint distribution stays in the same
-  // neighbourhood. Saves one entire fbm chain (4 noise / 16 hash
-  // calls per pixel).
-  float colorField = n1;
+  float colorField = fbm(uvNoise * 0.9 + vec2(scroll * 0.2, 0.0));
   vec3 tint = mix(uTintBlue, uTintPurple, smoothstep(0.25, 0.55, colorField));
   tint      = mix(tint,      uTintPeach,  smoothstep(0.50, 0.75, colorField + n1 * 0.2));
   tint      = mix(tint,      uTintPink,   smoothstep(0.70, 0.95, n2));

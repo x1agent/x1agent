@@ -140,10 +140,17 @@ function useTtlSweep(sessionId: string) {
 }
 
 /**
- * Main-timeline indicators — renders one pill per active wake whose
- * `share_id` and `thread_id` are both null. Returns null when there
- * are no main-scoped indicators so the timeline doesn't reserve
- * empty whitespace.
+ * Main-timeline indicator. Renders a SINGLE pill regardless of how
+ * many wakes are concurrently in-flight on the main timeline — the
+ * UI signal is "agent is thinking," not "N concurrent calls." The
+ * store still tracks one entry per `event_id` so the per-wake clear
+ * contract (see `extractCorrelatedEventId`) keeps working; the pill
+ * vanishes only when every active wake on this surface has cleared
+ * or expired.
+ *
+ * Earlier behaviour rendered one pill per in-flight wake, which read
+ * as duplicate UI when the platform happened to overlap two wakes
+ * (e.g. comment-wake landed before the previous main wake finished).
  */
 export function MainTimelineTypingIndicators({
   sessionId,
@@ -158,22 +165,15 @@ export function MainTimelineTypingIndicators({
   if (active.length === 0) return null;
   return (
     <div className="mx-auto max-w-3xl px-4 pb-3">
-      {active.map((ind) => (
-        <IndicatorPill
-          key={ind.event_id}
-          variant="main"
-          testIdSuffix={`main-${ind.event_id}`}
-        />
-      ))}
+      <IndicatorPill variant="main" testIdSuffix="main" />
     </div>
   );
 }
 
 /**
- * Share-comment-thread indicators — renders one pill per active wake
- * matching both `shareId` and `threadId`. Smaller variant; intended
- * to mount inside the thread card's body. Never bubbles into the
- * main timeline.
+ * Share-comment-thread indicator. Same single-pill semantics as the
+ * main variant — never more than one set of dots for the surface,
+ * regardless of how many overlapping wakes are tracked in the store.
  */
 export function ThreadTypingIndicators({
   sessionId,
@@ -198,13 +198,7 @@ export function ThreadTypingIndicators({
   if (active.length === 0) return null;
   return (
     <div className="mt-2">
-      {active.map((ind) => (
-        <IndicatorPill
-          key={ind.event_id}
-          variant="thread"
-          testIdSuffix={`thread-${ind.event_id}`}
-        />
-      ))}
+      <IndicatorPill variant="thread" testIdSuffix="thread" />
     </div>
   );
 }
