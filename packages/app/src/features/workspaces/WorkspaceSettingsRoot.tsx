@@ -12,6 +12,7 @@ import { WorkspaceMcpCatalogPanel } from "./WorkspaceMcpCatalogPanel";
 import { WorkspaceSlackPanel } from "./WorkspaceSlackPanel";
 import { WorkspaceSecurityPoliciesPanel } from "./WorkspaceSecurityPoliciesPanel";
 import { MembersPanel } from "./MembersPanel";
+import { AccessGrantsPanel } from "./AccessGrantsPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { WorkspaceSettingsOverview } from "./WorkspaceSettingsOverview";
 import { AnalyticsRoot } from "../analytics/AnalyticsRoot";
@@ -148,6 +149,10 @@ function renderPanel({
       );
     case "/members/people":
       return <MembersPanel workspaceSlug={workspaceSlug} canManage={canManage} />;
+    case "/members/access-grants":
+      return (
+        <AccessGrantsPanel slug={workspaceSlug} canManage={canManage} />
+      );
     case "/members/groups":
       return (
         <PlaceholderPanel

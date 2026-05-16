@@ -108,6 +108,13 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
         description: "Invite and manage workspace members.",
       },
       {
+        title: "Access grants",
+        pathSuffix: "/members/access-grants",
+        icon: ShieldCheck,
+        description:
+          "Allow whole domains or specific emails to sign in straight into this workspace.",
+      },
+      {
         title: "Groups",
         pathSuffix: "/members/groups",
         icon: UserCog,
