@@ -421,6 +421,16 @@ export function compose(env: CompositionEnv): Composition {
     env.workspaceSecretsMasterKey ?? process.env.WORKSPACE_SECRETS_MASTER_KEY,
   );
 
+  // Hoisted above internalRoutes — preview-deploy's env-binding
+  // resolver needs the SecretService eagerly. The HTTP route +
+  // workspace-binding service still wire from here below; they reuse
+  // the same instance.
+  const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
+  const workspaceSecretsService = new SecretService(
+    workspaceSecretsRepo,
+    workspaceSecretsKey,
+  );
+
   // Per-user OAuth token store. Encryption is performed at the auth /
   // internal-route boundary using the workspaceSecretsKey above.
   const userOAuthTokenStore = new PostgresUserOAuthTokenStore(env.sql);
@@ -952,14 +962,9 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  // Workspace secret store. Reuses `workspaceSecretsKey` (loaded near
-  // the top of compose). Decryption happens only inside the
-  // SecretService — repository never sees the key.
-  const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
-  const workspaceSecretsService = new SecretService(
-    workspaceSecretsRepo,
-    workspaceSecretsKey,
-  );
+  // Workspace secret store. workspaceSecretsRepo + workspaceSecretsService
+  // are hoisted above internalRoutes (the env-binding resolver needs
+  // them eagerly); routes wire here.
   const workspaceSecretsRoutes = createWorkspaceSecretsRoutes({
     service: workspaceSecretsService,
     requireAuth,
