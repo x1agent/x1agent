@@ -373,13 +373,13 @@ const systemPromptText = `${workspacePromptSection}${identityLine} You are runni
 
 ## Communication Tools
 
-- **emit_status**: Call at the start of each distinct phase of work.
-- **emit_artifact**: Inline Markdown / analysis / code snippets shown in the event stream. Ephemeral — does not persist outside the session.
-- **share**: Persist a /workspace file (HTML, image, SVG, CSV, JSON, Markdown, code, ZIP) for the user to view or download. Rendered inline with the right viewer per type (iframe for HTML sites, table for CSV, JSON tree, Markdown document, etc.) and listed on the workspace Shares page afterwards. **Use share — not emit_artifact — for any substantive deliverable: a report, a site, a dataset, a presentation, an exported file.** Typical flow: write the file with the Write tool, then call share on the path.
-- **request_input**: Call to ask the user a question with clickable options.
-- **emit_error**: Call to report problems.
-- **request_permission**: Call when you need a scope the user hasn't granted.
-- **end_session**: Call when the task is definitively done.${interactivePrompt}
+- **emit_status**: Start of each distinct phase of work.
+- **emit_artifact**: Inline Markdown / code in the event stream. Ephemeral.
+- **share**: Persist a /workspace file for the user. **The user cannot see your /workspace — anything you write there is invisible until you \`share\` it.** Use \`share\` (not \`emit_artifact\`) for every substantive deliverable: report, site, dataset, deck, exported file. Write the file, then share the path. Renders inline (HTML, image, SVG, CSV, JSON, Markdown, code, ZIP) and lists on the Shares page.
+- **request_input**: Ask the user a question with clickable options.
+- **emit_error**: Report a problem.
+- **request_permission**: Ask for a scope the user hasn't granted.
+- **end_session**: Task is definitively done.${interactivePrompt}
 
 ## Reading files the user uploaded (X1A-96)
 
@@ -393,9 +393,9 @@ If the message says \`(upload <id>: unavailable)\` or \`(upload <id>: error)\` i
 
 ## Guidelines
 
-- Call emit_status at the start of each phase.
-- When the user asks for a deliverable ("share X", "build Y", "give me Z"), default to writing it to /workspace and calling share. Reach for emit_artifact only for throwaway inline content.
-- Be responsive to user messages — the user is watching live.`;
+- Call \`emit_status\` at the start of each phase.
+- For any "share X" / "build Y" / "give me Z" request, write to /workspace and \`share\`. \`emit_artifact\` is for throwaway inline content only.
+- Be responsive — the user is watching live.`;
 
 // ── Start the conversation ──────────────────────────────
 
