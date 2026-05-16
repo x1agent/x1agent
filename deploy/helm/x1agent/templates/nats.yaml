@@ -282,7 +282,19 @@ data:
             # Same trust model as the existing wildcard event
             # publishes; per-session certs OR per-request workspace
             # checks at the provider are the v2 hardening.
-            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit", "x1.session.*.archive", "x1.provider.>"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
+            # `x1.session.*.input` is the orchestrator → worker comms
+            # path. The orchestrator's `inject_message` MCP tool routes
+            # through packages/sidecar/src/channel.rs::publish_input_envelope
+            # which publishes directly from the sidecar (faster than the
+            # api hop). Without this allow entry, every orchestrator
+            # attempt to message a spawned worker hits a Permissions
+            # Violation, the publish silently drops, and the worker
+            # never gets the message — the user sees "spawn errored"
+            # symptoms with no useful trace. The api cert (CN=x1agent-api)
+            # already has the same allow at line 247; this brings the
+            # sidecar's direct path to parity. Per-session certs are
+            # the v2 tightening that would let us drop the wildcard.
+            publish:   { allow: ["x1.session.*.input", "x1.session.*.events", "x1.session.*.audit", "x1.session.*.archive", "x1.provider.>"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
             subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] }
           }
         }
