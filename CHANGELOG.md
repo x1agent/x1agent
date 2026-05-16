@@ -1,3 +1,42 @@
+# [1.32.0](https://github.com/x1agent/x1agent/compare/v1.31.0...v1.32.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **app:** center agent detail page and move Edit inline beside title ([c945854](https://github.com/x1agent/x1agent/commit/c9458546458b61b7c6f079494d43f569da8ee05b))
+* **app:** disambiguate prepend vs append in EventStream anchor logic ([ffaad4e](https://github.com/x1agent/x1agent/commit/ffaad4e0ed59f21c7e5077f922b04b6592bb8a5d))
+* **app:** don't halt drift cycle on theme/resize during a tween ([c71ac86](https://github.com/x1agent/x1agent/commit/c71ac866f122f9ef4c56bff8fd4bf7e664d62f84))
+* **app:** stop EventStream from grabbing scroll on every new event ([1d1bb89](https://github.com/x1agent/x1agent/commit/1d1bb893b05a9775a82a6d533242d500fb704152))
+* **sessions:** switch comments load-older cursor from seq to created_at ([c36a489](https://github.com/x1agent/x1agent/commit/c36a489b1029a284b53924c7a8c910056c9b9177))
+* **shares:** zip-slip guard on download endpoint ([8c031ef](https://github.com/x1agent/x1agent/commit/8c031ef9564327ac6d11130d5be784eb8b05d32b))
+
+
+### Features
+
+* **app:** center timeline on deep-linked share ([510e0ca](https://github.com/x1agent/x1agent/commit/510e0cabc20549e5766b13281f9a7e40ad4bebea))
+* **app:** collapse comments sidebar when share is opened via deep-link ([9c6f4f0](https://github.com/x1agent/x1agent/commit/9c6f4f071d7d39c023138d56eeb2d7a9d5f6fecd))
+* **app:** MCP picker hidden by default + fuzzy search (X1A-86) ([b20bd17](https://github.com/x1agent/x1agent/commit/b20bd17fe66afc26c18b263aa062193cefc68d61))
+* **app:** paginate + fuzzy-search agent env bindings (X1A-86) ([33cb578](https://github.com/x1agent/x1agent/commit/33cb57816d1e643c8c55ffae08ae975ef45c2719))
+* **app:** paginate + fuzzy-search available repos on agent edit (X1A-86) ([fe6b5ac](https://github.com/x1agent/x1agent/commit/fe6b5ac74164ded240c6cb0e53f36e8972521aeb))
+* **app:** paginate comments sidebar with scroll-up to load older (X1A-72.4) ([ebefd0b](https://github.com/x1agent/x1agent/commit/ebefd0b173cc5f1a2e87b9452efd70fd41cd85a7))
+* **app:** paginate session event load with scroll-up to load older (X1A-72.3) ([a67128d](https://github.com/x1agent/x1agent/commit/a67128de8f4a6032b197f8ff8019eb1be51b2cf7))
+* **app:** render comment bodies as markdown (X1A-72.1) ([ef70a97](https://github.com/x1agent/x1agent/commit/ef70a974d78a66785bf15a5f4ef4a72a7d42ce92))
+* **app:** shares index links open the share in fullscreen mode ([165d140](https://github.com/x1agent/x1agent/commit/165d140dfc8c1fb9287728a0d4dc34398511bea5))
+* **app:** visual distinction for self-authored comments (X1A-72.2) ([effe270](https://github.com/x1agent/x1agent/commit/effe27060934ac0936510a85ed2cdbe1a056c815))
+* **sessions:** add PlatformAdminGuard port ([d920507](https://github.com/x1agent/x1agent/commit/d920507a226c6ef8eea11bc891b5841afd77088b))
+* **sessions:** hide superseded resume-chain entries from list queries ([b3d9751](https://github.com/x1agent/x1agent/commit/b3d9751b139bca436cff11c9f854d2413a02c0d2))
+* **sessions:** listBySession + events endpoint support before_seq (X1A-72.3 backend) ([3d4bd23](https://github.com/x1agent/x1agent/commit/3d4bd238c8048ac6d845fb31121895558aa31c8d))
+* **sessions:** listByShare + comments endpoint support thread pagination (X1A-72.4 backend) ([c5bbacc](https://github.com/x1agent/x1agent/commit/c5bbacc70a17a094fadc4a4af8e69e8f615761d4))
+* **sessions:** platform admin replaces workspace admin in visibility checks ([2f7ed40](https://github.com/x1agent/x1agent/commit/2f7ed40f454558a8bc26ede76c8616803e507859))
+* **sessions:** wire platform-admin guard through session/share routes ([a951391](https://github.com/x1agent/x1agent/commit/a95139105f9a702627fed71cd1c4f8df0fef7ed9))
+* **shares:** download icon returns a zip of the whole share ([f53ed11](https://github.com/x1agent/x1agent/commit/f53ed116dcbd7574dcf202a53636201040773fd5))
+
+
+### Performance Improvements
+
+* **app:** draw RailCanvas once on iPad / Android tablet instead of running 60fps shader ([b86e139](https://github.com/x1agent/x1agent/commit/b86e139f94ac8afe89137c037c99fccb3654ac2d))
+* **app:** drift-mode canvas + shader micro-optimizations ([acf4978](https://github.com/x1agent/x1agent/commit/acf497880c8e1a267f0bc2aa9400ba323dbf806d))
+
 # [1.31.0](https://github.com/x1agent/x1agent/compare/v1.30.0...v1.31.0) (2026-05-15)
 
 
