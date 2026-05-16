@@ -310,6 +310,26 @@ export function createWorkspaceShareRoutes(
       return c.json({ error: "share_not_found" }, 404);
     }
 
+    // Zip-Slip guard. Share file paths come from the `agent.share`
+    // event payload, which originates inside the (untrusted) agent
+    // container. The read side is already safe — `readShareFile` /
+    // GCS reject traversal — but the entry name we put INTO the zip
+    // is what a downstream extractor honours. A malicious agent could
+    // emit `path: "../../../tmp/pwned"` and turn the operator's
+    // download click into an arbitrary file-write on extract.
+    //
+    // Reject absolute paths, backslashes, and any segment that is "."
+    // or "..". Same set of rules the OWASP Zip-Slip guidance lists.
+    const isSafeZipPath = (p: string): boolean => {
+      if (!p || p.includes("\\") || p.startsWith("/")) return false;
+      if (p.includes("\0")) return false;
+      return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+    };
+    files = files.filter((f) => isSafeZipPath(f.path));
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
     const entries: { path: string; bytes: Buffer }[] = [];
     if (cfg.gcsArtifactsBucket) {
       const token = await fetchGcsToken();

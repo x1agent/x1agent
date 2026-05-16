@@ -253,4 +253,38 @@ describe("GET /:shareId/_download.zip", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  it("Zip-Slip guard: refuses traversal / absolute / backslash paths from the payload", async () => {
+    // Plant a real file at a safe name so the read side has something
+    // to find — but the event declares only unsafe paths. The route
+    // must reject them all and respond 404.
+    writeShareFiles(SESSION_A, SHARE_A, [
+      {
+        path: "ok.txt",
+        content: Buffer.from("ok", "utf8").toString("base64"),
+      },
+    ]);
+    events.add(SESSION_A, {
+      id: "e1" as never,
+      sessionId: SESSION_A as never,
+      seq: 1,
+      type: "agent.share",
+      payload: {
+        share_id: SHARE_A,
+        files: [
+          { path: "../../../tmp/pwned" },
+          { path: "/etc/passwd" },
+          { path: "a\\b.txt" },
+          { path: "./.bashrc" },
+          { path: "" },
+        ],
+      },
+      timestamp: new Date(),
+    } as unknown as SessionEvent);
+    actor = { userId: ALICE, email: "a@x.com" as Email };
+    const res = await build().request(
+      `/api/workspaces/ws-a/sessions/${SESSION_A}/shares/${SHARE_A}/_download.zip`,
+    );
+    expect(res.status).toBe(404);
+  });
 });
