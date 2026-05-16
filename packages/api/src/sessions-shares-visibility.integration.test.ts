@@ -214,14 +214,17 @@ async function getJson(a: Hono, url: string, c: string) {
 }
 
 describe("X1A-9 — workspace sessions list visibility", () => {
-  it("admin sees every session in the workspace (admin path)", async () => {
+  it("workspace admin does NOT see every session — admin role is workspace-management only", async () => {
+    // Post platform-admin refactor: workspace admin doesn't bypass
+    // per-user visibility. CAROL is admin in WS_A but not a platform
+    // admin and not the owner of either session, so list is empty.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(app, "http://api.test/api/workspaces/ws-a/sessions", c);
     expect(r.status).toBe(200);
     const ids = (r.body.sessions as { id: string }[]).map((s) => s.id);
-    expect(ids).toContain(aliceSession);
-    expect(ids).toContain(bobSession);
+    expect(ids).not.toContain(aliceSession);
+    expect(ids).not.toContain(bobSession);
   });
 
   it("owner sees own + sessions shared with them; NOT others (non-admin path)", async () => {
@@ -290,7 +293,9 @@ describe("X1A-9 — workspace session detail visibility", () => {
     expect(r.status).toBe(200);
   });
 
-  it("workspace admin can GET any session in the workspace", async () => {
+  it("workspace admin does NOT bypass per-session reads — only platform admin does", async () => {
+    // Workspace admin role gates workspace management (agents,
+    // members, settings), not per-user session reads.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(
@@ -298,7 +303,7 @@ describe("X1A-9 — workspace session detail visibility", () => {
       `http://api.test/api/workspaces/ws-a/sessions/${aliceSession}`,
       c,
     );
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(404);
   });
 
   it("non-owner, non-admin, non-sharee gets 404 (no info leak)", async () => {
@@ -352,7 +357,9 @@ describe("X1A-9 — per-session shares list visibility", () => {
     expect(r.status).toBe(404);
   });
 
-  it("workspace admin can list shares on any session", async () => {
+  it("workspace admin does NOT list shares on others' sessions — admin role is workspace mgmt only", async () => {
+    // Same rationale as the session-detail test above: workspace admin
+    // no longer bypasses per-user share visibility.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(
@@ -360,7 +367,7 @@ describe("X1A-9 — per-session shares list visibility", () => {
       `http://api.test/api/workspaces/ws-a/sessions/${aliceSession}/shares`,
       c,
     );
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(404);
   });
 
   it("cross-workspace: workspace B admin gets 404 on workspace A session shares", async () => {
