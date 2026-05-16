@@ -223,7 +223,7 @@ export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
   ) {
     const cluster = kc.getCurrentCluster();
     if (cluster) {
-      cluster.skipTLSVerify = true;
+      (cluster as { skipTLSVerify: boolean }).skipTLSVerify = true;
     }
   }
   const batchApi = kc.makeApiClient(k8s.BatchV1Api);

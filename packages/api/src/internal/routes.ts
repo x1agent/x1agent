@@ -1550,7 +1550,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (workspaceSlug) {
       headers["X-Upload-Workspace-Slug"] = workspaceSlug;
     }
-    return new Response(body, { status: 200, headers });
+    return new Response(body as BodyInit, { status: 200, headers });
   });
 
   return app;
