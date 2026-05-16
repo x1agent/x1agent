@@ -1,3 +1,25 @@
+# [1.34.0](https://github.com/x1agent/x1agent/compare/v1.33.0...v1.34.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **agent-prompt:** make 'user cannot see your /workspace' explicit on the share tool ([662398a](https://github.com/x1agent/x1agent/commit/662398a6f0f78135bab1a5704fb97866638a4c40))
+* **app:** make cost amounts clickable to open the worker-breakdown panel ([70427f5](https://github.com/x1agent/x1agent/commit/70427f5f05c6987f247f6f5fb1af746ddf8fe69b))
+* **app:** poll children while session is running so the active-workers counter tracks reality (X1A-60) ([ea3b0c8](https://github.com/x1agent/x1agent/commit/ea3b0c8aa0aed661be39cdbafae2dcd5bdf4cb4b))
+* **app:** refresh session record on children poll + single-pill typing indicator + better session-page title ([22a211d](https://github.com/x1agent/x1agent/commit/22a211dd96750191fe631a2ca24493f649a770ff))
+* **comments:** server-stamp NATS payload so live + REST comments sort consistently ([1ae710e](https://github.com/x1agent/x1agent/commit/1ae710e68fa2e64fff248152a5469b09d8045ffe))
+* **wake:** tell agent not to narrate on main timeline when replying to a comment ([4d3d67d](https://github.com/x1agent/x1agent/commit/4d3d67d0b6482ac14702cc88dfa59202e7f1efe0))
+
+
+### Features
+
+* **sessions:** GET /sessions/:id/children for live worker counts ([fe1ca2d](https://github.com/x1agent/x1agent/commit/fe1ca2d9144a19995dd30e1765b85d4091c88441))
+
+
+### Reverts
+
+* **app:** restore original hash + colorField in RailCanvas shader ([4f0bbc6](https://github.com/x1agent/x1agent/commit/4f0bbc6f8c9d420a29e637e7f572809127e0ce52))
+
 # [1.33.0](https://github.com/x1agent/x1agent/compare/v1.32.0...v1.33.0) (2026-05-16)
 
 
