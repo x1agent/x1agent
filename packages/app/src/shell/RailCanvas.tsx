@@ -263,6 +263,13 @@ export function RailCanvas() {
     let raf = 0;
     let driftTimeout: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+    // True while a drift tween's rAF chain is running. Theme/resize
+    // handlers must NOT cancel that rAF; doing so leaves the drift
+    // cycle un-armed and it dies until the next visibility toggle.
+    // Instead they let the next tween frame pick up the new state —
+    // `theme` and `canvas.width/height` are read inside drawOnce()
+    // every frame, so the next tick reflects the change for free.
+    let tweenActive = false;
     const start = performance.now();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // Touch tablets (iPad / Android tablet) drop the continuous 60fps
@@ -359,8 +366,15 @@ export function RailCanvas() {
     // Schedule a redraw on demand — used by resize / theme / visibility
     // transitions in staticMode so the canvas still reflects current
     // state without spinning the GPU between events.
+    //
+    // Skips when a drift tween is in flight: cancelling its rAF would
+    // strand the cycle (the next tick never runs, scheduleDrift never
+    // re-arms). The tween itself calls drawOnce() on each frame and
+    // reads theme/canvas-size from the surrounding closure, so the
+    // new state takes effect on the tween's next frame for free.
     function scheduleRedraw() {
       if (cancelled) return;
+      if (tweenActive) return;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         raf = 0;
@@ -387,6 +401,7 @@ export function RailCanvas() {
         // Pause the cycle while the canvas is off-screen; the
         // intersection observer kicks it back when we reappear.
         raf = 0;
+        tweenActive = false;
         return;
       }
       const fromX = mouseX;
@@ -396,10 +411,12 @@ export function RailCanvas() {
       const fromTime = timeOffset;
       const toTime = timeOffset + 1.5;
       const tweenStart = performance.now();
+      tweenActive = true;
       function tick() {
         if (cancelled) return;
         if (!visible) {
           raf = 0;
+          tweenActive = false;
           return;
         }
         const t = Math.min(1, (performance.now() - tweenStart) / TWEEN_MS);
@@ -412,6 +429,7 @@ export function RailCanvas() {
           raf = requestAnimationFrame(tick);
         } else {
           raf = 0;
+          tweenActive = false;
           scheduleDrift();
         }
       }
