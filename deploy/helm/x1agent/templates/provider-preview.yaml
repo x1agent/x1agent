@@ -22,9 +22,15 @@ RBAC is expressed as a Role in the target namespace + a RoleBinding with the
 subject ServiceAccount in the source namespace.
 */}}
 {{- if .Values.previews.enabled }}
-{{- if ne (default "http01" .Values.tls.solver.type) "dns01" }}
-{{- fail "previews.enabled=true requires tls.solver.type=dns01 — wildcard certs cannot be issued via http01" }}
-{{- end }}
+{{- /*
+DNS-01 for the wildcard cert is enforced by the cert-manager-issuer
+template — when previews.enabled=true it always renders a DNS-01
+solver scoped to preview.<baseDomain>, on top of whatever the
+operator picked for tls.solver.type (typically http01 for app/api).
+That hybrid lets the install not hang on cert-wait when DNS-01 IAM
+isn't yet right; the preview wildcard cert stays Pending until it
+clears, while app/api keep serving with their existing http01 cert.
+*/}}
 {{- $previewNs := default "x1-previews" .Values.providers.preview.previewNamespace }}
 {{- $buildNs := default .Release.Namespace .Values.providers.preview.buildNamespace }}
 {{- $previewDomain := default (printf "preview.%s" .Values.baseDomain) .Values.providers.preview.previewDomain }}

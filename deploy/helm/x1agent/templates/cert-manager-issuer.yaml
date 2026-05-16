@@ -30,11 +30,38 @@
 {{- fail (printf "tls.solver.type must be 'http01' or 'dns01', got %q" $solverType) }}
 {{- end }}
 {{- $dnsProject := default .Values.cloud.gcp.projectId .Values.tls.solver.dns01.cloudDNSProject }}
-{{- if and (eq $solverType "dns01") (not $dnsProject) }}
-{{- fail "tls.solver.type=dns01 requires tls.solver.dns01.cloudDNSProject or cloud.gcp.projectId" }}
+{{- $needsDns01 := or (eq $solverType "dns01") .Values.previews.enabled }}
+{{- if and $needsDns01 (not $dnsProject) }}
+{{- fail "DNS-01 solver (required by previews.enabled or tls.solver.type=dns01) needs tls.solver.dns01.cloudDNSProject or cloud.gcp.projectId" }}
 {{- end }}
+{{- /*
+Hybrid solver render. Two cases worth calling out:
+
+  1. previews.enabled=true + tls.solver.type=http01 (the recommended
+     shape for installs that don't want to migrate their existing
+     app/api certs to DNS-01): emits a DNS-01 solver scoped to the
+     preview zone for the wildcard cert, then an HTTP-01 catch-all for
+     app/api. cert-manager picks the longest matching dnsZones
+     selector, so *.preview.<base> goes DNS-01 and everything else
+     stays HTTP-01.
+
+  2. tls.solver.type=dns01 (entire install on DNS-01): a single DNS-01
+     solver, no selector — catches everything. previews.enabled is a
+     no-op for solver shape here; the DNS-01 path already covers the
+     wildcard.
+*/}}
 {{- define "x1agent.acmeSolvers" -}}
-{{- if eq .solverType "http01" }}
+{{- if and .previewsEnabled (eq .solverType "http01") }}
+- dns01:
+    cloudDNS:
+      project: {{ .dnsProject | quote }}
+  selector:
+    dnsZones:
+      - {{ printf "preview.%s" .baseDomain | quote }}
+- http01:
+    ingress:
+      class: {{ .ingressClass | quote }}
+{{- else if eq .solverType "http01" }}
 - http01:
     ingress:
       class: {{ .ingressClass | quote }}
@@ -44,6 +71,7 @@
       project: {{ .dnsProject | quote }}
 {{- end }}
 {{- end }}
+{{- $solverArgs := dict "solverType" $solverType "dnsProject" $dnsProject "ingressClass" .Values.ingress.className "previewsEnabled" .Values.previews.enabled "baseDomain" .Values.baseDomain }}
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -57,7 +85,7 @@ spec:
     privateKeySecretRef:
       name: {{ printf "%s-account" .Values.tls.clusterIssuer | quote }}
     solvers:
-      {{- include "x1agent.acmeSolvers" (dict "solverType" $solverType "dnsProject" $dnsProject "ingressClass" .Values.ingress.className) | nindent 6 }}
+      {{- include "x1agent.acmeSolvers" $solverArgs | nindent 6 }}
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -71,7 +99,7 @@ spec:
     privateKeySecretRef:
       name: {{ printf "%s-account" $issuerStaging | quote }}
     solvers:
-      {{- include "x1agent.acmeSolvers" (dict "solverType" $solverType "dnsProject" $dnsProject "ingressClass" .Values.ingress.className) | nindent 6 }}
+      {{- include "x1agent.acmeSolvers" $solverArgs | nindent 6 }}
 ---
 # NOTE: explicit Certificate for app+api removed. ingress-nginx's
 # cert-manager.io/cluster-issuer annotation on the Ingress causes
