@@ -136,7 +136,7 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
   async listByShare(
     sessionId: SessionId,
     shareId: string,
-    opts: { threadLimit?: number; beforeThreadFirstSeq?: number } = {},
+    opts: { threadLimit?: number; beforeThreadFirstCreatedAt?: Date } = {},
   ): Promise<readonly ShareComment[]> {
     // Default path: every row on the share. Used by the agent-side
     // wake plumbing + NATS subscribers, which need the full window.
@@ -150,19 +150,24 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
       return rows.map(toComment);
     }
 
-    // Operator sidebar path: thread-level pagination. Two queries —
-    // pick the latest N thread_ids first (small index-friendly
-    // aggregate), then fetch all comments belonging to those threads.
+    // Operator sidebar path: thread-level pagination keyed off the
+    // thread's first comment `created_at`. seq cannot be used as a
+    // cross-thread cursor: it resets per `(share_id, thread_id)`
+    // (see `append` above), so every thread head has seq=1 and any
+    // seq-based cursor degenerates.
+    //
+    // Two queries — pick the latest N thread_ids first, then fetch
+    // all comments belonging to those threads.
     const limit = Math.max(1, Math.min(500, opts.threadLimit));
-    const before = opts.beforeThreadFirstSeq;
+    const before = opts.beforeThreadFirstCreatedAt;
     const heads = before !== undefined
       ? await this.sql<{ thread_id: string }[]>`
           SELECT thread_id
           FROM share_comments
           WHERE session_id = ${sessionId} AND share_id = ${shareId}
           GROUP BY thread_id
-          HAVING min(seq) < ${before}
-          ORDER BY min(seq) DESC
+          HAVING min(created_at) < ${before}
+          ORDER BY min(created_at) DESC
           LIMIT ${limit}
         `
       : await this.sql<{ thread_id: string }[]>`
@@ -170,7 +175,7 @@ export class PostgresShareCommentRepository implements ShareCommentRepository {
           FROM share_comments
           WHERE session_id = ${sessionId} AND share_id = ${shareId}
           GROUP BY thread_id
-          ORDER BY min(seq) DESC
+          ORDER BY min(created_at) DESC
           LIMIT ${limit}
         `;
     if (heads.length === 0) return [];

@@ -61,17 +61,22 @@ export interface ShareCommentRepository {
    * For the operator-facing sidebar (X1A-72.4), pagination is
    * thread-level:
    *   - `threadLimit`: return comments belonging to the latest N
-   *     threads, ordered by the thread's first comment seq DESC.
-   *     Within each returned thread, all replies are included.
-   *   - `beforeThreadFirstSeq`: only consider threads whose first
-   *     comment seq is strictly less than this value. Pass the min
-   *     `firstSeq` of the currently-loaded window to fetch the
-   *     preceding page.
+   *     threads, ordered by the thread's first comment `created_at`
+   *     DESC. Within each returned thread, all replies are included.
+   *   - `beforeThreadFirstCreatedAt`: only consider threads whose
+   *     first comment `created_at` is strictly less than this value.
+   *     Pass the earliest head `created_at` from the currently-loaded
+   *     window to fetch the preceding page.
+   *
+   * NOTE: `seq` cannot be used as a cross-thread cursor — it's scoped
+   * per `(share_id, thread_id)` in the schema, so every thread's head
+   * has seq=1 and any min(seq) cursor degenerates to 1, leaving the
+   * server with no eligible older threads.
    */
   listByShare(
     sessionId: SessionId,
     shareId: string,
-    opts?: { threadLimit?: number; beforeThreadFirstSeq?: number },
+    opts?: { threadLimit?: number; beforeThreadFirstCreatedAt?: Date },
   ): Promise<readonly ShareComment[]>;
 
   /**

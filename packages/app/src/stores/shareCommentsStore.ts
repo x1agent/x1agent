@@ -78,14 +78,25 @@ function commentUrl(k: ShareKey, suffix = ""): string {
 // review surfaces; scroll-up loads the preceding window.
 const INITIAL_THREAD_LIMIT = 50;
 
-/** Smallest seq across all comments in the loaded window. Used as the
- *  cursor for the next page fetch — the server treats "threads whose
- *  first-seq < cursor" as "older threads". */
-function minSeqOf(rows: readonly ShareCommentDTO[]): number | null {
-  let min: number | null = null;
+/**
+ * Earliest thread-head `created_at` across the loaded window. Used as
+ * the cursor for the next page fetch — the server returns threads
+ * whose head `created_at` is strictly less than this value.
+ *
+ * Why thread heads (parent_comment_id = null) and not all comments:
+ * the server orders threads by `min(created_at)` per thread, which is
+ * the head's created_at. Using a reply's created_at as the cursor
+ * would either skip threads (when reply.created_at > head.created_at)
+ * or fail to advance (when seq-style anomalies push a reply earlier).
+ * Heads-only is the only cursor that round-trips cleanly.
+ */
+function earliestHeadCreatedAt(
+  rows: readonly ShareCommentDTO[],
+): string | null {
+  let min: string | null = null;
   for (const r of rows) {
-    if (typeof r.seq !== "number") continue;
-    if (min === null || r.seq < min) min = r.seq;
+    if (r.parent_comment_id !== null) continue;
+    if (min === null || r.created_at < min) min = r.created_at;
   }
   return min;
 }
@@ -142,7 +153,7 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
     if (!s.hasOlderByShareId[key.shareId]) return;
     if (s.loadingOlderByShareId[key.shareId]) return;
     const existing = s.byShareId[key.shareId] ?? [];
-    const cursor = minSeqOf(existing);
+    const cursor = earliestHeadCreatedAt(existing);
     if (cursor === null) return;
     set((prev) => ({
       loadingOlderByShareId: {
@@ -154,7 +165,7 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
       const url =
         commentUrl(key) +
         `?thread_limit=${INITIAL_THREAD_LIMIT}` +
-        `&before_thread_first_seq=${cursor}`;
+        `&before_thread_first_created_at=${encodeURIComponent(cursor)}`;
       const res = await apiFetch<ShareCommentListResponse>(url);
       set((prev) => {
         const cur = prev.byShareId[key.shareId] ?? [];

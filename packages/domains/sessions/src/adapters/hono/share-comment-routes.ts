@@ -207,18 +207,28 @@ export function createShareCommentRoutes(
   // ── GET /  — list comments on this share ─────────────────────────
   // X1A-72.4 — thread-level pagination. Default load (no params) is
   // backward-compatible: every comment row on the share, ordered by
-  // (thread_id, seq). With `?thread_limit=N` the response is scoped
-  // to the latest N threads by first-comment seq; `?before_thread_first_seq=`
-  // pages through older windows.
+  // (thread_id, seq). With `?thread_limit=N` the response is scoped to
+  // the latest N threads by first-comment `created_at`;
+  // `?before_thread_first_created_at=<ISO8601>` pages through older
+  // windows.
   app.get("/", async (c) => {
     const ctx = await loadCtx(c);
     if ("error" in ctx) return c.json({ error: ctx.error }, 404);
     const limitRaw = c.req.query("thread_limit");
-    const beforeRaw = c.req.query("before_thread_first_seq");
+    const beforeRaw = c.req.query("before_thread_first_created_at");
+    let beforeDate: Date | undefined;
+    if (beforeRaw !== undefined) {
+      const parsed = new Date(beforeRaw);
+      if (!Number.isNaN(parsed.getTime())) beforeDate = parsed;
+    }
+    const parsedLimit =
+      limitRaw !== undefined ? Number(limitRaw) : undefined;
     const rows = await cfg.comments.listByShare(ctx.sessionId, ctx.shareId, {
-      threadLimit: limitRaw !== undefined ? Number(limitRaw) : undefined,
-      beforeThreadFirstSeq:
-        beforeRaw !== undefined ? Number(beforeRaw) : undefined,
+      threadLimit:
+        parsedLimit !== undefined && Number.isFinite(parsedLimit)
+          ? parsedLimit
+          : undefined,
+      beforeThreadFirstCreatedAt: beforeDate,
     });
     return c.json({
       comments: rows.map(serialiseComment),
