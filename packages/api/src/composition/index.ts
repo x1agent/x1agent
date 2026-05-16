@@ -22,7 +22,9 @@ import {
 import {
   PostgresMembershipRepository,
   PostgresWorkspaceRepository,
+  PostgresAccessGrantRepository,
   createWorkspaceRoutes,
+  createAccessGrantsRoutes,
 } from "@x1agent/domain-workspaces";
 import { composeSlack } from "./slack.js";
 import {
@@ -186,6 +188,8 @@ export interface Composition {
   publicInvitationRoutes: Hono;
   /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
   workspaceCreateRoutes: Hono;
+  /** /api/workspaces/:slug/access-grants — workspace-admin-or-platform-admin domain/email grants. */
+  accessGrantsRoutes: Hono;
   agentRoutes: Hono;
   /** /api/workspaces/:slug/preview-environments — durable preview env list + admin mutations. */
   previewEnvironmentRoutes: Hono;
@@ -389,6 +393,7 @@ export function compose(env: CompositionEnv): Composition {
   const loginStates = new PostgresOAuthLoginStateStore(env.sql);
   const passwords = new PostgresPasswordCredentialStore(env.sql);
   const workspaces = new PostgresWorkspaceRepository(env.sql);
+  const accessGrants = new PostgresAccessGrantRepository(env.sql);
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
@@ -488,6 +493,21 @@ export function compose(env: CompositionEnv): Composition {
     // workspace member (otherwise they'd hit the "no workspace
     // access" empty state).
     pendingInvitations: new PendingInvitationAcceptorAdapter(env.sql),
+    // Workspace access grants: any matching domain= or email= rows
+    // turn into memberships at the row's default_role on first
+    // sign-in. Idempotent — re-signing-in doesn't change role.
+    accessGrants: {
+      async materializeForUser(userId, email) {
+        const matches = await accessGrants.findMatchesForEmail(String(email));
+        for (const grant of matches) {
+          await memberships.grant({
+            workspaceId: grant.workspaceId as never,
+            userId: userId as never,
+            role: (grant.defaultRole ?? "member") as never,
+          });
+        }
+      },
+    },
   });
 
   const requireAuth = createRequireAuth(tokenizer);
@@ -660,6 +680,24 @@ export function compose(env: CompositionEnv): Composition {
         "SameSite=Lax",
         `Max-Age=${maxAge}`,
       ].join("; ");
+    },
+  });
+
+  const accessGrantsRoutes = createAccessGrantsRoutes({
+    repository: accessGrants,
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+    // Admin-or-platform-admin gate. The bypass for platform admins is
+    // explicit here — WorkspaceAdminGuard's assertAdmin only checks the
+    // membership-role, so platform admins (who may not be workspace
+    // members) need a separate path.
+    requireWorkspaceAdminOrPlatformAdmin: async (workspaceId, userId, email) => {
+      if (env.platformAdmins.includes(email as never)) return;
+      await new WorkspaceAdminGuard(memberships).assertAdmin(
+        userId as never,
+        workspaceId as never,
+      );
     },
   });
 
@@ -1427,6 +1465,7 @@ export function compose(env: CompositionEnv): Composition {
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     workspaceCreateRoutes,
+    accessGrantsRoutes,
     agentRoutes,
     previewEnvironmentRoutes,
     sessionRoutes,

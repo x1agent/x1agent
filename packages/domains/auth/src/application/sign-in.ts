@@ -64,6 +64,14 @@ export interface SignInDeps {
    * user with no memberships. See PendingInvitationAcceptor.
    */
   pendingInvitations?: PendingInvitationAcceptor;
+  /**
+   * Optional: auto-create workspace memberships for any
+   * workspace_access_grant rows that match the user's email or its
+   * domain. Mirrors the pendingInvitations hook but for the bulk
+   * domain/email grant flow. Best-effort: a failure here logs but does
+   * not deny sign-in.
+   */
+  accessGrants?: import("../ports/access-gate.js").AccessGrantMaterializer;
 }
 
 export interface SignInResult {
@@ -124,6 +132,19 @@ export async function completeSignIn(
     } catch (err) {
       console.warn(
         `[auth] failed to auto-accept pending invitations for ${profile.email}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Materialise workspace memberships from any matching access grants
+  // (kind='email' exact OR kind='domain' on the user's email domain).
+  // Same best-effort posture as the invitation auto-accept above.
+  if (deps.accessGrants) {
+    try {
+      await deps.accessGrants.materializeForUser(user.id, profile.email);
+    } catch (err) {
+      console.warn(
+        `[auth] failed to materialize access grants for ${profile.email}: ${(err as Error).message}`,
       );
     }
   }

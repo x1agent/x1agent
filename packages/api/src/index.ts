@@ -253,6 +253,7 @@ const {
   meRoutes,
   workspaceInvitationRoutes,
   workspaceCreateRoutes,
+  accessGrantsRoutes,
   publicInvitationRoutes,
   agentRoutes,
   previewEnvironmentRoutes,
@@ -485,6 +486,7 @@ app.route(
 );
 app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
 app.route("/api/workspaces/:slug/env-bindings", workspaceEnvRoutes);
+app.route("/api/workspaces/:slug/access-grants", accessGrantsRoutes);
 // Browser-redirect OAuth flows for remote_oauth MCPs:
 //   /auth/mcp/start/:slug/:name      — initiate
 //   /auth/mcp/callback/:slug/:name   — provider redirects here

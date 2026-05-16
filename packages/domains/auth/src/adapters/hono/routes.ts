@@ -116,6 +116,13 @@ export interface AuthRoutesConfig {
    * sign-in. See PendingInvitationAcceptor.
    */
   pendingInvitations?: PendingInvitationAcceptor;
+  /**
+   * Optional materializer for workspace_access_grants. On a successful
+   * sign-in, after pendingInvitations has run, this turns any matching
+   * (email-exact or domain-wildcard) grant rows into workspace
+   * memberships. See AccessGrantMaterializer.
+   */
+  accessGrants?: import("../../ports/access-gate.js").AccessGrantMaterializer;
 }
 
 function buildCookieHeader(
@@ -280,6 +287,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           accessGate: cfg.accessGate,
           oauthTokens: cfg.oauthTokens,
           pendingInvitations: cfg.pendingInvitations,
+          accessGrants: cfg.accessGrants,
         },
         code,
         redirectUri(),
@@ -328,6 +336,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
             platformAdmins: cfg.platformAdmins ?? [],
             accessGate: cfg.accessGate,
             pendingInvitations: cfg.pendingInvitations,
+            accessGrants: cfg.accessGrants,
           },
           profile,
         );

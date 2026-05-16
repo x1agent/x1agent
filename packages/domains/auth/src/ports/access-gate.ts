@@ -25,3 +25,17 @@ export const denyAllAccessGate: AccessGate = {
     return false;
   },
 };
+
+/**
+ * Materialise workspace memberships for a newly-signed-in user whose
+ * email matches a `workspace_access_grant` row. Idempotent — calling
+ * twice for the same (user, workspace) returns the same membership.
+ *
+ * Mirrors the pendingInvitations port's role: a side-effect hook run
+ * after sign-in identity is minted, before the membership list is
+ * fetched. When unwired, grants still let sign-in succeed (via
+ * AccessGate) but the user lands with no memberships.
+ */
+export interface AccessGrantMaterializer {
+  materializeForUser(userId: string, email: Email): Promise<void>;
+}
