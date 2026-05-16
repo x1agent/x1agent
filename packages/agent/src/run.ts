@@ -40,6 +40,10 @@ import { createEventCorrelator } from "./event-correlator.js";
 const sessionId = process.env.SESSION_ID;
 const agentId = process.env.AGENT_ID || "generic";
 const sidecarUrl = process.env.SIDECAR_URL || "http://localhost:9090";
+// The sidecar splits credentials (127.0.0.1:9090) from health (0.0.0.0:9091)
+// — see packages/sidecar/src/main.rs. The /health route lives only on :9091.
+const sidecarHealthUrl =
+  process.env.SIDECAR_HEALTH_URL || "http://localhost:9091";
 const maxTurns = Number.parseInt(process.env.MAX_TURNS || "200", 10);
 // Empty = no auto-prompt; the SDK blocks on the input channel until the
 // user's first inject arrives. Scheduler-triggered sessions populate
@@ -75,17 +79,17 @@ async function postToSidecar(type: string, payload: unknown): Promise<void> {
 }
 
 // Poll the sidecar's /health until it answers or we hit the timeout.
-// The sidecar performs git clones + NATS connect before binding :9090,
-// so it routinely takes 1-3s longer than the agent to be ready. Without
-// this gate the early POSTs (session.started + the gh-credential
-// bootstrap) race the sidecar's HTTP listener and silently no-op,
-// leaving `gh` unauthenticated and the session.started event lost.
+// The sidecar performs git clones + NATS connect before binding its
+// listeners, so it routinely takes 1-3s longer than the agent to be
+// ready. Without this gate the early POSTs (session.started + the
+// gh-credential bootstrap) race the sidecar's HTTP listener and silently
+// no-op, leaving `gh` unauthenticated and the session.started event lost.
 async function waitForSidecar(timeoutMs = 30_000): Promise<boolean> {
   const start = Date.now();
   let delay = 100;
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${sidecarUrl}/health`);
+      const res = await fetch(`${sidecarHealthUrl}/health`);
       if (res.ok) return true;
     } catch {
       // not up yet
