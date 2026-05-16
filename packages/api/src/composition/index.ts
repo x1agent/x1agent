@@ -394,6 +394,10 @@ export function compose(env: CompositionEnv): Composition {
   const passwords = new PostgresPasswordCredentialStore(env.sql);
   const workspaces = new PostgresWorkspaceRepository(env.sql);
   const accessGrants = new PostgresAccessGrantRepository(env.sql);
+  // Hoisted because internalRoutes' preview-deploy env-binding resolver
+  // references it directly (eagerly evaluated), not in a closure.
+  // The service + routes are still constructed lower down.
+  const workspaceBindingRepo = new PostgresWorkspaceBindingRepository(env.sql);
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
@@ -1195,8 +1199,8 @@ export function compose(env: CompositionEnv): Composition {
   // Workspace-scoped env bindings. Same env_bindings table, scope='workspace'.
   // Preview environments + agent sessions opt into these by name; the resolver
   // at preview-deploy time joins env_bindings + workspace_secrets to mint the
-  // per-preview Secret bundle.
-  const workspaceBindingRepo = new PostgresWorkspaceBindingRepository(env.sql);
+  // per-preview Secret bundle. (workspaceBindingRepo is hoisted above
+  // internalRoutes; service + routes constructed here.)
   const workspaceBindingService = new WorkspaceBindingService(
     workspaceBindingRepo,
     async (workspaceId, secretName) => {
