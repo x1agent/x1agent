@@ -68,12 +68,20 @@ export function WorkspacesRoot() {
     >
       <div className="max-w-5xl space-y-6 p-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Workspaces</CardTitle>
-            <CardDescription>
-              Every workspace in this deployment. Read-only — manage members
-              and agents from inside the workspace.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1.5">
+              <CardTitle>Workspaces</CardTitle>
+              <CardDescription>
+                Every workspace in this deployment. Read-only — manage members
+                and agents from inside the workspace.
+              </CardDescription>
+            </div>
+            <a
+              href="/workspaces/new"
+              className="inline-flex shrink-0 items-center rounded-md bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg/90"
+            >
+              New workspace
+            </a>
           </CardHeader>
           <CardContent>
             {error && <div className="mb-4 text-sm text-red-400">{error}</div>}
