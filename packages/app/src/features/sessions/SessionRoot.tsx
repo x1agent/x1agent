@@ -51,6 +51,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     errorBySession,
     loadInitial,
     loadOlder,
+    loadChildren,
     appendEvent,
     setError,
     setSession,
@@ -290,6 +291,27 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       useTypingIndicatorStore.getState().clearAllForSession(sessionId);
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
+
+  // X1A-60 — poll the children list while the parent is alive. The
+  // parent's NATS stream doesn't fire when a child's lifecycle
+  // changes, and the spawn-result sniffer in sessionDetailStore is
+  // best-effort (races on subscribe, bails on payload-shape drift).
+  // 4s is a balance: tight enough to feel live, sparse enough that
+  // a long-running orchestrator doesn't generate one request per
+  // second forever. Stops when the session is no longer running.
+  useEffect(() => {
+    if (!session) return;
+    const alive =
+      session.status === "running" || session.status === "pending";
+    if (!alive) return;
+    // Fire immediately so the counter is correct on landing, then
+    // every 4 seconds.
+    void loadChildren(workspaceSlug, sessionId);
+    const id = setInterval(() => {
+      void loadChildren(workspaceSlug, sessionId);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [workspaceSlug, sessionId, session?.status, loadChildren]);
 
   // User input TTL: drop messages older than this on the consumer.
   // 2 min is "long enough to cover pod warmup (~30s typical, ~2min
