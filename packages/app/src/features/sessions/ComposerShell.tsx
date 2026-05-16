@@ -1,6 +1,5 @@
 import {
   forwardRef,
-  useEffect,
   useRef,
   useState,
   type DragEvent,
@@ -112,14 +111,6 @@ export const ComposerShell = forwardRef<HTMLTextAreaElement, Props>(
       }
     };
 
-    // Autosize up to ~6 rows.
-    useEffect(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 168) + "px";
-    }, [value, textareaRef]);
-
     const handleSubmit = (e: FormEvent) => {
       e.preventDefault();
       if (!canSend) return;
@@ -161,16 +152,35 @@ export const ComposerShell = forwardRef<HTMLTextAreaElement, Props>(
                 {pills}
               </div>
             )}
-            <textarea
-              ref={textareaRef}
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={onKeyDown}
-              rows={1}
-              disabled={disabled}
-              placeholder={placeholder}
-              className="block w-full resize-none bg-transparent text-[15px] leading-6 text-fg placeholder:text-fg-faint focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-            />
+            {/* Pure-CSS autosize. The grid row tracks the hidden mirror
+                <span> whose content matches the textarea's value plus a
+                trailing space (so a fresh newline still extends the row).
+                Avoids the JS `scrollHeight` read on every keystroke,
+                which forced a full-document reflow and was the
+                dominant per-keystroke cost on iPad with a long
+                unvirtualized event timeline. Cap at ~6 rows via
+                `max-h-[168px]` + `overflow-y-auto` on the grid. */}
+            <div
+              className="composer-autosize grid max-h-[168px] overflow-y-auto"
+              data-testid="composer-autosize"
+            >
+              <span
+                aria-hidden
+                className="invisible whitespace-pre-wrap break-words text-[15px] leading-6 [grid-area:1/1/2/2]"
+              >
+                {value + " "}
+              </span>
+              <textarea
+                ref={textareaRef}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onKeyDown={onKeyDown}
+                rows={1}
+                disabled={disabled}
+                placeholder={placeholder}
+                className="block w-full resize-none overflow-hidden bg-transparent text-[15px] leading-6 text-fg placeholder:text-fg-faint focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 [grid-area:1/1/2/2]"
+              />
+            </div>
 
             {/* Drop-target overlay: a centered 64x64 grey upload icon
                 appears whenever a file is being dragged over the
