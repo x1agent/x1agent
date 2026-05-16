@@ -671,6 +671,12 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
           process.env.IMAGE_REGISTRY ||
           "x1-registry.x1agent.svc.cluster.local:5000",
         registryInsecure: process.env.IMAGE_REGISTRY_INSECURE !== "false",
+        // Optional KSA the Kaniko Job runs as. Required for Artifact
+        // Registry pushes — the KSA must be Workload-Identity-bound to
+        // a GSA with roles/artifactregistry.writer. Defaults to
+        // x1agent-preview-build, which the chart already provisions
+        // when previews are enabled (same writer permission).
+        buildServiceAccount: process.env.IMAGE_BUILD_SERVICE_ACCOUNT || undefined,
       });
       registerCleanup(() => handle.stop());
     } catch (err) {

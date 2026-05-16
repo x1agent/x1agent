@@ -901,6 +901,12 @@ export function compose(env: CompositionEnv): Composition {
     // Durable preview environment side-effect on preview-deploy.
     // Same repository the workspace UI list endpoint reads from.
     previewEnvironments,
+    // Workspace env-binding resolver. preview-deploy reads the env's
+    // env_var_names → looks up matching bindings → resolves each
+    // secret to plaintext → forwards as `extra_env` over NATS. The
+    // provider mints the per-preview K8s Secret bundle.
+    workspaceBindings: workspaceBindingRepo,
+    workspaceSecrets: workspaceSecretsService,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so

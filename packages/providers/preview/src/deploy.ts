@@ -72,6 +72,14 @@ export interface DeployInputs {
    * Empty/undefined when the spec uses no `from: secret:<NAME>` env vars.
    */
   secretValues?: Record<string, string>;
+  /**
+   * Workspace env-binding overrides keyed by env-var name. Merged with
+   * spec.env entries — extraEnv wins on a name collision because it's
+   * the operator's explicit per-environment override. Values land in
+   * the same per-preview K8s Secret as secretValues; the Deployment
+   * env block references the Secret via valueFrom.secretKeyRef.
+   */
+  extraEnv?: Record<string, string>;
 }
 
 export interface DeployResult {
@@ -366,10 +374,14 @@ export async function deployPreview(
     );
   }
 
-  // Step 2a: mint per-preview secret bundle when the spec uses any
-  // `from: secret:<NAME>` env vars. Values are pre-resolved by the api
-  // and shipped over NATS; we just stage them into a K8s Secret so the
-  // Deployment can reference by valueFrom.secretKeyRef.
+  // Step 2a: mint per-preview secret bundle. Two sources feed in:
+  //   - spec `from: secret:<NAME>` entries get the workspace secret
+  //     value (keyed by secret name).
+  //   - extraEnv (workspace env-bindings the env opted into) gets the
+  //     env-var value (keyed by env-var name). extraEnv collisions
+  //     win since they're the explicit per-environment override.
+  // Both go into the same K8s Secret stringData; the manifest builder
+  // emits both via valueFrom.secretKeyRef with the appropriate key.
   let secretBundleName: string | undefined;
   const referencedSecrets = new Set<string>();
   for (const e of spec.spec.env) {
@@ -377,17 +389,24 @@ export async function deployPreview(
       referencedSecrets.add(e.from.slice("secret:".length));
     }
   }
-  if (referencedSecrets.size > 0 && inputs.secretValues) {
+  const extraEnv = inputs.extraEnv ?? {};
+  const hasExtraEnv = Object.keys(extraEnv).length > 0;
+  if ((referencedSecrets.size > 0 && inputs.secretValues) || hasExtraEnv) {
     secretBundleName = `preview-secrets-${slug}`.slice(0, 63);
     const stringData: Record<string, string> = {};
-    for (const name of referencedSecrets) {
-      const value = inputs.secretValues[name];
-      if (typeof value === "string") {
-        stringData[name] = value;
+    if (inputs.secretValues) {
+      for (const name of referencedSecrets) {
+        const value = inputs.secretValues[name];
+        if (typeof value === "string") {
+          stringData[name] = value;
+        }
+        // Missing values are skipped silently — the manifest builder
+        // emits empty string in their place, surfacing as a "missing
+        // env" error in the user's app, not as a deploy crash.
       }
-      // Missing values are skipped silently — the manifest builder
-      // emits empty string in their place, surfacing as a "missing
-      // env" error in the user's app, not as a deploy crash.
+    }
+    for (const [envName, value] of Object.entries(extraEnv)) {
+      stringData[envName] = value;
     }
     if (Object.keys(stringData).length > 0) {
       const secretBody: k8s.V1Secret = {
@@ -432,6 +451,7 @@ export async function deployPreview(
     tlsSecretName: inputs.tlsSecretName,
     selfUrl,
     secretBundleName,
+    extraEnv,
   };
   const deployment = buildDeployment(deployInputs);
   const service = buildService(deployInputs);

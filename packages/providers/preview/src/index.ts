@@ -50,6 +50,14 @@ interface ProvisionRequest {
    * (Zone 2 for previews — see docs/security/agent-env.md).
    */
   secret_values?: Record<string, string>;
+  /**
+   * Pre-resolved workspace env-binding values keyed by env-var name.
+   * Set when the preview env's `env_var_names` list opted into one or
+   * more workspace bindings; the api resolved each binding's
+   * secret_name → plaintext before publishing. Provider injects these
+   * into the per-preview K8s Secret bundle alongside spec.env entries.
+   */
+  extra_env?: Record<string, string>;
 }
 
 type ProvisionReply =
@@ -238,6 +246,12 @@ async function main() {
           req.secret_values !== null &&
           !Array.isArray(req.secret_values)
             ? (req.secret_values as Record<string, string>)
+            : undefined,
+        extraEnv:
+          typeof req.extra_env === "object" &&
+          req.extra_env !== null &&
+          !Array.isArray(req.extra_env)
+            ? (req.extra_env as Record<string, string>)
             : undefined,
       });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);

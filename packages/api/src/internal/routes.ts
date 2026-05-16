@@ -114,6 +114,16 @@ export interface InternalRoutesConfig {
    */
   previewEnvironments?: import("@x1agent/domain-preview-environments").PreviewEnvironmentRepository;
   /**
+   * Workspace-scoped env-binding resolver — paired with the preview env's
+   * `env_var_names` list, the preview-deploy route translates each name
+   * into a (env_var, secret_value) pair and forwards them to the
+   * provider as `extra_env`. Both deps must be wired for the lookup to
+   * run; absent either, env vars set on the preview env are silently
+   * ignored at deploy time.
+   */
+  workspaceBindings?: import("@x1agent/domain-agent-env").WorkspaceBindingRepository;
+  workspaceSecrets?: import("@x1agent/domain-workspace-secrets").SecretService;
+  /**
    * User-scoped OAuth token substrate. When present, exposes
    * looks up the user's stored grant for a provider, refreshes the
    * access token if it's near expiry, returns a fresh access_token.
@@ -999,6 +1009,56 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
     }
 
+    // Resolve workspace-scoped env bindings the preview opted into.
+    // The preview's env_var_names list (set in the workspace UI) names
+    // env_bindings rows with scope='workspace'; each row references a
+    // workspace_secret. We turn the list into a {ENV_NAME → plaintext}
+    // map here so the provider can mint the per-preview K8s Secret
+    // without needing direct DB or secret-store access.
+    //
+    // Best-effort: missing bindings or secrets are silently skipped —
+    // the agent's app sees that env var as unset rather than crashing
+    // the deploy. Logged so the operator can spot misconfigurations.
+    const extraEnv: Record<string, string> = {};
+    if (
+      cfg.previewEnvironments &&
+      cfg.workspaceBindings &&
+      cfg.workspaceSecrets &&
+      earlySlug
+    ) {
+      try {
+        const existingEnv = await cfg.previewEnvironments.findBySlug(
+          agent.workspaceId,
+          earlySlug as never,
+        );
+        const names = existingEnv?.envVarNames ?? [];
+        if (names.length > 0) {
+          const bindings = await cfg.workspaceBindings.findByNames(
+            agent.workspaceId as string,
+            names,
+          );
+          for (const binding of bindings) {
+            const value = await cfg.workspaceSecrets.resolve(
+              agent.workspaceId as string,
+              binding.secretName,
+            );
+            if (value !== null) {
+              extraEnv[binding.envName as string] = value;
+            } else {
+              console.warn(
+                `[preview-deploy] workspace secret '${binding.secretName}' (bound to env '${binding.envName}') resolved null — skipping`,
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[preview-deploy] env-binding resolver failed:",
+          (err as Error).message,
+        );
+      }
+    }
+
     // NATS request/reply to the provider. Timeout covers a full
     // Kaniko build + Deployment ready — hence 20 minutes.
     const jc = JSONCodec();
@@ -1013,6 +1073,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           branch: body.branch,
           commit_sha: body.commit_sha,
           installation_id: installationId,
+          extra_env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
         }),
         { timeout: 20 * 60 * 1000 },
       );
