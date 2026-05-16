@@ -59,6 +59,22 @@ jobs:
           # helm binary required. See deploy/helm/x1agent/tests/ for
           # the rationale.
           bun test deploy/helm/x1agent/tests
+      - name: Typecheck api (production source — excludes tests)
+        # `bun test` doesn't typecheck. Without this step abstract-class
+        # subclasses missing the `code` field, dropped re-exports, and
+        # readonly-property assigns landed on main and only surfaced when
+        # someone ran tsc by hand. The exclusion below scopes the gate
+        # to production source — Hono+Zod validator type-narrowing in
+        # auth/invitations/uploads routes and CompositionEnv drift in
+        # integration tests are tracked separately and currently noisy.
+        run: |
+          set -e
+          cd packages/api
+          bun run tsc --noEmit 2>&1 | tee /tmp/tsc.out
+          # Filter out known-noisy surfaces; fail if anything else trips.
+          ! grep -E "error TS" /tmp/tsc.out \
+            | grep -vE "\.test\.ts|integration\.test|domains/(auth|invitations|uploads)/src/adapters/hono/routes\.ts" \
+            | grep -q .
 
   integration:
     name: Adapter + API integration tests
