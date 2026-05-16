@@ -369,6 +369,32 @@ const interactivePrompt =
     ? `\n\n## Interactive Session\n\nThis is an INTERACTIVE session. The user will send you multiple messages over time. After responding to each message, STOP and WAIT for the next user message. Do NOT say goodbye or end the conversation.`
     : `\n\n## One-Shot Session\n\nComplete the task and finish.`;
 
+const agentKind = process.env.AGENT_KIND ?? "worker";
+const orchestratorSection = agentKind === "orchestrator"
+  ? `
+
+## You Are an Orchestrator
+
+You can spawn child sessions (workers) and drive them. Each child runs in its own pod with its own private \`/workspace\` — you can NOT see their files directly, and they can NOT push files to you.
+
+**Default mechanism for getting a worker's output into your workspace:** the **\`pull_from_child\`** tool. It snapshots the worker's entire \`/workspace\` into your own \`/workspace/workers/<child_session_id>/\`. After it returns, use Read / Bash / Grep against \`/workspace/workers/<id>/\` as if those files were always yours. Call it whenever you need their output — after the worker reports done, mid-flight to check progress, or after \`inject_message\` if you asked them to produce something. A second call overwrites with a fresh snapshot.
+
+Other orchestrator-only tools:
+- **\`spawn_session\`**: start a child worker (use \`list_spawnable_agents\` to discover which agents you can spawn).
+- **\`inject_message\`**: send a user-message turn into a running child.
+- **\`cancel_session\`**: stop a child you spawned.
+- **\`share_to_child\`**: push a file or folder from your \`/workspace\` into a child's \`/workspace\` (inverse of \`pull_from_child\`).
+- **\`read_child_output\`**: read a child's event timeline (status updates, artifacts, errors) — events only, not files.
+
+The workspace mental model: each child's \`/workspace\` is sandboxed. The only way data flows out of it is \`pull_from_child\`. The only way data flows in is \`share_to_child\` or what you put in the initial prompt.`
+  : `
+
+## You Are a Worker
+
+You're running in a pod spawned by an orchestrator. Your \`/workspace\` is PRIVATE to this session — the user does not see it, the orchestrator does not see it directly. The orchestrator pulls files from your workspace when it needs them (it has a \`pull_from_child\` tool); you don't push.
+
+So: just write your output to \`/workspace\` like any normal working directory. Don't worry about \`share\` for the orchestrator's benefit — \`share\` is for the human user, not for the orchestrator.`;
+
 const systemPromptText = `${workspacePromptSection}${identityLine} You are running as an agent and a user is watching your session in real-time.
 
 ## Communication Tools
@@ -395,7 +421,7 @@ If the message says \`(upload <id>: unavailable)\` or \`(upload <id>: error)\` i
 
 - Call \`emit_status\` at the start of each phase.
 - For any "share X" / "build Y" / "give me Z" request, write to /workspace and \`share\`. \`emit_artifact\` is for throwaway inline content only.
-- Be responsive — the user is watching live.`;
+- Be responsive — the user is watching live.${orchestratorSection}`;
 
 // ── Start the conversation ──────────────────────────────
 

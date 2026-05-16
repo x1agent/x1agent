@@ -547,6 +547,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "pull_from_child",
+      description:
+        "Snapshot a child session's entire /workspace into your own /workspace/workers/<child_session_id>/. Use this whenever you need to read what a worker has produced (reports, datasets, generated code, scratch files) — workers cannot push files to you, so YOU pull when you need their output. Snapshot semantics: a second call overwrites the same workers/<id>/ subdirectory with a fresh copy. After it returns, use the Read / Bash / Grep tools against /workspace/workers/<id>/ as if those files were always yours. Returns `{ ok, files, total_bytes, dest_path }`. A 403 means the session isn't yours; 410 means the child has already finished (its workspace is gone with the pod). Optionally pass `paths` to snapshot only a subset (relative to the child's /workspace).",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: {
+            type: "string",
+            description: "The child session id (returned by spawn_session).",
+          },
+          paths: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional list of subpaths under the child's /workspace to copy. Omit to snapshot the whole workspace (recommended for most cases). Example: ['out/report.md', 'data/clean.csv'].",
+          },
+        },
+        required: ["child_session_id"],
+      },
+    },
+    {
       name: "share_to_child",
       description:
         "Snapshot a file or folder from THIS session's /workspace into a child session's /workspace at the named dest_path. Snapshot semantics ONLY — the child gets a copy of the bytes at the moment of the call; subsequent edits in this session do NOT propagate. A second call with the same source_path re-stages a fresh snapshot at the same dest. Use this to hand a child agent the artifacts it needs to work on — a generated spec, a CSV, a directory of code — without committing through git. Returns `{ ok, files, total_size }` on success. The child must already exist and have been spawned by you; a 403 means the session isn't yours.",
@@ -1367,6 +1388,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `cancel_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "pull_from_child": {
+      try {
+        const paths = Array.isArray(a?.paths)
+          ? (a.paths as unknown[]).filter((p) => typeof p === "string")
+          : undefined;
+        const res = await fetch(`${sidecarUrl}/pull_from_child`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_session_id: String(a?.child_session_id ?? ""),
+            ...(paths && paths.length > 0 ? { paths } : {}),
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `pull_from_child failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
