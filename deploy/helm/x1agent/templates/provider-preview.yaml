@@ -194,6 +194,15 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            # @kubernetes/client-node under Bun doesn't pick up the
+            # in-cluster CA from `kc.loadFromCluster()` when it falls
+            # back to global fetch — so calls to the K8s API server
+            # fail with "unable to verify the first certificate" the
+            # first time the provider tries to create a Kaniko Job.
+            # Pointing Bun at the SA-mounted CA via NODE_EXTRA_CA_CERTS
+            # restores trust without disabling verification.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: NATS_URL
               value: tls://nats:4222
             - name: NATS_CA_FILE

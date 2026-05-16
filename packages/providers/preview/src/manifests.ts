@@ -140,11 +140,16 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
               image: "gcr.io/kaniko-project/executor:latest",
               args,
               securityContext: {
-                // Kaniko requires root inside the container — it
-                // writes to / during its build. Dropping CAP_NET_BIND_SERVICE
-                // and the rest is fine; Kaniko doesn't need them.
+                // Kaniko unpacks base-image tarballs into / and chowns
+                // files like /etc/shadow during rootfs unpacking. With
+                // capabilities.drop: ["ALL"] the chown fails ("operation
+                // not permitted") and the build aborts before the
+                // user's Dockerfile even runs. Default cap set keeps
+                // the standard restricted-runtime baseline (the pod
+                // template's seccompProfile=RuntimeDefault stays on)
+                // and Kaniko has the chown/setuid/setgid/fowner caps
+                // it needs.
                 allowPrivilegeEscalation: false,
-                capabilities: { drop: ["ALL"] },
               },
               resources: {
                 requests: { cpu: "500m", memory: "1Gi" },
