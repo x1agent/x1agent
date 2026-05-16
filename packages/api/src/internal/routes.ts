@@ -918,6 +918,28 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     // rather than add a new port just for this path.
     const agent = await cfg.agents.findById(session.agentId as never);
     if (!agent) return c.json({ error: "agent_not_found" }, 404);
+
+    // Re-check that the requested repo is actually linked to this agent.
+    // The installation token granted below covers every repo the GitHub
+    // App installation can see — not just the ones this agent was
+    // explicitly granted. Trusting body.repo_full_name verbatim would
+    // let an agent with a single linked repo build any other repo in
+    // the same installation (source exfiltration + cross-repo deploy).
+    const repoLinked = await cfg.sql<{ ok: boolean }[]>`
+      SELECT TRUE AS ok FROM agent_repos
+      WHERE agent_id = ${session.agentId}
+        AND repo_full_name = ${body.repo_full_name}
+      LIMIT 1`;
+    if (repoLinked.length === 0) {
+      return c.json(
+        {
+          error: "repo_not_linked",
+          message: `Repo ${body.repo_full_name} is not linked to this agent.`,
+        },
+        403,
+      );
+    }
+
     const linkedRows = await cfg.sql<
       { installation_id: string | null }[]
     >`SELECT linked_installation_id AS installation_id FROM agents WHERE id = ${session.agentId}`;
@@ -1151,6 +1173,36 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
       return c.json(result);
     } catch (err) {
+      // NATS timeout / broker disconnect / provider crash mid-build all
+      // land here. Without this branch the early provisioning row sits
+      // at status='provisioning' forever and the UI spins. Stamp it
+      // failed so the operator sees what happened and can re-deploy.
+      if (cfg.previewEnvironments && earlySlug) {
+        try {
+          const { upsertPreviewEnvironment } = await import(
+            "@x1agent/domain-preview-environments"
+          );
+          await upsertPreviewEnvironment(
+            { repository: cfg.previewEnvironments },
+            {
+              workspaceId: agent.workspaceId,
+              slug: earlySlug,
+              repoFullName: body.repo_full_name,
+              branch: body.branch,
+              deploy: {
+                status: "failed",
+                sha: body.commit_sha,
+                statusReason: `provider_request_failed: ${(err as Error).message}`,
+              },
+            },
+          );
+        } catch (upsertErr) {
+          console.warn(
+            "[preview-deploy] failure upsert in catch:",
+            (upsertErr as Error).message,
+          );
+        }
+      }
       return c.json(
         {
           error: "provider_request_failed",
