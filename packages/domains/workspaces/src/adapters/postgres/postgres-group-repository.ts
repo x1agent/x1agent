@@ -54,7 +54,7 @@ export class PostgresGroupRepository implements GroupRepository {
         VALUES
           (${input.workspaceId}, ${input.slug}, ${input.name},
            ${source}, ${input.externalId ?? null},
-           ${input.rule ? this.sql.json(input.rule) : null})
+           ${input.rule ? this.sql.json(input.rule as never) : null})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;
       return toGroup(rows[0]!);

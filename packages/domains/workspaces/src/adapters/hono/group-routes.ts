@@ -14,6 +14,13 @@ import {
   GroupSlugTakenError,
 } from "../../domain/group.js";
 
+class AdminDeniedError extends DomainError {
+  readonly code = "admin_denied";
+  constructor() {
+    super("only workspace admins can manage groups");
+  }
+}
+
 export interface GroupRoutesConfig {
   groups: GroupRepository;
   /** Email → user id, used by member-add by-email. */
@@ -66,11 +73,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
 
   const requireAdmin = async (actor: UserId, wsId: WorkspaceId) => {
     if (!(await cfg.isWorkspaceAdmin(actor, wsId))) {
-      const e = new DomainError(
-        "only workspace admins can manage groups",
-      ) as DomainError & { code: string };
-      (e as { code: string }).code = "admin_denied";
-      throw e;
+      throw new AdminDeniedError();
     }
   };
 

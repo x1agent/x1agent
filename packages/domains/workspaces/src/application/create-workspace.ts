@@ -1,5 +1,5 @@
 import { WorkspaceSlug, type Email, type UserId } from "@x1agent/kernel";
-import { DomainError } from "@x1agent/kernel";
+import { DomainError, ValidationError } from "@x1agent/kernel";
 import type { WorkspaceRepository } from "../ports/workspace-repository.js";
 import type { MembershipRepository } from "../ports/membership-repository.js";
 import type { Workspace } from "../domain/workspace.js";
@@ -30,12 +30,14 @@ import type { Workspace } from "../domain/workspace.js";
  */
 
 export class NotPlatformAdminError extends DomainError {
+  readonly code = "not_platform_admin";
   constructor(public readonly email: Email) {
     super(`${email} is not a platform admin`);
   }
 }
 
 export class WorkspaceSlugTakenError extends DomainError {
+  readonly code = "workspace_slug_taken";
   constructor(public readonly slug: string) {
     super(`workspace slug "${slug}" is already taken`);
   }
@@ -76,10 +78,10 @@ export async function createWorkspace(
   const slug = WorkspaceSlug(input.slug);
   const trimmedName = input.name.trim();
   if (trimmedName.length === 0) {
-    throw new DomainError("workspace name cannot be empty");
+    throw new ValidationError("name", "workspace name cannot be empty");
   }
   if (trimmedName.length > 64) {
-    throw new DomainError("workspace name cannot exceed 64 chars");
+    throw new ValidationError("name", "workspace name cannot exceed 64 chars");
   }
 
   // Slug uniqueness check. Race: between this check and the create

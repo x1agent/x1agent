@@ -8,7 +8,11 @@ export type {
   UpdateCollectionInput,
   AttachInput,
 } from "./ports/collection-repository.js";
-export type { ProviderGateway } from "./ports/provider-gateway.js";
+export type {
+  ProviderGateway,
+  ProviderRecord,
+  ProviderRecordType,
+} from "./ports/provider-gateway.js";
 export type { AdminGuard } from "./ports/admin-guard.js";
 
 // Application

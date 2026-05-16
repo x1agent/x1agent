@@ -93,6 +93,21 @@ export class InMemorySessionRepository implements SessionRepository {
       .slice(0, limit);
   }
 
+  async listForUser(
+    _workspaceId: unknown,
+    userId: unknown,
+    limit: number,
+  ): Promise<readonly Session[]> {
+    // Mirrors listByWorkspace's coarseness: the fake doesn't track
+    // shares or owner attribution. Tests that need workspace+user
+    // scoping should seed only the rows they want to see.
+    return this.rows
+      .slice()
+      .filter((r) => (r as { triggeredByUserId?: unknown }).triggeredByUserId === userId)
+      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime())
+      .slice(0, limit);
+  }
+
   async listChildren(parentSessionId: SessionId): Promise<readonly Session[]> {
     return this.rows
       .filter((r) => r.parentSessionId === parentSessionId)
