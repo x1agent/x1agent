@@ -228,7 +228,12 @@ export function SessionCostBlock({
             title="Live · updates within ~2s"
           />
         ) : null}
-        <CostAmount amount={selfCost} />
+        <CostAmount
+          amount={selfCost}
+          onToggle={hasChildren ? () => setTreeOpen((v) => !v) : undefined}
+          panelId={hasChildren ? treeId : undefined}
+          panelOpen={treeOpen}
+        />
         {hasChildren && treeCost ? (
           <>
             <span aria-hidden="true" className="text-fg-faint">
@@ -237,16 +242,28 @@ export function SessionCostBlock({
             <WorkerCostAmount
               amount={workerTotal}
               count={workerCount}
+              onToggle={() => setTreeOpen((v) => !v)}
+              panelId={treeId}
+              panelOpen={treeOpen}
             />
             <span aria-hidden="true" className="text-fg-faint">
               =
             </span>
-            <span
-              className="font-medium text-fg"
+            <button
+              type="button"
+              onClick={() => setTreeOpen((v) => !v)}
+              className="font-medium text-fg hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong rounded"
+              aria-expanded={treeOpen}
+              aria-controls={treeId}
+              aria-label={
+                treeOpen
+                  ? "Collapse session tree"
+                  : "Expand session tree to see per-worker cost"
+              }
               data-testid="session-tree-grand-total"
             >
               {formatUsd(treeTotal)}
-            </span>
+            </button>
             <button
               type="button"
               onClick={() => setTreeOpen((v) => !v)}
@@ -312,25 +329,50 @@ export function SessionCostBlock({
 /**
  * The muted dollar amount with dashed-underline hover affordance.
  * Hover (or keyboard focus) reveals a short label clarifying that this
- * is the current session's cost — the full per-worker breakdown lives
- * inside the floating tree dropdown one click away on the caret.
+ * is the current session's cost. When `onToggle` is provided (i.e. the
+ * session has workers and the breakdown panel exists), the amount
+ * itself is also a click target that opens the panel — the dotted
+ * underline is the visual cue.
  */
-export function CostAmount({ amount }: { amount: number }) {
+export function CostAmount({
+  amount,
+  onToggle,
+  panelId,
+  panelOpen,
+}: {
+  amount: number;
+  onToggle?: () => void;
+  panelId?: string;
+  panelOpen?: boolean;
+}) {
+  const clickable = !!onToggle;
   return (
     <span className="group relative inline-flex items-center">
-      <span
-        className="cursor-help border-b border-dashed border-fg-faint text-fg-muted"
-        tabIndex={0}
-        aria-describedby="cost-tooltip"
-      >
-        {formatUsd(amount)}
-      </span>
+      {clickable ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={panelOpen}
+          aria-controls={panelId}
+          className="cursor-pointer border-b border-dashed border-fg-faint text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong rounded-sm"
+        >
+          {formatUsd(amount)}
+        </button>
+      ) : (
+        <span
+          className="cursor-help border-b border-dashed border-fg-faint text-fg-muted"
+          tabIndex={0}
+          aria-describedby="cost-tooltip"
+        >
+          {formatUsd(amount)}
+        </span>
+      )}
       <span
         id="cost-tooltip"
         role="tooltip"
         className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden whitespace-nowrap rounded-md border border-border-strong bg-surface-elevated px-2 py-1 text-xs text-fg shadow-lg group-hover:block group-focus-within:block"
       >
-        This session
+        {clickable ? "This session — click to see breakdown" : "This session"}
       </span>
     </span>
   );
@@ -338,28 +380,47 @@ export function CostAmount({ amount }: { amount: number }) {
 
 /**
  * Inline summary of worker costs sitting between the "this session"
- * amount and the grand total. Hover/focus reveals which workers
- * contributed — same dashed-underline affordance as the by-model
- * tooltip on `CostAmount`.
+ * amount and the grand total. Same click-to-expand semantics as
+ * `CostAmount` — clicking opens the per-worker breakdown panel.
  */
 export function WorkerCostAmount({
   amount,
   count,
+  onToggle,
+  panelId,
+  panelOpen,
 }: {
   amount: number;
   count: number;
+  onToggle?: () => void;
+  panelId?: string;
+  panelOpen?: boolean;
 }) {
   const label = `${count} ${count === 1 ? "worker" : "workers"}`;
+  const clickable = !!onToggle;
   return (
     <span className="group relative inline-flex items-center">
-      <span
-        className="cursor-help border-b border-dashed border-fg-faint text-fg-muted"
-        tabIndex={0}
-        aria-describedby="workers-cost-tooltip"
-        aria-label={`Workers cost — ${label}`}
-      >
-        {formatUsd(amount)}
-      </span>
+      {clickable ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={panelOpen}
+          aria-controls={panelId}
+          aria-label={`Workers cost — ${label} — click to see breakdown`}
+          className="cursor-pointer border-b border-dashed border-fg-faint text-fg-muted hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong rounded-sm"
+        >
+          {formatUsd(amount)}
+        </button>
+      ) : (
+        <span
+          className="cursor-help border-b border-dashed border-fg-faint text-fg-muted"
+          tabIndex={0}
+          aria-describedby="workers-cost-tooltip"
+          aria-label={`Workers cost — ${label}`}
+        >
+          {formatUsd(amount)}
+        </span>
+      )}
       <span
         id="workers-cost-tooltip"
         role="tooltip"
