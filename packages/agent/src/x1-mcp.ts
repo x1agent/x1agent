@@ -161,6 +161,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "read_share",
+      description:
+        "Read the content of a share THIS session previously published with the `share` tool. The share content lives in persistent storage (GCS in prod, /tmp in dev) and survives the pod, so resumed sessions can read back their own past output even after `/workspace` was wiped.\n\nSlice A (PRD 0006) scope: 200 only when the share belongs to THIS session. Reading another session's share returns 403 (Slice B will widen this once explicit grants ship); a share_id that doesn't exist anywhere returns 404.\n\nReturns `{ share_id, path?, mime_type, size, content_b64 }`. `content_b64` is always base64 because shares can be binary (PNG, PDF, ZIP). Decode locally before use.\n\nUse `path` only for multi-file shares (sites with assets); single-file shares (markdown, image, csv) take the default and don't need it.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          share_id: {
+            type: "string",
+            description:
+              "The id echoed back from a prior `share` call in this session.",
+          },
+          path: {
+            type: "string",
+            description:
+              "Optional. For multi-file shares (sites with assets), the relative path inside the share — e.g. 'assets/main.css'. Omit for single-file shares.",
+          },
+        },
+        required: ["share_id"],
+      },
+    },
+    {
       name: "share_comment",
       description:
         "Post a comment on a share you (or another agent) previously published with the `share` tool. Symmetric to `share` — adds a thread (or replies to an existing one) on a markdown or HTML share so the user sees your follow-up alongside the artifact in the timeline pill or the fullscreen flyout.\n\n**Brevity is mandatory.** Comments are NOT chat. Reply in **one or two short sentences** — an acknowledgment, a clarifying question, a confirmation that you'll act, or a one-line note that you've shipped a revision. Anything longer than ~2 sentences belongs in chat or in a fresh share with the explanation rendered as the artifact. Operators scan comment threads inline next to the artifact; a paragraph buries the conversation. If you find yourself wanting to explain at length, the right move is `share(path=…, share_id=<existing>)` with the explanation as a markdown share, plus a one-line comment pointing at it.\n\nTwo modes:\n- **Reply to an existing thread:** pass `thread_id` only (plus `text`). The server resolves the thread → share and posts your reply as the next seq in that thread. Use this when the wake plumbing handed you a `thread_id` to respond to.\n- **Open a new thread:** pass `share_id` + `scope` (and `anchor` if scope=passage) + `text`. v1 commentable types are markdown (`document`) and HTML (`site`). For markdown you can anchor to a passage; for HTML threads are share-scoped only.\n\nIDOR is enforced server-side: a `thread_id` from a foreign workspace returns `403 thread_not_visible`. You cannot leak content by guessing ids.\n\nDoes NOT wake the producing agent on your own reply (anti-loop). Comments authored by users will wake the agent of the share via X1A-55.",
@@ -215,7 +236,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "request_permission",
       description:
-        "Ask the active user to grant one or more permission scopes (e.g. 'git.write', 'calendar.read').\n\nUse only when a gated tool has already failed with a `permission_required` error, or when you know up front you'll need a scope. The user sees a dialog and clicks Allow or Deny; a system message tells you the outcome.\n\nAfter calling this, END YOUR TURN and wait — do not retry the gated operation immediately. When approved a synthetic user message starts a fresh turn. Write justifications from the user's perspective.",
+        "Ask the active user to grant a PLATFORM-INTERNAL permission scope (e.g. 'git.write', 'vector.write'). The user sees an in-app dialog and clicks Allow or Deny; a system message tells you the outcome.\n\n**Scope format is `domain.action` — short slugs, NOT URLs.** Example valid scopes: `git.write`, `vector.write`, `repo.attach`. Example INVALID scopes: any `https://...googleapis.com/...` URL, any Slack OAuth scope, any external-provider scope.\n\n**DO NOT call this for external-OAuth permission errors (Google Drive / Docs / Sheets / Gmail / Calendar, Slack, GitHub, Linear, etc.).** Those are user-OAuth scopes, granted by the user signing in to the provider directly with the right consent. If a Google Workspace or Slack or other external MCP call returns `permission_required` or a 403/401, the correct response is to **tell the user in plain English** that they need to (re)connect their account — point them at the workspace integrations page in the UI. Do NOT call request_permission. Do NOT retry the failed tool.\n\nUse this tool ONLY for x1agent-internal scopes the platform defines. When unsure, ask the user instead of guessing.\n\nAfter calling this, END YOUR TURN and wait — do not retry the gated operation immediately. When approved a synthetic user message starts a fresh turn. Write justifications from the user's perspective.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -505,6 +526,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "cancel_session",
+      description:
+        "Cancel a child session you spawned. Use when the child has gone off-task, hit an unrecoverable error, or is no longer needed. Idempotent — a second cancel on the same child returns `cancelled: false` instead of erroring, so racing state-change wakes from the watchdog won't trip you up. The K8s Job backing the child is also deleted so the pod actually stops; without this a long-running stuck child keeps burning tokens. Returns `{ ok, cancelled, session: { id, status, completed_at } }`. A 403 means the session isn't yours to cancel (i.e. wasn't spawned by you). A 404 means the session id doesn't exist.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: {
+            type: "string",
+            description:
+              "The session id returned by spawn_session — the child you want to terminate.",
+          },
+          reason: {
+            type: "string",
+            description:
+              "Optional short note recorded on the session.cancelled_by_parent event. Helps the timeline reader understand why the orchestrator pulled the plug.",
+          },
+        },
+        required: ["child_session_id"],
+      },
+    },
+    {
+      name: "share_to_child",
+      description:
+        "Snapshot a file or folder from THIS session's /workspace into a child session's /workspace at the named dest_path. Snapshot semantics ONLY — the child gets a copy of the bytes at the moment of the call; subsequent edits in this session do NOT propagate. A second call with the same source_path re-stages a fresh snapshot at the same dest. Use this to hand a child agent the artifacts it needs to work on — a generated spec, a CSV, a directory of code — without committing through git. Returns `{ ok, files, total_size }` on success. The child must already exist and have been spawned by you; a 403 means the session isn't yours.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          child_session_id: {
+            type: "string",
+            description: "The child session id (returned by spawn_session).",
+          },
+          source_path: {
+            type: "string",
+            description:
+              "Path under /workspace to copy (file or directory). Same rules as the `share` tool — relative or `/workspace/...` accepted; `..` rejected.",
+          },
+          dest_path: {
+            type: "string",
+            description:
+              "Optional destination path under the child's /workspace. Defaults to the source path's basename. Example: source_path='out/report.md', dest_path='inputs/report.md'.",
+          },
+        },
+        required: ["child_session_id", "source_path"],
+      },
+    },
+    {
       name: "preview_deploy",
       description:
         "Deploy the current branch of an attached repo to a preview environment. The platform reads `.x1agent/preview.yaml` at the root of the repo's checked-out tree at commit_sha, builds a Docker image via Kaniko, pushes it to the in-cluster registry, applies a Deployment + Service + Ingress, and returns the public URL. Blocks until the preview is reachable (usually 1–3 minutes). Returns { ok, url, slug, image } on success or { ok: false, code, message } on failure. The resulting URL is stable for the lifetime of the preview and is what humans will bookmark — prefer writing the URL into your session summary share.",
@@ -740,6 +807,141 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `Share failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "read_share": {
+      // Forwards to the sidecar's /read_share route, which in turn
+      // calls the api with the session's credentials. The MCP layer
+      // never touches user tokens or the api directly — the sidecar
+      // is the trust boundary that knows this session's identity.
+      //
+      // Mirror of the share_comment plumbing: until the sidecar Rust
+      // side lands the /read_share route, this tool returns a clean
+      // sidecar_route_missing error so callers can detect the gap.
+      const shareId =
+        typeof a?.share_id === "string" ? a.share_id : "";
+      const path = typeof a?.path === "string" ? a.path : undefined;
+      if (!shareId) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "read_share failed: share_id is required.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+        const res = await fetch(
+          `${sidecarUrl}/read_share/${encodeURIComponent(shareId)}${qs}`,
+        );
+        if (res.status === 404) {
+          // Two possible 404s: the sidecar doesn't have the route at
+          // all (image predates this PR) or the share legitimately
+          // doesn't exist. We can't distinguish without sniffing the
+          // body, so check for an explicit `error: share_not_found`
+          // payload — anything else is treated as a missing route.
+          const bodyText = await res.text();
+          let parsed: { error?: string } = {};
+          if (bodyText) {
+            try {
+              parsed = JSON.parse(bodyText) as { error?: string };
+            } catch {
+              // not JSON — fall through to missing-route handling
+            }
+          }
+          if (parsed.error === "share_not_found" || parsed.error === "file_not_found") {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `read_share failed: share ${shareId} not found in this session's history.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "read_share failed: sidecar route /read_share is not yet implemented in this build (PRD 0006 Slice A follow-up).",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const bodyText = await res.text();
+        let parsed: {
+          share_id?: string;
+          path?: string;
+          mime_type?: string;
+          size?: number;
+          content_b64?: string;
+          error?: string;
+        } = {};
+        if (bodyText) {
+          try {
+            parsed = JSON.parse(bodyText);
+          } catch {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `read_share failed: non-JSON response (${res.status}): ${bodyText.slice(0, 200)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+        if (res.status === 403) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `read_share failed: share ${shareId} belongs to a different session. Slice A only allows reading shares this session produced.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        if (!res.ok) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `read_share failed (${res.status}): ${parsed.error ?? bodyText.slice(0, 200) ?? "unknown error"}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        // Return the JSON envelope verbatim. The agent decodes
+        // `content_b64` locally — base64 is fine in the Claude
+        // tool-result channel and is the lowest-friction way to
+        // round-trip binary shares (PDF, PNG).
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(parsed, null, 2),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `read_share failed: ${(err as Error).message}`,
             },
           ],
           isError: true,
@@ -1135,6 +1337,70 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text" as const,
               text: `spawn_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "cancel_session": {
+      try {
+        const res = await fetch(`${sidecarUrl}/cancel_session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_session_id: String(a?.child_session_id ?? ""),
+            reason: typeof a?.reason === "string" ? a.reason : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `cancel_session failed: ${(err as Error).message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "share_to_child": {
+      try {
+        const res = await fetch(`${sidecarUrl}/share_to_child`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            child_session_id: String(a?.child_session_id ?? ""),
+            source_path: String(a?.source_path ?? ""),
+            dest_path:
+              typeof a?.dest_path === "string" && a.dest_path.trim() !== ""
+                ? a.dest_path
+                : null,
+          }),
+        });
+        const result = await res.json();
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+          isError: !res.ok,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `share_to_child failed: ${(err as Error).message}`,
             },
           ],
           isError: true,

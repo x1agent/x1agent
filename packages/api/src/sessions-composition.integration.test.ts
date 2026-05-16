@@ -28,10 +28,23 @@ beforeAll(async () => {
     INSERT INTO users (email, name) VALUES ('member@example.com', 'Member')
     RETURNING id
   `;
+  // 'other' workspace exists so the stranger has SOMEWHERE to be a
+  // member (sign-in rejects users with zero memberships). They're
+  // intentionally NOT in 'default' — exercises the cross-tenant gate
+  // independently of the member-vs-admin role check.
+  const [otherWs] = await dbSql<{ id: string }[]>`
+    INSERT INTO workspaces (slug, name) VALUES ('other', 'Other')
+    RETURNING id
+  `;
+  const [stranger] = await dbSql<{ id: string }[]>`
+    INSERT INTO users (email, name) VALUES ('stranger@example.com', 'Stranger')
+    RETURNING id
+  `;
   await dbSql`
     INSERT INTO workspace_members (workspace_id, user_id, role)
-    VALUES (${ws!.id}, ${admin!.id}, 'admin'),
-           (${ws!.id}, ${member!.id}, 'member')
+    VALUES (${ws!.id},      ${admin!.id},    'admin'),
+           (${ws!.id},      ${member!.id},   'member'),
+           (${otherWs!.id}, ${stranger!.id}, 'admin')
   `;
 
   process.env.TEST_USER = "admin@example.com";
@@ -154,15 +167,31 @@ describe("session routes", () => {
     expect(body.sessions[0]!.id).toBe(session.id);
   });
 
-  it("member (non-admin) cannot trigger a session", async () => {
+  it("member (non-admin) can trigger a session (X1A-126)", async () => {
     const adminC = await login("admin@example.com");
-    const id = await newAgent(adminC, "no-trigger", null);
+    const id = await newAgent(adminC, "member-trigger", null);
 
     const memberC = await login("member@example.com");
     const res = await app.fetch(
       new Request(
         `http://api.test/api/workspaces/default/agents/${id}/sessions`,
         { method: "POST", headers: { Cookie: memberC } },
+      ),
+    );
+    // Run-time chat is a member-level capability — admin only gates
+    // management (bulk delete, listing other people's sessions).
+    expect(res.status).toBe(201);
+  });
+
+  it("non-member cannot trigger a session", async () => {
+    const adminC = await login("admin@example.com");
+    const id = await newAgent(adminC, "no-trigger-stranger", null);
+
+    const strangerC = await login("stranger@example.com");
+    const res = await app.fetch(
+      new Request(
+        `http://api.test/api/workspaces/default/agents/${id}/sessions`,
+        { method: "POST", headers: { Cookie: strangerC } },
       ),
     );
     expect(res.status).toBe(403);

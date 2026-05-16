@@ -57,6 +57,11 @@ output "cert_manager_workload_identity_gsa" {
   description = "GSA email cert-manager uses for DNS-01 challenges. Annotate cert-manager/cert-manager SA with iam.gke.io/gcp-service-account=<this>."
 }
 
+output "preview_build_workload_identity_gsa" {
+  value       = google_service_account.preview_build.email
+  description = "GSA email the Kaniko preview build Pod impersonates. Set helm values providers.preview.buildServiceAccountAnnotations.\"iam.gke.io/gcp-service-account\"=<this>."
+}
+
 output "gsm_secret_names" {
   value       = [for s in google_secret_manager_secret.secrets : s.secret_id]
   description = "Empty GSM secrets created. Populate values via gcloud secrets versions add."

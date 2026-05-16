@@ -52,9 +52,14 @@ export function ArtifactPanel() {
 
   if (!open) return null;
 
-  const { artifact, workspaceSlug, sessionId } = open;
+  const { artifact, workspaceSlug, sessionId, version } = open;
   const showCommentsSidebar =
     view === "fullscreen" && COMMENTABLE_TYPES.has(artifact.share_type);
+  // Keyed remount of the renderer subtree on each share-update event for
+  // this share_id (artifactPanelStore.replaceArtifact bumps `version`).
+  // The iframe + fetch chains inside per-type renderers re-initialize,
+  // so the user sees the new content without a manual refresh.
+  const bodyKey = `${artifact.share_id}:${version}`;
   return (
     <ArtifactSurface view={view} onClose={close}>
       <ArtifactHeader
@@ -67,7 +72,10 @@ export function ArtifactPanel() {
         onClose={close}
       />
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col overflow-auto p-4">
+        <div
+          key={bodyKey}
+          className="flex min-w-0 flex-1 flex-col overflow-auto p-4"
+        >
           {renderShareBody({
             payload: artifact,
             workspaceSlug,

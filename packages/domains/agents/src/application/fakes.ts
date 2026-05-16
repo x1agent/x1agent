@@ -53,6 +53,7 @@ export class InMemoryAgentRepository implements AgentRepository {
         input.scheduledRunAsUserId === undefined
           ? input.createdBy
           : input.scheduledRunAsUserId,
+      idleTimeoutSeconds: input.idleTimeoutSeconds ?? null,
       createdAt: now,
       updatedAt: now,
       lastSchedulerTickAt: null,
@@ -93,6 +94,9 @@ export class InMemoryAgentRepository implements AgentRepository {
       ...(patch.visibility !== undefined && { visibility: patch.visibility }),
       ...(patch.scheduledRunAsUserId !== undefined && {
         scheduledRunAsUserId: patch.scheduledRunAsUserId,
+      }),
+      ...(patch.idleTimeoutSeconds !== undefined && {
+        idleTimeoutSeconds: patch.idleTimeoutSeconds,
       }),
       updatedAt: new Date(),
     };

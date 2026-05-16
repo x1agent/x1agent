@@ -38,7 +38,11 @@ export class InMemorySessionRepository implements SessionRepository {
         r.triggeredAt.getTime() === input.triggeredAt.getTime(),
     );
     if (clash)
-      throw new SessionDuplicateTickError(input.agentId, input.triggeredAt);
+      throw new SessionDuplicateTickError(
+        input.agentId,
+        input.triggeredAt,
+        input.triggeredBy,
+      );
     const session: Session = {
       id: SessionId(nextId()),
       agentId: input.agentId,
@@ -183,10 +187,16 @@ export class AllowAllAdmin implements AdminGuard {
   async assertAdmin() {
     return;
   }
+  async assertMember() {
+    return;
+  }
 }
 
 export class DenyAdmin implements AdminGuard {
   async assertAdmin(): Promise<never> {
+    throw new FakeAdminDeniedError();
+  }
+  async assertMember(): Promise<never> {
     throw new FakeAdminDeniedError();
   }
 }

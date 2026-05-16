@@ -66,6 +66,13 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
     title: "Integrations",
     items: [
       {
+        title: "Env bindings",
+        pathSuffix: "/integrations/env-bindings",
+        icon: KeyRound,
+        description:
+          "Map env vars to workspace secrets. Agents + previews opt in by name.",
+      },
+      {
         title: "Environment variables",
         pathSuffix: "/integrations/environment-variables",
         icon: KeyRound,
@@ -106,6 +113,13 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
         pathSuffix: "/members/people",
         icon: Users,
         description: "Invite and manage workspace members.",
+      },
+      {
+        title: "Access grants",
+        pathSuffix: "/members/access-grants",
+        icon: ShieldCheck,
+        description:
+          "Allow whole domains or specific emails to sign in straight into this workspace.",
       },
       {
         title: "Groups",

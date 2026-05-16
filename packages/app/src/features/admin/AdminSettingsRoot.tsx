@@ -17,8 +17,6 @@ import {
  *     cards. Letter-square glyphs (A on terracotta, O on green). Status
  *     badge. Masked input + Save (or Update + Clear) controls. Inline
  *     replacement on Update; inline confirm on Clear (no modal).
- *   - Future-sections stub at the bottom: "Telemetry · Workspace
- *     Defaults · Feature Flags" — faded, non-interactive.
  *   - Non-admin who URL-pokes here gets the 403 affordance below; the
  *     real gate lives on /api/admin/* via requirePlatformAdmin.
  *
@@ -122,17 +120,7 @@ export function AdminSettingsRoot() {
           </div>
 
           {banner && <RestartBannerView />}
-
-          <div className="flex items-center gap-3 border-t border-dashed border-border-soft px-5 py-3 text-xs text-fg-faint">
-            <span className="rounded bg-surface-elevated px-2 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
-              Phase 2
-            </span>
-            Other providers (Gemini, Bedrock, Cohere) extend the same card
-            pattern — out of scope for v1.
-          </div>
         </section>
-
-        <FutureSectionsStub />
       </div>
     </AppShell>
   );
@@ -405,23 +393,6 @@ function RestartBannerView() {
       Saved. API will restart in ~30s. Active sessions will reconnect
       automatically.
     </div>
-  );
-}
-
-function FutureSectionsStub() {
-  return (
-    <section
-      aria-label="Future sections"
-      className="rounded-lg border border-dashed border-border-soft bg-surface/40 px-5 py-6 text-center opacity-60"
-    >
-      <p className="text-sm text-fg-muted">
-        Telemetry · Workspace Defaults · Feature Flags
-      </p>
-      <p className="mt-1 text-xs text-fg-faint">
-        Coming in future updates. Workspace-scoped settings already live
-        under Workspace settings.
-      </p>
-    </section>
   );
 }
 

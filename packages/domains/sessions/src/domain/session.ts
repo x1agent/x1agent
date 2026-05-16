@@ -81,14 +81,44 @@ export class SessionAlreadyTerminalError extends DomainError {
   }
 }
 
+/**
+ * Source that hit the unique-violation on (agent_id, triggered_at).
+ * The DB constraint is shared across every code path that creates a
+ * session, so the error message has to disambiguate which one — a
+ * scheduler-tick collision reads very differently from a user-Resume
+ * race even though both end up here.
+ */
+export type SessionTriggerSourceForError =
+  | "scheduler"
+  | "user"
+  | "agent"
+  | "unknown";
+
 export class SessionDuplicateTickError extends DomainError {
   readonly code = "session_duplicate_tick";
   constructor(
     public readonly agentId: string,
     public readonly triggeredAt: Date,
+    public readonly source: SessionTriggerSourceForError = "unknown",
   ) {
-    super(
-      `scheduler tick for agent ${agentId} at ${triggeredAt.toISOString()} already recorded`,
-    );
+    super(messageFor(source, agentId, triggeredAt));
+  }
+}
+
+function messageFor(
+  source: SessionTriggerSourceForError,
+  agentId: string,
+  triggeredAt: Date,
+): string {
+  const at = triggeredAt.toISOString();
+  switch (source) {
+    case "scheduler":
+      return `scheduler tick for agent ${agentId} at ${at} already recorded`;
+    case "user":
+      return `a session for agent ${agentId} at timestamp ${at} already exists — a concurrent Resume or trigger landed first; refresh and try again`;
+    case "agent":
+      return `agent ${agentId} already has a session at ${at} — concurrent spawn from the same parent`;
+    default:
+      return `session for agent ${agentId} at ${at} already exists`;
   }
 }

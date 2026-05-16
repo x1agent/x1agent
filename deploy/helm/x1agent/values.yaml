@@ -313,9 +313,17 @@ config:
 providers:
   # Singleton domains. "none" disables the capability + skips the
   # provider Deployment. Today the only graph kind is surrealdb, which
-  # also implements vector — so vector is locked to graph in v1.
+  # also implements vector — so vector is locked to graph in v1. The
+  # files/docs/sheets/calendar/email kinds are wired by the
+  # google-workspace provider (a single Deployment serves all five).
   graph: none
   vector: none
+  files: none
+  docs: none
+  sheets: none
+  calendar: none
+  email: none
+  messaging: none
 
   # Per-kind config — only the block matching `graph` is consumed. New
   # graph kinds (e.g. neo4j) add their own block here + a sibling
@@ -341,6 +349,81 @@ providers:
     storageClass: ""
     # Default for v1; rotate via GSM + ESO before going live.
     rootPassword: "x1agent-surreal-root"
+
+  # Google Workspace provider — Drive / Docs / Sheets / Calendar /
+  # Gmail. One Deployment subscribes to all five subject trees. Set
+  # any of providers.{files,docs,sheets,calendar,email} to
+  # "googleworkspace" to render the Deployment; per-domain api
+  # capability gates (PROVIDER_FILES, PROVIDER_DOCS, …) are set in
+  # the install file's config block.
+  googleWorkspace:
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+
+  # Messaging provider — Slack. One Deployment subscribes to
+  # x1.provider.messaging.* and posts to Slack via SLACK_BOT_TOKEN
+  # from the ESO-synced x1agent-secrets bundle.
+  messagingSlack:
+    image:
+      repository: ""
+      tag: latest
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m,  memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+
+  # Preview provider — receives x1.provider.preview.provision requests,
+  # builds the caller's repo with Kaniko, applies a Deployment + Service
+  # + Ingress to the previews namespace at <slug>.preview.<baseDomain>.
+  #
+  # Render-gated on `previews.enabled` (top-level). The provider block
+  # below is consumed only when previews.enabled=true.
+  #
+  # Prereqs:
+  #   - tls.solver.type=dns01 (wildcard cert can't issue via http01)
+  #   - cert-manager GSA has roles/dns.admin on baseDomain's Cloud DNS zone
+  #   - providers.preview.buildServiceAccountAnnotations binds the
+  #     x1agent-preview-build KSA to a GSA with
+  #     roles/artifactregistry.writer on the AR repo (so Kaniko can push)
+  preview:
+    image:
+      repository: ""          # defaults to <artifactRegistry>/preview
+      tag: ""                 # defaults to images.api.tag
+      pullPolicy: Always
+    replicas: 1
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits:   { cpu: 1,   memory: 1Gi }
+    # Namespace where Kaniko Jobs run. Empty defaults to the install
+    # namespace (.Release.Namespace).
+    buildNamespace: ""
+    # Namespace where each preview's Deployment + Service + Ingress
+    # land. Created by the chart.
+    previewNamespace: x1-previews
+    # Domain pattern: <slug>.<previewDomain>. Empty defaults to
+    # "preview.<baseDomain>".
+    previewDomain: ""
+    registry:
+      # Container registry Kaniko pushes built preview images to. Empty
+      # defaults to "<cloud.gcp.artifactRegistry>/preview-images".
+      address: ""
+      # When the registry is HTTP (dev in-cluster), Kaniko needs
+      # --insecure. AR is always TLS.
+      insecure: false
+    # Annotations applied to the x1agent-preview-build ServiceAccount.
+    # On GKE, set iam.gke.io/gcp-service-account to a GSA bound with
+    # roles/artifactregistry.writer on the destination AR repo.
+    #
+    # buildServiceAccountAnnotations:
+    #   iam.gke.io/gcp-service-account: "x1agent-preview-build@<project>.iam.gserviceaccount.com"
+    buildServiceAccountAnnotations: {}
 
 # ============================================================================
 # Telemetry — OpenTelemetry collector + per-pod env wiring

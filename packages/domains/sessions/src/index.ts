@@ -44,6 +44,7 @@ export { StubSessionSummarizer } from "./ports/session-summarizer.js";
 export * from "./application/trigger-session.js";
 export * from "./application/list-sessions.js";
 export * from "./application/cancel-session.js";
+export * from "./application/cancel-child-session.js";
 export * from "./application/delete-sessions.js";
 export * from "./application/schedule-due-sessions.js";
 export * from "./application/next-due.js";
@@ -92,6 +93,10 @@ export {
   AnthropicSessionSummarizer,
   type AnthropicSessionSummarizerOptions,
 } from "./adapters/anthropic/anthropic-session-summarizer.js";
+export {
+  VertexAnthropicSessionSummarizer,
+  type VertexAnthropicSessionSummarizerOptions,
+} from "./adapters/anthropic/vertex-anthropic-session-summarizer.js";
 export {
   OpenAISessionSummarizer,
   type OpenAISessionSummarizerOptions,

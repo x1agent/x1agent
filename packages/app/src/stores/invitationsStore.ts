@@ -14,6 +14,7 @@ interface InvitationsState {
   load(slug: string): Promise<void>;
   create(slug: string, email: string, role: Role): Promise<InvitationDTO>;
   revoke(slug: string, id: string): Promise<void>;
+  changeRole(slug: string, id: string, role: Role): Promise<void>;
 }
 
 export const useInvitationsStore = create<InvitationsState>((set, get) => ({
@@ -58,14 +59,38 @@ export const useInvitationsStore = create<InvitationsState>((set, get) => ({
   },
 
   async revoke(slug, id) {
-    await apiFetch(`/api/workspaces/${slug}/invitations/${id}`, {
-      method: "DELETE",
-    });
+    // Use the returned row so revoked invites can still surface
+    // historically under a "show revoked" toggle in the UI rather
+    // than vanishing — but if the API returns 204 we synthesize the
+    // revoked state locally.
+    const res = await apiFetch<{ invitation?: InvitationDTO } | undefined>(
+      `/api/workspaces/${slug}/invitations/${id}`,
+      { method: "DELETE" },
+    );
+    const current = get().bySlug[slug] ?? [];
+    const revoked = res?.invitation;
+    set((s) => ({
+      bySlug: {
+        ...s.bySlug,
+        [slug]: current.map((i) =>
+          i.id !== id
+            ? i
+            : revoked ?? { ...i, revoked_at: new Date().toISOString() },
+        ),
+      },
+    }));
+  },
+
+  async changeRole(slug, id, role) {
+    const res = await apiFetch<{ invitation: InvitationDTO }>(
+      `/api/workspaces/${slug}/invitations/${id}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    );
     const current = get().bySlug[slug] ?? [];
     set((s) => ({
       bySlug: {
         ...s.bySlug,
-        [slug]: current.filter((i) => i.id !== id),
+        [slug]: current.map((i) => (i.id === id ? res.invitation : i)),
       },
     }));
   },

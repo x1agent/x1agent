@@ -364,6 +364,23 @@ export const useSessionDetailStore = create<SessionDetailState>((set) => ({
           },
         };
       }
+      // X1A-66 — flip the status pill from `pending` to `running` the
+      // moment `session.started` arrives. The server-side row also
+      // flips (job-watcher + NATS subscriber both do it), but the
+      // client cache was previously only listening for terminal
+      // transitions — so after a stop→resume the pill stayed on
+      // `pending` even as tool_calls and agent.text were streaming
+      // in. Idempotent: only nudges `pending`, leaves any other
+      // status alone.
+      if (ev.type === "session.started" && sessions[sessionId]) {
+        const cur = sessions[sessionId] as SessionDTO;
+        if (cur.status === "pending") {
+          sessions = {
+            ...sessions,
+            [sessionId]: { ...cur, status: "running" },
+          };
+        }
+      }
 
       // Real-time child-worker tracking. An orchestrator's NATS event
       // stream emits `agent.tool_result` for every MCP call, including

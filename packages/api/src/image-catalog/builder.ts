@@ -30,6 +30,8 @@ export interface ImageBuilderOptions {
   subject?: string;
   /** Queue group — at-least-once delivery with crash recovery. */
   queueGroup?: string;
+  /** Optional KSA the Kaniko Pod runs as. Required for AR pushes. */
+  buildServiceAccount?: string;
 }
 
 export interface ImageBuilderHandle {
@@ -111,6 +113,7 @@ export async function startImageBuilder(
         buildNamespace: opts.buildNamespace,
         registryAddress: opts.registryAddress,
         registryInsecure: opts.registryInsecure,
+        buildServiceAccount: opts.buildServiceAccount,
       })
         .catch((err) => {
           console.error(
@@ -154,6 +157,7 @@ interface HandleBuildArgs {
   buildNamespace: string;
   registryAddress: string;
   registryInsecure: boolean;
+  buildServiceAccount?: string;
 }
 
 async function handleBuild(args: HandleBuildArgs): Promise<void> {
@@ -166,6 +170,7 @@ async function handleBuild(args: HandleBuildArgs): Promise<void> {
     buildNamespace,
     registryAddress,
     registryInsecure,
+    buildServiceAccount,
   } = args;
 
   // 1. Atomic claim. Only the consumer that flips pending → building
@@ -246,6 +251,7 @@ async function handleBuild(args: HandleBuildArgs): Promise<void> {
       "x1-image-id": imageId,
       "x1-workspace-id": workspaceId,
     },
+    serviceAccountName: buildServiceAccount,
   });
 
   try {

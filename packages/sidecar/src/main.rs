@@ -256,6 +256,19 @@ pub fn build_credential_router(state: Arc<AppState>) -> Router {
             "/preview/deploy",
             routing::post(orchestration::handle_preview_deploy),
         )
+        // X1A-118 — orchestrator-only cancel of a child session it
+        // spawned. The api enforces the parent → child relationship.
+        .route(
+            "/cancel_session",
+            routing::post(orchestration::handle_cancel_session),
+        )
+        // X1A-63 — orchestrator-only snapshot copy of a file/folder
+        // from this session's /workspace into a named child's
+        // /workspace. Snapshot only — not a live link.
+        .route(
+            "/share_to_child",
+            routing::post(orchestration::handle_share_to_child),
+        )
         .route(
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
@@ -331,6 +344,13 @@ pub fn build_credential_router(state: Arc<AppState>) -> Router {
         .route("/email/send", routing::post(email::handle_send))
         .route("/email/trash", routing::post(email::handle_trash))
         .route("/share", routing::post(shares::handle_share))
+        // X1A-32: read_share back to its producing session. PRD 0006
+        // Slice A — only the session that produced the share can read
+        // it. The api enforces the cross-session guard.
+        .route(
+            "/read_share/{share_id}",
+            routing::get(shares::handle_read_share),
+        )
         // Doc commenting v1 (X1A-52). Sidecar is the trust boundary —
         // the MCP `share_comment` + `share_comment_resolve` tools POST
         // here, the sidecar adds X-Internal-Token and forwards to
@@ -482,12 +502,15 @@ mod tests {
             "/email/list_threads",
             "/sheets/read_range",
             "/share",
+            "/read_share/abc",
             "/share_comment",
             "/graph/query",
             "/graph/write",
             "/vector/upsert",
             "/vector/search",
             "/preview/deploy",
+            "/cancel_session",
+            "/share_to_child",
             "/messaging/post_message",
             "/event",
             "/collections",

@@ -82,6 +82,18 @@ subjects:
     name: x1agent-preview
     namespace: x1agent
 ---
+# Headless Service — provider has no inbound HTTP; exists for parity
+# with the chart and for DNS resolution from sibling pods during debug.
+apiVersion: v1
+kind: Service
+metadata:
+  name: preview
+  namespace: x1agent
+spec:
+  clusterIP: None
+  selector:
+    app: preview
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

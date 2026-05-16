@@ -1,10 +1,8 @@
 import { InvitationsPanel } from "../invitations/InvitationsPanel";
+import { ActiveMembersCard } from "./ActiveMembersCard";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "../../components/ui/card";
 
 interface Props {
@@ -13,11 +11,9 @@ interface Props {
 }
 
 /**
- * "People" page. Today this is just the existing InvitationsPanel —
- * a future PR adds the current member roster + role management
- * above the invitations card. Keeping the rename + new route now
- * (rather than waiting for the full member-roster work) lets the
- * IA reshuffle ship without holding it on a sub-feature.
+ * "People" page. Pairs the invitations card (pending users — admins
+ * only) with the active-members roster (everyone who's joined —
+ * visible to any member, with role/remove controls for admins).
  */
 export function MembersPanel({ workspaceSlug, canManage }: Props) {
   return (
@@ -30,18 +26,7 @@ export function MembersPanel({ workspaceSlug, canManage }: Props) {
           </CardContent>
         </Card>
       )}
-      <Card>
-        <CardHeader>
-          <CardTitle>Active members</CardTitle>
-          <CardDescription>Coming soon.</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-fg-faint">
-          The current member roster + per-member role editor lands in a
-          follow-up. For now use Invitations above to add or revoke
-          access; existing members manage their own role via the
-          workspace switcher.
-        </CardContent>
-      </Card>
+      <ActiveMembersCard slug={workspaceSlug} canManage={canManage} />
     </div>
   );
 }

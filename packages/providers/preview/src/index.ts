@@ -8,7 +8,7 @@ initOtel({ serviceName: "x1agent-provider-preview" });
  * requests from the api, builds an image via Kaniko, applies
  * Deployment/Service/Ingress, and returns the public URL.
  *
- * NATS subject: `x1.providers.preview.provision`
+ * NATS subject: `x1.provider.preview.provision`
  * Request shape:
  *   {
  *     preview_yaml: string,
@@ -34,7 +34,8 @@ initOtel({ serviceName: "x1agent-provider-preview" });
 import { connect, JSONCodec, type Msg } from "nats";
 import { readFileSync } from "node:fs";
 import * as k8s from "@kubernetes/client-node";
-import { deployPreview, DeployError } from "./deploy.js";
+import { deployPreview, DeployError, teardownPreview } from "./deploy.js";
+import { parsePreviewSpec, PreviewSpecError } from "./preview-spec.js";
 
 interface ProvisionRequest {
   preview_yaml?: string;
@@ -49,6 +50,14 @@ interface ProvisionRequest {
    * (Zone 2 for previews — see docs/security/agent-env.md).
    */
   secret_values?: Record<string, string>;
+  /**
+   * Pre-resolved workspace env-binding values keyed by env-var name.
+   * Set when the preview env's `env_var_names` list opted into one or
+   * more workspace bindings; the api resolved each binding's
+   * secret_name → plaintext before publishing. Provider injects these
+   * into the per-preview K8s Secret bundle alongside spec.env entries.
+   */
+  extra_env?: Record<string, string>;
 }
 
 type ProvisionReply =
@@ -59,6 +68,19 @@ type ProvisionReply =
       image: string;
       job_name: string;
     }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      /** Known when the failure happened AFTER the spec parsed; null for invalid_preview_spec. */
+      slug?: string;
+    };
+
+interface TeardownRequest {
+  slug?: string;
+}
+type TeardownReply =
+  | { ok: true; slug: string; deleted: string[] }
   | { ok: false; code: string; message: string };
 
 function requireEnv(name: string): string {
@@ -86,6 +108,7 @@ async function main() {
   const registryAddress = requireEnv("REGISTRY_ADDRESS");
   const registryInsecure = process.env.REGISTRY_INSECURE === "true";
   const buildNamespace = process.env.BUILD_NAMESPACE || "x1agent";
+  const buildServiceAccount = process.env.BUILD_SERVICE_ACCOUNT || undefined;
   const previewNamespace = process.env.PREVIEW_NAMESPACE || "x1-previews";
   const previewDomain =
     process.env.PREVIEW_DOMAIN || "preview.local.x1agent.dev";
@@ -117,10 +140,18 @@ async function main() {
 
   const jc = JSONCodec<ProvisionRequest>();
   const jcReply = JSONCodec<ProvisionReply>();
+  const jcTeardown = JSONCodec<TeardownRequest>();
+  const jcTeardownReply = JSONCodec<TeardownReply>();
 
-  const subject = "x1.providers.preview.provision";
+  const subject = "x1.provider.preview.provision";
   const sub = nc.subscribe(subject, { queue: "preview-provisioners" });
   console.log(`[preview] subscribed to ${subject}`);
+
+  const teardownSubject = "x1.provider.preview.teardown";
+  const teardownSub = nc.subscribe(teardownSubject, {
+    queue: "preview-provisioners",
+  });
+  console.log(`[preview] subscribed to ${teardownSubject}`);
 
   (async () => {
     for await (const m of sub) {
@@ -128,6 +159,14 @@ async function main() {
     }
   })().catch((err) => {
     console.error(`[preview] subscriber loop exited: ${(err as Error).message}`);
+  });
+
+  (async () => {
+    for await (const m of teardownSub) {
+      void handleTeardown(m);
+    }
+  })().catch((err) => {
+    console.error(`[preview] teardown subscriber loop exited: ${(err as Error).message}`);
   });
 
   async function handleProvision(msg: Msg) {
@@ -163,6 +202,25 @@ async function main() {
       return;
     }
 
+    // Parse the spec up front so failures past this point can name
+    // the slug in the reply — the api uses the slug to upsert a
+    // preview_environments row with status=failed.
+    let parsedSlug: string | undefined;
+    try {
+      parsedSlug = parsePreviewSpec(req.preview_yaml).metadata.name;
+    } catch (err) {
+      const code =
+        err instanceof PreviewSpecError ? "invalid_preview_spec" : "internal_error";
+      msg.respond(
+        jcReply.encode({
+          ok: false,
+          code,
+          message: (err as Error).message,
+        }),
+      );
+      return;
+    }
+
     const startedAt = Date.now();
     console.log(
       `[preview] provision start repo=${req.repo_full_name} branch=${req.branch} sha=${req.commit_sha.slice(0, 12)}`,
@@ -177,6 +235,7 @@ async function main() {
         registryAddress,
         registryInsecure,
         buildNamespace,
+        buildServiceAccount,
         previewNamespace,
         previewDomain,
         tlsSecretName,
@@ -187,6 +246,12 @@ async function main() {
           req.secret_values !== null &&
           !Array.isArray(req.secret_values)
             ? (req.secret_values as Record<string, string>)
+            : undefined,
+        extraEnv:
+          typeof req.extra_env === "object" &&
+          req.extra_env !== null &&
+          !Array.isArray(req.extra_env)
+            ? (req.extra_env as Record<string, string>)
             : undefined,
       });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -209,7 +274,64 @@ async function main() {
       console.warn(
         `[preview] provision failed code=${code} elapsed=${elapsed}s: ${message}`,
       );
-      msg.respond(jcReply.encode({ ok: false, code, message }));
+      msg.respond(
+        jcReply.encode({ ok: false, code, message, slug: parsedSlug }),
+      );
+    }
+  }
+
+  async function handleTeardown(msg: Msg) {
+    let req: TeardownRequest;
+    try {
+      req = jcTeardown.decode(msg.data);
+    } catch (err) {
+      msg.respond(
+        jcTeardownReply.encode({
+          ok: false,
+          code: "bad_request_decode",
+          message: (err as Error).message,
+        }),
+      );
+      return;
+    }
+    if (!req.slug) {
+      msg.respond(
+        jcTeardownReply.encode({
+          ok: false,
+          code: "missing_fields",
+          message: "required: slug",
+        }),
+      );
+      return;
+    }
+    console.log(`[preview] teardown start slug=${req.slug}`);
+    try {
+      const result = await teardownPreview(kc, {
+        slug: req.slug,
+        previewNamespace,
+      });
+      console.log(
+        `[preview] teardown ok slug=${result.slug} deleted=${result.deleted.join(",") || "none"}`,
+      );
+      msg.respond(
+        jcTeardownReply.encode({
+          ok: true,
+          slug: result.slug,
+          deleted: result.deleted,
+        }),
+      );
+    } catch (err) {
+      const code = err instanceof DeployError ? err.code : "internal_error";
+      console.warn(
+        `[preview] teardown failed slug=${req.slug} code=${code}: ${(err as Error).message}`,
+      );
+      msg.respond(
+        jcTeardownReply.encode({
+          ok: false,
+          code,
+          message: (err as Error).message,
+        }),
+      );
     }
   }
 
@@ -217,6 +339,7 @@ async function main() {
     process.on(signal, async () => {
       console.log(`[preview] received ${signal}, draining`);
       await sub.unsubscribe();
+      await teardownSub.unsubscribe();
       await nc.drain();
       process.exit(0);
     });

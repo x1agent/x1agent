@@ -101,6 +101,18 @@ export function compactKind(type: string): CompactKind {
  */
 export function isShareCommentWakeEvent(payload: unknown): boolean {
   if (typeof payload !== "object" || payload === null) return false;
+  // X1A-133 — SDK-native origin envelope (PRD 0007) wins over the
+  // legacy `kind` field. New share-comment wakes drop the `[wake: ...]`
+  // prose preamble and carry origin.kind/server instead.
+  const origin = (payload as { origin?: unknown }).origin;
+  if (
+    origin &&
+    typeof origin === "object" &&
+    (origin as { kind?: unknown }).kind === "channel" &&
+    (origin as { server?: unknown }).server === "share-comments"
+  ) {
+    return true;
+  }
   const kind = (payload as { kind?: unknown }).kind;
   return kind === "comment_added" || kind === "comment_resolved";
 }

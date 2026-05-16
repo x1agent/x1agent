@@ -1,3 +1,112 @@
+# [1.31.0](https://github.com/x1agent/x1agent/compare/v1.30.0...v1.31.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **agent:** clarify request_permission is platform-internal scopes only ([f1225ea](https://github.com/x1agent/x1agent/commit/f1225eaa31339388fd0b33d3b7f364f789623692))
+* **api:** honour google oauth scope hierarchy in user-oauth-token check ([377b80f](https://github.com/x1agent/x1agent/commit/377b80f7677101f8d629be022bf7c17909d906a0))
+* **api:** soft-skip zone-3 MCPs without an OAuth token instead of failing the session ([182ddcf](https://github.com/x1agent/x1agent/commit/182ddcf7ba6f65cfc5b6baf184acb79512ad7077))
+* **google-workspace:** include shared drives on every Drive API call ([f8c9b0b](https://github.com/x1agent/x1agent/commit/f8c9b0b5db126fb633b14f40cc6646aa8820f7dd))
+
+
+### Features
+
+* **agents:** per-agent idle timeout override + UI knob ([406c8ba](https://github.com/x1agent/x1agent/commit/406c8ba608b415352c822c5c6f59a0a0d90496b6))
+* **api:** summarizer prefers vertex → anthropic api key → openai ([3f3bf4e](https://github.com/x1agent/x1agent/commit/3f3bf4e15f582a639d59d740e2581318b50c2f25))
+* **app:** collapse session cost to a [$] button by default, persist visibility ([d152be7](https://github.com/x1agent/x1agent/commit/d152be7fd466f0035944ba8b12b21f3466f93648))
+
+# [1.30.0](https://github.com/x1agent/x1agent/compare/v1.29.0...v1.30.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **chart:** allow session sidecar to publish on x1.provider.{graph,vector}.> ([5b901d9](https://github.com/x1agent/x1agent/commit/5b901d979e72c3d9208c44dbf598758ff1e3fb00))
+* **chart:** include packages/domains/ in messaging-slack image ([e848059](https://github.com/x1agent/x1agent/commit/e8480598c411181ebd8011b2624783c5c3022fd6))
+* **chart:** widen session sidecar publish allowlist to all x1.provider.> ([b1029d5](https://github.com/x1agent/x1agent/commit/b1029d5123d99d91476dd965005d4bf42450a70a))
+* **mise:** collapse duplicate `tasks.script` into the per-deployment runner ([c52f6a1](https://github.com/x1agent/x1agent/commit/c52f6a10f27d7ad789c05513ca4f419544098d31))
+
+
+### Features
+
+* **agent:** cancel_session + share_to_child MCP tools, suppress share-comment timeline emit ([17f4b89](https://github.com/x1agent/x1agent/commit/17f4b89cc3bdb9eb9d16abb1291faac6b05acd75))
+* **api:** orchestrator MCP fan-out + silent-worker reaper + wake envelope ([a4b2019](https://github.com/x1agent/x1agent/commit/a4b20193019703fdf9a39ac87c3f93ff369a4784))
+* **chart:** ship google-workspace provider as a chart-rendered Deployment ([3850f23](https://github.com/x1agent/x1agent/commit/3850f233f5306d0214738b6819c063810ac34c9a))
+* **chart:** ship messaging-slack provider as a chart-rendered Deployment ([ab96046](https://github.com/x1agent/x1agent/commit/ab96046bc7e1990b82775982ccc06987e1417107))
+* **mise:** add `mise run script <name>` for per-deployment ad-hoc scripts ([9d46daa](https://github.com/x1agent/x1agent/commit/9d46daa694c30ec72e969ba53a857888f341b3a3))
+* **sessions:** parent-initiated cancelChildSession use case ([f478079](https://github.com/x1agent/x1agent/commit/f47807941b4df2b4f298c58219ceb1af1a46e806))
+* **sidecar:** cancel_session + share_to_child + read_share + wake envelope ([6d72320](https://github.com/x1agent/x1agent/commit/6d723206d9b8a694dc68c854c0e90eb00adf6e6d))
+
+# [1.29.0](https://github.com/x1agent/x1agent/compare/v1.28.0...v1.29.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **api:** flip pending→running on session.started event (X1A-66) ([b72fc38](https://github.com/x1agent/x1agent/commit/b72fc3887c5e0b5dd545f1a4931c2604a61f42ed))
+* **app:** client-side status pill flips pending→running on session.started (X1A-66) ([e81089f](https://github.com/x1agent/x1agent/commit/e81089fc297293091480b40b73ad5356d4b66160))
+
+
+### Features
+
+* **api:** wire K8sJobTerminator into session-cancel composition (X1A-70) ([18aea3b](https://github.com/x1agent/x1agent/commit/18aea3b1f481ec91375826d6f4d6f7f552ad6559))
+* **app:** cache-buster on share content URLs for live-update (X1A-92) ([b8e4a5f](https://github.com/x1agent/x1agent/commit/b8e4a5f1759ed5e2d2dbf4c339231d2d252564a4))
+* **sessions:** Pause kills the K8s Job + clearer dup-tick errors (X1A-70) ([4969e9c](https://github.com/x1agent/x1agent/commit/4969e9c4cc244bf159922b61cc96937f05ad917d))
+* **sidecar:** emit updated_at_ms on agent.share + harden path normalization ([fc67765](https://github.com/x1agent/x1agent/commit/fc67765f47d35d048091bd1fab0dd67f06e73f71))
+
+# [1.28.0](https://github.com/x1agent/x1agent/compare/v1.27.1...v1.28.0) (2026-05-14)
+
+
+### Bug Fixes
+
+* **api:** send strategic-merge-patch Content-Type from platform-secrets store ([6401676](https://github.com/x1agent/x1agent/commit/6401676a9f3e663e9f43e61f98a3f3a8faad32a4))
+* **sessions:** members can trigger and cancel their own sessions (X1A-126) ([7a3352b](https://github.com/x1agent/x1agent/commit/7a3352b01f3ffd8d37c78f4439989f18741e56bc))
+
+
+### Features
+
+* **app:** active members card, role-edit on invitations, hide admin nav from members (X1A-127, X1A-129, X1A-130, X1A-131) ([65e8814](https://github.com/x1agent/x1agent/commit/65e8814f0f55b7c36a5ee45d99ac24d084ad7d99))
+* **auth:** auto-accept pending invitations on first sign-in (X1A-128) ([f7d5b05](https://github.com/x1agent/x1agent/commit/f7d5b05b883743314851f1bab403e6f3ba979aa1))
+* **invitations:** edit pending role + revoke returns row (X1A-129, X1A-130) ([8f3a603](https://github.com/x1agent/x1agent/commit/8f3a603f66953aeca92d88af09e7c4b3a6a79cb9))
+* **mise:** add operator-scratchpad script task ([52e5b08](https://github.com/x1agent/x1agent/commit/52e5b084c3f3ff7cd4785f2adbe38d2ddb2adca4))
+* **workspace-members:** PATCH role + DELETE member API (X1A-127) ([3529e56](https://github.com/x1agent/x1agent/commit/3529e567228c30302f0aa7f8447b2dca6e4e4d45))
+
+## [1.27.1](https://github.com/x1agent/x1agent/compare/v1.27.0...v1.27.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **app:** share content + comments live-update from agent ([3aa8131](https://github.com/x1agent/x1agent/commit/3aa81318fe8fd4bb758ca589c2e27053ab141d51)), closes [#132](https://github.com/x1agent/x1agent/issues/132)
+
+# [1.27.0](https://github.com/x1agent/x1agent/compare/v1.26.0...v1.27.0) (2026-05-14)
+
+
+### Features
+
+* **shares:** add read_share MCP tool + content-read api route (PRD 0006 Slice A) ([eff9472](https://github.com/x1agent/x1agent/commit/eff947288a813f0099bf61e2092cc377e62efcd1))
+
+# [1.26.0](https://github.com/x1agent/x1agent/compare/v1.25.2...v1.26.0) (2026-05-14)
+
+
+### Bug Fixes
+
+* **auth:** enforce OAuth state + PKCE on Google sign-in flow ([c6d4186](https://github.com/x1agent/x1agent/commit/c6d4186ffe368fada4ee4f15768941b6226367fa)), closes [#1](https://github.com/x1agent/x1agent/issues/1)
+* **chart:** allow http01 cert solver + gate preview wildcard ([fc9cb50](https://github.com/x1agent/x1agent/commit/fc9cb506aefdaddc926cf7afc7c724ab6af3c674)), closes [#132](https://github.com/x1agent/x1agent/issues/132)
+* **chart:** drop redundant default true on session.networkPolicy.enabled ([acccd69](https://github.com/x1agent/x1agent/commit/acccd69e3c5c1db2623e4e73ac41a73f75211abc)), closes [124/#129](https://github.com/x1agent/x1agent/issues/129)
+* **chart:** restore session.networkPolicy values dropped by [#132](https://github.com/x1agent/x1agent/issues/132) merge ([a1b3c62](https://github.com/x1agent/x1agent/commit/a1b3c628daff8e333a464e17623c7bd58bba08e9)), closes [#124](https://github.com/x1agent/x1agent/issues/124) [#129](https://github.com/x1agent/x1agent/issues/129)
+* **graph:** reject USE / multi-statement SurrealQL from agents ([8e1ea9a](https://github.com/x1agent/x1agent/commit/8e1ea9a4ad6178f9742f4cfbf2b0e08125f51f5d)), closes [#2](https://github.com/x1agent/x1agent/issues/2)
+* **helm:** remove anonymous NATS WebSocket listener mapping to api super-user ([3052216](https://github.com/x1agent/x1agent/commit/30522160d7b23279370281266fdb3173b88e9161))
+* **mcp-catalog:** close SSRF holes in OAuth metadata + DCR fetches ([0dccfb2](https://github.com/x1agent/x1agent/commit/0dccfb220c884ba97675d248070c8ebca4c76205))
+* **migrations:** renumber oauth_login_states 053→054 (collision with collections_backend_namespace) ([70e8d4f](https://github.com/x1agent/x1agent/commit/70e8d4f907ddc2b385b8045a442fd3bc4f039ce4))
+* **sidecar:** bind credential routes to localhost + add session NetworkPolicy ([b432c74](https://github.com/x1agent/x1agent/commit/b432c740e32a72cc59e1ec7ae740517b1fc6fe7b))
+* **sidecar:** delete unauthenticated /user-oauth-token sidecar route ([bd8853c](https://github.com/x1agent/x1agent/commit/bd8853c3d169f9f4ab0115f6c725bb0182306392))
+* **sidecar:** drop API_INTERNAL_TOKEN from agent container — relay upload reads through sidecar ([a2040e5](https://github.com/x1agent/x1agent/commit/a2040e5bf5a263885d2e9edf089108ee682a328d))
+* **tests:** switch JSDoc to line comments to unblock bun parser ([4067293](https://github.com/x1agent/x1agent/commit/4067293429e862ab7b0dcea14755ac7e9e6630ad))
+
+
+### Features
+
+* **graph:** per-workspace SurrealDB namespace isolation ([9cb7437](https://github.com/x1agent/x1agent/commit/9cb74378252d27533cb8f4010b06e67aba0bae19)), closes [#2](https://github.com/x1agent/x1agent/issues/2) [#128](https://github.com/x1agent/x1agent/issues/128) [#128](https://github.com/x1agent/x1agent/issues/128)
+* **security:** add agent-session egress NetworkPolicy to Helm chart ([de0715f](https://github.com/x1agent/x1agent/commit/de0715f4609b27fc2d2e4c8398541fdb9c1ce9fb)), closes [#1](https://github.com/x1agent/x1agent/issues/1)
+
 ## [1.25.2](https://github.com/x1agent/x1agent/compare/v1.25.1...v1.25.2) (2026-05-14)
 
 

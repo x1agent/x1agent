@@ -16,7 +16,11 @@
 //! it so a buggy or malicious agent cannot exfiltrate host files.
 
 use crate::AppState;
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::{Path as AxumPath, Query, State},
+    http::StatusCode,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,6 +28,54 @@ use std::sync::Arc;
 const WORKSPACE_ROOT: &str = "/workspace";
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB per file
 const MAX_TOTAL_SIZE: u64 = 200 * 1024 * 1024; // 200 MB per share
+
+/// Coerce the user-supplied `path` into a value that, when joined with
+/// `/workspace`, points at the intended file. Accepts:
+///
+///   - `foo.md`                              (workspace-relative, single file)
+///   - `dir/sub/foo.md`                      (workspace-relative, subdir — X1A-23)
+///   - `/workspace/foo.md`                   (absolute, under workspace)
+///   - `/workspace/dir/sub/foo.md`           (absolute, subdir)
+///   - `./foo.md`                            (current-dir relative)
+///
+/// Rejects:
+///   - any component equal to `..` (parent-dir traversal)
+///   - an absolute path NOT under `/workspace/` (e.g. `/etc/passwd`)
+///
+/// Returns the workspace-relative form (`dir/sub/foo.md`) — the caller
+/// joins it onto `/workspace` to get the absolute path. This isolates
+/// the leading-slash + absolute-path handling that has bitten subdir
+/// shares before (see X1A-23).
+pub fn normalize_request_path(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("path is empty".into());
+    }
+
+    // Strip the `/workspace` prefix if the caller sent an absolute
+    // path. An absolute path that's NOT under `/workspace` is a hard
+    // error — refuse rather than silently swallow it.
+    let rel = if let Some(rest) = trimmed.strip_prefix(WORKSPACE_ROOT) {
+        // /workspace, /workspace/foo, /workspace/dir/foo
+        rest.trim_start_matches('/')
+    } else if trimmed.starts_with('/') {
+        return Err(format!(
+            "absolute path '{}' is outside the workspace root",
+            trimmed
+        ));
+    } else {
+        // Already workspace-relative — strip a leading `./` if any.
+        trimmed.strip_prefix("./").unwrap_or(trimmed)
+    };
+
+    if Path::new(rel)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("path must not contain '..' components".into());
+    }
+    Ok(rel.to_string())
+}
 
 #[derive(Deserialize)]
 pub struct ShareRequest {
@@ -230,30 +282,36 @@ pub async fn handle_share(
 ) -> Result<Json<ShareResponse>, (StatusCode, Json<ShareResponse>)> {
     let workspace = PathBuf::from(WORKSPACE_ROOT);
 
-    // Reject `..` components up-front. A path containing parent-dir
-    // traversal cannot be a legitimate workspace-relative reference,
-    // and we must not rely on canonicalize() catching it because
-    // canonicalize() fails (no fall-open) on non-existent paths.
-    if Path::new(&req.path)
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ShareResponse {
-                ok: false,
-                share_id: String::new(),
-                share_type: String::new(),
-                title: String::new(),
-                files: vec![],
-                total_size: 0,
-                entry_point: None,
-                error: Some("Path must not contain '..' components".into()),
-            }),
-        ));
-    }
+    // Normalize the request path — accepts workspace-relative
+    // (`dir/foo.md`), absolute (`/workspace/dir/foo.md`), and
+    // `./`-prefixed forms; rejects `..` components and absolute paths
+    // outside the workspace root. See X1A-23 — subdirectory shares
+    // were failing because of `req.path` shapes the old explicit
+    // checks didn't cover.
+    let rel = match normalize_request_path(&req.path) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ShareResponse {
+                    ok: false,
+                    share_id: String::new(),
+                    share_type: String::new(),
+                    title: String::new(),
+                    files: vec![],
+                    total_size: 0,
+                    entry_point: None,
+                    error: Some(e),
+                }),
+            ));
+        }
+    };
 
-    let abs_path = workspace.join(&req.path);
+    let abs_path = if rel.is_empty() {
+        workspace.clone()
+    } else {
+        workspace.join(&rel)
+    };
 
     // canonicalize() resolves symlinks and `..` segments; if it fails
     // (path does not exist, broken symlink, permission denied) we
@@ -375,6 +433,16 @@ pub async fn handle_share(
         ));
     }
 
+    // updated_at_ms is the millisecond timestamp at the moment storage
+    // finished writing. The browser viewer uses it as a cache-buster
+    // (`?v=<updated_at_ms>`) on content-fetch URLs so an update of an
+    // existing share_id renders new bytes immediately instead of the
+    // cached version. See X1A-92.
+    let updated_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
     let payload = serde_json::json!({
         "share_id": share_id,
         "share_type": share_type,
@@ -387,8 +455,15 @@ pub async fn handle_share(
         })).collect::<Vec<_>>(),
         "total_size": total_size,
         "entry_point": entry_point,
+        "updated_at_ms": updated_at_ms,
     });
 
+    // Publish-after-persist: the upload_to_gcs / upload_to_api call
+    // above is awaited to completion BEFORE we publish here. The
+    // viewer re-fetches content as soon as it sees this event, so
+    // publishing before the bytes are durable would have it pull v1
+    // bytes (or hit a 404) thinking they're v2. If you move this
+    // publish call earlier, you reintroduce that race — don't.
     crate::nats_bridge::publish_event(&state, "agent.share", payload).await;
 
     tracing::info!(
@@ -409,6 +484,188 @@ pub async fn handle_share(
         entry_point,
         error: None,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct ReadShareQuery {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ReadShareResponse {
+    pub share_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub mime_type: String,
+    pub size: u64,
+    pub content_b64: String,
+}
+
+#[derive(Serialize)]
+pub struct ReadShareError {
+    pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// GET /read_share/{share_id} — read back the content of a share this
+/// session previously published. PRD 0006 Slice A scope: only the
+/// producing session can read its own past output.
+///
+/// Two backends, mirroring the write path:
+///   - GCS in prod (`GCS_ARTIFACTS_BUCKET` set): fetch directly via the
+///     GCE metadata server. The pod SA needs `storage.objectViewer`.
+///   - api service in local dev: forward to the internal route which
+///     reads the bytes off the share directory. The api enforces the
+///     cross-session guard there.
+///
+/// Response shape mirrors the workspace `/:shareId/content` route so
+/// the agent dispatcher handles both surfaces identically.
+pub async fn handle_read_share(
+    State(state): State<Arc<AppState>>,
+    AxumPath(share_id): AxumPath<String>,
+    Query(q): Query<ReadShareQuery>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let path = q.path.unwrap_or_default();
+    let gcs_bucket = std::env::var("GCS_ARTIFACTS_BUCKET").unwrap_or_default();
+    if !gcs_bucket.is_empty() {
+        match read_from_gcs(&gcs_bucket, &state.session_id, &share_id, &path).await {
+            Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+            Err((status, err)) => (status, Json(err)).into_response(),
+        }
+    } else {
+        match read_from_api(&state, &share_id, &path).await {
+            Ok((status, body)) => axum::http::Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap_or_else(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "body build failed",
+                    )
+                        .into_response()
+                }),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(ReadShareError {
+                    error: "upstream_failed".into(),
+                    message: Some(e),
+                }),
+            )
+                .into_response(),
+        }
+    }
+}
+
+async fn read_from_gcs(
+    bucket: &str,
+    session_id: &str,
+    share_id: &str,
+    requested_path: &str,
+) -> Result<ReadShareResponse, (StatusCode, ReadShareError)> {
+    let file_path = if requested_path.is_empty() {
+        "index.html".to_string()
+    } else {
+        requested_path.to_string()
+    };
+    let token = get_gce_token().await.ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ReadShareError {
+            error: "gcs_auth_failed".into(),
+            message: None,
+        },
+    ))?;
+    let object_name = format!(
+        "sessions/{}/shares/{}/{}",
+        session_id, share_id, file_path
+    );
+    let url = format!(
+        "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
+        bucket,
+        urlencoding::encode(&object_name)
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                ReadShareError {
+                    error: "gcs_fetch_failed".into(),
+                    message: Some(e.to_string()),
+                },
+            )
+        })?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err((
+            StatusCode::NOT_FOUND,
+            ReadShareError {
+                error: "file_not_found".into(),
+                message: None,
+            },
+        ));
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err((
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            ReadShareError {
+                error: "gcs_fetch_failed".into(),
+                message: Some(format!("status {}", status)),
+            },
+        ));
+    }
+    let bytes = resp.bytes().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            ReadShareError {
+                error: "gcs_fetch_failed".into(),
+                message: Some(e.to_string()),
+            },
+        )
+    })?;
+    let path_for_response =
+        if requested_path.is_empty() { None } else { Some(requested_path.to_string()) };
+    Ok(ReadShareResponse {
+        share_id: share_id.to_string(),
+        path: path_for_response,
+        mime_type: guess_content_type(&file_path),
+        size: bytes.len() as u64,
+        content_b64: base64_encode(&bytes),
+    })
+}
+
+async fn read_from_api(
+    state: &Arc<AppState>,
+    share_id: &str,
+    requested_path: &str,
+) -> Result<(StatusCode, bytes::Bytes), String> {
+    let mut url = format!(
+        "{}/api/internal/sessions/{}/shares/{}/content",
+        state.api_url.trim_end_matches('/'),
+        state.session_id,
+        urlencoding::encode(share_id),
+    );
+    if !requested_path.is_empty() {
+        url.push_str(&format!("?path={}", urlencoding::encode(requested_path)));
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-Internal-Token", &state.api_internal_token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let body = resp.bytes().await.map_err(|e| e.to_string())?;
+    Ok((status, body))
 }
 
 /// Upload every file to a GCS bucket under
@@ -525,6 +782,27 @@ async fn get_gce_token() -> Option<String> {
         .ok()?;
     let body: serde_json::Value = resp.json().await.ok()?;
     body["access_token"].as_str().map(|s| s.to_string())
+}
+
+/// Collect files for an orchestrator → child transfer. Returns
+/// `(rel_path, bytes)` tuples — same caps + skip rules as the
+/// regular share collector, minus the ShareFileEntry metadata since
+/// the child-staging route on the api side only needs the raw bytes.
+pub fn collect_files_for_transfer(
+    abs_path: &std::path::Path,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let collected = collect_files(abs_path, abs_path)?;
+    Ok(collected
+        .into_iter()
+        .map(|(rel, content, _)| (rel, content))
+        .collect())
+}
+
+/// Public re-export of the internal base64 encoder for use by the
+/// orchestration handlers. Kept here so the same hand-rolled encoder
+/// is the only one in the binary.
+pub fn base64_encode_public(data: &[u8]) -> String {
+    base64_encode(data)
 }
 
 /// Hand-rolled base64 encoder. We don't pull in a crate for this — the
@@ -849,5 +1127,62 @@ mod tests {
     fn collect_files_errors_for_missing_path() {
         let bogus = std::path::PathBuf::from("/nonexistent/path/12345");
         assert!(collect_files(&bogus, &bogus).is_err());
+    }
+
+    // ── X1A-23: subdirectory paths ──────────────────────────────────
+
+    #[test]
+    fn normalize_accepts_workspace_relative_top_level_file() {
+        assert_eq!(normalize_request_path("foo.md").unwrap(), "foo.md");
+    }
+
+    #[test]
+    fn normalize_accepts_subdirectory_path() {
+        assert_eq!(
+            normalize_request_path("dir/sub/foo.md").unwrap(),
+            "dir/sub/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_workspace_prefix_for_absolute_path() {
+        assert_eq!(
+            normalize_request_path("/workspace/dir/foo.md").unwrap(),
+            "dir/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_workspace_prefix_alone() {
+        // `/workspace` and `/workspace/` both resolve to the root.
+        assert_eq!(normalize_request_path("/workspace").unwrap(), "");
+        assert_eq!(normalize_request_path("/workspace/").unwrap(), "");
+    }
+
+    #[test]
+    fn normalize_strips_leading_dot_slash() {
+        assert_eq!(normalize_request_path("./foo.md").unwrap(), "foo.md");
+        assert_eq!(
+            normalize_request_path("./dir/foo.md").unwrap(),
+            "dir/foo.md"
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_parent_dir_traversal() {
+        assert!(normalize_request_path("../foo.md").is_err());
+        assert!(normalize_request_path("dir/../foo.md").is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_absolute_path_outside_workspace() {
+        assert!(normalize_request_path("/etc/passwd").is_err());
+        assert!(normalize_request_path("/tmp/file").is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_empty_path() {
+        assert!(normalize_request_path("").is_err());
+        assert!(normalize_request_path("   ").is_err());
     }
 }

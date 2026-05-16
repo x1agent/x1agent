@@ -22,13 +22,17 @@ export type {
   ExchangeCodeOptions,
 } from "./ports/auth-provider.js";
 export type { PasswordCredentialStore } from "./ports/password-credential-store.js";
-export type { AccessGate } from "./ports/access-gate.js";
+export type {
+  AccessGate,
+  AccessGrantMaterializer,
+} from "./ports/access-gate.js";
 export type {
   UserOAuthTokenStore,
   EncryptedUserOAuthTokenInput,
   EncryptedUserOAuthTokenBlob,
 } from "./ports/user-oauth-token-store.js";
 export { denyAllAccessGate } from "./ports/access-gate.js";
+export type { PendingInvitationAcceptor } from "./ports/pending-invitation-acceptor.js";
 
 // Application
 export * from "./application/sign-in.js";

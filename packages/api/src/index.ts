@@ -22,6 +22,7 @@ import {
   AnthropicSessionSummarizer,
   OpenAISessionSummarizer,
   StubSessionSummarizer,
+  VertexAnthropicSessionSummarizer,
   DEFAULT_SUMMARY_CONFIG,
   type SessionSummarizer,
   type MaybeUpdateSessionSummaryConfig,
@@ -41,32 +42,59 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
  * Build the SessionSummarizer for this process.
  *
  * Selection order:
- *   1. ANTHROPIC_API_KEY (when ANTHROPIC_PROVIDER is unset or "api_key").
- *   2. OPENAI_API_KEY — fallback so an install with an OpenAI key (e.g.
- *      the one already used for collection embeddings) can light up
- *      summaries without also acquiring an Anthropic key.
- *   3. Stub — no creds available; session.summary stays NULL and the UI
- *      falls back to the id hash.
+ *   1. Vertex Anthropic — when ANTHROPIC_PROVIDER="vertex" AND both
+ *      ANTHROPIC_VERTEX_PROJECT_ID and CLOUD_ML_REGION are set. The
+ *      Workload Identity token is minted per-call from the GCE
+ *      metadata server; if the pod isn't on GKE or the SA lacks
+ *      aiplatform.user, individual calls return null but the
+ *      composition still selects this path (other paths likely have
+ *      identical credentials and would also fail).
+ *   2. Anthropic direct API — when ANTHROPIC_API_KEY is set, regardless
+ *      of ANTHROPIC_PROVIDER. This is the fallback for a Vertex-
+ *      configured install whose Vertex creds aren't usable (e.g.
+ *      regional outage) but an API key is also wired.
+ *   3. OpenAI — when OPENAI_API_KEY is set. Lets a deployment using
+ *      OpenAI for embeddings light up summaries without acquiring
+ *      Anthropic credentials.
+ *   4. Stub — no creds anywhere; session.summary stays NULL and the
+ *      UI falls back to the id hash.
  *
- * Vertex routing for the Anthropic side is still on the X1A-7 follow-up
- * list; until that ships, a Vertex-only install can opt into OpenAI by
- * setting OPENAI_API_KEY.
+ * Selection is one-time at boot. Per-call failures inside the chosen
+ * summarizer are swallowed — a missed summary is not a fatal state
+ * and the next scheduled summary refresh tries again.
  */
 function buildSessionSummarizer(): SessionSummarizer {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const anthropicProvider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
-  if (
-    anthropicProvider === "api_key" &&
-    anthropicKey &&
-    anthropicKey.trim()
-  ) {
-    const model =
-      process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
-    console.log("[summarizer] using anthropic api-key path");
-    return new AnthropicSessionSummarizer({ apiKey: anthropicKey, model });
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const summaryModel = process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
+
+  if (anthropicProvider === "vertex") {
+    const projectId = process.env.ANTHROPIC_VERTEX_PROJECT_ID?.trim();
+    const region = process.env.CLOUD_ML_REGION?.trim();
+    if (projectId && region) {
+      console.log(
+        `[summarizer] using anthropic vertex path (project=${projectId} region=${region})`,
+      );
+      return new VertexAnthropicSessionSummarizer({
+        projectId,
+        region,
+        model: summaryModel,
+      });
+    }
+    console.warn(
+      "[summarizer] ANTHROPIC_PROVIDER=vertex but ANTHROPIC_VERTEX_PROJECT_ID / CLOUD_ML_REGION unset — falling through",
+    );
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY;
+  if (anthropicKey && anthropicKey.trim()) {
+    console.log("[summarizer] using anthropic api-key path");
+    return new AnthropicSessionSummarizer({
+      apiKey: anthropicKey,
+      model: summaryModel,
+    });
+  }
+
   if (openaiKey && openaiKey.trim()) {
     const model = process.env.OPENAI_SUMMARY_MODEL?.trim() || undefined;
     console.log("[summarizer] using openai api-key path");
@@ -74,7 +102,7 @@ function buildSessionSummarizer(): SessionSummarizer {
   }
 
   console.log(
-    "[summarizer] no anthropic or openai api key — session summaries disabled",
+    "[summarizer] no anthropic vertex / api key / openai key — session summaries disabled",
   );
   return new StubSessionSummarizer();
 }
@@ -225,8 +253,10 @@ const {
   meRoutes,
   workspaceInvitationRoutes,
   workspaceCreateRoutes,
+  accessGrantsRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  previewEnvironmentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
   workspaceTokenUsageRoutes,
@@ -248,6 +278,7 @@ const {
   mcpCatalogRoutes,
   agentMcpAttachmentRoutes,
   agentEnvRoutes,
+  workspaceEnvRoutes,
   mcpOAuthRoutes,
   mcpUserTokenRoutes,
   collectionRoutes,
@@ -287,6 +318,7 @@ const {
   quietHints: composedQuietHints,
   uploadRoutes,
   tickUploadsCleanup,
+  jobTerminator: composedJobTerminator,
 } = compose({
   sql: getSql(),
   jwtSecret: process.env.JWT_SECRET,
@@ -412,6 +444,10 @@ app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route(
+  "/api/workspaces/:slug/preview-environments",
+  previewEnvironmentRoutes,
+);
 app.route("/api/workspaces/:slug/agents/:agentId/sessions", sessionRoutes);
 app.route("/api/workspaces/:slug/sessions", workspaceSessionRoutes);
 app.route("/api/workspaces/:slug/token-usage", workspaceTokenUsageRoutes);
@@ -449,6 +485,8 @@ app.route(
   agentMcpAttachmentRoutes,
 );
 app.route("/api/workspaces/:slug/agents/:agentId/env", agentEnvRoutes);
+app.route("/api/workspaces/:slug/env-bindings", workspaceEnvRoutes);
+app.route("/api/workspaces/:slug/access-grants", accessGrantsRoutes);
 // Browser-redirect OAuth flows for remote_oauth MCPs:
 //   /auth/mcp/start/:slug/:name      — initiate
 //   /auth/mcp/callback/:slug/:name   — provider redirects here
@@ -633,6 +671,12 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
           process.env.IMAGE_REGISTRY ||
           "x1-registry.x1agent.svc.cluster.local:5000",
         registryInsecure: process.env.IMAGE_REGISTRY_INSECURE !== "false",
+        // Optional KSA the Kaniko Job runs as. Required for Artifact
+        // Registry pushes — the KSA must be Workload-Identity-bound to
+        // a GSA with roles/artifactregistry.writer. Defaults to
+        // x1agent-preview-build, which the chart already provisions
+        // when previews are enabled (same writer permission).
+        buildServiceAccount: process.env.IMAGE_BUILD_SERVICE_ACCOUNT || undefined,
       });
       registerCleanup(() => handle.stop());
     } catch (err) {
@@ -903,6 +947,32 @@ if (
     quietHints: composedQuietHints,
   });
   registerCleanup(() => watchdog.stop());
+}
+
+// Silent-worker reaper (X1A-28). Cancels worker sessions whose
+// session_events stream has been silent past the configured threshold
+// — distinct from the activity watchdog (which fires a wake to the
+// parent at 5 min); the reaper is the hard termination after that.
+// Default 30 min silence; configurable via env.
+if (process.env.SILENT_WORKER_REAPER !== "disabled") {
+  const { startSilentWorkerReaper } = await import(
+    "./orchestration/silent-worker-reaper.js"
+  );
+  const reaper = startSilentWorkerReaper({
+    sql: composedSql,
+    agents: composedAgents,
+    sessions: composedSessions,
+    events: sessionEvents,
+    jobs: composedJobTerminator,
+    quietHints: composedQuietHints,
+    intervalMs: Number(
+      process.env.SILENT_WORKER_REAPER_INTERVAL_MS || 120_000,
+    ),
+    silenceThresholdMs: Number(
+      process.env.SILENT_WORKER_REAPER_THRESHOLD_MS || 30 * 60_000,
+    ),
+  });
+  registerCleanup(() => reaper.stop());
 }
 
 // Checkup timer — cadence-driven "just checking in" for

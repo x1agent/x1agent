@@ -32,7 +32,7 @@ counter resets to 0 if the sidecar restarts mid-session.
 | `x1.session.{id}.archive` | sidecar → JetStream | Durable copy of `events`, when `useJetstreamPublish=true` (Wave 3 of `rfcs/jetstream-migration.md`). |
 | `x1.session.{id}.presence` | api → sidecar | Liveness pokes; sidecar POSTs `/keepalive` on the agent. |
 | `x1.provider.{domain}.*` | sidecar → provider | Request/reply for graph/vector/messaging/calendar/docs/email/files. |
-| `x1.providers.preview.provision` | api → preview provider | (note **plural** `providers` for this subject family) |
+| `x1.provider.preview.provision` | api → preview provider | |
 | `x1.image.build` | api/api-internal → in-process image-builder | Workspace image build trigger. |
 | `x1.audit.>` | provider → api | Provider-side audit publishes. |
 | `x1.orchestration.>` | api → orchestrator children | Reserved per NATS ACL; in flight. |

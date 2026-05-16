@@ -174,6 +174,18 @@ export function isShareCommentWakePayload(
   payload: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!payload) return false;
+  // X1A-133 — SDK-native classification wins over kind-based detection
+  // because new wakes drop the prose preamble and may not stamp `kind`
+  // on the version that reaches the events bus.
+  const origin = payload["origin"];
+  if (
+    origin &&
+    typeof origin === "object" &&
+    (origin as { kind?: unknown }).kind === "channel" &&
+    (origin as { server?: unknown }).server === "share-comments"
+  ) {
+    return true;
+  }
   const kind = payload["kind"];
   return kind === "comment_added" || kind === "comment_resolved";
 }
@@ -261,6 +273,19 @@ export async function startSessionEventSubscriber(
       // trip for an event we'll discard. Also skip the summarizer +
       // token-usage paths below — those only apply to durable rows.
       if (TRANSIENT_EVENT_TYPES.has(parsed.type)) {
+        continue;
+      }
+      // X1A-133 — share-comment wakes belong in the comment thread,
+      // not in the session timeline. Defense in depth: the agent
+      // already suppresses the .events emit for these, but if a stale
+      // agent build reaches a new api we still want them filtered out
+      // before they pollute session_events.
+      if (
+        parsed.type === "user.message" &&
+        isShareCommentWakePayload(
+          parsed.payload as Record<string, unknown> | null | undefined,
+        )
+      ) {
         continue;
       }
 
@@ -365,6 +390,29 @@ export async function startSessionEventSubscriber(
         } catch (err) {
           console.warn(
             `[nats] token_usage write failed for session ${sessionId} seq=${parsed.sequence}: ${(err as Error).message}`,
+          );
+        }
+      }
+
+      // X1A-66 — when the agent emits `session.started`, flip the
+      // session row from pending → running here. The job-watcher
+      // already does this when it launches the pod, but its tick
+      // interval (5s default) can leave the row at `pending` for up
+      // to one tick after the agent has actually started speaking.
+      // This handler closes that race: by the time the FIRST event
+      // from the pod hits NATS, the agent is provably running, so the
+      // row should reflect it without waiting for the next watcher
+      // tick. Idempotent — only flips pending → running, ignores any
+      // session already past pending (running, complete, failed).
+      if (parsed.type === "session.started") {
+        try {
+          const session = await opts.sessions.findById(sessionId);
+          if (session && session.status === "pending") {
+            await opts.sessions.updateStatus(sessionId, { status: "running" });
+          }
+        } catch (err) {
+          console.warn(
+            `[nats] session.started status-flip failed for ${sessionId}: ${(err as Error).message}`,
           );
         }
       }

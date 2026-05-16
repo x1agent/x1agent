@@ -40,6 +40,10 @@ import { createEventCorrelator } from "./event-correlator.js";
 const sessionId = process.env.SESSION_ID;
 const agentId = process.env.AGENT_ID || "generic";
 const sidecarUrl = process.env.SIDECAR_URL || "http://localhost:9090";
+// The sidecar splits credentials (127.0.0.1:9090) from health (0.0.0.0:9091)
+// — see packages/sidecar/src/main.rs. The /health route lives only on :9091.
+const sidecarHealthUrl =
+  process.env.SIDECAR_HEALTH_URL || "http://localhost:9091";
 const maxTurns = Number.parseInt(process.env.MAX_TURNS || "200", 10);
 // Empty = no auto-prompt; the SDK blocks on the input channel until the
 // user's first inject arrives. Scheduler-triggered sessions populate
@@ -75,17 +79,17 @@ async function postToSidecar(type: string, payload: unknown): Promise<void> {
 }
 
 // Poll the sidecar's /health until it answers or we hit the timeout.
-// The sidecar performs git clones + NATS connect before binding :9090,
-// so it routinely takes 1-3s longer than the agent to be ready. Without
-// this gate the early POSTs (session.started + the gh-credential
-// bootstrap) race the sidecar's HTTP listener and silently no-op,
-// leaving `gh` unauthenticated and the session.started event lost.
+// The sidecar performs git clones + NATS connect before binding its
+// listeners, so it routinely takes 1-3s longer than the agent to be
+// ready. Without this gate the early POSTs (session.started + the
+// gh-credential bootstrap) race the sidecar's HTTP listener and silently
+// no-op, leaving `gh` unauthenticated and the session.started event lost.
 async function waitForSidecar(timeoutMs = 30_000): Promise<boolean> {
   const start = Date.now();
   let delay = 100;
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${sidecarUrl}/health`);
+      const res = await fetch(`${sidecarHealthUrl}/health`);
       if (res.ok) return true;
     } catch {
       // not up yet
@@ -450,6 +454,21 @@ const injectServer = http.createServer(async (req, res) => {
         thread_id?: string | null;
         kind?: string;
         source?: string;
+        // X1A-133 (PRD 0007) — SDK-native wake envelope. `origin.kind`
+        // discriminates the wake category; share-comment wakes carry
+        // `origin: { kind: 'channel', server: 'share-comments' }` and
+        // are NOT persisted in the session timeline (they live in the
+        // share's comment thread). `is_synthetic` flags server-driven
+        // wakes; `priority` / `should_query` are forward-compatible.
+        origin?: {
+          kind?: string;
+          server?: string;
+          share_id?: string | null;
+          thread_id?: string | null;
+        } | null;
+        is_synthetic?: boolean;
+        priority?: string;
+        should_query?: boolean;
       };
       if (typeof parsed.text !== "string") {
         res.writeHead(400);
@@ -478,17 +497,31 @@ const injectServer = http.createServer(async (req, res) => {
       // content to Claude so the model literally sees the pixels.
       const resolvedText = await resolveImageTokens(parsed.text);
       inputChannel.push(resolvedText, parsed.request_id || undefined);
-      // Emit the user message to the stream so the sidecar publishes
-      // it on `.events` and the api persists it to session_events. The
-      // browser applies a local echo immediately on send, but without
-      // this emission the event never reaches durable storage and
-      // disappears on refresh.
-      emitToStream({
-        type: parsed.request_id ? "user.input_response" : "user.message",
-        payload: parsed.request_id
-          ? { text: parsed.text, request_id: parsed.request_id }
-          : { text: parsed.text },
-      });
+      // X1A-133 — share-comment wakes belong in the share's comment
+      // thread, not in the session timeline. Skip the .events emit
+      // when origin.kind === 'channel' && origin.server ===
+      // 'share-comments' so the user.message never reaches durable
+      // session_events. The agent still processes the wake (already
+      // pushed to inputChannel above); it just doesn't pollute the
+      // main timeline. Other origin.kind values reserved for future
+      // PRD 0007 slices (peer / coordinator / task-notification)
+      // fall through to the normal emit so the contract is opt-in.
+      const isShareCommentChannel =
+        parsed.origin?.kind === "channel" &&
+        parsed.origin?.server === "share-comments";
+      if (!isShareCommentChannel) {
+        // Emit the user message to the stream so the sidecar publishes
+        // it on `.events` and the api persists it to session_events. The
+        // browser applies a local echo immediately on send, but without
+        // this emission the event never reaches durable storage and
+        // disappears on refresh.
+        emitToStream({
+          type: parsed.request_id ? "user.input_response" : "user.message",
+          payload: parsed.request_id
+            ? { text: parsed.text, request_id: parsed.request_id }
+            : { text: parsed.text },
+        });
+      }
       resetIdleTimer();
       console.log(`[agent] queued user message: ${parsed.text.slice(0, 100)}`);
       res.writeHead(200);

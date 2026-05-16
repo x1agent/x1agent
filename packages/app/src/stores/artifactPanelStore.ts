@@ -15,6 +15,14 @@ export interface OpenArtifact {
   workspaceSlug: string;
   sessionId: string;
   artifact: AgentSharePayload;
+  /**
+   * Monotonic version bumped each time the agent re-emits an
+   * `agent.share` event for this share_id while the panel is open.
+   * The renderer subtree's React `key` includes this so a re-share
+   * tears down and re-mounts the iframe / fetch chain — picking up
+   * the new content without a manual refresh.
+   */
+  version: number;
 }
 
 interface ArtifactPanelState {
@@ -28,7 +36,13 @@ interface ArtifactPanelState {
    * the recipient's own collapse preference.
    */
   commentsCollapsed: boolean;
-  show: (input: OpenArtifact) => void;
+  show: (input: Omit<OpenArtifact, "version">) => void;
+  /**
+   * Replace the artifact body if (and only if) `share_id` matches the
+   * currently-open panel. No-op otherwise. Bumps `version` so the
+   * renderer re-mounts and re-fetches the now-fresh share content.
+   */
+  replaceArtifact: (payload: AgentSharePayload) => void;
   close: () => void;
   maximize: () => void;
   restore: () => void;
@@ -75,7 +89,19 @@ export const useArtifactPanelStore = create<ArtifactPanelState>((set, get) => ({
   commentsCollapsed: false,
   show: (input) => {
     syncUrl(input.artifact.share_id ?? null, "panel");
-    set({ open: input, view: "panel" });
+    set({ open: { ...input, version: 0 }, view: "panel" });
+  },
+  replaceArtifact: (payload) => {
+    const current = get().open;
+    if (!current) return;
+    if (current.artifact.share_id !== payload.share_id) return;
+    set({
+      open: {
+        ...current,
+        artifact: payload,
+        version: current.version + 1,
+      },
+    });
   },
   close: () => {
     syncUrl(null, "panel");

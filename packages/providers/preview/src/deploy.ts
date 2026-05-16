@@ -47,6 +47,11 @@ export interface DeployInputs {
   registryInsecure: boolean;
   /** Namespace the Kaniko Job runs in. */
   buildNamespace: string;
+  /**
+   * Optional KSA the Kaniko Pod runs as. Required for Artifact Registry
+   * pushes (KSA must be Workload-Identity-bound to a writer GSA).
+   */
+  buildServiceAccount?: string;
   /** Namespace the Deployment / Service / Ingress go into. */
   previewNamespace: string;
   /** The domain pattern; slug fills the subdomain (e.g. 'preview.local.x1agent.dev'). */
@@ -67,6 +72,14 @@ export interface DeployInputs {
    * Empty/undefined when the spec uses no `from: secret:<NAME>` env vars.
    */
   secretValues?: Record<string, string>;
+  /**
+   * Workspace env-binding overrides keyed by env-var name. Merged with
+   * spec.env entries — extraEnv wins on a name collision because it's
+   * the operator's explicit per-environment override. Values land in
+   * the same per-preview K8s Secret as secretValues; the Deployment
+   * env block references the Secret via valueFrom.secretKeyRef.
+   */
+  extraEnv?: Record<string, string>;
 }
 
 export interface DeployResult {
@@ -83,6 +96,77 @@ export class DeployError extends Error {
   ) {
     super(message);
   }
+}
+
+export interface TeardownInputs {
+  slug: string;
+  previewNamespace: string;
+}
+
+export interface TeardownResult {
+  slug: string;
+  /** Names of K8s resources deleted (best-effort; missing items skipped). */
+  deleted: string[];
+}
+
+/**
+ * Inverse of deployPreview — removes the per-preview Deployment,
+ * Service, Ingress, and Secret bundle from `previewNamespace`. Used
+ * by the workspace UI's "Delete environment" button (routed via NATS
+ * from the api).
+ *
+ * Idempotent: missing resources are skipped without raising. Errors
+ * other than 404 surface as DeployError("teardown_failed", …) so the
+ * caller can decide whether to retry or surface to the operator.
+ */
+export async function teardownPreview(
+  kc: k8s.KubeConfig,
+  inputs: TeardownInputs,
+): Promise<TeardownResult> {
+  const clients = makeClients(kc);
+  const deleted: string[] = [];
+
+  const tryDelete = async (
+    name: string,
+    fn: () => Promise<unknown>,
+  ): Promise<void> => {
+    try {
+      await fn();
+      deleted.push(name);
+    } catch (err) {
+      const code = (err as { code?: number }).code;
+      if (code === 404 || code === undefined) return;
+      throw new DeployError("teardown_failed", `${name}: ${(err as Error).message}`);
+    }
+  };
+
+  await tryDelete(`ingress/${inputs.slug}`, () =>
+    clients.networking.deleteNamespacedIngress({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  await tryDelete(`service/${inputs.slug}`, () =>
+    clients.core.deleteNamespacedService({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  await tryDelete(`deployment/${inputs.slug}`, () =>
+    clients.apps.deleteNamespacedDeployment({
+      name: inputs.slug,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+  const secretName = `preview-secrets-${inputs.slug}`.slice(0, 63);
+  await tryDelete(`secret/${secretName}`, () =>
+    clients.core.deleteNamespacedSecret({
+      name: secretName,
+      namespace: inputs.previewNamespace,
+    }),
+  );
+
+  return { slug: inputs.slug, deleted };
 }
 
 /**
@@ -264,6 +348,7 @@ export async function deployPreview(
     destination: image,
     insecureRegistry: inputs.registryInsecure,
     accessToken: token,
+    serviceAccountName: inputs.buildServiceAccount,
   });
   try {
     await clients.batch.createNamespacedJob({
@@ -289,10 +374,14 @@ export async function deployPreview(
     );
   }
 
-  // Step 2a: mint per-preview secret bundle when the spec uses any
-  // `from: secret:<NAME>` env vars. Values are pre-resolved by the api
-  // and shipped over NATS; we just stage them into a K8s Secret so the
-  // Deployment can reference by valueFrom.secretKeyRef.
+  // Step 2a: mint per-preview secret bundle. Two sources feed in:
+  //   - spec `from: secret:<NAME>` entries get the workspace secret
+  //     value (keyed by secret name).
+  //   - extraEnv (workspace env-bindings the env opted into) gets the
+  //     env-var value (keyed by env-var name). extraEnv collisions
+  //     win since they're the explicit per-environment override.
+  // Both go into the same K8s Secret stringData; the manifest builder
+  // emits both via valueFrom.secretKeyRef with the appropriate key.
   let secretBundleName: string | undefined;
   const referencedSecrets = new Set<string>();
   for (const e of spec.spec.env) {
@@ -300,17 +389,24 @@ export async function deployPreview(
       referencedSecrets.add(e.from.slice("secret:".length));
     }
   }
-  if (referencedSecrets.size > 0 && inputs.secretValues) {
+  const extraEnv = inputs.extraEnv ?? {};
+  const hasExtraEnv = Object.keys(extraEnv).length > 0;
+  if ((referencedSecrets.size > 0 && inputs.secretValues) || hasExtraEnv) {
     secretBundleName = `preview-secrets-${slug}`.slice(0, 63);
     const stringData: Record<string, string> = {};
-    for (const name of referencedSecrets) {
-      const value = inputs.secretValues[name];
-      if (typeof value === "string") {
-        stringData[name] = value;
+    if (inputs.secretValues) {
+      for (const name of referencedSecrets) {
+        const value = inputs.secretValues[name];
+        if (typeof value === "string") {
+          stringData[name] = value;
+        }
+        // Missing values are skipped silently — the manifest builder
+        // emits empty string in their place, surfacing as a "missing
+        // env" error in the user's app, not as a deploy crash.
       }
-      // Missing values are skipped silently — the manifest builder
-      // emits empty string in their place, surfacing as a "missing
-      // env" error in the user's app, not as a deploy crash.
+    }
+    for (const [envName, value] of Object.entries(extraEnv)) {
+      stringData[envName] = value;
     }
     if (Object.keys(stringData).length > 0) {
       const secretBody: k8s.V1Secret = {
@@ -355,6 +451,7 @@ export async function deployPreview(
     tlsSecretName: inputs.tlsSecretName,
     selfUrl,
     secretBundleName,
+    extraEnv,
   };
   const deployment = buildDeployment(deployInputs);
   const service = buildService(deployInputs);

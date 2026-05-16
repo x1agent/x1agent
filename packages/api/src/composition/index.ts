@@ -22,7 +22,9 @@ import {
 import {
   PostgresMembershipRepository,
   PostgresWorkspaceRepository,
+  PostgresAccessGrantRepository,
   createWorkspaceRoutes,
+  createAccessGrantsRoutes,
 } from "@x1agent/domain-workspaces";
 import { composeSlack } from "./slack.js";
 import {
@@ -35,6 +37,10 @@ import {
   PostgresAgentRepository,
   createAgentRoutes,
 } from "@x1agent/domain-agents";
+import {
+  PostgresPreviewEnvironmentRepository,
+  createPreviewEnvironmentRoutes,
+} from "@x1agent/domain-preview-environments";
 import {
   PostgresSessionRepository,
   PostgresSessionEventRepository,
@@ -88,7 +94,10 @@ import jwt from "jsonwebtoken";
 import {
   BindingService,
   PostgresBindingRepository,
+  PostgresWorkspaceBindingRepository,
+  WorkspaceBindingService,
   createAgentEnvRoutes,
+  createWorkspaceEnvRoutes,
 } from "@x1agent/domain-agent-env";
 import {
   PostgresCollectionRepository,
@@ -124,7 +133,8 @@ import {
   type RedisBranchMinter,
   type RedisBranchRepository,
 } from "@x1agent/agent-resources-redis";
-import type * as k8s from "@kubernetes/client-node";
+import * as k8s from "@kubernetes/client-node";
+import { K8sJobTerminator } from "../k8s/job-terminator.js";
 import { NatsProviderGateway } from "./nats-provider-gateway.js";
 import type { NatsConnection } from "nats";
 import {
@@ -147,6 +157,7 @@ import type postgres from "postgres";
 import type { Context, Hono } from "hono";
 import {
   MembershipGrantorAdapter,
+  PendingInvitationAcceptorAdapter,
   WorkspaceAdminGuard,
   WorkspaceReaderAdapter,
 } from "./invitation-adapters.js";
@@ -177,7 +188,11 @@ export interface Composition {
   publicInvitationRoutes: Hono;
   /** POST /api/workspaces — platform-admin-only first-workspace bootstrap. */
   workspaceCreateRoutes: Hono;
+  /** /api/workspaces/:slug/access-grants — workspace-admin-or-platform-admin domain/email grants. */
+  accessGrantsRoutes: Hono;
   agentRoutes: Hono;
+  /** /api/workspaces/:slug/preview-environments — durable preview env list + admin mutations. */
+  previewEnvironmentRoutes: Hono;
   sessionRoutes: Hono;
   workspaceSessionRoutes: Hono;
   workspaceTokenUsageRoutes: Hono;
@@ -214,6 +229,8 @@ export interface Composition {
   agentMcpAttachmentRoutes: Hono;
   /** /api/workspaces/:slug/agents/:agentId/env — Zone-2 agent env bindings. */
   agentEnvRoutes: Hono;
+  /** /api/workspaces/:slug/env-bindings — workspace-scoped env-var bindings. */
+  workspaceEnvRoutes: Hono;
   /** /auth/mcp/* — browser redirects for the OAuth flow. */
   mcpOAuthRoutes: Hono;
   /** /api/users/me/mcp-tokens — JSON status endpoints for the UI. */
@@ -292,6 +309,13 @@ export interface Composition {
   uploadRoutes: Hono;
   /** Periodic cleanup tick for the uploads subsystem. */
   tickUploadsCleanup: () => Promise<import("@x1agent/domain-uploads").CleanupResult>;
+  /**
+   * K8s Job terminator shared by the human-Pause path and the silent-
+   * worker reaper (X1A-28). Undefined when the api isn't running in-
+   * cluster — cancel still flips the DB row, just doesn't delete the
+   * pod (which doesn't exist on a non-k8s host).
+   */
+  jobTerminator?: K8sJobTerminator;
 }
 
 export interface CompositionEnv {
@@ -369,6 +393,11 @@ export function compose(env: CompositionEnv): Composition {
   const loginStates = new PostgresOAuthLoginStateStore(env.sql);
   const passwords = new PostgresPasswordCredentialStore(env.sql);
   const workspaces = new PostgresWorkspaceRepository(env.sql);
+  const accessGrants = new PostgresAccessGrantRepository(env.sql);
+  // Hoisted because internalRoutes' preview-deploy env-binding resolver
+  // references it directly (eagerly evaluated), not in a closure.
+  // The service + routes are still constructed lower down.
+  const workspaceBindingRepo = new PostgresWorkspaceBindingRepository(env.sql);
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
@@ -390,6 +419,16 @@ export function compose(env: CompositionEnv): Composition {
   // persistence) and downstream secret-bearing services can share it.
   const workspaceSecretsKey = loadMasterKey(
     env.workspaceSecretsMasterKey ?? process.env.WORKSPACE_SECRETS_MASTER_KEY,
+  );
+
+  // Hoisted above internalRoutes — preview-deploy's env-binding
+  // resolver needs the SecretService eagerly. The HTTP route +
+  // workspace-binding service still wire from here below; they reuse
+  // the same instance.
+  const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
+  const workspaceSecretsService = new SecretService(
+    workspaceSecretsRepo,
+    workspaceSecretsKey,
   );
 
   // Per-user OAuth token store. Encryption is performed at the auth /
@@ -462,6 +501,27 @@ export function compose(env: CompositionEnv): Composition {
       store: userOAuthTokenStore,
       encrypt: encryptOAuthToken,
     },
+    // X1A-128: auto-accept any still-active invitations whose email
+    // matches the signing-in user, so an invitee who clicks "Sign in
+    // with Google" instead of the invite link still lands as a
+    // workspace member (otherwise they'd hit the "no workspace
+    // access" empty state).
+    pendingInvitations: new PendingInvitationAcceptorAdapter(env.sql),
+    // Workspace access grants: any matching domain= or email= rows
+    // turn into memberships at the row's default_role on first
+    // sign-in. Idempotent — re-signing-in doesn't change role.
+    accessGrants: {
+      async materializeForUser(userId, email) {
+        const matches = await accessGrants.findMatchesForEmail(String(email));
+        for (const grant of matches) {
+          await memberships.grant({
+            workspaceId: grant.workspaceId as never,
+            userId: userId as never,
+            role: (grant.defaultRole ?? "member") as never,
+          });
+        }
+      },
+    },
   });
 
   const requireAuth = createRequireAuth(tokenizer);
@@ -500,6 +560,26 @@ export function compose(env: CompositionEnv): Composition {
     return w?.id ?? null;
   };
 
+  const previewEnvironments = new PostgresPreviewEnvironmentRepository(env.sql);
+  const previewEnvironmentRoutes = createPreviewEnvironmentRoutes({
+    repository: previewEnvironments,
+    adminGuard: {
+      requireWorkspaceAdmin: async (workspaceId, userId) => {
+        await new WorkspaceAdminGuard(memberships).assertAdmin(
+          userId,
+          workspaceId,
+        );
+      },
+    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+    // Used by DELETE /:id to fire x1.provider.preview.teardown before
+    // dropping the row, so the cluster Deployment/Service/Ingress goes
+    // away with the row instead of dangling.
+    natsConnection: env.natsConnection,
+  });
+
   const agentRoutes = createAgentRoutes({
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
@@ -523,6 +603,18 @@ export function compose(env: CompositionEnv): Composition {
     enabledModels: async () => listEnabledOverrides(env.sql),
   });
 
+  // X1A-70 — Pause now deletes the K8s Job so the pod actually
+  // stops. Skips the wire-up when the api isn't running in-cluster
+  // (no kubeconfig); cancel still flips the DB row, just doesn't
+  // terminate the pod (which doesn't exist on a non-k8s host
+  // anyway).
+  const jobTerminator = env.kubeConfig
+    ? new K8sJobTerminator(
+        env.kubeConfig.makeApiClient(k8s.BatchV1Api),
+        env.sharedResourcesNamespace ?? "x1agent",
+      )
+    : undefined;
+
   const sessionsConfig = {
     agents,
     sessions,
@@ -536,6 +628,7 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
     getActor,
     clock: systemClock,
+    jobs: jobTerminator,
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
@@ -604,6 +697,24 @@ export function compose(env: CompositionEnv): Composition {
     },
   });
 
+  const accessGrantsRoutes = createAccessGrantsRoutes({
+    repository: accessGrants,
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+    // Admin-or-platform-admin gate. The bypass for platform admins is
+    // explicit here — WorkspaceAdminGuard's assertAdmin only checks the
+    // membership-role, so platform admins (who may not be workspace
+    // members) need a separate path.
+    requireWorkspaceAdminOrPlatformAdmin: async (workspaceId, userId, email) => {
+      if (env.platformAdmins.includes(email as never)) return;
+      await new WorkspaceAdminGuard(memberships).assertAdmin(
+        userId as never,
+        workspaceId as never,
+      );
+    },
+  });
+
   const workspaceShareRoutes = createWorkspaceShareRoutes({
     sessions,
     events: sessionEvents,
@@ -617,6 +728,11 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
     getActor,
     gcsArtifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
+    // Powers the cross-session 403 distinction on
+    // `/:shareId/content`. When omitted the route still returns 404
+    // for unknown shares — the agent just can't tell "wrong session"
+    // from "no such share".
+    sql: env.sql,
   });
 
   const workspaceSharesIndexRoutes = createWorkspaceSharesIndexRoutes({
@@ -793,6 +909,18 @@ export function compose(env: CompositionEnv): Composition {
     // so the route can look the row up + stream the bytes.
     uploads: uploads.repository,
     uploadStorage: uploads.storage,
+    // X1A-118 — parent-initiated cancel routed through the internal
+    // /cancel-by-parent route shares the same terminator as Pause.
+    jobs: jobTerminator,
+    // Durable preview environment side-effect on preview-deploy.
+    // Same repository the workspace UI list endpoint reads from.
+    previewEnvironments,
+    // Workspace env-binding resolver. preview-deploy reads the env's
+    // env_var_names → looks up matching bindings → resolves each
+    // secret to plaintext → forwards as `extra_env` over NATS. The
+    // provider mints the per-preview K8s Secret bundle.
+    workspaceBindings: workspaceBindingRepo,
+    workspaceSecrets: workspaceSecretsService,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so
@@ -834,14 +962,9 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  // Workspace secret store. Reuses `workspaceSecretsKey` (loaded near
-  // the top of compose). Decryption happens only inside the
-  // SecretService — repository never sees the key.
-  const workspaceSecretsRepo = new PostgresSecretRepository(env.sql);
-  const workspaceSecretsService = new SecretService(
-    workspaceSecretsRepo,
-    workspaceSecretsKey,
-  );
+  // Workspace secret store. workspaceSecretsRepo + workspaceSecretsService
+  // are hoisted above internalRoutes (the env-binding resolver needs
+  // them eagerly); routes wire here.
   const workspaceSecretsRoutes = createWorkspaceSecretsRoutes({
     service: workspaceSecretsService,
     requireAuth,
@@ -1076,6 +1199,40 @@ export function compose(env: CompositionEnv): Composition {
     service: bindingService,
     requireAuth,
     requireAgent,
+  });
+
+  // Workspace-scoped env bindings. Same env_bindings table, scope='workspace'.
+  // Preview environments + agent sessions opt into these by name; the resolver
+  // at preview-deploy time joins env_bindings + workspace_secrets to mint the
+  // per-preview Secret bundle. (workspaceBindingRepo is hoisted above
+  // internalRoutes; service + routes constructed here.)
+  const workspaceBindingService = new WorkspaceBindingService(
+    workspaceBindingRepo,
+    async (workspaceId, secretName) => {
+      const blob = await workspaceSecretsRepo.getBlob(
+        workspaceId,
+        secretName as unknown as Parameters<typeof workspaceSecretsRepo.getBlob>[1],
+      );
+      return blob !== null;
+    },
+  );
+  const workspaceEnvRoutes = createWorkspaceEnvRoutes({
+    service: workspaceBindingService,
+    resolveWorkspace: async (slug) => {
+      const w = await workspaces.findBySlug(slug);
+      return w?.id ?? null;
+    },
+    requireAuth,
+    requireWorkspaceAdmin: async (workspaceId, userId) => {
+      await new WorkspaceAdminGuard(memberships).assertAdmin(
+        userId as never,
+        workspaceId as never,
+      );
+    },
+    getActor: (c) => {
+      const actor = getActor(c);
+      return actor ? { userId: actor.userId, email: actor.email } : null;
+    },
   });
 
   const collectionsWorkspaceReader: CollectionsWorkspaceReader = {
@@ -1323,7 +1480,9 @@ export function compose(env: CompositionEnv): Composition {
     workspaceInvitationRoutes,
     publicInvitationRoutes,
     workspaceCreateRoutes,
+    accessGrantsRoutes,
     agentRoutes,
+    previewEnvironmentRoutes,
     sessionRoutes,
     workspaceSessionRoutes,
     workspaceTokenUsageRoutes,
@@ -1345,6 +1504,7 @@ export function compose(env: CompositionEnv): Composition {
     mcpCatalogRoutes,
     agentMcpAttachmentRoutes,
     agentEnvRoutes,
+    workspaceEnvRoutes,
     mcpOAuthRoutes,
     mcpUserTokenRoutes,
     collectionRoutes,
@@ -1384,5 +1544,8 @@ export function compose(env: CompositionEnv): Composition {
     quietHints,
     uploadRoutes,
     tickUploadsCleanup,
+    // X1A-28 — exposed so the api index can wire the silent-worker
+    // reaper to the same K8s Job terminator the human Pause path uses.
+    jobTerminator,
   };
 }

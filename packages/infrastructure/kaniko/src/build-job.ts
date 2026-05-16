@@ -59,6 +59,15 @@ export interface KanikoBuildInputs {
     requests?: { cpu: string; memory: string };
     limits?: { cpu: string; memory: string };
   };
+  /**
+   * Optional KSA the Kaniko Pod runs as. Required for Artifact Registry
+   * pushes — the KSA must be Workload-Identity-bound to a GSA with
+   * roles/artifactregistry.writer on the destination repo. Falls back to
+   * the namespace default SA when empty (fine for dev's in-cluster
+   * HTTP registry but the prod push will fail with
+   * `artifactregistry.repositories.uploadArtifacts denied`).
+   */
+  serviceAccountName?: string;
 }
 
 const DEFAULT_KANIKO_IMAGE = "gcr.io/kaniko-project/executor:latest";
@@ -131,6 +140,9 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
         metadata: { labels },
         spec: {
           restartPolicy: "Never",
+          ...(inputs.serviceAccountName
+            ? { serviceAccountName: inputs.serviceAccountName }
+            : {}),
           securityContext: {
             seccompProfile: { type: "RuntimeDefault" },
           },

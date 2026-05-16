@@ -9,7 +9,7 @@ sidebar:
 **Implementation status — read this first.**
 
 Today's preview provider implements `provision` only (subscribes to
-`x1.providers.preview.provision`). The `sync`, `introspect`, `validate`,
+`x1.provider.preview.provision`). The `sync`, `introspect`, `validate`,
 and `debug` capabilities and the per-preview sidecar routes are
 design — not shipped. The provider supports `entrypoint.kind:
 dockerfile` only; compose / helm / kustomize / manifest are accepted by
@@ -63,9 +63,7 @@ Three required capabilities plus one optional. Any provider that implements the 
 
 **`provision`** *(implemented in v1)* — Spin up the preview environment
 based on a declarative spec. The provider subscribes to
-`x1.providers.preview.provision` (note: subject will rename to
-`x1.provider.preview.provision` to match the convention used by other
-providers).
+`x1.provider.preview.provision`.
 
 **`sync`** *(design)* — Move code from the agent's workspace into the
 preview environment, unidirectionally.

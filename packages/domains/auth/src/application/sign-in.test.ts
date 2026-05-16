@@ -129,6 +129,54 @@ describe("signInWithCode", () => {
     ).rejects.toBeInstanceOf(DomainNotAllowedError);
   });
 
+  it("calls pendingInvitations.acceptAllFor with the user id + email before listing memberships", async () => {
+    const deps = makeDeps();
+    const users = deps.users as InMemoryUserRepository;
+    let acceptedFor: { userId: string; email: Email } | null = null;
+    // Seed the membership inside acceptAllFor so the test proves the
+    // call landed before listMemberships ran.
+    deps.pendingInvitations = {
+      async acceptAllFor(userId, email) {
+        acceptedFor = { userId, email };
+        users.seedMembership(userId, "default", "Default", Role("member"));
+      },
+    };
+    const { session } = await signInWithCode(
+      deps,
+      "alice-code",
+      "http://localhost/cb",
+    );
+    expect(acceptedFor).not.toBeNull();
+    expect(acceptedFor!.email).toBe(Email("alice@example.com"));
+    expect(session.memberships).toHaveLength(1);
+    expect(session.memberships[0]!.slug).toBe("default");
+  });
+
+  it("does not deny sign-in if pendingInvitations.acceptAllFor throws", async () => {
+    const deps = makeDeps();
+    const users = deps.users as InMemoryUserRepository;
+    // Memberships still come from elsewhere — seed via upsert.
+    const orig = users.upsertFromProfile.bind(users);
+    users.upsertFromProfile = async (p) => {
+      const u = await orig(p);
+      users.seedMembership(u.id, "default", "Default", Role("owner"));
+      return u;
+    };
+    deps.pendingInvitations = {
+      async acceptAllFor() {
+        throw new Error("invitations adapter exploded");
+      },
+    };
+    const { session } = await signInWithCode(
+      deps,
+      "alice-code",
+      "http://localhost/cb",
+    );
+    // Identity is already minted — a flaky invitations adapter must
+    // not block sign-in.
+    expect(session.email).toBe(Email("alice@example.com"));
+  });
+
   it("marks platform admins in the session", async () => {
     const deps = makeDeps({ platformAdmins: ["alice@example.com"] });
     const users = deps.users as InMemoryUserRepository;

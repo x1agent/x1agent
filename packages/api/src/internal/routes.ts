@@ -4,13 +4,16 @@ import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
 import { AgentId, type AgentRepository } from "@x1agent/domain-agents";
 import type {
   AgentCostWindow,
+  JobTerminator,
   SessionEventRepository,
   SessionRepository,
   TokenUsageRepository,
 } from "@x1agent/domain-sessions";
 import {
+  NotYourChildError,
   SessionId,
   appendSessionEvent,
+  cancelChildSession,
   spawnChildSession,
 } from "@x1agent/domain-sessions";
 import {
@@ -18,8 +21,15 @@ import {
   findActiveGrant,
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
-import { writeShareFiles } from "../shares/storage.js";
+import {
+  getMimeType,
+  readShareFile,
+  readStagingFile,
+  writeShareFiles,
+  writeStagingFiles,
+} from "../shares/storage.js";
 import { StringCodec, JSONCodec } from "nats";
+import { randomUUID } from "node:crypto";
 import type {
   UploadRepository,
   UploadStorage,
@@ -82,12 +92,37 @@ export interface InternalRoutesConfig {
   uploads?: UploadRepository;
   uploadStorage?: UploadStorage;
   /**
+   * Optional K8s Job terminator shared with the human-cancel path.
+   * When wired, `cancel_session` from an orchestrator (X1A-118) also
+   * deletes the child's K8s Job so the pod actually stops — without
+   * this the cancel is purely a DB flip.
+   */
+  jobs?: JobTerminator;
+  /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
    * the preview-deploy route returns 503. Narrow escape hatch until
    * the agent-repo-store adapter exposes this as a first-class method.
    */
   sql?: import("postgres").Sql<Record<string, unknown>>;
+  /**
+   * Durable preview environment store. When present, the preview-deploy
+   * route upserts a row at two points: status=provisioning before the
+   * NATS request, status=ready|failed after the reply lands. The agent
+   * sees the same response shape as before; the row is a side effect
+   * the UI consumes through the workspace `/preview-environments` list.
+   */
+  previewEnvironments?: import("@x1agent/domain-preview-environments").PreviewEnvironmentRepository;
+  /**
+   * Workspace-scoped env-binding resolver — paired with the preview env's
+   * `env_var_names` list, the preview-deploy route translates each name
+   * into a (env_var, secret_value) pair and forwards them to the
+   * provider as `extra_env`. Both deps must be wired for the lookup to
+   * run; absent either, env vars set on the preview env are silently
+   * ignored at deploy time.
+   */
+  workspaceBindings?: import("@x1agent/domain-agent-env").WorkspaceBindingRepository;
+  workspaceSecrets?: import("@x1agent/domain-workspace-secrets").SecretService;
   /**
    * User-scoped OAuth token substrate. When present, exposes
    * looks up the user's stored grant for a provider, refreshes the
@@ -164,6 +199,97 @@ export function resolveSpawnModel(
     return pool[0] ?? null;
   }
   return enabled.has(trimmed) ? trimmed : null;
+}
+
+/**
+ * Map from a narrow Google OAuth scope → the set of broader scopes
+ * that, in Google's hierarchy, fully cover it. The intent is that
+ * a user who granted the broader scope should not be told their
+ * permission is insufficient when a provider asks for a narrower
+ * variant. The provider could ask for the broader scope directly,
+ * but the conventional ask is "the least permission I need" — so the
+ * platform meets it where it is.
+ *
+ * Only Google scopes need this today because Google ships the
+ * fan-out of `.readonly`, `.metadata.readonly`, etc. as separate
+ * strings; other providers either don't fan out or are listed once
+ * verbatim already. Extend per provider when the same problem shows
+ * up elsewhere.
+ *
+ * Sourced from Google's published OAuth scope docs:
+ *   https://developers.google.com/identity/protocols/oauth2/scopes
+ */
+const GOOGLE_SCOPE_IMPLICATIONS: Record<string, readonly string[]> = {
+  // Drive — full read+write covers every narrower drive.* variant.
+  "https://www.googleapis.com/auth/drive.readonly": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  "https://www.googleapis.com/auth/drive.metadata": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  "https://www.googleapis.com/auth/drive.metadata.readonly": [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.metadata",
+    "https://www.googleapis.com/auth/drive.readonly",
+  ],
+  "https://www.googleapis.com/auth/drive.file": [
+    "https://www.googleapis.com/auth/drive",
+  ],
+  // Sheets / Docs — read covered by full read+write.
+  "https://www.googleapis.com/auth/spreadsheets.readonly": [
+    "https://www.googleapis.com/auth/spreadsheets",
+  ],
+  "https://www.googleapis.com/auth/documents.readonly": [
+    "https://www.googleapis.com/auth/documents",
+  ],
+  // Calendar — read variants covered by full calendar; events variants
+  // similarly covered by the parent calendar scope.
+  "https://www.googleapis.com/auth/calendar.readonly": [
+    "https://www.googleapis.com/auth/calendar",
+  ],
+  "https://www.googleapis.com/auth/calendar.events": [
+    "https://www.googleapis.com/auth/calendar",
+  ],
+  "https://www.googleapis.com/auth/calendar.events.readonly": [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+  ],
+  // Gmail — gmail.modify is read + send + trash; gmail.readonly is
+  // strictly read. Modify covers readonly; full mail covers both.
+  "https://www.googleapis.com/auth/gmail.readonly": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.send": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.compose": [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/",
+  ],
+  "https://www.googleapis.com/auth/gmail.modify": [
+    "https://mail.google.com/",
+  ],
+};
+
+/**
+ * Returns true when `requested` is either present in `granted` verbatim
+ * or implied by some scope that is. Lets a user who consented to a
+ * broader scope (`drive`) satisfy a provider asking for a narrower
+ * variant (`drive.readonly`). For non-Google providers this collapses
+ * to the original exact-match check since the implications table is
+ * Google-only today.
+ */
+function scopeIsCovered(
+  requested: string,
+  granted: readonly string[],
+): boolean {
+  if (granted.includes(requested)) return true;
+  const implicators = GOOGLE_SCOPE_IMPLICATIONS[requested];
+  if (!implicators) return false;
+  return implicators.some((s) => granted.includes(s));
 }
 
 function requireInternalToken(token: string): MiddlewareHandler {
@@ -442,6 +568,228 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     return c.json({ ok: true, total_size: totalSize });
   });
 
+  // Read a share's content back to its producing session (X1A-32).
+  //
+  // The sidecar's /read_share route forwards here in local-dev (no GCS).
+  // The sidecar already authenticates with the internal token; we just
+  // need to confirm the share belongs to the named session (same
+  // cross-session guard as the workspace-scoped /:shareId/content route)
+  // before reading the bytes off disk.
+  //
+  // Returns { share_id, path?, mime_type, size, content_b64 } on
+  // success. Empty `?path=` falls back to `index.html` — matches
+  // writeShareFiles for single-file shares.
+  app.get("/sessions/:sessionId/shares/:shareId/content", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const shareId = c.req.param("shareId")!;
+    const requestedPath = c.req.query("path") ?? "";
+
+    const session = await cfg.sessions.findById(sessionId);
+    if (!session) return c.json({ error: "session_not_found" }, 404);
+
+    // 5000 matches the workspace-scoped read route. Shares are sparse
+    // relative to message events, so the cap is effectively unbounded
+    // in practice.
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    const sharedHere = events.some((e) => {
+      if (e.type !== "agent.share") return false;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      return payload?.share_id === shareId;
+    });
+
+    if (!sharedHere) {
+      // Disambiguate "exists in another session" (403) from "doesn't
+      // exist anywhere" (404) when sql is wired, so the sidecar can
+      // surface a useful error to the agent.
+      if (cfg.sql) {
+        const rows = await cfg.sql<{ session_id: string }[]>`
+          SELECT session_id
+          FROM session_events
+          WHERE type = 'agent.share'
+            AND (payload->>'share_id') = ${shareId}
+          LIMIT 1
+        `;
+        if (rows.length > 0) {
+          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        }
+      }
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const filePath = requestedPath || "index.html";
+    const bytes = readShareFile(sessionId, shareId, filePath);
+    if (!bytes) return c.json({ error: "file_not_found" }, 404);
+    return c.json({
+      share_id: shareId,
+      path: requestedPath || undefined,
+      mime_type: getMimeType(filePath),
+      size: bytes.length,
+      content_b64: bytes.toString("base64"),
+    });
+  });
+
+  // Orchestrator → child cancel. The parent's sidecar calls this when
+  // the orchestrator invokes the `cancel_session` MCP tool (X1A-118).
+  // Authorization is the parent → child relationship, not user RBAC:
+  // the body carries the caller session_id and we refuse unless the
+  // target child's parent_session_id matches it. Idempotent — a second
+  // cancel on an already-terminal session returns `cancelled: false`.
+  app.post("/sessions/:childId/cancel-by-parent", async (c) => {
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      reason?: string | null;
+    };
+    if (!body.parent_session_id) {
+      return c.json(
+        { error: "missing_fields", need: ["parent_session_id"] },
+        400,
+      );
+    }
+    try {
+      const result = await cancelChildSession(
+        {
+          sessions: cfg.sessions,
+          events: cfg.events,
+          clock: systemClock,
+          jobs: cfg.jobs,
+        },
+        body.parent_session_id as SessionId,
+        childId,
+        typeof body.reason === "string" ? body.reason : null,
+      );
+      return c.json({
+        ok: true,
+        cancelled: result.cancelled,
+        session: {
+          id: result.session.id,
+          status: result.session.status,
+          completed_at: result.session.completedAt?.toISOString() ?? null,
+        },
+      });
+    } catch (err) {
+      if (err instanceof NotYourChildError) {
+        return c.json({ error: "not_your_child" }, 403);
+      }
+      if (err instanceof DomainError) {
+        const status = err.code === "session_not_found" ? 404 : 400;
+        return c.json(
+          { error: err.code, message: err.message },
+          status as 400,
+        );
+      }
+      throw err;
+    }
+  });
+
+  // Orchestrator → child snapshot transfer (X1A-63). The parent's
+  // sidecar POSTs the file bytes here after validating the local
+  // /workspace source path. We confirm parent → child, persist the
+  // bytes to a per-stage directory on disk, then publish a NATS
+  // message on the child's `.input` subject with kind=parent_staging
+  // so the child's sidecar fetches and materializes the files into
+  // `/workspace/{dest_path}`. Snapshot semantics — no subscription.
+  app.post("/sessions/:childId/share-to-child", async (c) => {
+    if (!cfg.natsConnection) {
+      return c.json({ error: "parent_staging_unavailable" }, 503);
+    }
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      dest_path?: string | null;
+      files?: { path: string; content: string }[];
+    };
+    if (!body.parent_session_id || !Array.isArray(body.files)) {
+      return c.json(
+        {
+          error: "missing_fields",
+          need: ["parent_session_id", "files"],
+        },
+        400,
+      );
+    }
+    if (body.files.length === 0) {
+      return c.json({ error: "no_files" }, 400);
+    }
+
+    const child = await cfg.sessions.findById(childId);
+    if (!child) return c.json({ error: "session_not_found" }, 404);
+    if (child.parentSessionId !== body.parent_session_id) {
+      return c.json({ error: "not_your_child" }, 403);
+    }
+    if (child.status === "complete" || child.status === "failed") {
+      return c.json({ error: "child_not_live" }, 410);
+    }
+
+    const stageId = randomUUID();
+    const result = writeStagingFiles(childId, stageId, body.files);
+
+    // Resolve destination. When the parent named one, use it verbatim;
+    // otherwise default to the first file's relative path. The sidecar
+    // side enforces traversal safety again before writing to
+    // /workspace, so a malformed dest_path can't escape the volume.
+    const destPath =
+      typeof body.dest_path === "string" && body.dest_path.trim() !== ""
+        ? body.dest_path.trim()
+        : (result.paths[0] ?? "");
+
+    const sc = StringCodec();
+    const envelope = {
+      session_id: childId,
+      timestamp: new Date().toISOString(),
+      type: "user.message",
+      payload: {
+        // The text is what /inject sees; the sidecar suppresses the
+        // /inject post on parent_staging events so this string never
+        // reaches the SDK. It exists so an older sidecar that lacks
+        // the staging branch falls back to a useful wake instead of
+        // a cryptic empty inject.
+        text: `Parent staged ${result.paths.length} file(s) at /workspace/${destPath}`,
+        kind: "parent_staging",
+        source: "platform",
+        event_id: stageId,
+        stage_id: stageId,
+        dest_path: destPath,
+        paths: result.paths,
+        from_session_id: body.parent_session_id,
+      },
+    };
+    cfg.natsConnection.publish(
+      `x1.session.${childId}.input`,
+      sc.encode(JSON.stringify(envelope)),
+    );
+
+    return c.json({
+      ok: true,
+      stage_id: stageId,
+      dest_path: destPath,
+      files: result.paths,
+      total_size: result.totalSize,
+    });
+  });
+
+  // Sidecar fetch of a single staged file (X1A-63). The child's
+  // sidecar pulls each path out of staging into /workspace/{dest_path}
+  // on receipt of the parent_staging NATS notification.
+  app.get("/sessions/:sessionId/staging/:stageId/content", async (c) => {
+    const sessionId = c.req.param("sessionId")! as SessionId;
+    const stageId = c.req.param("stageId")!;
+    const filePath = c.req.query("path") ?? "";
+    if (!filePath) return c.json({ error: "missing_path" }, 400);
+    const bytes = readStagingFile(sessionId, stageId, filePath);
+    if (!bytes) return c.json({ error: "file_not_found" }, 404);
+    return c.json({
+      stage_id: stageId,
+      path: filePath,
+      mime_type: getMimeType(filePath),
+      size: bytes.length,
+      content_b64: bytes.toString("base64"),
+    });
+  });
+
   // Child → parent explicit signal. The child's sidecar calls this
   // when the child invokes the `message_caller` MCP tool. We look
   // up the child's parent, confirm the parent is alive + an
@@ -624,6 +972,93 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     }
     const previewYaml = await ghRes.text();
 
+    // Extract metadata.name from the yaml for an immediate "I'm
+    // provisioning" upsert before the long-running NATS request. The
+    // provider does the full schema validation; we only need the slug
+    // here so the workspace UI can render a row right away. Regex
+    // tolerates quoted and unquoted forms; falls back to no-early-row
+    // when the shape doesn't match (provider's parse will fail with a
+    // crisp message either way).
+    const slugMatch = previewYaml.match(
+      /(^|\n)metadata:\s*\n\s+name:\s*['"]?([a-z][a-z0-9-]{0,62})['"]?\s*(\n|$)/,
+    );
+    const earlySlug = slugMatch?.[2];
+    if (cfg.previewEnvironments && earlySlug) {
+      try {
+        const { upsertPreviewEnvironment } = await import(
+          "@x1agent/domain-preview-environments"
+        );
+        await upsertPreviewEnvironment(
+          { repository: cfg.previewEnvironments },
+          {
+            workspaceId: agent.workspaceId,
+            slug: earlySlug,
+            repoFullName: body.repo_full_name,
+            branch: body.branch,
+            deploy: { status: "provisioning" },
+          },
+        );
+      } catch (earlyErr) {
+        // Non-fatal — operator just won't see the row until the deploy
+        // resolves. If this fires for a slug-taken conflict, the
+        // provider's reply will surface the same error to the agent.
+        console.warn(
+          "[preview-deploy] early upsert failed:",
+          (earlyErr as Error).message,
+        );
+      }
+    }
+
+    // Resolve workspace-scoped env bindings the preview opted into.
+    // The preview's env_var_names list (set in the workspace UI) names
+    // env_bindings rows with scope='workspace'; each row references a
+    // workspace_secret. We turn the list into a {ENV_NAME → plaintext}
+    // map here so the provider can mint the per-preview K8s Secret
+    // without needing direct DB or secret-store access.
+    //
+    // Best-effort: missing bindings or secrets are silently skipped —
+    // the agent's app sees that env var as unset rather than crashing
+    // the deploy. Logged so the operator can spot misconfigurations.
+    const extraEnv: Record<string, string> = {};
+    if (
+      cfg.previewEnvironments &&
+      cfg.workspaceBindings &&
+      cfg.workspaceSecrets &&
+      earlySlug
+    ) {
+      try {
+        const existingEnv = await cfg.previewEnvironments.findBySlug(
+          agent.workspaceId,
+          earlySlug as never,
+        );
+        const names = existingEnv?.envVarNames ?? [];
+        if (names.length > 0) {
+          const bindings = await cfg.workspaceBindings.findByNames(
+            agent.workspaceId as string,
+            names,
+          );
+          for (const binding of bindings) {
+            const value = await cfg.workspaceSecrets.resolve(
+              agent.workspaceId as string,
+              binding.secretName,
+            );
+            if (value !== null) {
+              extraEnv[binding.envName as string] = value;
+            } else {
+              console.warn(
+                `[preview-deploy] workspace secret '${binding.secretName}' (bound to env '${binding.envName}') resolved null — skipping`,
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[preview-deploy] env-binding resolver failed:",
+          (err as Error).message,
+        );
+      }
+    }
+
     // NATS request/reply to the provider. Timeout covers a full
     // Kaniko build + Deployment ready — hence 20 minutes.
     const jc = JSONCodec();
@@ -631,19 +1066,84 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     void sc;
     try {
       const reply = await cfg.natsConnection.request(
-        "x1.providers.preview.provision",
+        "x1.provider.preview.provision",
         jc.encode({
           preview_yaml: previewYaml,
           repo_full_name: body.repo_full_name,
           branch: body.branch,
           commit_sha: body.commit_sha,
           installation_id: installationId,
+          extra_env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
         }),
         { timeout: 20 * 60 * 1000 },
       );
       const result = jc.decode(reply.data) as
         | { ok: true; url: string; slug: string; image: string; job_name: string }
         | { ok: false; code: string; message: string };
+
+      // Side-effect: upsert the durable preview environment row so the
+      // workspace UI's Environments list reflects this deploy. We only
+      // fire this when the repository is wired in composition; older
+      // installs without it keep the old "URL returned, nothing
+      // persisted" shape and get a UI list once they upgrade.
+      if (cfg.previewEnvironments) {
+        try {
+          const { upsertPreviewEnvironment } = await import(
+            "@x1agent/domain-preview-environments"
+          );
+          if (result.ok) {
+            await upsertPreviewEnvironment(
+              { repository: cfg.previewEnvironments },
+              {
+                workspaceId: agent.workspaceId,
+                slug: result.slug,
+                repoFullName: body.repo_full_name,
+                branch: body.branch,
+                deploy: {
+                  status: "ready",
+                  sha: body.commit_sha,
+                  url: result.url,
+                  imageRef: result.image,
+                },
+              },
+            );
+          } else {
+            // Failure path. Prefer the slug from the provider's reply
+            // (set when the parse succeeded but a later step failed);
+            // fall back to the earlySlug we grabbed before the NATS
+            // request so the in-progress row doesn't sit at
+            // status=provisioning forever after an invalid_preview_spec.
+            const failed = result as
+              & { ok: false; code: string; message: string }
+              & { slug?: string };
+            const slug = failed.slug ?? earlySlug;
+            if (slug) {
+              await upsertPreviewEnvironment(
+                { repository: cfg.previewEnvironments },
+                {
+                  workspaceId: agent.workspaceId,
+                  slug,
+                  repoFullName: body.repo_full_name,
+                  branch: body.branch,
+                  deploy: {
+                    status: "failed",
+                    sha: body.commit_sha,
+                    statusReason: result.message,
+                  },
+                },
+              );
+            }
+          }
+        } catch (upsertErr) {
+          // Persistence of the side-effect must not block the agent's
+          // response. Log + swallow.
+          console.warn(
+            "[preview-deploy] upsert failed:",
+            (upsertErr as Error).message,
+          );
+        }
+      }
+
       if (!result.ok) {
         const status =
           result.code === "invalid_preview_spec" ? 400 : 502;
@@ -702,7 +1202,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       );
     }
 
-    if (scope && !blob.scopesGranted.includes(scope)) {
+    if (scope && !scopeIsCovered(scope, blob.scopesGranted)) {
       return c.json(
         {
           error: "permission_required",

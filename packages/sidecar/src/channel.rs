@@ -76,6 +76,20 @@ struct InjectPayload {
     kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<String>,
+    // X1A-133 — SDK-native wake-classification envelope (PRD 0007).
+    // `origin.kind` discriminates the wake category (channel / peer /
+    // coordinator / task-notification). `is_synthetic` flags server-
+    // synthesised wakes (vs human-typed). `priority` and
+    // `should_query` carry forward-compatible plumbing — current
+    // share-comments slice uses normal/true, future slices toggle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_synthetic: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    priority: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    should_query: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +105,11 @@ pub struct ParsedInput {
     pub thread_id: Option<String>,
     pub kind: Option<String>,
     pub source: Option<String>,
+    // X1A-133 — forward-compatible SDK-native wake envelope (PRD 0007).
+    pub origin: Option<serde_json::Value>,
+    pub is_synthetic: Option<bool>,
+    pub priority: Option<String>,
+    pub should_query: Option<bool>,
 }
 
 /// Parse the user-input NATS message, preferring `text` over `answer`
@@ -130,6 +149,10 @@ pub fn parse_input_message(raw: &[u8]) -> Option<ParsedInput> {
         thread_id: str_field("thread_id"),
         kind: str_field("kind"),
         source: str_field("source"),
+        origin: payload.get("origin").cloned(),
+        is_synthetic: payload.get("is_synthetic").and_then(|v| v.as_bool()),
+        priority: str_field("priority"),
+        should_query: payload.get("should_query").and_then(|v| v.as_bool()),
     })
 }
 
@@ -154,6 +177,153 @@ async fn wait_for_agent_ready(client: &reqwest::Client, channel_url: &str) -> bo
     false
 }
 
+/// X1A-63 — handle a parent_staging input message by fetching each
+/// staged file from the api and materializing it into
+/// `/workspace/{dest_path}/...`. Returns Ok(()) when the bytes are
+/// written so the caller can ack and SUPPRESS the /inject forward —
+/// the agent doesn't see the wake as a user message; from its POV,
+/// files just appeared. Errors bubble so JetStream redelivers.
+async fn handle_parent_staging(
+    state: &Arc<crate::AppState>,
+    client: &reqwest::Client,
+    payload: &[u8],
+) -> Result<(), String> {
+    let message: serde_json::Value = serde_json::from_slice(payload)
+        .map_err(|e| format!("parent_staging: bad envelope: {e}"))?;
+    let p = message.get("payload").ok_or("parent_staging: no payload")?;
+    let stage_id = p
+        .get("stage_id")
+        .and_then(|v| v.as_str())
+        .ok_or("parent_staging: missing stage_id")?;
+    let dest_path = p
+        .get("dest_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let paths: Vec<String> = p
+        .get("paths")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if paths.is_empty() {
+        return Err("parent_staging: empty paths".into());
+    }
+
+    // Resolve dest_path against /workspace. The parent supplied dest;
+    // refuse traversal here even though the api enforced it on the
+    // parent side — defense in depth, the sidecar is the trust
+    // boundary for filesystem writes.
+    let dest_rel = crate::shares::normalize_request_path(&dest_path)
+        .map_err(|e| format!("parent_staging: invalid dest_path: {e}"))?;
+    let dest_root = std::path::PathBuf::from("/workspace").join(&dest_rel);
+
+    for rel in &paths {
+        // Refuse `..` in individual file paths the same way. Each rel
+        // gets joined onto dest_root so a per-file traversal would
+        // also need a leading `../`, which normalize rejects.
+        let safe_rel = crate::shares::normalize_request_path(rel)
+            .map_err(|e| format!("parent_staging: invalid file path {rel}: {e}"))?;
+
+        let url = format!(
+            "{}/api/internal/sessions/{}/staging/{}/content?path={}",
+            state.api_url.trim_end_matches('/'),
+            state.session_id,
+            urlencoding::encode(stage_id),
+            urlencoding::encode(&safe_rel),
+        );
+        let resp = client
+            .get(&url)
+            .header("X-Internal-Token", &state.api_internal_token)
+            .send()
+            .await
+            .map_err(|e| format!("parent_staging: fetch {rel}: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!(
+                "parent_staging: fetch {rel}: status {}",
+                resp.status()
+            ));
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("parent_staging: parse {rel}: {e}"))?;
+        let b64 = body
+            .get("content_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("parent_staging: no content_b64 for {rel}"))?;
+        let bytes = base64_decode(b64)
+            .ok_or_else(|| format!("parent_staging: bad base64 for {rel}"))?;
+
+        // Decide on-disk path. When a single file is staged with a
+        // dest_path of "inputs/spec.md", we write directly to that
+        // path (don't append the source basename). When multiple
+        // files are staged, dest_path is a directory and we preserve
+        // the relative file paths under it.
+        let target = if paths.len() == 1 {
+            dest_root.clone()
+        } else {
+            dest_root.join(&safe_rel)
+        };
+        if let Some(parent_dir) = target.parent() {
+            std::fs::create_dir_all(parent_dir)
+                .map_err(|e| format!("parent_staging: mkdir {rel}: {e}"))?;
+        }
+        // Canonicalize the PARENT directory (target may not exist yet)
+        // and re-confirm it lives under /workspace. Without this, a
+        // crafted dest_path that resolves through a symlink could
+        // escape the volume.
+        let parent_canonical = target
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .ok_or_else(|| format!("parent_staging: bad target {rel}"))?;
+        if !parent_canonical.starts_with("/workspace") {
+            return Err("parent_staging: target outside /workspace".into());
+        }
+        std::fs::write(&target, &bytes)
+            .map_err(|e| format!("parent_staging: write {rel}: {e}"))?;
+    }
+    tracing::info!(
+        "parent_staging: materialized {} files at /workspace/{}",
+        paths.len(),
+        dest_rel
+    );
+    Ok(())
+}
+
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    // Hand-rolled to keep the binary surface small — mirrors the
+    // encoder in shares.rs. Tolerates trailing `=` padding.
+    let lookup: [Option<u8>; 256] = {
+        let mut t: [Option<u8>; 256] = [None; 256];
+        for (i, b) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            .iter()
+            .enumerate()
+        {
+            t[*b as usize] = Some(i as u8);
+        }
+        t
+    };
+    let cleaned: Vec<u8> = s.bytes().filter(|b| *b != b'=' && *b != b'\n').collect();
+    let mut out = Vec::with_capacity(cleaned.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for b in cleaned {
+        let v = lookup[b as usize]?;
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 /// Decode + POST one wake to the agent's /inject endpoint. Returns
 /// Ok(()) on a successful inject so the JetStream caller can ack the
 /// message, Err on parse failure or HTTP failure so the caller can
@@ -175,6 +345,10 @@ async fn post_inject(
         thread_id: parsed.thread_id,
         kind: parsed.kind,
         source: parsed.source,
+        origin: parsed.origin,
+        is_synthetic: parsed.is_synthetic,
+        priority: parsed.priority,
+        should_query: parsed.should_query,
     };
     let resp = client
         .post(inject_url)
@@ -234,12 +408,37 @@ async fn input_subscriber_core(
     let inject_url = format!("{}/inject", state.channel_url);
 
     while let Some(msg) = sub.next().await {
+        // X1A-63 — parent_staging messages are materialized to
+        // /workspace by the sidecar itself and NOT forwarded to the
+        // agent's /inject. The agent finds the files already on disk
+        // the next turn; no synthetic user-message in the timeline.
+        if is_parent_staging(&msg.payload) {
+            match handle_parent_staging(&state, &client, &msg.payload).await {
+                Ok(()) => tracing::info!("parent_staging: applied"),
+                Err(e) => tracing::error!("parent_staging failed: {}", e),
+            }
+            continue;
+        }
         match post_inject(&client, &inject_url, &msg.payload).await {
             Ok(()) => tracing::info!("Injected message into agent"),
             Err(e) => tracing::error!("Agent inject failed: {}", e),
         }
     }
     Ok(())
+}
+
+/// Peek at the payload's `kind` field WITHOUT a full parse — just
+/// enough to know whether this is a parent_staging message we should
+/// route through the filesystem branch instead of /inject.
+fn is_parent_staging(payload: &[u8]) -> bool {
+    let v: serde_json::Value = match serde_json::from_slice(payload) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    v.get("payload")
+        .and_then(|p| p.get("kind"))
+        .and_then(|k| k.as_str())
+        == Some("parent_staging")
 }
 
 /// JetStream path. Per-session durable pull consumer reads from the
@@ -324,6 +523,40 @@ async fn input_subscriber_jetstream(
             }
         }
 
+        // X1A-63 — parent_staging branch identical to the core path:
+        // bypass /inject, materialize bytes into /workspace, ack.
+        if is_parent_staging(&msg.payload) {
+            match handle_parent_staging(&state, &client, &msg.payload).await {
+                Ok(()) => {
+                    if let Err(e) = msg.ack().await {
+                        tracing::error!("ack failed: {}", e);
+                    }
+                    tracing::info!(
+                        "parent_staging: applied (delivery={})",
+                        delivery_count
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "parent_staging failed (delivery={}): {}",
+                        delivery_count,
+                        e
+                    );
+                    let backoff = match delivery_count {
+                        0 | 1 => Duration::from_secs(2),
+                        2 => Duration::from_secs(10),
+                        _ => Duration::from_secs(30),
+                    };
+                    if let Err(e) = msg
+                        .ack_with(AckKind::Nak(Some(backoff)))
+                        .await
+                    {
+                        tracing::error!("nak failed: {}", e);
+                    }
+                }
+            }
+            continue;
+        }
         match post_inject(&client, &inject_url, &msg.payload).await {
             Ok(()) => {
                 if let Err(e) = msg.ack().await {
@@ -463,5 +696,36 @@ mod tests {
         assert!(p.kind.is_none());
         assert!(p.share_id.is_none());
         assert!(p.thread_id.is_none());
+        assert!(p.origin.is_none());
+        assert!(p.is_synthetic.is_none());
+        assert!(p.priority.is_none());
+        assert!(p.should_query.is_none());
+    }
+
+    // X1A-133 — SDK-native wake envelope fields (PRD 0007). The
+    // sidecar must forward `origin`, `is_synthetic`, `priority`, and
+    // `should_query` verbatim so the agent can classify the wake
+    // without parsing the prose body.
+    #[test]
+    fn parse_input_extracts_pr_0007_origin_envelope() {
+        let raw = br#"{"payload":{"text":"hi","origin":{"kind":"channel","server":"share-comments","share_id":"s","thread_id":"t"},"is_synthetic":true,"priority":"normal","should_query":true}}"#;
+        let p = parse_input_message(raw).unwrap();
+        assert_eq!(
+            p.origin
+                .as_ref()
+                .and_then(|v| v.get("kind"))
+                .and_then(|v| v.as_str()),
+            Some("channel"),
+        );
+        assert_eq!(
+            p.origin
+                .as_ref()
+                .and_then(|v| v.get("server"))
+                .and_then(|v| v.as_str()),
+            Some("share-comments"),
+        );
+        assert_eq!(p.is_synthetic, Some(true));
+        assert_eq!(p.priority.as_deref(), Some("normal"));
+        assert_eq!(p.should_query, Some(true));
     }
 }

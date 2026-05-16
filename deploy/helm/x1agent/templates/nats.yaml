@@ -268,7 +268,21 @@ data:
             # permission, every event publish hits a Permissions
             # Violation log line even when the rest of the pipeline
             # is healthy.
-            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit", "x1.session.*.archive"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
+            #
+            # `x1.provider.>` covers every provider subtree the
+            # sidecar forwards from MCP tools — graph, vector, files
+            # (Drive), email (Gmail), calendar, docs, sheets,
+            # messaging (Slack). Without this, `nc.request()` to
+            # any provider is silently rejected at the broker, the
+            # request never gets a reply, and the MCP call times out
+            # after 10s with `provider_timeout`. Same `*` wildcard
+            # semantics as the session subjects: any sidecar can
+            # publish under any namespace+handle, the provider does
+            # not currently do per-request workspace verification.
+            # Same trust model as the existing wildcard event
+            # publishes; per-session certs OR per-request workspace
+            # checks at the provider are the v2 hardening.
+            publish:   { allow: ["x1.session.*.events", "x1.session.*.audit", "x1.session.*.archive", "x1.provider.>"{{- if $jsEnabled }}, "$JS.API.>", "$JS.ACK.>"{{- end }}] }
             subscribe: { allow: ["x1.session.*.input", "x1.session.*.presence", "_INBOX.>"] }
           }
         }

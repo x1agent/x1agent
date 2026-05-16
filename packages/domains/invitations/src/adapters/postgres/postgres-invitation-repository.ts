@@ -129,4 +129,16 @@ export class PostgresInvitationRepository implements InvitationRepository {
       UPDATE invitations SET revoked_at = ${at} WHERE id = ${id}
     `;
   }
+
+  async updateRole(id: InvitationId, role: Role): Promise<Invitation> {
+    const rows = await this.sql<Row[]>`
+      UPDATE invitations
+         SET role = ${role}
+       WHERE id = ${id}
+       RETURNING id, workspace_id, email, role, token, invited_by,
+                 expires_at, accepted_at, accepted_by, revoked_at, created_at
+    `;
+    if (!rows[0]) throw new Error(`invitation ${id} not found`);
+    return toInvitation(rows[0]);
+  }
 }

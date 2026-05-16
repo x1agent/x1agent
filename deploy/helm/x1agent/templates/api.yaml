@@ -220,6 +220,17 @@ spec:
             # seed falls back to x1-registry.x1agent.svc.cluster.local:5000.
             - name: IMAGE_REGISTRY
               value: {{ .Values.cloud.gcp.artifactRegistry | quote }}
+            # KSA the image-catalog Kaniko Job runs as so it can push to
+            # AR via Workload Identity. We reuse the preview-build KSA
+            # the chart already provisions when previews are enabled —
+            # the writer permission is the same. Falls back to empty
+            # (Kaniko uses the namespace default SA) in installs that
+            # don't enable previews; image-catalog AR pushes will fail
+            # with "uploadArtifacts denied" until you flip previews on.
+            {{- if .Values.previews.enabled }}
+            - name: IMAGE_BUILD_SERVICE_ACCOUNT
+              value: "x1agent-preview-build"
+            {{- end }}
             # Anthropic credential source. The api forwards these env
             # vars onto every spawned session Job so the agent runtime's
             # SDK uses the right path.

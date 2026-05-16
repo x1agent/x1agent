@@ -69,6 +69,15 @@ export interface KanikoBuildInputs {
    * seeing the long-lived app private key.
    */
   accessToken: string;
+  /**
+   * Optional KSA name the Kaniko Pod runs under. When the destination
+   * is Artifact Registry, this KSA must be Workload-Identity-bound to
+   * a GSA with roles/artifactregistry.writer on the target repo, so
+   * Kaniko's push uses the GCE metadata server for auth (no JSON key).
+   * Falls back to the namespace's `default` SA when empty — fine for
+   * the dev in-cluster HTTP registry.
+   */
+  serviceAccountName?: string;
 }
 
 export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
@@ -119,6 +128,9 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
         metadata: { labels },
         spec: {
           restartPolicy: "Never",
+          ...(inputs.serviceAccountName
+            ? { serviceAccountName: inputs.serviceAccountName }
+            : {}),
           securityContext: {
             seccompProfile: { type: "RuntimeDefault" },
           },
@@ -128,11 +140,16 @@ export function buildKanikoJob(inputs: KanikoBuildInputs): V1Job {
               image: "gcr.io/kaniko-project/executor:latest",
               args,
               securityContext: {
-                // Kaniko requires root inside the container — it
-                // writes to / during its build. Dropping CAP_NET_BIND_SERVICE
-                // and the rest is fine; Kaniko doesn't need them.
+                // Kaniko unpacks base-image tarballs into / and chowns
+                // files like /etc/shadow during rootfs unpacking. With
+                // capabilities.drop: ["ALL"] the chown fails ("operation
+                // not permitted") and the build aborts before the
+                // user's Dockerfile even runs. Default cap set keeps
+                // the standard restricted-runtime baseline (the pod
+                // template's seccompProfile=RuntimeDefault stays on)
+                // and Kaniko has the chown/setuid/setgid/fowner caps
+                // it needs.
                 allowPrivilegeEscalation: false,
-                capabilities: { drop: ["ALL"] },
               },
               resources: {
                 requests: { cpu: "500m", memory: "1Gi" },

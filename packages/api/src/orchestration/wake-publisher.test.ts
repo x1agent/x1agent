@@ -560,7 +560,10 @@ describe("formatStateChangeWakeText", () => {
 // ── X1A-55 — comment-added / comment-resolved wakes ─────────────────────
 
 describe("formatCommentAddedWakeText", () => {
-  it("renders share-scoped comment with inline mcp tool instructions", () => {
+  // X1A-133 — wake text is terse and contains no `[wake: ...]`
+  // preamble. The SDK-native origin envelope on the payload drives
+  // classification; the body is the comment plus a one-line tool hint.
+  it("renders share-scoped comment without the legacy preamble", () => {
     const t = formatCommentAddedWakeText({
       shareId: "abcd1234-5678-7000-8000-000000000000",
       threadId: "thread-xyz",
@@ -570,20 +573,14 @@ describe("formatCommentAddedWakeText", () => {
       anchorQuote: null,
       body: "the H2 wording needs softening",
     });
-    expect(t).toContain("[wake: new comment on share abcd1234]");
-    expect(t).toContain("Author: human 019e0d79");
-    expect(t).toContain("Thread id: thread-xyz");
-    expect(t).toContain("Scope: share");
-    expect(t).toContain("Anchor: On this share");
-    expect(t).toContain("Body:");
+    expect(t).not.toContain("[wake:");
+    expect(t).not.toContain("Thread id:");
+    expect(t).toContain("human 019e0d79 commented on this share");
     expect(t).toContain("the H2 wording needs softening");
-    expect(t).toContain(
-      `share_comment(share_id="abcd1234-5678-7000-8000-000000000000", thread_id="thread-xyz"`,
-    );
-    expect(t).toContain(`share_comment_resolve(thread_id="thread-xyz")`);
+    expect(t).toContain(`share_comment(thread_id="thread-xyz"`);
   });
 
-  it("renders passage-scoped comment with the quoted anchor", () => {
+  it("inlines the quoted anchor for passage-scoped comments", () => {
     const t = formatCommentAddedWakeText({
       shareId: "abcd1234-5678-7000-8000-000000000000",
       threadId: "thread-xyz",
@@ -593,23 +590,21 @@ describe("formatCommentAddedWakeText", () => {
       anchorQuote: "We aim to redefine collaboration.",
       body: "drop the buzzword pls",
     });
-    expect(t).toContain("Scope: passage");
-    expect(t).toContain('Anchor: "We aim to redefine collaboration."');
+    expect(t).toContain('Anchored to: "We aim to redefine collaboration."');
     expect(t).toContain("drop the buzzword pls");
   });
 });
 
 describe("formatCommentResolvedWakeText", () => {
-  it("uses verb 'resolved' and informational copy for resolved=true", () => {
+  it("uses verb 'resolved' without the legacy preamble", () => {
     const t = formatCommentResolvedWakeText({
       shareId: "abcd1234-5678-7000-8000-000000000000",
       threadId: "thread-xyz",
       resolverDisplay: "human",
       resolved: true,
     });
-    expect(t).toContain("[wake: comment thread resolved on share abcd1234]");
-    expect(t).toContain("Resolved by: human");
-    expect(t).toContain("Nothing required");
+    expect(t).not.toContain("[wake:");
+    expect(t).toBe("human resolved this comment thread.");
   });
 
   it("uses verb 'reopened' when resolved=false", () => {
@@ -619,9 +614,7 @@ describe("formatCommentResolvedWakeText", () => {
       resolverDisplay: "human",
       resolved: false,
     });
-    expect(t).toContain("[wake: comment thread reopened on share abcd1234]");
-    expect(t).toContain("Reopened by: human");
-    expect(t).toContain("now reopened");
+    expect(t).toBe("human reopened this comment thread.");
   });
 });
 
@@ -649,6 +642,41 @@ describe("publishCommentAddedWake / publishCommentResolvedWake", () => {
     expect(env.payload.thread_id).toBe("thread-1");
     expect(all[0]!.subject).toContain(uuid(0xAA01));
     expect(all[0]!.subject).toContain(".input");
+  });
+
+  // X1A-133 — SDK-native origin envelope (PRD 0007). The harness reads
+  // origin.kind/server to classify the wake without parsing the prose
+  // body; share-comment wakes also carry is_synthetic + priority +
+  // should_query for forward-compatibility with later slices.
+  it("stamps the SDK-native origin envelope on comment_added wakes", async () => {
+    const fake = new FakeNats();
+    await publishCommentAddedWake(fake as never, uuid(0xAA10), {
+      shareId: "share-7",
+      threadId: "thread-7",
+      commentId: "comment-7",
+      authorDisplay: "human",
+      scope: "share",
+      anchorQuote: null,
+      body: "ping",
+    });
+    const env = fake.published[0]!.body as {
+      payload: {
+        origin?: { kind?: string; server?: string };
+        is_synthetic?: boolean;
+        priority?: string;
+        should_query?: boolean;
+        text?: string;
+      };
+    };
+    expect(env.payload.origin?.kind).toBe("channel");
+    expect(env.payload.origin?.server).toBe("share-comments");
+    expect(env.payload.is_synthetic).toBe(true);
+    expect(env.payload.priority).toBe("normal");
+    expect(env.payload.should_query).toBe(true);
+    // Defense against regression: the legacy `[wake: ...]` preamble
+    // must not reappear in the wake body — the SDK-native envelope
+    // is now load-bearing for classification.
+    expect(env.payload.text).not.toContain("[wake:");
   });
 
   it("deduplicates by comment_id across retries (JetStream msgId)", async () => {

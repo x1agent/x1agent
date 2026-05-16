@@ -81,11 +81,14 @@ export class K8sPlatformSecretsStore implements PlatformSecretsStore {
     // strategic-merge-patch on Secret treats data as a regular map.
     // We use a strategic-merge body shaped { data: { name: null } }.
     try {
-      await this.core.patchNamespacedSecret({
-        name: this.secretName,
-        namespace: this.namespace,
-        body: { data: { [name]: null } } as unknown as k8s.V1Secret,
-      });
+      await this.core.patchNamespacedSecret(
+        {
+          name: this.secretName,
+          namespace: this.namespace,
+          body: { data: { [name]: null } } as unknown as k8s.V1Secret,
+        },
+        k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.StrategicMergePatch),
+      );
     } catch (err) {
       // 404: Secret doesn't exist yet — nothing to clear. Treat as a
       // no-op so the UI's Clear button is idempotent on a fresh
@@ -101,30 +104,39 @@ export class K8sPlatformSecretsStore implements PlatformSecretsStore {
     // kubectl.kubernetes.io/restartedAt annotation. This is what
     // `kubectl rollout restart deploy/api` does under the hood — every
     // pod gets a new templateHash, triggering a rolling replace.
-    await this.apps.patchNamespacedDeployment({
-      name: this.deploymentName,
-      namespace: this.namespace,
-      body: {
-        spec: {
-          template: {
-            metadata: {
-              annotations: {
-                "kubectl.kubernetes.io/restartedAt": restartedAt,
+    // @kubernetes/client-node 1.x requires the Content-Type header to
+    // be set explicitly; without it the API server tries to decode
+    // the body as a RFC 6902 JSON Patch array and rejects with 400.
+    await this.apps.patchNamespacedDeployment(
+      {
+        name: this.deploymentName,
+        namespace: this.namespace,
+        body: {
+          spec: {
+            template: {
+              metadata: {
+                annotations: {
+                  "kubectl.kubernetes.io/restartedAt": restartedAt,
+                },
               },
             },
           },
-        },
-      } as unknown as k8s.V1Deployment,
-    });
+        } as unknown as k8s.V1Deployment,
+      },
+      k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.StrategicMergePatch),
+    );
   }
 
   private async upsertSecret(data: Record<string, string>): Promise<void> {
     try {
-      await this.core.patchNamespacedSecret({
-        name: this.secretName,
-        namespace: this.namespace,
-        body: { data } as unknown as k8s.V1Secret,
-      });
+      await this.core.patchNamespacedSecret(
+        {
+          name: this.secretName,
+          namespace: this.namespace,
+          body: { data } as unknown as k8s.V1Secret,
+        },
+        k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.StrategicMergePatch),
+      );
     } catch (err) {
       if (isNotFound(err)) {
         // Helm installs an empty Secret of this name on first chart

@@ -4,6 +4,7 @@ import type { SessionTokenizer } from "../ports/session-tokenizer.js";
 import type { PersonRepository } from "../ports/person-repository.js";
 import type { AccessGate } from "../ports/access-gate.js";
 import type { UserOAuthTokenStore } from "../ports/user-oauth-token-store.js";
+import type { PendingInvitationAcceptor } from "../ports/pending-invitation-acceptor.js";
 import {
   assertAllowedDomain,
   type AuthProfile,
@@ -56,6 +57,21 @@ export interface SignInDeps {
     store: UserOAuthTokenStore;
     encrypt: EncryptOAuthToken;
   };
+  /**
+   * Optional: auto-accept any pending invitations for the user's
+   * email on sign-in. Without this, an invitee who clicks "Sign in
+   * with Google" instead of the invite link lands as an authenticated
+   * user with no memberships. See PendingInvitationAcceptor.
+   */
+  pendingInvitations?: PendingInvitationAcceptor;
+  /**
+   * Optional: auto-create workspace memberships for any
+   * workspace_access_grant rows that match the user's email or its
+   * domain. Mirrors the pendingInvitations hook but for the bulk
+   * domain/email grant flow. Best-effort: a failure here logs but does
+   * not deny sign-in.
+   */
+  accessGrants?: import("../ports/access-gate.js").AccessGrantMaterializer;
 }
 
 export interface SignInResult {
@@ -104,6 +120,34 @@ export async function completeSignIn(
     }
   }
   const user = await deps.users.upsertFromProfile(profile);
+
+  // Materialize any pending invitations into workspace memberships
+  // before we read memberships below — otherwise an invitee who didn't
+  // click their invite link gets the "no workspace access" page.
+  // Best-effort: a failure here doesn't deny sign-in (identity is
+  // already minted).
+  if (deps.pendingInvitations) {
+    try {
+      await deps.pendingInvitations.acceptAllFor(user.id, profile.email);
+    } catch (err) {
+      console.warn(
+        `[auth] failed to auto-accept pending invitations for ${profile.email}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Materialise workspace memberships from any matching access grants
+  // (kind='email' exact OR kind='domain' on the user's email domain).
+  // Same best-effort posture as the invitation auto-accept above.
+  if (deps.accessGrants) {
+    try {
+      await deps.accessGrants.materializeForUser(user.id, profile.email);
+    } catch (err) {
+      console.warn(
+        `[auth] failed to materialize access grants for ${profile.email}: ${(err as Error).message}`,
+      );
+    }
+  }
 
   if (deps.persons) {
     const existing = await deps.persons.findPersonIdForUser(user.id);

@@ -93,8 +93,7 @@ x1.session.{session_id}.input     -- clients publish, sidecar subscribes (user i
 x1.session.{session_id}.audit     -- sidecar publishes, api persists (privileged HTTP audit log)
 x1.session.{session_id}.presence  -- browser publishes, sidecar tracks (keepalive)
 
-x1.provider.{domain}.*            -- provider request/reply (graph, vector, files, docs, sheets, calendar, email)
-x1.providers.preview.provision    -- preview provider (note: plural "providers" — a known inconsistency)
+x1.provider.{domain}.*            -- provider request/reply (graph, vector, files, docs, sheets, calendar, email, preview)
 
 x1.image.build                    -- image-builder consumes for in-cluster Kaniko builds
 ```
