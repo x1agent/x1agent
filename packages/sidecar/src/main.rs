@@ -269,6 +269,15 @@ pub fn build_credential_router(state: Arc<AppState>) -> Router {
             "/share_to_child",
             routing::post(orchestration::handle_share_to_child),
         )
+        // Orchestrator-only — snapshot a child's entire /workspace
+        // into this session's /workspace/workers/<child_id>/. Inverse
+        // of share_to_child; the orchestrator drives, the worker is
+        // passive. Sidesteps the small-model "worker won't call share"
+        // failure mode.
+        .route(
+            "/pull_from_child",
+            routing::post(orchestration::handle_pull_from_child),
+        )
         .route(
             "/messaging/post_message",
             routing::post(messaging::handle_post_message),
