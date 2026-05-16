@@ -278,13 +278,18 @@ describe("per-session shares list — visibility", () => {
     expect(res.status).toBe(200);
   });
 
-  it("workspace admin can list shares on any session in the workspace", async () => {
+  it("workspace admin does NOT see other users' shares — admin role is workspace mgmt only", async () => {
+    // Post the platform-admin-only refactor: workspace admin is no
+    // longer a visibility bypass. CAROL is admin in WS_A but neither
+    // the owner of SESSION_A nor a sharee, so the route 404s. Only a
+    // platform admin (separate guard, wired from the install-time
+    // email list) bypasses now.
     actor = { userId: CAROL, email: "c@x.com" as Email };
     const app = build();
     const res = await app.request(
       `/api/workspaces/ws-a/sessions/${SESSION_A}/shares`,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
   });
 
   it("non-owner non-admin non-sharee gets 404 on a peer's session", async () => {

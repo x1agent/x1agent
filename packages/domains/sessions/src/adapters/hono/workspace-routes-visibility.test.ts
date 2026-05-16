@@ -250,7 +250,15 @@ beforeEach(() => {
 });
 
 describe("workspace sessions list — visibility", () => {
-  it("admin sees every session in the workspace", async () => {
+  it("workspace admin does NOT see other users' sessions — admin role is workspace-management only", async () => {
+    // Post-refactor: workspace admin is for editing agents / members /
+    // settings, not for reading every user's session history. Cross-
+    // user list mode is gated by the *platform* admin guard, wired
+    // from the install-time platformAdmins email list. CAROL is
+    // admin in WS_A but not a platform admin and not the owner of
+    // ALICE_SESSION, so the list should NOT include it. CAROL still
+    // sees her own owned sessions (none in this fixture, so the list
+    // is empty).
     actor = { userId: CAROL, email: "c@x.com" as Email };
     app = build();
     const res = await app.request("/api/workspaces/ws-a/sessions");
@@ -259,8 +267,8 @@ describe("workspace sessions list — visibility", () => {
       sessions: { id: string }[];
     };
     const ids = ss.map((s) => s.id);
-    expect(ids).toContain(ALICE_SESSION);
-    expect(ids).toContain(BOB_SESSION);
+    expect(ids).not.toContain(ALICE_SESSION);
+    expect(ids).not.toContain(BOB_SESSION);
   });
 
   it("owner sees own + sessions explicitly shared with them", async () => {
@@ -309,13 +317,15 @@ describe("workspace session detail — visibility", () => {
     expect(res.status).toBe(200);
   });
 
-  it("workspace admin can GET any session in the workspace", async () => {
+  it("workspace admin does NOT bypass per-session reads — only platform admin does", async () => {
+    // Same rationale as the list-side test above. CAROL is admin in
+    // WS_A but neither the owner nor a sharee on ALICE_SESSION.
     actor = { userId: CAROL, email: "c@x.com" as Email };
     app = build();
     const res = await app.request(
       `/api/workspaces/ws-a/sessions/${ALICE_SESSION}`,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
   });
 
   it("non-owner non-admin non-sharee gets 404", async () => {

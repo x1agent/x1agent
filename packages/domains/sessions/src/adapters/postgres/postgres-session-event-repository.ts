@@ -69,10 +69,23 @@ export class PostgresSessionEventRepository implements SessionEventRepository {
 
   async listBySession(
     sessionId: SessionId,
-    opts: { afterSeq?: number; limit?: number } = {},
+    opts: { afterSeq?: number; beforeSeq?: number; limit?: number } = {},
   ): Promise<readonly SessionEvent[]> {
     const limit = Math.max(1, Math.min(5000, opts.limit ?? 1000));
     const after = opts.afterSeq ?? -1;
+    if (opts.beforeSeq !== undefined) {
+      // "Last N events before X" → DESC + LIMIT, then re-sort ASC so
+      // the caller always sees oldest-first.
+      const rows = await this.sql<Row[]>`
+        SELECT ${this.sql.unsafe(SELECT)} FROM session_events
+        WHERE session_id = ${sessionId}
+          AND seq > ${after}
+          AND seq < ${opts.beforeSeq}
+        ORDER BY seq DESC
+        LIMIT ${limit}
+      `;
+      return rows.map(toEvent).reverse();
+    }
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM session_events
       WHERE session_id = ${sessionId} AND seq > ${after}

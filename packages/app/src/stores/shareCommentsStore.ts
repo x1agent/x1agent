@@ -33,8 +33,19 @@ interface ShareCommentsState {
   /** Cache the share-type so the UI can branch on markdown vs HTML
    *  without re-reading the underlying agent.share event. */
   shareTypeById: Record<string, string>;
+  /** X1A-72.4 — true while we've loaded a capped window and the server
+   * almost certainly has older threads. False once a load returns
+   * fewer threads than the requested page size. */
+  hasOlderByShareId: Record<string, boolean>;
+  /** Mutex on the loadOlder fetch to keep scroll-to-top from fanning
+   *  out. */
+  loadingOlderByShareId: Record<string, boolean>;
 
   load: (key: ShareKey) => Promise<void>;
+  /** Fetch the page of threads strictly older than the oldest thread
+   *  currently in the store. No-op when has-older is false or another
+   *  loadOlder is in flight. */
+  loadOlder: (key: ShareKey) => Promise<void>;
   add: (
     key: ShareKey,
     input: {
@@ -63,11 +74,49 @@ function commentUrl(k: ShareKey, suffix = ""): string {
   return `/api/workspaces/${k.workspaceSlug}/sessions/${k.sessionId}/shares/${k.shareId}/comments${suffix}`;
 }
 
+// X1A-72.4 — initial thread page size. 50 threads covers most active
+// review surfaces; scroll-up loads the preceding window.
+const INITIAL_THREAD_LIMIT = 50;
+
+/**
+ * Earliest thread-head `created_at` across the loaded window. Used as
+ * the cursor for the next page fetch — the server returns threads
+ * whose head `created_at` is strictly less than this value.
+ *
+ * Why thread heads (parent_comment_id = null) and not all comments:
+ * the server orders threads by `min(created_at)` per thread, which is
+ * the head's created_at. Using a reply's created_at as the cursor
+ * would either skip threads (when reply.created_at > head.created_at)
+ * or fail to advance (when seq-style anomalies push a reply earlier).
+ * Heads-only is the only cursor that round-trips cleanly.
+ */
+function earliestHeadCreatedAt(
+  rows: readonly ShareCommentDTO[],
+): string | null {
+  let min: string | null = null;
+  for (const r of rows) {
+    if (r.parent_comment_id !== null) continue;
+    if (min === null || r.created_at < min) min = r.created_at;
+  }
+  return min;
+}
+
+/** Count of distinct thread_ids in the window. Used to decide
+ *  hasOlder: if a fetch returned exactly INITIAL_THREAD_LIMIT
+ *  threads we likely capped, so more probably exists. */
+function distinctThreadCount(rows: readonly ShareCommentDTO[]): number {
+  const seen = new Set<string>();
+  for (const r of rows) seen.add(r.thread_id);
+  return seen.size;
+}
+
 export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
   byShareId: {},
   loading: {},
   errors: {},
   shareTypeById: {},
+  hasOlderByShareId: {},
+  loadingOlderByShareId: {},
 
   async load(key) {
     set((s) => ({
@@ -75,11 +124,18 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
       errors: { ...s.errors, [key.shareId]: null },
     }));
     try {
-      const res = await apiFetch<ShareCommentListResponse>(commentUrl(key));
+      const url =
+        commentUrl(key) + `?thread_limit=${INITIAL_THREAD_LIMIT}`;
+      const res = await apiFetch<ShareCommentListResponse>(url);
       set((s) => ({
         byShareId: { ...s.byShareId, [key.shareId]: res.comments },
         shareTypeById: { ...s.shareTypeById, [key.shareId]: res.share_type },
         loading: { ...s.loading, [key.shareId]: false },
+        hasOlderByShareId: {
+          ...s.hasOlderByShareId,
+          [key.shareId]:
+            distinctThreadCount(res.comments) >= INITIAL_THREAD_LIMIT,
+        },
       }));
     } catch (err) {
       set((s) => ({
@@ -87,6 +143,57 @@ export const useShareCommentsStore = create<ShareCommentsState>((set, get) => ({
         errors: {
           ...s.errors,
           [key.shareId]: (err as Error).message ?? "load_failed",
+        },
+      }));
+    }
+  },
+
+  async loadOlder(key) {
+    const s = get();
+    if (!s.hasOlderByShareId[key.shareId]) return;
+    if (s.loadingOlderByShareId[key.shareId]) return;
+    const existing = s.byShareId[key.shareId] ?? [];
+    const cursor = earliestHeadCreatedAt(existing);
+    if (cursor === null) return;
+    set((prev) => ({
+      loadingOlderByShareId: {
+        ...prev.loadingOlderByShareId,
+        [key.shareId]: true,
+      },
+    }));
+    try {
+      const url =
+        commentUrl(key) +
+        `?thread_limit=${INITIAL_THREAD_LIMIT}` +
+        `&before_thread_first_created_at=${encodeURIComponent(cursor)}`;
+      const res = await apiFetch<ShareCommentListResponse>(url);
+      set((prev) => {
+        const cur = prev.byShareId[key.shareId] ?? [];
+        const seenIds = new Set(cur.map((c) => c.id));
+        const fresh = res.comments.filter((c) => !seenIds.has(c.id));
+        const next = [...fresh, ...cur];
+        return {
+          byShareId: { ...prev.byShareId, [key.shareId]: next },
+          hasOlderByShareId: {
+            ...prev.hasOlderByShareId,
+            [key.shareId]:
+              distinctThreadCount(res.comments) >= INITIAL_THREAD_LIMIT,
+          },
+          loadingOlderByShareId: {
+            ...prev.loadingOlderByShareId,
+            [key.shareId]: false,
+          },
+        };
+      });
+    } catch (err) {
+      set((prev) => ({
+        loadingOlderByShareId: {
+          ...prev.loadingOlderByShareId,
+          [key.shareId]: false,
+        },
+        errors: {
+          ...prev.errors,
+          [key.shareId]: (err as Error).message ?? "load_more_failed",
         },
       }));
     }

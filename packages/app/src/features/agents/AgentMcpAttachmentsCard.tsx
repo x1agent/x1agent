@@ -70,6 +70,10 @@ export function AgentMcpAttachmentsCard({
   const [pickedEntryId, setPickedEntryId] = useState("");
   const [envInputs, setEnvInputs] = useState<Record<string, AttachmentEnvValue>>({});
   const [submitting, setSubmitting] = useState(false);
+  // X1A-86 — MCP picker is hidden until the user types. For workspaces
+  // with many registered MCPs the dropdown was a wall; this surfaces
+  // only matching rows as the operator searches.
+  const [search, setSearch] = useState("");
   const { confirm, dialog } = useConfirm();
 
   const pickedEntry = useMemo(
@@ -224,6 +228,20 @@ export function AgentMcpAttachmentsCard({
   const unattached = catalog.filter(
     (c) => !attachments.some((a) => a.catalog_entry_id === c.id),
   );
+
+  // Fuzzy match (case-insensitive substring) against catalog name AND
+  // display_name. Empty query returns an empty list so the picker
+  // stays hidden until the user types.
+  const matchingMcps = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return unattached.filter((c) => {
+      if (c.name.toLowerCase().includes(q)) return true;
+      if (c.display_name && c.display_name.toLowerCase().includes(q))
+        return true;
+      return false;
+    });
+  }, [unattached, search]);
   // Whether `remote_oauth` MCPs are attachable to non-worker agents
   // is now a server-side decision driven by the workspace's
   // `oauthMcpsOnOrchestrators` setting. We don't replicate the
@@ -366,34 +384,92 @@ export function AgentMcpAttachmentsCard({
             // save instead of the per-attachment PUT.
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="mcp-pick">MCP server</Label>
-                <Select value={pickedEntryId} onValueChange={setPickedEntryId}>
-                  <SelectTrigger id="mcp-pick">
-                    <SelectValue placeholder="Pick a registered MCP" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {unattached.map((c) => {
+                <Label htmlFor="mcp-search">MCP server</Label>
+                <Input
+                  id="mcp-search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={`Type to find an MCP (${unattached.length} registered)…`}
+                  autoComplete="off"
+                />
+                {search.trim() === "" && !pickedEntry && (
+                  <p className="text-xs text-fg-faint">
+                    Start typing to reveal matching MCPs. The picker is
+                    hidden by default to keep the page tidy when many
+                    servers are registered.
+                  </p>
+                )}
+                {search.trim() !== "" && matchingMcps.length === 0 && (
+                  <p className="text-xs text-fg-faint">
+                    No MCPs match "{search.trim()}".
+                  </p>
+                )}
+                {matchingMcps.length > 0 && (
+                  <ul className="divide-y divide-border-soft rounded-md border border-border-soft">
+                    {matchingMcps.slice(0, 10).map((c) => {
                       const reason = incompatibleReason(c);
+                      const selected = c.id === pickedEntryId;
                       return (
-                        <SelectItem key={c.id} value={c.id} disabled={!!reason}>
-                          {c.display_name ?? c.name}{" "}
-                          <span className="text-fg-faint">({c.name})</span>
-                          {reason && (
-                            <span className="ml-2 text-amber-400 text-xs">
-                              — {reason}
-                            </span>
-                          )}
-                        </SelectItem>
+                        <li
+                          key={c.id}
+                          className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-fg">
+                              {c.display_name ?? c.name}
+                              <span className="ml-1 text-fg-faint">
+                                ({c.name})
+                              </span>
+                            </div>
+                            {reason && (
+                              <div className="text-xs text-amber-400">
+                                {reason}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={selected ? "secondary" : "outline"}
+                            disabled={!!reason}
+                            onClick={() => {
+                              setPickedEntryId(c.id);
+                              setSearch("");
+                            }}
+                          >
+                            {selected ? "Picked" : "Pick"}
+                          </Button>
+                        </li>
                       );
                     })}
-                  </SelectContent>
-                </Select>
+                  </ul>
+                )}
                 {pickableCatalog.length === 0 && (
                   <p className="text-xs text-fg-muted">
                     No MCPs left to attach — register one in workspace
                     settings → MCP servers, or detach an existing
                     attachment to free up a slot.
                   </p>
+                )}
+                {pickedEntry && (
+                  <div className="mt-2 flex items-center justify-between rounded-md border border-border-strong bg-bg-elevated px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-fg">
+                        {pickedEntry.display_name ?? pickedEntry.name}
+                      </div>
+                      <div className="text-xs text-fg-faint">
+                        ({pickedEntry.name})
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPickedEntryId("")}
+                    >
+                      Clear
+                    </Button>
+                  </div>
                 )}
               </div>
 

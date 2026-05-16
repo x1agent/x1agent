@@ -279,6 +279,136 @@ describe("EventStream — platform wake pills", () => {
   });
 });
 
+describe("EventStream — sticky-bottom scroll behavior", () => {
+  /**
+   * happy-dom doesn't lay out, so scrollHeight / clientHeight / scrollTop
+   * default to 0. We have to forge them on the scroll container before
+   * dispatching a scroll event to exercise the "user is scrolled up"
+   * branch.
+   */
+  function forgeScroll(
+    el: HTMLElement,
+    metrics: { scrollHeight: number; scrollTop: number; clientHeight: number },
+  ) {
+    Object.defineProperty(el, "scrollHeight", {
+      value: metrics.scrollHeight,
+      configurable: true,
+    });
+    Object.defineProperty(el, "scrollTop", {
+      value: metrics.scrollTop,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      value: metrics.clientHeight,
+      configurable: true,
+    });
+  }
+
+  it("does not render the Jump-to-latest button on initial mount (user is at bottom)", () => {
+    const { queryByTestId } = render(
+      <EventStream
+        events={mixedEvents()}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    expect(queryByTestId("scroll-to-latest")).toBeNull();
+  });
+
+  it("shows the Jump-to-latest button once the user scrolls up", () => {
+    const { queryByTestId } = render(
+      <EventStream
+        events={mixedEvents()}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    const scrollEl = queryByTestId("event-stream-compact") as HTMLElement;
+    expect(scrollEl).not.toBeNull();
+    // 5000 - 100 - 500 = 4400 > 120 → "scrolled up"
+    forgeScroll(scrollEl, {
+      scrollHeight: 5000,
+      scrollTop: 100,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scrollEl);
+    expect(queryByTestId("scroll-to-latest")).not.toBeNull();
+  });
+
+  it("clicking Jump-to-latest hides the button and snaps back to bottom", () => {
+    const { queryByTestId } = render(
+      <EventStream
+        events={mixedEvents()}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    const scrollEl = queryByTestId("event-stream-compact") as HTMLElement;
+    forgeScroll(scrollEl, {
+      scrollHeight: 5000,
+      scrollTop: 100,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scrollEl);
+    const btn = queryByTestId("scroll-to-latest");
+    if (!btn) throw new Error("expected Jump-to-latest button");
+    fireEvent.click(btn);
+    // The click sets stick=true and atBottom=true synchronously; the
+    // button must unmount as a result.
+    expect(queryByTestId("scroll-to-latest")).toBeNull();
+  });
+
+  it("does not auto-scroll the container when new events arrive while the user is scrolled up", () => {
+    const initial = mixedEvents();
+    const { queryByTestId, rerender } = render(
+      <EventStream
+        events={initial}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    const scrollEl = queryByTestId("event-stream-compact") as HTMLElement;
+    // Pin the user to the top of a long timeline.
+    forgeScroll(scrollEl, {
+      scrollHeight: 5000,
+      scrollTop: 100,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scrollEl);
+    expect(scrollEl.scrollTop).toBe(100);
+
+    // A new event lands.
+    const extra: SessionEventDTO[] = [
+      ...initial,
+      {
+        id: "11",
+        session_id: "s1",
+        seq: 11,
+        type: "agent.text",
+        payload: { text: "later message" },
+        timestamp: "2026-01-01T00:00:10Z",
+      },
+    ];
+    rerender(
+      <EventStream
+        events={extra}
+        verbose={false}
+        workspaceSlug="ws"
+        sessionId="s1"
+      />,
+    );
+    // scrollTop must NOT have been moved to scrollHeight — that was the
+    // bug. The Jump-to-latest button stays visible so the user can opt in.
+    expect(scrollEl.scrollTop).toBe(100);
+    expect(queryByTestId("scroll-to-latest")).not.toBeNull();
+  });
+});
+
 describe("EventStream — verbose mode", () => {
   it("renders the full event stream including internal tool calls and results", () => {
     const events = mixedEvents();

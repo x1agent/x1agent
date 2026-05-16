@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isTouchTablet } from "../lib/device";
 
 /**
  * Volumetric nebula shader — ported 1:1 from the marketing site's
@@ -30,9 +31,15 @@ uniform vec3  uHue;
 uniform float uIntensity;
 uniform float uIsDark;
 
+// IQ-style sinless hash. The legacy fract(sin(dot(...)) * c) version
+// works but sin() is one of the slowest ops on Apple GPUs — and the
+// fbm chain below calls hash 16× per pixel. Bit-mixing via fract +
+// dot + add is visually equivalent for noise patterns and roughly
+// an order of magnitude cheaper.
 float hash(vec2 p) {
-  p = fract(p * vec2(127.1, 311.7));
-  return fract(sin(dot(p, p + 17.13)) * 43758.5453);
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
 }
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -75,7 +82,13 @@ void main() {
   float density = n1 * 0.55 + n2 * 0.30 + n3 * 0.15;
   density = pow(clamp(density, 0.0, 1.0), 1.35);
 
-  float colorField = fbm(uvNoise * 0.9 + vec2(scroll * 0.2, 0.0));
+  // Re-use n1 as the colour field driver instead of a separate fbm
+  // pass. n1 is sampled at scale 1.4 vs the original colorField's 0.9
+  // — slightly higher frequency, but the smoothstep windows below
+  // soften that and the visible tint distribution stays in the same
+  // neighbourhood. Saves one entire fbm chain (4 noise / 16 hash
+  // calls per pixel).
+  float colorField = n1;
   vec3 tint = mix(uTintBlue, uTintPurple, smoothstep(0.25, 0.55, colorField));
   tint      = mix(tint,      uTintPeach,  smoothstep(0.50, 0.75, colorField + n1 * 0.2));
   tint      = mix(tint,      uTintPink,   smoothstep(0.70, 0.95, n2));
@@ -84,15 +97,21 @@ void main() {
 
   vec3 gas = tint * density * 2.6;
 
+  // Branch-free starfield. The old "if (starSeed > 0.985)" form
+  // looked like an early-out but mobile GPUs run both branches of a
+  // divergent warp; the conditional just adds warp-coherence cost
+  // with no actual skip of the length() / smoothstep work. Express
+  // it as a step() multiplier so every lane runs the same path.
   vec2 starUv = uvNoise * 220.0 + vec2(scroll * 8.0, t * 0.5);
   vec2 starCell = floor(starUv);
   vec2 starF = fract(starUv) - 0.5;
   float starSeed = hash(starCell);
-  float star = 0.0;
-  if (starSeed > 0.985) {
-    float dist = length(starF);
-    star = smoothstep(0.10, 0.0, dist) * (starSeed - 0.985) * 60.0;
-  }
+  float starGate = step(0.985, starSeed);
+  float starDist = length(starF);
+  float star =
+    starGate *
+    smoothstep(0.10, 0.0, starDist) *
+    (starSeed - 0.985) * 60.0;
 
   float hot = smoothstep(0.55, 1.0, density);
   vec3 col = gas + uHue * hot * 0.18;
@@ -242,15 +261,42 @@ export function RailCanvas() {
     let theme = readTheme();
     let visible = true;
     let raf = 0;
+    let driftTimeout: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+    // True while a drift tween's rAF chain is running. Theme/resize
+    // handlers must NOT cancel that rAF; doing so leaves the drift
+    // cycle un-armed and it dies until the next visibility toggle.
+    // Instead they let the next tween frame pick up the new state —
+    // `theme` and `canvas.width/height` are read inside drawOnce()
+    // every frame, so the next tick reflects the change for free.
+    let tweenActive = false;
     const start = performance.now();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Touch tablets (iPad / Android tablet) drop the continuous 60fps
+    // shader loop — it pegged the GPU and tanked scroll latency. They
+    // instead get the "drift" path: every 2–5s pick a new mouse
+    // target + a small forward step in noise-time, ease into it over
+    // ~1.2s, then idle. The page still feels alive but the GPU is
+    // quiet between transitions. `prefers-reduced-motion` opts in
+    // too. `staticMode` here means "no realtime animation" — drift
+    // is allowed, per-frame redraws aren't.
+    const staticMode = reduced || isTouchTablet();
+    // Mouse + time uniforms when in drift mode. mouseX/Y interpolate
+    // toward the random target during a tween burst; timeOffset is
+    // the value handed to uTime so the noise field shifts a little
+    // per tick instead of advancing every frame.
+    let timeOffset = 0;
 
     let scrollY = window.scrollY || 0;
     const onScroll = () => {
       scrollY = window.scrollY || 0;
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    if (!staticMode) {
+      // In staticMode the canvas is drawn once and re-drawn only on
+      // theme/resize/visibility; tracking scroll position would just
+      // burn cycles for a value the next draw won't use.
+      window.addEventListener("scroll", onScroll, { passive: true });
+    }
 
     let mouseTargetX = 0;
     let mouseTargetY = 0;
@@ -263,7 +309,7 @@ export function RailCanvas() {
       mouseTargetX = (x - 0.5) * 2;
       mouseTargetY = (y - 0.5) * 2;
     };
-    if (!reduced) {
+    if (!staticMode) {
       window.addEventListener("mousemove", onMouseMove, { passive: true });
     }
 
@@ -280,43 +326,142 @@ export function RailCanvas() {
       }
     }
 
+    function drawOnce() {
+      if (cancelled) return;
+      if (!visible) return;
+      const docH = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const progress = Math.max(0, Math.min(1, scrollY / docH));
+
+      if (!staticMode) {
+        mouseX += (mouseTargetX - mouseX) * 0.05;
+        mouseY += (mouseTargetY - mouseY) * 0.05;
+      }
+
+      resize();
+      gl!.viewport(0, 0, canvas!.width, canvas!.height);
+      if (theme.isDark) gl!.clearColor(0.024, 0.02, 0.016, 1.0);
+      else gl!.clearColor(0.925, 0.898, 0.839, 1.0);
+      gl!.clear(gl!.COLOR_BUFFER_BIT);
+      gl!.useProgram(prog);
+      gl!.uniform2f(uRes, canvas!.width, canvas!.height);
+      gl!.uniform1f(uTime, staticMode ? timeOffset : (performance.now() - start) / 1000);
+      gl!.uniform1f(uScroll, progress * 4.5);
+      gl!.uniform2f(uMouse, mouseX, mouseY);
+      gl!.uniform3f(uBlue, theme.blue[0], theme.blue[1], theme.blue[2]);
+      gl!.uniform3f(uPurple, theme.purple[0], theme.purple[1], theme.purple[2]);
+      gl!.uniform3f(uPeach, theme.peach[0], theme.peach[1], theme.peach[2]);
+      gl!.uniform3f(uPink, theme.pink[0], theme.pink[1], theme.pink[2]);
+      gl!.uniform3f(uHue, theme.hue[0], theme.hue[1], theme.hue[2]);
+      gl!.uniform1f(uIntensity, theme.intensity);
+      gl!.uniform1f(uIsDark, theme.isDark);
+      gl!.drawArrays(gl!.TRIANGLES, 0, 6);
+    }
+
     function frame() {
       if (cancelled) return;
-      if (visible) {
-        const docH = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-        const progress = Math.max(0, Math.min(1, scrollY / docH));
-
-        if (!reduced) {
-          mouseX += (mouseTargetX - mouseX) * 0.05;
-          mouseY += (mouseTargetY - mouseY) * 0.05;
-        }
-
-        resize();
-        gl!.viewport(0, 0, canvas!.width, canvas!.height);
-        if (theme.isDark) gl!.clearColor(0.024, 0.02, 0.016, 1.0);
-        else gl!.clearColor(0.925, 0.898, 0.839, 1.0);
-        gl!.clear(gl!.COLOR_BUFFER_BIT);
-        gl!.useProgram(prog);
-        gl!.uniform2f(uRes, canvas!.width, canvas!.height);
-        gl!.uniform1f(uTime, reduced ? 0 : (performance.now() - start) / 1000);
-        gl!.uniform1f(uScroll, progress * 4.5);
-        gl!.uniform2f(uMouse, mouseX, mouseY);
-        gl!.uniform3f(uBlue, theme.blue[0], theme.blue[1], theme.blue[2]);
-        gl!.uniform3f(uPurple, theme.purple[0], theme.purple[1], theme.purple[2]);
-        gl!.uniform3f(uPeach, theme.peach[0], theme.peach[1], theme.peach[2]);
-        gl!.uniform3f(uPink, theme.pink[0], theme.pink[1], theme.pink[2]);
-        gl!.uniform3f(uHue, theme.hue[0], theme.hue[1], theme.hue[2]);
-        gl!.uniform1f(uIntensity, theme.intensity);
-        gl!.uniform1f(uIsDark, theme.isDark);
-        gl!.drawArrays(gl!.TRIANGLES, 0, 6);
-      }
+      drawOnce();
       raf = requestAnimationFrame(frame);
+    }
+
+    // Schedule a redraw on demand — used by resize / theme / visibility
+    // transitions in staticMode so the canvas still reflects current
+    // state without spinning the GPU between events.
+    //
+    // Skips when a drift tween is in flight: cancelling its rAF would
+    // strand the cycle (the next tick never runs, scheduleDrift never
+    // re-arms). The tween itself calls drawOnce() on each frame and
+    // reads theme/canvas-size from the surrounding closure, so the
+    // new state takes effect on the tween's next frame for free.
+    function scheduleRedraw() {
+      if (cancelled) return;
+      if (tweenActive) return;
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        drawOnce();
+      });
+    }
+
+    // Drift cycle — staticMode only. Every 2–5s, pick a new mouse
+    // target somewhere across the canvas and step `timeOffset`
+    // forward a little. Ease from the current values to the new
+    // ones over TWEEN_MS using smoothstep so the transition reads
+    // as "slowly settling," not as a snap. Stop the rAF burst as
+    // soon as the tween completes; schedule the next pick with a
+    // randomised delay so the rhythm isn't a metronome.
+    const TWEEN_MS = 1200;
+    const MIN_DELAY_MS = 2000;
+    const MAX_DELAY_MS = 5000;
+    function smoothstep(t: number): number {
+      return t * t * (3 - 2 * t);
+    }
+    function driftTick() {
+      if (cancelled) return;
+      if (!visible) {
+        // Pause the cycle while the canvas is off-screen; the
+        // intersection observer kicks it back when we reappear.
+        raf = 0;
+        tweenActive = false;
+        return;
+      }
+      const fromX = mouseX;
+      const fromY = mouseY;
+      const toX = mouseTargetX;
+      const toY = mouseTargetY;
+      const fromTime = timeOffset;
+      const toTime = timeOffset + 1.5;
+      const tweenStart = performance.now();
+      tweenActive = true;
+      function tick() {
+        if (cancelled) return;
+        if (!visible) {
+          raf = 0;
+          tweenActive = false;
+          return;
+        }
+        const t = Math.min(1, (performance.now() - tweenStart) / TWEEN_MS);
+        const k = smoothstep(t);
+        mouseX = fromX + (toX - fromX) * k;
+        mouseY = fromY + (toY - fromY) * k;
+        timeOffset = fromTime + (toTime - fromTime) * k;
+        drawOnce();
+        if (t < 1) {
+          raf = requestAnimationFrame(tick);
+        } else {
+          raf = 0;
+          tweenActive = false;
+          scheduleDrift();
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    function scheduleDrift() {
+      if (cancelled) return;
+      if (driftTimeout) clearTimeout(driftTimeout);
+      const delay =
+        MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS);
+      driftTimeout = setTimeout(() => {
+        driftTimeout = null;
+        if (cancelled || !visible) return;
+        // Pick a fresh wander target. Range slightly narrower than
+        // [-1, 1] so the focal point doesn't always sit on the edges.
+        mouseTargetX = (Math.random() - 0.5) * 1.6;
+        mouseTargetY = (Math.random() - 0.5) * 1.6;
+        driftTick();
+      }, delay);
     }
 
     const io = new IntersectionObserver(
       (entries) =>
         entries.forEach((e) => {
+          const becameVisible = !visible && e.isIntersecting;
           visible = e.isIntersecting;
+          if (staticMode && becameVisible) {
+            // Re-draw immediately to reflect the current state and
+            // restart the drift cycle that paused while off-screen.
+            scheduleRedraw();
+            scheduleDrift();
+          }
         }),
       { threshold: 0 },
     );
@@ -324,20 +469,34 @@ export function RailCanvas() {
 
     const mo = new MutationObserver(() => {
       theme = readTheme();
+      if (staticMode) scheduleRedraw();
     });
     mo.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-theme"],
     });
 
-    wrap.dataset.shader = "on";
-    raf = requestAnimationFrame(frame);
+    // Resize → redraw in staticMode (the rAF loop covers it otherwise).
+    const onResize = () => {
+      if (staticMode) scheduleRedraw();
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+
+    wrap.dataset.shader = staticMode ? "drift" : "on";
+    if (staticMode) {
+      scheduleRedraw();
+      scheduleDrift();
+    } else {
+      raf = requestAnimationFrame(frame);
+    }
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(raf);
+      if (raf) cancelAnimationFrame(raf);
+      if (driftTimeout) clearTimeout(driftTimeout);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("resize", onResize);
       io.disconnect();
       mo.disconnect();
       gl.deleteProgram(prog);

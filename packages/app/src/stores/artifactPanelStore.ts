@@ -47,6 +47,7 @@ interface ArtifactPanelState {
   maximize: () => void;
   restore: () => void;
   toggleCommentsCollapsed: () => void;
+  setCommentsCollapsed: (collapsed: boolean) => void;
 }
 
 // Sync the artifact-panel's open share + view-mode into the URL as
@@ -119,4 +120,5 @@ export const useArtifactPanelStore = create<ArtifactPanelState>((set, get) => ({
   },
   toggleCommentsCollapsed: () =>
     set((s) => ({ commentsCollapsed: !s.commentsCollapsed })),
+  setCommentsCollapsed: (collapsed) => set({ commentsCollapsed: collapsed }),
 }));
