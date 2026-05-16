@@ -82,9 +82,9 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       expect(ws.persistentVolumeClaim!.claimName).toMatch(/^x1-session-/);
     });
 
-    it("requests 512Mi / 50m — mostly idle, burstable to limit when active", () => {
+    it("requests 768Mi / 50m — observed peaks at ~650Mi, CPU idle at ~15m", () => {
       const agent = pod.containers!.find((c) => c.name === "agent")!;
-      expect(agent.resources!.requests).toEqual({ memory: "512Mi", cpu: "50m" });
+      expect(agent.resources!.requests).toEqual({ memory: "768Mi", cpu: "50m" });
       expect(agent.resources!.limits).toEqual({ memory: "2Gi", cpu: "1" });
     });
   });

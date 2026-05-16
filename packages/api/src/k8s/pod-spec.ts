@@ -374,7 +374,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     : { name: "workspace", emptyDir: {} };
   const agentResources = isOrchestrator
     ? {
-        requests: { memory: "512Mi", cpu: "50m" },
+        requests: { memory: "768Mi", cpu: "50m" },
         limits: { memory: "2Gi", cpu: "1" },
       }
     : {
@@ -535,7 +535,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 },
               ],
               resources: {
-                requests: { memory: "128Mi", cpu: "100m" },
+                requests: { memory: "32Mi", cpu: "25m" },
                 limits: { memory: "256Mi", cpu: "250m" },
               },
               readinessProbe: {
