@@ -56,7 +56,8 @@ CREATE TABLE workspace_access_grants (
 -- email whose domain isn't allow-listed. Two access paths:
 --   * exact (workspace_id, kind='email', value=<lower(email)>)
 --   * domain match (kind='domain', value=<email domain>)
--- One composite + one partial index covers both without a seqscan.
+-- Index covers (kind, value); the expires_at filter stays in the
+-- query (partial-index predicates require IMMUTABLE functions and
+-- now() is STABLE, so an expires-aware partial index isn't possible).
 CREATE INDEX workspace_access_grants_lookup_idx
-  ON workspace_access_grants (kind, value)
-  WHERE expires_at IS NULL OR expires_at > now();
+  ON workspace_access_grants (kind, value);
