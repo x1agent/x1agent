@@ -1,3 +1,27 @@
+# [1.35.0](https://github.com/x1agent/x1agent/compare/v1.34.1...v1.35.0) (2026-05-17)
+
+
+### Bug Fixes
+
+* **agent-prompt:** worker drops share guidance; orchestrator gets update-mode ([1bd1f98](https://github.com/x1agent/x1agent/commit/1bd1f986f7e60d25a94322ef22a1cb6629f17a90))
+* **app:** iOS keyboard leaves no stuck gap below the composer (dvh) ([e62dae5](https://github.com/x1agent/x1agent/commit/e62dae5184c8a321328d86560f41fdc44b2e10b4))
+* **app:** keep agent image binding visible while the image is rebuilding ([1cf5fcc](https://github.com/x1agent/x1agent/commit/1cf5fccb06869b3a2af2d6145727b86fe1b98c01))
+* **chart:** allow CN=session-sidecar to publish x1.session.*.input ([d4e7d99](https://github.com/x1agent/x1agent/commit/d4e7d9900e67ddac85fff6aff395f54c13ce354b))
+
+
+### Features
+
+* **agent:** pull_from_child MCP tool + orchestrator/worker prompt split ([9dcf90c](https://github.com/x1agent/x1agent/commit/9dcf90c13e6953a0d3684b3013bb0073f16780df))
+* **api:** pull_from_child — orchestrator pulls a worker's /workspace ([4b9c7a4](https://github.com/x1agent/x1agent/commit/4b9c7a49dedd1f776f9975957610a0118bb7321a))
+* **sidecar:** pull_from_child handler — relay to api with parent stamp ([bb1be5c](https://github.com/x1agent/x1agent/commit/bb1be5c1a7103eecea761c074357ddb7e44d7690))
+
+
+### Performance Improvements
+
+* **app:** drop JS scrollHeight autosize for pure-CSS grid auto-grow ([94b3cb3](https://github.com/x1agent/x1agent/commit/94b3cb334c9ad9500bf3ac0d89cebfac5774008e))
+* **app:** per-session selectors + memo EventCard + content-visibility rows ([4069e68](https://github.com/x1agent/x1agent/commit/4069e680c30e7559ed7d39312fa630b540a1e60c))
+* **app:** stable callbacks + memo TurnComposer so WS events don't tear down the composer ([3a1bb87](https://github.com/x1agent/x1agent/commit/3a1bb879a2f2f0da0a203fea0e62633b1d5d2bb1))
+
 ## [1.34.1](https://github.com/x1agent/x1agent/compare/v1.34.0...v1.34.1) (2026-05-16)
 
 
