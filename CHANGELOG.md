@@ -1,3 +1,10 @@
+# [1.37.0](https://github.com/x1agent/x1agent/compare/v1.36.1...v1.37.0) (2026-05-17)
+
+
+### Features
+
+* **agents:** per-agent collaborate grants + open-by-default Permissions tab ([#143](https://github.com/x1agent/x1agent/issues/143)) ([b4de510](https://github.com/x1agent/x1agent/commit/b4de510ebdf87c0fe75737e04dc3f8962ae2e9d5)), closes [#142](https://github.com/x1agent/x1agent/issues/142)
+
 ## [1.36.1](https://github.com/x1agent/x1agent/compare/v1.36.0...v1.36.1) (2026-05-17)
 
 
