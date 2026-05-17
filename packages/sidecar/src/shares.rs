@@ -578,10 +578,8 @@ async fn read_from_gcs(
             message: None,
         },
     ))?;
-    let object_name = format!(
-        "sessions/{}/shares/{}/{}",
-        session_id, share_id, file_path
-    );
+    let _ = session_id;
+    let object_name = format!("shares/{}/{}", share_id, file_path);
     let url = format!(
         "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
         bucket,
@@ -668,16 +666,19 @@ async fn read_from_api(
     Ok((status, body))
 }
 
-/// Upload every file to a GCS bucket under
-/// `sessions/{session_id}/shares/{share_id}/{rel_path}`, using an
-/// access token minted from the pod's service account via the GCE
-/// metadata server.
+/// Upload every file to a GCS bucket under `shares/{share_id}/{rel_path}`,
+/// using an access token minted from the pod's service account via the
+/// GCE metadata server. The object key is intentionally flat (no
+/// session id) so a resumed session that re-shares with the same
+/// share_id overwrites in place rather than forking a parallel object
+/// tree under a different session.
 async fn upload_to_gcs(
     bucket: &str,
     session_id: &str,
     share_id: &str,
     files: &[(String, Vec<u8>, ShareFileEntry)],
 ) -> bool {
+    let _ = session_id;
     let token = match get_gce_token().await {
         Some(t) => t,
         None => {
@@ -688,7 +689,7 @@ async fn upload_to_gcs(
 
     let client = reqwest::Client::new();
     for (rel_path, content, entry) in files {
-        let object_name = format!("sessions/{}/shares/{}/{}", session_id, share_id, rel_path);
+        let object_name = format!("shares/{}/{}", share_id, rel_path);
         let url = format!(
             "https://storage.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}",
             bucket,
