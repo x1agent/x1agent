@@ -32,4 +32,12 @@ export interface UserRepository {
    * authenticated session matches the userId before calling this port.
    */
   setGitIdentity(userId: UserId, identity: GitIdentity | null): Promise<void>;
+
+  /**
+   * IANA timezone (e.g. "America/New_York") used to localize every
+   * UTC timestamp the user sees in the UI. Pass `null` to clear —
+   * the UI then falls back to UTC formatting. The api validates the
+   * value against `Intl.supportedValuesOf("timeZone")` before calling.
+   */
+  setTimezone(userId: UserId, timezone: string | null): Promise<void>;
 }
