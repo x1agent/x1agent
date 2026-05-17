@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { X } from "lucide-react";
 import { ComposerShell } from "./ComposerShell";
 import {
@@ -33,7 +33,11 @@ interface Props {
  * NewSessionComposer; left slot shows a thin status label rather than
  * an agent picker since the agent is already chosen by this point.
  */
-export function TurnComposer({
+// memo so a SessionRoot re-render (which fires on every WS event on a
+// busy orchestrator) doesn't tear down the composer's local text +
+// upload state. SessionRoot's callback props are wrapped in
+// useCallback so the shallow-equality check actually succeeds.
+function TurnComposerInner({
   onSend,
   disabled,
   placeholder,
@@ -103,6 +107,8 @@ export function TurnComposer({
     />
   );
 }
+
+export const TurnComposer = memo(TurnComposerInner);
 
 /**
  * In-prompt attachment pill. Matches the existing SharePill visual

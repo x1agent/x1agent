@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   openBridge,
   type BridgeHandle,
@@ -105,7 +105,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     }
   };
 
-  const onPause = async () => {
+  // Stable across renders so TurnComposer (memo'd) doesn't tear down +
+  // remount on every SessionRoot re-render — was the second iPad
+  // typing lag source after WS events flooded SessionRoot updates.
+  const onPause = useCallback(async () => {
     if (!agent) return;
     try {
       const cancelled = await cancelAction(workspaceSlug, agent.id, sessionId);
@@ -117,7 +120,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     } catch (err) {
       setError(sessionId, (err as Error).message);
     }
-  };
+  }, [agent, cancelAction, workspaceSlug, sessionId, setSession, setError]);
 
   // `session`, `agent`, `parent`, `events`, `error` are subscribed
   // above via per-session selectors so we re-render only when THIS
@@ -345,7 +348,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // entries.
   const USER_INPUT_TTL_MS = 2 * 60 * 1000;
 
-  const sendMessage = async (text: string, requestId?: string) => {
+  const sendMessage = useCallback(async (text: string, requestId?: string) => {
     const bridge = bridgeRef.current;
     if (!bridge) return;
     const basePayload: Record<string, unknown> = { text };
@@ -388,7 +391,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         `failed to publish user input: ${(err as Error).message}`,
       );
     }
-  };
+  }, [sessionId]);
 
   // Auto-send a pending prompt once the agent is actually up. We wait
   // for the `session.started` event rather than the session row's
