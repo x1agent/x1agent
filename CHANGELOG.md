@@ -1,3 +1,19 @@
+# [1.36.0](https://github.com/x1agent/x1agent/compare/v1.35.1...v1.36.0) (2026-05-17)
+
+
+### Bug Fixes
+
+* **api:** orchestration — tighter watchdog backoff + no-hang pullFromChild ([d2b2714](https://github.com/x1agent/x1agent/commit/d2b2714997158167740c08d71bb5aa7c27740c61))
+* **app:** align summarizer-model URL with backend route ([d6a9f4b](https://github.com/x1agent/x1agent/commit/d6a9f4b988d9c35a7e23f69329277575117400ed))
+* **auth:** re-resolve platform-admin flag on /me + account switch ([fccdca5](https://github.com/x1agent/x1agent/commit/fccdca5fa4052787df6076be99270a0946b12609))
+
+
+### Features
+
+* **api:** admin/anthropic/summary-model endpoints + summarizer wire-up ([35fd493](https://github.com/x1agent/x1agent/commit/35fd4932e0d30b00910f674d1f1262f1fa5c5a68))
+* **app:** Model Settings — tabbed page replaces standalone Claude models ([8c9e78a](https://github.com/x1agent/x1agent/commit/8c9e78aa7b66bded52a21ead37ed6a95549a24df))
+* **sessions:** per-call modelResolver on Anthropic summarizers ([82dd6a7](https://github.com/x1agent/x1agent/commit/82dd6a745569241c576a256192996703dc48c809))
+
 ## [1.35.1](https://github.com/x1agent/x1agent/compare/v1.35.0...v1.35.1) (2026-05-17)
 
 
