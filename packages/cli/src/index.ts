@@ -53,8 +53,9 @@ async function main() {
       const action = (subcommand === "install"
         ? "up"
         : subcommand.split(":")[1]) as InstallAction;
+      const autoConfirm = process.argv.slice(3).includes("--yes");
       try {
-        const ok = await runInstall(action);
+        const ok = await runInstall(action, { autoConfirm });
         process.exit(ok ? 0 : 1);
       } catch (err) {
         log.error((err as Error).message);

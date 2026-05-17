@@ -231,6 +231,10 @@ spec:
             - name: IMAGE_BUILD_SERVICE_ACCOUNT
               value: "x1agent-preview-build"
             {{- end }}
+            {{- if .Values.shares.gcsBucket }}
+            - name: GCS_ARTIFACTS_BUCKET
+              value: {{ .Values.shares.gcsBucket | quote }}
+            {{- end }}
             # Anthropic credential source. The api forwards these env
             # vars onto every spawned session Job so the agent runtime's
             # SDK uses the right path.

@@ -22,12 +22,14 @@ import {
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
 import {
+  downloadShareFromGcs,
   getMimeType,
   readShareFile,
   readStagingFile,
   writeShareFiles,
   writeStagingFiles,
 } from "../shares/storage.js";
+import { resumeChainSessionIds } from "../shares/resume-chain.js";
 import { StringCodec, JSONCodec } from "nats";
 import type { KubeConfig } from "@kubernetes/client-node";
 import { pullFromChild } from "../k8s/pull-from-child.js";
@@ -159,6 +161,14 @@ export interface InternalRoutesConfig {
       }
     >;
   };
+  /**
+   * GCS bucket for share content. When set, the api re-uploads share
+   * bytes from the local-dev fallback path (sidecar without GCS env)
+   * straight to GCS, so legacy session pods still produce durable
+   * shares. Empty = local-disk fallback (`/tmp/x1-shares`), wiped on
+   * every api restart.
+   */
+  gcsArtifactsBucket?: string;
 }
 
 /**
@@ -566,15 +576,28 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       `;
       const existingOwner = rows[0]?.session_id;
       if (existingOwner && existingOwner !== sessionId) {
-        return c.json(
-          { error: "share_id_owned_by_other_session" },
-          403,
-        );
+        const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+        if (!chain.includes(existingOwner)) {
+          return c.json(
+            { error: "share_id_owned_by_other_session" },
+            403,
+          );
+        }
       }
     }
 
-    const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
-    return c.json({ ok: true, total_size: totalSize });
+    try {
+      const totalSize = await writeShareFiles(body.share_id, body.files, {
+        gcsArtifactsBucket: cfg.gcsArtifactsBucket,
+      });
+      return c.json({ ok: true, total_size: totalSize });
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "share_write_failed";
+      console.warn(
+        `[shares] write failed share=${body.share_id.slice(0, 8)} session=${(sessionId as unknown as string).slice(0, 8)} code=${code}: ${(err as Error).message}`,
+      );
+      return c.json({ error: code, message: (err as Error).message }, 502);
+    }
   });
 
   // Read a share's content back to its producing session (X1A-32).
@@ -611,8 +634,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
 
     if (!sharedHere) {
       // Disambiguate "exists in another session" (403) from "doesn't
-      // exist anywhere" (404) when sql is wired, so the sidecar can
-      // surface a useful error to the agent.
+      // exist anywhere" (404) when sql is wired. A resumed session
+      // legitimately needs to read shares its ancestor created, so we
+      // walk the chain before 403-ing.
       if (cfg.sql) {
         const rows = await cfg.sql<{ session_id: string }[]>`
           SELECT session_id
@@ -621,15 +645,31 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
             AND (payload->>'share_id') = ${shareId}
           LIMIT 1
         `;
-        if (rows.length > 0) {
-          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        const owner = rows[0]?.session_id;
+        if (owner) {
+          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+          if (!chain.includes(owner)) {
+            return c.json({ error: "cross_session_read_forbidden" }, 403);
+          }
+          // Owner is an ancestor — allow the read to fall through.
+        } else {
+          return c.json({ error: "share_not_found" }, 404);
         }
+      } else {
+        return c.json({ error: "share_not_found" }, 404);
       }
-      return c.json({ error: "share_not_found" }, 404);
     }
 
     const filePath = requestedPath || "index.html";
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    let bytes: Buffer | null;
+    try {
+      bytes = cfg.gcsArtifactsBucket
+        ? await downloadShareFromGcs(cfg.gcsArtifactsBucket, shareId, filePath)
+        : readShareFile(shareId, filePath);
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "share_read_failed";
+      return c.json({ error: code, message: (err as Error).message }, 502);
+    }
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,

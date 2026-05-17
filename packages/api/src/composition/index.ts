@@ -946,6 +946,10 @@ export function compose(env: CompositionEnv): Composition {
     // provider mints the per-preview K8s Secret bundle.
     workspaceBindings: workspaceBindingRepo,
     workspaceSecrets: workspaceSecretsService,
+    // Lets the legacy sidecar→api fallback for share uploads land in
+    // GCS instead of the api pod's /tmp. Same value the workspace
+    // routes use for reads.
+    gcsArtifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
   });
 
   // If the GitHub App isn't configured, return stub routes that 503 so

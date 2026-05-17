@@ -18,7 +18,8 @@ import {
   type AdminGuard,
   type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
-import { getMimeType, readShareFile } from "./storage.js";
+import { downloadShareFromGcs, getMimeType, readShareFile } from "./storage.js";
+import { resumeChainSessionIds } from "./resume-chain.js";
 import { buildStoredZip } from "./zip.js";
 
 /**
@@ -217,9 +218,9 @@ export function createWorkspaceShareRoutes(
 
     if (!sharedHere) {
       // Disambiguate "exists elsewhere → 403" from "doesn't exist →
-      // 404" so the agent can branch programmatically. When sql isn't
-      // wired (tests, slim composition) we collapse both into 404 —
-      // safe, just slightly less informative.
+      // 404" so the agent can branch programmatically. A resumed
+      // session is allowed to read shares its ancestor created, so we
+      // walk the chain before 403-ing.
       if (cfg.sql) {
         const rows = await cfg.sql<{ session_id: string }[]>`
           SELECT session_id
@@ -228,11 +229,19 @@ export function createWorkspaceShareRoutes(
             AND (payload->>'share_id') = ${shareId}
           LIMIT 1
         `;
-        if (rows.length > 0) {
-          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        const owner = rows[0]?.session_id;
+        if (owner) {
+          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+          if (!chain.includes(owner)) {
+            return c.json({ error: "cross_session_read_forbidden" }, 403);
+          }
+          // Owner is an ancestor — allow the read to fall through.
+        } else {
+          return c.json({ error: "share_not_found" }, 404);
         }
+      } else {
+        return c.json({ error: "share_not_found" }, 404);
       }
-      return c.json({ error: "share_not_found" }, 404);
     }
 
     // For single-file shares (markdown, image, csv) the agent does
@@ -246,13 +255,12 @@ export function createWorkspaceShareRoutes(
     if (cfg.gcsArtifactsBucket) {
       return readFromGcsAsJson(
         cfg.gcsArtifactsBucket,
-        sessionId,
         shareId,
         filePath,
         requestedPath,
       );
     }
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    const bytes = readShareFile(shareId, filePath);
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,
@@ -332,25 +340,24 @@ export function createWorkspaceShareRoutes(
 
     const entries: { path: string; bytes: Buffer }[] = [];
     if (cfg.gcsArtifactsBucket) {
-      const token = await fetchGcsToken();
-      if (!token) {
-        return c.json({ error: "gcs_auth_failed" }, 500);
-      }
       for (const f of files) {
-        const objectName = `sessions/${sessionId}/shares/${shareId}/${f.path}`;
-        const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${cfg.gcsArtifactsBucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-        const res = await fetch(gcsUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) continue;
-        entries.push({
-          path: f.path,
-          bytes: Buffer.from(await res.arrayBuffer()),
-        });
+        try {
+          const bytes = await downloadShareFromGcs(
+            cfg.gcsArtifactsBucket,
+            shareId,
+            f.path,
+          );
+          if (!bytes) continue;
+          entries.push({ path: f.path, bytes });
+        } catch {
+          // Skip this file; the surrounding loop still produces a zip
+          // with whatever did fetch. The route 404s only if NO files
+          // came back at all.
+        }
       }
     } else {
       for (const f of files) {
-        const bytes = readShareFile(sessionId, shareId, f.path);
+        const bytes = readShareFile(shareId, f.path);
         if (!bytes) continue;
         entries.push({ path: f.path, bytes });
       }
@@ -419,14 +426,13 @@ export function createWorkspaceShareRoutes(
     if (cfg.gcsArtifactsBucket) {
       return serveFromGcs(
         cfg.gcsArtifactsBucket,
-        sessionId,
         shareId,
         filePath,
         corsHeaders,
       );
     }
 
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    const bytes = readShareFile(shareId, filePath);
     if (!bytes) return c.json({ error: "not_found" }, 404);
     return new Response(new Uint8Array(bytes), {
       headers: {
@@ -571,52 +577,20 @@ export function createWorkspaceSharesIndexRoutes(
  * pointless when the caller wants JSON, and base64 is the lowest-fric
  * encoding for binary shares (PDF, PNG) over a JSON channel.
  */
-async function fetchGcsToken(): Promise<string | null> {
-  try {
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    return tokenBody.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function readFromGcsAsJson(
   bucket: string,
-  sessionId: string,
   shareId: string,
   filePath: string,
   requestedPath: string,
 ): Promise<Response> {
   try {
-    const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
-    const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    const token = tokenBody.access_token;
-    if (!token) {
-      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    const res = await fetch(gcsUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
+    const buf = await downloadShareFromGcs(bucket, shareId, filePath);
+    if (!buf) {
       return new Response(JSON.stringify({ error: "file_not_found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
-    const buf = Buffer.from(await res.arrayBuffer());
     return new Response(
       JSON.stringify({
         share_id: shareId,
@@ -627,8 +601,9 @@ async function readFromGcsAsJson(
       }),
       { headers: { "Content-Type": "application/json" } },
     );
-  } catch {
-    return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "gcs_fetch_failed";
+    return new Response(JSON.stringify({ error: code }), {
       status: 502,
       headers: { "Content-Type": "application/json" },
     });
@@ -643,45 +618,28 @@ async function readFromGcsAsJson(
  */
 async function serveFromGcs(
   bucket: string,
-  sessionId: string,
   shareId: string,
   filePath: string,
   corsHeaders: Record<string, string>,
 ): Promise<Response> {
   try {
-    const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
-    const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    const token = tokenBody.access_token;
-    if (!token) {
-      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
-    }
-    const res = await fetch(gcsUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
+    const buf = await downloadShareFromGcs(bucket, shareId, filePath);
+    if (!buf) {
       return new Response(JSON.stringify({ error: "not_found" }), {
         status: 404,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
-    return new Response(res.body, {
+    return new Response(new Uint8Array(buf), {
       headers: {
         "Content-Type": getMimeType(filePath),
         "Cache-Control": "public, max-age=86400",
         ...corsHeaders,
       },
     });
-  } catch {
-    return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "gcs_fetch_failed";
+    return new Response(JSON.stringify({ error: code }), {
       status: 502,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     });

@@ -42,7 +42,9 @@ const ESO_NS = "external-secrets";
 const CERTMGR_NS = "cert-manager";
 const NGINX_NS = "ingress-nginx";
 
-export async function runInstallUp(): Promise<boolean> {
+export async function runInstallUp(
+  opts: { autoConfirm?: boolean } = {},
+): Promise<boolean> {
   intro("x1agent install");
 
   // ── Phase 1: preflight ──────────────────────────────────────────
@@ -84,13 +86,17 @@ export async function runInstallUp(): Promise<boolean> {
       `Resumable — every phase is idempotent, re-running picks up from where it stopped.`,
     "Plan",
   );
-  const ok = await confirm({
-    message: "Proceed?",
-    initialValue: true,
-  });
-  if (isCancel(ok) || !ok) {
-    cancel("Cancelled.");
-    return false;
+  if (opts.autoConfirm) {
+    note("Auto-confirming via --yes flag.", "Plan");
+  } else {
+    const ok = await confirm({
+      message: "Proceed?",
+      initialValue: true,
+    });
+    if (isCancel(ok) || !ok) {
+      cancel("Cancelled.");
+      return false;
+    }
   }
 
   // ── Phase 3: terraform apply (cluster pass) ─────────────────────

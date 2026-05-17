@@ -183,6 +183,8 @@ export function render(input: RenderInput): RenderResult {
     `\n` +
     renderPreviewsSection(env) +
     `\n` +
+    renderSharesSection(env, projectId) +
+    `\n` +
     // Anthropic credential source — drives api Deployment env, the
     // session ServiceAccount's WI annotation, and the GSM ANTHROPIC_API_KEY
     // ExternalSecret gate. Defaults to vertex when CLOUD_PROVIDER=gcp;
@@ -339,6 +341,16 @@ function renderPreviewsSection(env: EnvFile): string {
   // Ingress. Disabled by default; only x1agent.com runs preview hosting today.
   const enabled = (env.get("PREVIEWS_ENABLED") || "false").toLowerCase() === "true";
   return `previews:\n  enabled: ${enabled}\n`;
+}
+
+function renderSharesSection(env: EnvFile, projectId: string): string {
+  // SHARE_ARTIFACTS_BUCKET lets an operator override the default
+  // <project_id>-x1agent-shares name. Empty = use terraform's default.
+  const override = env.get("SHARE_ARTIFACTS_BUCKET");
+  const bucket = override && override.trim()
+    ? override.trim()
+    : `${projectId}-x1agent-shares`;
+  return `shares:\n  gcsBucket: ${q(bucket)}\n`;
 }
 
 function required(env: EnvFile, key: string): string {

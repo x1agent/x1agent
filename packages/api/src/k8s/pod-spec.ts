@@ -349,6 +349,14 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     ...(process.env.USE_JETSTREAM_CONSUME === "true"
       ? [{ name: "USE_JETSTREAM_CONSUME", value: "true" }]
       : []),
+    // Sidecar uploads share bytes straight to GCS when this is set.
+    // Empty = falls back to upload_to_api, which is durable only when
+    // the api's own GCS_ARTIFACTS_BUCKET is set (api re-uploads on the
+    // sidecar's behalf). Propagated from the api process so a chart
+    // values change rolls every new pod over without touching this.
+    ...(process.env.GCS_ARTIFACTS_BUCKET
+      ? [{ name: "GCS_ARTIFACTS_BUCKET", value: process.env.GCS_ARTIFACTS_BUCKET }]
+      : []),
   ];
 
   // Pod-shape branching by agent kind. Orchestrators are long-lived
