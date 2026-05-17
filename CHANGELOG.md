@@ -1,3 +1,10 @@
+## [1.35.1](https://github.com/x1agent/x1agent/compare/v1.35.0...v1.35.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **scheduler:** orchestrator schedules don't fire silently when anchor is stale ([dd646e9](https://github.com/x1agent/x1agent/commit/dd646e9bf0dc584c57845f45b0058179998a28e7))
+
 # [1.35.0](https://github.com/x1agent/x1agent/compare/v1.34.1...v1.35.0) (2026-05-17)
 
 
