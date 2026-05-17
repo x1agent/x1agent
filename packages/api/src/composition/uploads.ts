@@ -145,7 +145,11 @@ function makeLazyS3Client(region: string): S3ClientLike {
     if (sdkPromise) return sdkPromise;
     sdkPromise = (async () => {
       try {
+        // @ts-expect-error — optional peer dep; only installed when the
+        // operator picks the S3 upload backend. Lazy-loaded so installs
+        // without S3 don't need the SDK present at compile or runtime.
         const cli = await import("@aws-sdk/client-s3");
+        // @ts-expect-error — same as above; lazy-loaded peer dep.
         const ps = await import("@aws-sdk/s3-request-presigner");
         return {
           client: new (cli as any).S3Client({ region }),

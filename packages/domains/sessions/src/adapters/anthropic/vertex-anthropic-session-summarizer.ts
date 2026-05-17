@@ -36,6 +36,14 @@ export interface VertexAnthropicSessionSummarizerOptions {
    * install via env if a region serves a different id.
    */
   model?: string;
+  /**
+   * Optional per-call resolver. The api composes this to read the
+   * admin's selected summary model from platform_settings; a successful
+   * read replaces the static `model` for that one request. Returning
+   * null/undefined falls through to `model` (then DEFAULT_MODEL).
+   * Failures are swallowed — the static default is the safe fallback.
+   */
+  modelResolver?: () => Promise<string | null | undefined>;
   /** Override fetch for tests. Defaults to globalThis.fetch. */
   fetchImpl?: typeof fetch;
   /**
@@ -63,6 +71,9 @@ export class VertexAnthropicSessionSummarizer implements SessionSummarizer {
   private readonly projectId: string;
   private readonly region: string;
   private readonly model: string;
+  private readonly modelResolver:
+    | (() => Promise<string | null | undefined>)
+    | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly metadataBaseUrl: string;
   private readonly vertexBaseUrl: string;
@@ -71,10 +82,18 @@ export class VertexAnthropicSessionSummarizer implements SessionSummarizer {
     this.projectId = opts.projectId;
     this.region = opts.region;
     this.model = opts.model ?? DEFAULT_MODEL;
+    this.modelResolver = opts.modelResolver;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
     this.metadataBaseUrl = opts.metadataBaseUrl ?? DEFAULT_METADATA_BASE_URL;
+    // Vertex AI's global endpoint is unprefixed (aiplatform.googleapis.com
+    // with `locations/global/...` in the path). Every other region uses the
+    // per-region host shape. The Claude Code SDK handles this transparently;
+    // we have to do it by hand because we build the URL ourselves.
     this.vertexBaseUrl =
-      opts.vertexBaseUrl ?? `https://${opts.region}-aiplatform.googleapis.com`;
+      opts.vertexBaseUrl ??
+      (opts.region === "global"
+        ? "https://aiplatform.googleapis.com"
+        : `https://${opts.region}-aiplatform.googleapis.com`);
   }
 
   async summarize(events: readonly SessionEvent[]): Promise<string | null> {
@@ -85,9 +104,11 @@ export class VertexAnthropicSessionSummarizer implements SessionSummarizer {
     const token = await this.fetchAccessToken();
     if (!token) return null;
 
+    const model = await this.resolveModel();
+
     const url =
       `${this.vertexBaseUrl}/v1/projects/${this.projectId}` +
-      `/locations/${this.region}/publishers/anthropic/models/${encodeURIComponent(this.model)}:rawPredict`;
+      `/locations/${this.region}/publishers/anthropic/models/${encodeURIComponent(model)}:rawPredict`;
 
     let res: Response;
     try {
@@ -138,6 +159,16 @@ export class VertexAnthropicSessionSummarizer implements SessionSummarizer {
     const text = extractText(json);
     if (!text) return null;
     return text.slice(0, MAX_SUMMARY_CHARS);
+  }
+
+  private async resolveModel(): Promise<string> {
+    if (!this.modelResolver) return this.model;
+    try {
+      const v = await this.modelResolver();
+      return v && v.trim() ? v : this.model;
+    } catch {
+      return this.model;
+    }
   }
 
   /**

@@ -32,6 +32,7 @@ export type {
   RecordTokenUsageInput,
 } from "./ports/token-usage-repository.js";
 export type { AdminGuard } from "./ports/admin-guard.js";
+export type { PlatformAdminGuard } from "./ports/platform-admin-guard.js";
 export type { MessageInjector } from "./ports/message-injector.js";
 export type {
   SessionShareRepository,

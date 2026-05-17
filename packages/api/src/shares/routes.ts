@@ -16,8 +16,11 @@ import {
   type SessionRepository,
   type SessionShareRepository,
   type AdminGuard,
+  type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
-import { getMimeType, readShareFile } from "./storage.js";
+import { downloadShareFromGcs, getMimeType, readShareFile } from "./storage.js";
+import { resumeChainSessionIds } from "./resume-chain.js";
+import { buildStoredZip } from "./zip.js";
 
 /**
  * Workspace-scoped read side of the share subsystem.
@@ -39,6 +42,8 @@ export interface WorkspaceShareRoutesConfig {
   events: SessionEventRepository;
   agents: AgentRepository;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass for session visibility. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   /**
    * Per-user share grants — used by the visibility check so a non-admin
    * sharee can fetch the artefacts of a session granted to them. Without
@@ -46,6 +51,16 @@ export interface WorkspaceShareRoutesConfig {
    * less useful).
    */
   shares?: SessionShareRepository;
+  /**
+   * Optional resolver — when wired, callers with `canCollaborate` on
+   * the session's agent (workspace tier OR explicit `collaborate`
+   * grant) can read every share the agent produced. Survives resume.
+   * Composition root wires this; unwired callers degrade gracefully.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -120,7 +135,12 @@ export function createWorkspaceShareRoutes(
     // which meant a session owner could see the event stream but not
     // the share artefacts that the session emitted (X1A-9).
     const decision = await resolveSessionVisibility(
-      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+        shares: cfg.shares,
+        agentCollaborateResolver: cfg.agentCollaborateResolver,
+      },
       actorId,
       session,
       agent.workspaceId,
@@ -209,9 +229,9 @@ export function createWorkspaceShareRoutes(
 
     if (!sharedHere) {
       // Disambiguate "exists elsewhere → 403" from "doesn't exist →
-      // 404" so the agent can branch programmatically. When sql isn't
-      // wired (tests, slim composition) we collapse both into 404 —
-      // safe, just slightly less informative.
+      // 404" so the agent can branch programmatically. A resumed
+      // session is allowed to read shares its ancestor created, so we
+      // walk the chain before 403-ing.
       if (cfg.sql) {
         const rows = await cfg.sql<{ session_id: string }[]>`
           SELECT session_id
@@ -220,11 +240,19 @@ export function createWorkspaceShareRoutes(
             AND (payload->>'share_id') = ${shareId}
           LIMIT 1
         `;
-        if (rows.length > 0) {
-          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        const owner = rows[0]?.session_id;
+        if (owner) {
+          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+          if (!chain.includes(owner)) {
+            return c.json({ error: "cross_session_read_forbidden" }, 403);
+          }
+          // Owner is an ancestor — allow the read to fall through.
+        } else {
+          return c.json({ error: "share_not_found" }, 404);
         }
+      } else {
+        return c.json({ error: "share_not_found" }, 404);
       }
-      return c.json({ error: "share_not_found" }, 404);
     }
 
     // For single-file shares (markdown, image, csv) the agent does
@@ -238,13 +266,12 @@ export function createWorkspaceShareRoutes(
     if (cfg.gcsArtifactsBucket) {
       return readFromGcsAsJson(
         cfg.gcsArtifactsBucket,
-        sessionId,
         shareId,
         filePath,
         requestedPath,
       );
     }
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    const bytes = readShareFile(shareId, filePath);
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,
@@ -252,6 +279,114 @@ export function createWorkspaceShareRoutes(
       mime_type: getMimeType(filePath),
       size: bytes.length,
       content_b64: bytes.toString("base64"),
+    });
+  });
+
+  // Bundle every file in the share as a zip. The UI's "download" icon
+  // points here so an operator can pull the whole share in one click
+  // rather than fetching files one at a time.
+  //
+  // Source of truth for the file list is the share's `agent.share` event
+  // payload (`files[].path`), not the on-disk directory — that way we
+  // never include stray bytes (e.g. partially-written transient files)
+  // and the bundle is reproducible from the persisted event.
+  //
+  // Declared BEFORE the `/:shareId/*` wildcard so Hono matches it
+  // ahead of the per-file proxy.
+  app.get("/:shareId/_download.zip", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const shareId = c.req.param("shareId")!;
+    const sessionId = scope.session.id;
+
+    const events = await cfg.events.listBySession(sessionId, { limit: 5000 });
+    let title = "share";
+    let files: { path: string }[] = [];
+    for (const e of events) {
+      if (e.type !== "agent.share") continue;
+      const payload =
+        typeof e.payload === "string"
+          ? (JSON.parse(e.payload) as Record<string, unknown>)
+          : (e.payload as Record<string, unknown>);
+      if (payload?.share_id !== shareId) continue;
+      const fs = Array.isArray(payload.files) ? payload.files : [];
+      files = fs
+        .map((f) => (f && typeof f === "object" ? (f as { path?: unknown }) : null))
+        .filter((f): f is { path: string } => !!f && typeof f.path === "string");
+      if (typeof payload.title === "string" && payload.title) {
+        title = payload.title;
+      }
+    }
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    // Zip-Slip guard. Share file paths come from the `agent.share`
+    // event payload, which originates inside the (untrusted) agent
+    // container. The read side is already safe — `readShareFile` /
+    // GCS reject traversal — but the entry name we put INTO the zip
+    // is what a downstream extractor honours. A malicious agent could
+    // emit `path: "../../../tmp/pwned"` and turn the operator's
+    // download click into an arbitrary file-write on extract.
+    //
+    // Reject absolute paths, backslashes, and any segment that is "."
+    // or "..". Same set of rules the OWASP Zip-Slip guidance lists.
+    const isSafeZipPath = (p: string): boolean => {
+      if (!p || p.includes("\\") || p.startsWith("/")) return false;
+      if (p.includes("\0")) return false;
+      return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+    };
+    files = files.filter((f) => isSafeZipPath(f.path));
+    if (files.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const entries: { path: string; bytes: Buffer }[] = [];
+    if (cfg.gcsArtifactsBucket) {
+      for (const f of files) {
+        try {
+          const bytes = await downloadShareFromGcs(
+            cfg.gcsArtifactsBucket,
+            shareId,
+            f.path,
+          );
+          if (!bytes) continue;
+          entries.push({ path: f.path, bytes });
+        } catch {
+          // Skip this file; the surrounding loop still produces a zip
+          // with whatever did fetch. The route 404s only if NO files
+          // came back at all.
+        }
+      }
+    } else {
+      for (const f of files) {
+        const bytes = readShareFile(shareId, f.path);
+        if (!bytes) continue;
+        entries.push({ path: f.path, bytes });
+      }
+    }
+    if (entries.length === 0) {
+      return c.json({ error: "share_not_found" }, 404);
+    }
+
+    const zip = buildStoredZip(entries);
+    const safeTitle = title.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) ||
+      "share";
+    return new Response(new Uint8Array(zip), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${safeTitle}.zip"`,
+        "Content-Length": String(zip.length),
+        "Cache-Control": "no-store",
+      },
     });
   });
 
@@ -302,14 +437,13 @@ export function createWorkspaceShareRoutes(
     if (cfg.gcsArtifactsBucket) {
       return serveFromGcs(
         cfg.gcsArtifactsBucket,
-        sessionId,
         shareId,
         filePath,
         corsHeaders,
       );
     }
 
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    const bytes = readShareFile(shareId, filePath);
     if (!bytes) return c.json({ error: "not_found" }, 404);
     return new Response(new Uint8Array(bytes), {
       headers: {
@@ -341,6 +475,8 @@ export function createWorkspaceShareRoutes(
 export interface WorkspaceSharesIndexConfig {
   sql: postgres.Sql<Record<string, unknown>>;
   adminGuard: AdminGuard;
+  /** Platform-admin bypass. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -377,7 +513,10 @@ export function createWorkspaceSharesIndexRoutes(
     // index on (session_id, user_id) means the LEFT JOIN cannot fan
     // out, so DISTINCT isn't needed.
     const listMode = await pickSessionListMode(
-      { adminGuard: cfg.adminGuard },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+      },
       actor.userId,
       wsId,
     );
@@ -451,37 +590,18 @@ export function createWorkspaceSharesIndexRoutes(
  */
 async function readFromGcsAsJson(
   bucket: string,
-  sessionId: string,
   shareId: string,
   filePath: string,
   requestedPath: string,
 ): Promise<Response> {
   try {
-    const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
-    const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    const token = tokenBody.access_token;
-    if (!token) {
-      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    const res = await fetch(gcsUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
+    const buf = await downloadShareFromGcs(bucket, shareId, filePath);
+    if (!buf) {
       return new Response(JSON.stringify({ error: "file_not_found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
-    const buf = Buffer.from(await res.arrayBuffer());
     return new Response(
       JSON.stringify({
         share_id: shareId,
@@ -492,8 +612,9 @@ async function readFromGcsAsJson(
       }),
       { headers: { "Content-Type": "application/json" } },
     );
-  } catch {
-    return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "gcs_fetch_failed";
+    return new Response(JSON.stringify({ error: code }), {
       status: 502,
       headers: { "Content-Type": "application/json" },
     });
@@ -508,45 +629,28 @@ async function readFromGcsAsJson(
  */
 async function serveFromGcs(
   bucket: string,
-  sessionId: string,
   shareId: string,
   filePath: string,
   corsHeaders: Record<string, string>,
 ): Promise<Response> {
   try {
-    const objectName = `sessions/${sessionId}/shares/${shareId}/${filePath}`;
-    const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    const token = tokenBody.access_token;
-    if (!token) {
-      return new Response(JSON.stringify({ error: "gcs_auth_failed" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
-    }
-    const res = await fetch(gcsUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
+    const buf = await downloadShareFromGcs(bucket, shareId, filePath);
+    if (!buf) {
       return new Response(JSON.stringify({ error: "not_found" }), {
         status: 404,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
-    return new Response(res.body, {
+    return new Response(new Uint8Array(buf), {
       headers: {
         "Content-Type": getMimeType(filePath),
         "Cache-Control": "public, max-age=86400",
         ...corsHeaders,
       },
     });
-  } catch {
-    return new Response(JSON.stringify({ error: "gcs_fetch_failed" }), {
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "gcs_fetch_failed";
+    return new Response(JSON.stringify({ error: code }), {
       status: 502,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     });

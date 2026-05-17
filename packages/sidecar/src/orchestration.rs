@@ -65,6 +65,13 @@ pub struct ShareToChildRequest {
 }
 
 #[derive(Deserialize)]
+pub struct PullFromChildRequest {
+    pub child_session_id: String,
+    #[serde(default)]
+    pub paths: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
 pub struct PreviewDeployRequest {
     pub repo_full_name: String,
     pub branch: String,
@@ -336,6 +343,41 @@ pub async fn handle_cancel_session(
     let body = serde_json::json!({
         "parent_session_id": state.session_id,
         "reason": req.reason,
+    });
+    let res = client
+        .post(&url)
+        .header("x-internal-token", &state.api_internal_token)
+        .json(&body)
+        .send()
+        .await;
+    relay_json(res).await
+}
+
+/// Orchestrator → child WORKSPACE pull. Inverse of share_to_child:
+/// the orchestrator names a child it spawned and the api snapshots
+/// that child's /workspace into the orchestrator's own
+/// /workspace/workers/<child_id>/. Used to surface a worker's
+/// generated outputs (reports, datasets, files) so the orchestrator
+/// can read them with normal tools (Read, Bash, Grep) — sidesteps
+/// the brittle "worker calls share" path that small models routinely
+/// skip.
+///
+/// Snapshot semantics. A second call overwrites the same
+/// /workspace/workers/<child_id>/ directory. Authorization is the
+/// parent → child relationship on the api side.
+pub async fn handle_pull_from_child(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PullFromChildRequest>,
+) -> axum::response::Response {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/internal/sessions/{}/pull-for-parent",
+        state.api_url.trim_end_matches('/'),
+        urlencoding::encode(&req.child_session_id),
+    );
+    let body = serde_json::json!({
+        "parent_session_id": state.session_id,
+        "paths": req.paths,
     });
     let res = client
         .post(&url)

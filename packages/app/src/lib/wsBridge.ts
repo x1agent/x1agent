@@ -60,6 +60,12 @@ export interface BridgeCommentEvent {
   session_id: string | null;
   share_type: string | null;
   parent_comment_id: string | null;
+  /**
+   * Server-stamped ISO 8601 created-at. May be null on payloads from
+   * an older api version mid-deploy; callers fall back to client wall
+   * clock in that case (the pre-fix behaviour).
+   */
+  created_at: string | null;
   transitioned_at: string | null;
   resolved: boolean | null;
   resolved_by_user_id: string | null;

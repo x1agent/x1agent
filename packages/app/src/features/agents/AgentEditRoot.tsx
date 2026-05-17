@@ -45,6 +45,7 @@ import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
+import { AgentCollaboratorsCard } from "./AgentCollaboratorsCard";
 import { AgentMcpAttachmentsCard } from "./AgentMcpAttachmentsCard";
 import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
 import { AgentSlackBotCard } from "./AgentSlackBotCard";
@@ -534,26 +535,45 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                             );
                           })()}
 
-                          {/* Workspace-authored images — non-preset. Hide
-                              rows that aren't ready to run: pending /
-                              building / failed images would crash a
-                              session pod with ImagePullBackOff. */}
+                          {/* Workspace-authored images — non-preset. We
+                              SHOW transient build states (pending /
+                              building) so an agent that's pinned to an
+                              image being rebuilt doesn't lose its
+                              binding mid-rebuild — Select's `value`
+                              would no longer match any option, the
+                              dropdown would visually revert to
+                              "Platform default", and the next save
+                              would persist image_id=NULL. Failed
+                              builds are still hidden — spawning
+                              against a failed image is a guaranteed
+                              ImagePullBackOff. The same defense lives
+                              on the spawn path: pod-spec falls back to
+                              the platform default if built_ref is
+                              empty, so picking a pending/building
+                              image is safe until the build lands. */}
                           {(() => {
                             const workspace = images.filter(
                               (img) =>
-                                !img.is_preset &&
-                                (img.build_status === "ready" ||
-                                  img.build_status === "succeeded"),
+                                !img.is_preset && img.build_status !== "failed",
                             );
                             if (workspace.length === 0) return null;
                             return (
                               <SelectGroup>
                                 <SelectLabel>Workspace</SelectLabel>
-                                {workspace.map((img) => (
-                                  <SelectItem key={img.id} value={img.id}>
-                                    {img.display_name}
-                                  </SelectItem>
-                                ))}
+                                {workspace.map((img) => {
+                                  const suffix =
+                                    img.build_status === "pending"
+                                      ? " (queued)"
+                                      : img.build_status === "building"
+                                        ? " (building…)"
+                                        : "";
+                                  return (
+                                    <SelectItem key={img.id} value={img.id}>
+                                      {img.display_name}
+                                      {suffix}
+                                    </SelectItem>
+                                  );
+                                })}
                               </SelectGroup>
                             );
                           })()}
@@ -841,7 +861,18 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   />
                 </TabsContent>
 
-                <TabsContent value="permissions" className="mt-0">
+                <TabsContent value="permissions" className="mt-0 space-y-6">
+                  <AgentCollaboratorsCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    agentName={existing.name}
+                    visibility={
+                      (existing as { visibility?: "private" | "workspace" | "via_grants" })
+                        .visibility ?? "workspace"
+                    }
+                    canManage={!!canManage}
+                    onVisibilityChanged={() => load(workspaceSlug)}
+                  />
                   <CanSpawnCard
                     workspaceSlug={workspaceSlug}
                     parentAgentId={existing.id}

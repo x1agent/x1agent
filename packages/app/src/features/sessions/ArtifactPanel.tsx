@@ -154,13 +154,23 @@ function ArtifactHeader({
   onClose: () => void;
 }) {
   const Icon = TYPE_ICONS[artifact.share_type];
-  const downloadPath =
-    artifact.entry_point || artifact.files[0]?.path || "";
+  // Download always returns a zip of every file in the share, so a user
+  // who clicked the icon expecting "the whole thing" gets it. The
+  // server route (see packages/api/src/shares/routes.ts) reads the
+  // file list from the persisted `agent.share` event payload.
   const downloadUrl = shareUrl(
     workspaceSlug,
     sessionId,
     artifact.share_id,
-    downloadPath,
+    "_download.zip",
+  );
+  // For "Open in new tab" on site shares we still want the live entry
+  // point, not the zip.
+  const openUrl = shareUrl(
+    workspaceSlug,
+    sessionId,
+    artifact.share_id,
+    artifact.entry_point || artifact.files[0]?.path || "",
   );
   const canMaximize =
     FULLSCREEN_TYPES.includes(artifact.share_type) || view === "fullscreen";
@@ -186,7 +196,7 @@ function ArtifactHeader({
         </Button>
       </a>
       {artifact.share_type === "site" && (
-        <a href={downloadUrl} target="_blank" rel="noopener">
+        <a href={openUrl} target="_blank" rel="noopener">
           <Button variant="ghost" size="sm" title="Open in new tab">
             <ExternalLink className="size-3.5" />
           </Button>

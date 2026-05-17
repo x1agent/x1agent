@@ -22,13 +22,17 @@ import {
   type PermissionGrantRepository,
 } from "@x1agent/domain-permissions";
 import {
+  downloadShareFromGcs,
   getMimeType,
   readShareFile,
   readStagingFile,
   writeShareFiles,
   writeStagingFiles,
 } from "../shares/storage.js";
+import { resumeChainSessionIds } from "../shares/resume-chain.js";
 import { StringCodec, JSONCodec } from "nats";
+import type { KubeConfig } from "@kubernetes/client-node";
+import { pullFromChild } from "../k8s/pull-from-child.js";
 import { randomUUID } from "node:crypto";
 import type {
   UploadRepository,
@@ -99,6 +103,13 @@ export interface InternalRoutesConfig {
    */
   jobs?: JobTerminator;
   /**
+   * In-cluster K8s client + namespace — needed by
+   * `/sessions/:id/pull-for-parent` to exec `tar` in the child + parent
+   * pods. When absent, the pull-from-child route returns 503.
+   */
+  kubeConfig?: KubeConfig;
+  namespace?: string;
+  /**
    * Raw SQL client — needed by `/sessions/:id/preview-deploy` to look
    * up the linked installation id directly on `agents`. When absent,
    * the preview-deploy route returns 503. Narrow escape hatch until
@@ -150,6 +161,14 @@ export interface InternalRoutesConfig {
       }
     >;
   };
+  /**
+   * GCS bucket for share content. When set, the api re-uploads share
+   * bytes from the local-dev fallback path (sidecar without GCS env)
+   * straight to GCS, so legacy session pods still produce durable
+   * shares. Empty = local-disk fallback (`/tmp/x1-shares`), wiped on
+   * every api restart.
+   */
+  gcsArtifactsBucket?: string;
 }
 
 /**
@@ -557,15 +576,28 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       `;
       const existingOwner = rows[0]?.session_id;
       if (existingOwner && existingOwner !== sessionId) {
-        return c.json(
-          { error: "share_id_owned_by_other_session" },
-          403,
-        );
+        const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+        if (!chain.includes(existingOwner)) {
+          return c.json(
+            { error: "share_id_owned_by_other_session" },
+            403,
+          );
+        }
       }
     }
 
-    const totalSize = writeShareFiles(sessionId, body.share_id, body.files);
-    return c.json({ ok: true, total_size: totalSize });
+    try {
+      const totalSize = await writeShareFiles(body.share_id, body.files, {
+        gcsArtifactsBucket: cfg.gcsArtifactsBucket,
+      });
+      return c.json({ ok: true, total_size: totalSize });
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "share_write_failed";
+      console.warn(
+        `[shares] write failed share=${body.share_id.slice(0, 8)} session=${(sessionId as unknown as string).slice(0, 8)} code=${code}: ${(err as Error).message}`,
+      );
+      return c.json({ error: code, message: (err as Error).message }, 502);
+    }
   });
 
   // Read a share's content back to its producing session (X1A-32).
@@ -602,8 +634,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
 
     if (!sharedHere) {
       // Disambiguate "exists in another session" (403) from "doesn't
-      // exist anywhere" (404) when sql is wired, so the sidecar can
-      // surface a useful error to the agent.
+      // exist anywhere" (404) when sql is wired. A resumed session
+      // legitimately needs to read shares its ancestor created, so we
+      // walk the chain before 403-ing.
       if (cfg.sql) {
         const rows = await cfg.sql<{ session_id: string }[]>`
           SELECT session_id
@@ -612,15 +645,31 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
             AND (payload->>'share_id') = ${shareId}
           LIMIT 1
         `;
-        if (rows.length > 0) {
-          return c.json({ error: "cross_session_read_forbidden" }, 403);
+        const owner = rows[0]?.session_id;
+        if (owner) {
+          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
+          if (!chain.includes(owner)) {
+            return c.json({ error: "cross_session_read_forbidden" }, 403);
+          }
+          // Owner is an ancestor — allow the read to fall through.
+        } else {
+          return c.json({ error: "share_not_found" }, 404);
         }
+      } else {
+        return c.json({ error: "share_not_found" }, 404);
       }
-      return c.json({ error: "share_not_found" }, 404);
     }
 
     const filePath = requestedPath || "index.html";
-    const bytes = readShareFile(sessionId, shareId, filePath);
+    let bytes: Buffer | null;
+    try {
+      bytes = cfg.gcsArtifactsBucket
+        ? await downloadShareFromGcs(cfg.gcsArtifactsBucket, shareId, filePath)
+        : readShareFile(shareId, filePath);
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "share_read_failed";
+      return c.json({ error: code, message: (err as Error).message }, 502);
+    }
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,
@@ -790,6 +839,66 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     });
   });
 
+  // Orchestrator → child workspace pull (inverse of share-to-child).
+  // The parent's sidecar POSTs here when the orchestrator invokes
+  // `pull_from_child`. We exec `tar` in both pods to snapshot the
+  // child's /workspace into the parent's /workspace/workers/<child>/.
+  // Worker-driven `share` was unreliable on small models (Haiku) which
+  // narrate calling the tool but don't emit the structured call — the
+  // orchestrator-pulls direction sidesteps that entirely.
+  app.post("/sessions/:childId/pull-for-parent", async (c) => {
+    if (!cfg.kubeConfig || !cfg.namespace) {
+      return c.json({ error: "pull_unavailable", message: "k8s client not wired" }, 503);
+    }
+    const childId = c.req.param("childId")! as SessionId;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      parent_session_id?: string;
+      paths?: string[];
+    };
+    if (!body.parent_session_id || typeof body.parent_session_id !== "string") {
+      return c.json({ error: "missing_fields", need: ["parent_session_id"] }, 400);
+    }
+
+    const child = await cfg.sessions.findById(childId);
+    if (!child) return c.json({ error: "child_not_found" }, 404);
+    if (child.parentSessionId !== body.parent_session_id) {
+      return c.json({ error: "not_your_child" }, 403);
+    }
+    const parent = await cfg.sessions.findById(body.parent_session_id as SessionId);
+    if (!parent || parent.status === "complete" || parent.status === "failed") {
+      return c.json({ error: "parent_not_live" }, 410);
+    }
+
+    const startedAt = Date.now();
+    try {
+      const result = await pullFromChild({
+        kubeConfig: cfg.kubeConfig,
+        namespace: cfg.namespace,
+        parentSessionId: body.parent_session_id,
+        childSessionId: childId as unknown as string,
+        paths: Array.isArray(body.paths) ? body.paths : undefined,
+      });
+      console.log(
+        `[pull-for-parent] ok parent=${body.parent_session_id.slice(0, 8)} child=${childId.slice(0, 8)} files=${result.files} bytes=${result.totalBytes} elapsed=${Date.now() - startedAt}ms`,
+      );
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? "pull_failed";
+      const status =
+        code === "child_workspace_unavailable" ? 410
+          : code === "workspace_too_large" ? 413
+          : code === "parent_pod_missing" ? 404
+          : 502;
+      console.warn(
+        `[pull-for-parent] failed code=${code} parent=${body.parent_session_id.slice(0, 8)} child=${childId.slice(0, 8)} elapsed=${Date.now() - startedAt}ms: ${(err as Error).message}`,
+      );
+      return c.json(
+        { error: code, message: (err as Error).message },
+        status,
+      );
+    }
+  });
+
   // Child → parent explicit signal. The child's sidecar calls this
   // when the child invokes the `message_caller` MCP tool. We look
   // up the child's parent, confirm the parent is alive + an
@@ -918,6 +1027,28 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     // rather than add a new port just for this path.
     const agent = await cfg.agents.findById(session.agentId as never);
     if (!agent) return c.json({ error: "agent_not_found" }, 404);
+
+    // Re-check that the requested repo is actually linked to this agent.
+    // The installation token granted below covers every repo the GitHub
+    // App installation can see — not just the ones this agent was
+    // explicitly granted. Trusting body.repo_full_name verbatim would
+    // let an agent with a single linked repo build any other repo in
+    // the same installation (source exfiltration + cross-repo deploy).
+    const repoLinked = await cfg.sql<{ ok: boolean }[]>`
+      SELECT TRUE AS ok FROM agent_repos
+      WHERE agent_id = ${session.agentId}
+        AND repo_full_name = ${body.repo_full_name}
+      LIMIT 1`;
+    if (repoLinked.length === 0) {
+      return c.json(
+        {
+          error: "repo_not_linked",
+          message: `Repo ${body.repo_full_name} is not linked to this agent.`,
+        },
+        403,
+      );
+    }
+
     const linkedRows = await cfg.sql<
       { installation_id: string | null }[]
     >`SELECT linked_installation_id AS installation_id FROM agents WHERE id = ${session.agentId}`;
@@ -1151,6 +1282,36 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
       return c.json(result);
     } catch (err) {
+      // NATS timeout / broker disconnect / provider crash mid-build all
+      // land here. Without this branch the early provisioning row sits
+      // at status='provisioning' forever and the UI spins. Stamp it
+      // failed so the operator sees what happened and can re-deploy.
+      if (cfg.previewEnvironments && earlySlug) {
+        try {
+          const { upsertPreviewEnvironment } = await import(
+            "@x1agent/domain-preview-environments"
+          );
+          await upsertPreviewEnvironment(
+            { repository: cfg.previewEnvironments },
+            {
+              workspaceId: agent.workspaceId,
+              slug: earlySlug,
+              repoFullName: body.repo_full_name,
+              branch: body.branch,
+              deploy: {
+                status: "failed",
+                sha: body.commit_sha,
+                statusReason: `provider_request_failed: ${(err as Error).message}`,
+              },
+            },
+          );
+        } catch (upsertErr) {
+          console.warn(
+            "[preview-deploy] failure upsert in catch:",
+            (upsertErr as Error).message,
+          );
+        }
+      }
       return c.json(
         {
           error: "provider_request_failed",
@@ -1498,7 +1659,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (workspaceSlug) {
       headers["X-Upload-Workspace-Slug"] = workspaceSlug;
     }
-    return new Response(body, { status: 200, headers });
+    return new Response(body as BodyInit, { status: 200, headers });
   });
 
   return app;

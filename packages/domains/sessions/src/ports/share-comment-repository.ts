@@ -51,10 +51,32 @@ export interface ThreadLocator {
 export interface ShareCommentRepository {
   append(input: AppendShareCommentInput): Promise<ShareComment>;
 
-  /** All comments on a single share, ordered by `(thread_id, seq)`. */
+  /**
+   * Comments on a single share, ordered by `(thread_id, seq)`.
+   *
+   * Without options, returns every row — same shape as before
+   * pagination existed. The agent-side reads (NATS subscribers,
+   * comment-handler spawn) still need the full window.
+   *
+   * For the operator-facing sidebar (X1A-72.4), pagination is
+   * thread-level:
+   *   - `threadLimit`: return comments belonging to the latest N
+   *     threads, ordered by the thread's first comment `created_at`
+   *     DESC. Within each returned thread, all replies are included.
+   *   - `beforeThreadFirstCreatedAt`: only consider threads whose
+   *     first comment `created_at` is strictly less than this value.
+   *     Pass the earliest head `created_at` from the currently-loaded
+   *     window to fetch the preceding page.
+   *
+   * NOTE: `seq` cannot be used as a cross-thread cursor — it's scoped
+   * per `(share_id, thread_id)` in the schema, so every thread's head
+   * has seq=1 and any min(seq) cursor degenerates to 1, leaving the
+   * server with no eligible older threads.
+   */
   listByShare(
     sessionId: SessionId,
     shareId: string,
+    opts?: { threadLimit?: number; beforeThreadFirstCreatedAt?: Date },
   ): Promise<readonly ShareComment[]>;
 
   /**

@@ -369,17 +369,63 @@ const interactivePrompt =
     ? `\n\n## Interactive Session\n\nThis is an INTERACTIVE session. The user will send you multiple messages over time. After responding to each message, STOP and WAIT for the next user message. Do NOT say goodbye or end the conversation.`
     : `\n\n## One-Shot Session\n\nComplete the task and finish.`;
 
+const agentKind = process.env.AGENT_KIND ?? "worker";
+const isOrchestrator = agentKind === "orchestrator";
+
+// `share` is the user-facing artifact tool. Orchestrators have a human
+// watching them and routinely ship deliverables, so they get the full
+// share guidance. Workers are driven by the orchestrator — their
+// /workspace gets pulled via pull_from_child — and historically the
+// "you MUST call share" pressure caused small models (Haiku) to
+// narrate calling share without emitting the actual tool call, then
+// claim the user could see files that were still stuck in the
+// ephemeral pod. So workers don't get share guidance at all.
+const shareBullet = isOrchestrator
+  ? `- **share**: Persist a /workspace file for the user — the user cannot see your /workspace, so a file is invisible until you \`share\` it. Use \`share\` for every substantive deliverable: report, site, dataset, deck, exported file. Write the file, then call share on the path. Renders inline (HTML, image, SVG, CSV, JSON, Markdown, code, ZIP) and lists on the Shares page. **Prefer updating an existing share over creating v2/v3.** When iterating on an artifact, pass the existing \`share_id\` so the same pill updates in place and any comment thread stays attached — never publish a fresh share for the next revision.`
+  : ``;
+
+const orchestratorSection = isOrchestrator
+  ? `
+
+## You Are an Orchestrator
+
+You can spawn child sessions (workers) and drive them. Each child runs in its own pod with its own private \`/workspace\` — you can NOT see their files directly, and they can NOT push files to you.
+
+**Default mechanism for getting a worker's output into your workspace:** the **\`pull_from_child\`** tool. It snapshots the worker's entire \`/workspace\` into your own \`/workspace/workers/<child_session_id>/\`. After it returns, use Read / Bash / Grep against \`/workspace/workers/<id>/\` as if those files were always yours. Call it whenever you need their output — after the worker reports done, mid-flight to check progress, or after \`inject_message\` if you asked them to produce something. A second call overwrites with a fresh snapshot.
+
+Other orchestrator-only tools:
+- **\`spawn_session\`**: start a child worker (use \`list_spawnable_agents\` to discover which agents you can spawn).
+- **\`inject_message\`**: send a user-message turn into a running child.
+- **\`cancel_session\`**: stop a child you spawned.
+- **\`share_to_child\`**: push a file or folder from your \`/workspace\` into a child's \`/workspace\` (inverse of \`pull_from_child\`).
+- **\`read_child_output\`**: read a child's event timeline (status updates, artifacts, errors) — events only, not files.
+
+The workspace mental model: each child's \`/workspace\` is sandboxed. The only way data flows out of it is \`pull_from_child\`. The only way data flows in is \`share_to_child\` or what you put in the initial prompt.`
+  : `
+
+## You Are a Worker
+
+You're running in a pod spawned by an orchestrator. Your \`/workspace\` is PRIVATE to this session. The orchestrator pulls files from your workspace when it needs them (\`pull_from_child\`); you don't push.
+
+So: just write your output to \`/workspace\` like any normal working directory and let the orchestrator pull it.`;
+
+// Worker-facing guidelines drop the share-related bullet since workers
+// don't have share in their tool list; the orchestrator handles that
+// for them.
+const guidelinesShareBullet = isOrchestrator
+  ? `\n- For any "share X" / "build Y" / "give me Z" request, write to /workspace and \`share\`. When revising an artifact the user has already seen, update the existing share by id — don't create a new one. \`emit_artifact\` is for throwaway inline content only.`
+  : ``;
+
 const systemPromptText = `${workspacePromptSection}${identityLine} You are running as an agent and a user is watching your session in real-time.
 
 ## Communication Tools
 
-- **emit_status**: Call at the start of each distinct phase of work.
-- **emit_artifact**: Inline Markdown / analysis / code snippets shown in the event stream. Ephemeral — does not persist outside the session.
-- **share**: Persist a /workspace file (HTML, image, SVG, CSV, JSON, Markdown, code, ZIP) for the user to view or download. Rendered inline with the right viewer per type (iframe for HTML sites, table for CSV, JSON tree, Markdown document, etc.) and listed on the workspace Shares page afterwards. **Use share — not emit_artifact — for any substantive deliverable: a report, a site, a dataset, a presentation, an exported file.** Typical flow: write the file with the Write tool, then call share on the path.
-- **request_input**: Call to ask the user a question with clickable options.
-- **emit_error**: Call to report problems.
-- **request_permission**: Call when you need a scope the user hasn't granted.
-- **end_session**: Call when the task is definitively done.${interactivePrompt}
+- **emit_status**: Start of each distinct phase of work.
+- **emit_artifact**: Inline Markdown / code in the event stream. Ephemeral.${shareBullet ? "\n" + shareBullet : ""}
+- **request_input**: Ask the user a question with clickable options.
+- **emit_error**: Report a problem.
+- **request_permission**: Ask for a scope the user hasn't granted.
+- **end_session**: Task is definitively done.${interactivePrompt}
 
 ## Reading files the user uploaded (X1A-96)
 
@@ -393,9 +439,8 @@ If the message says \`(upload <id>: unavailable)\` or \`(upload <id>: error)\` i
 
 ## Guidelines
 
-- Call emit_status at the start of each phase.
-- When the user asks for a deliverable ("share X", "build Y", "give me Z"), default to writing it to /workspace and calling share. Reach for emit_artifact only for throwaway inline content.
-- Be responsive to user messages — the user is watching live.`;
+- Call \`emit_status\` at the start of each phase.${guidelinesShareBullet}
+- Be responsive — the user is watching live.${orchestratorSection}`;
 
 // ── Start the conversation ──────────────────────────────
 

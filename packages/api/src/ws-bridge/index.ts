@@ -43,6 +43,7 @@ import {
   resolveSessionVisibility,
   type PostgresSessionRepository,
   type PostgresSessionShareRepository,
+  type PlatformAdminGuard,
 } from "@x1agent/domain-sessions";
 import type { PostgresAgentRepository } from "@x1agent/domain-agents";
 import type { PostgresMembershipRepository } from "@x1agent/domain-workspaces";
@@ -64,6 +65,21 @@ export interface WsBridgeDeps {
   agents: PostgresAgentRepository;
   memberships: PostgresMembershipRepository;
   sessionShares: PostgresSessionShareRepository;
+  /** Platform-admin bypass for session visibility. Optional. */
+  platformAdminGuard?: PlatformAdminGuard;
+  /**
+   * Optional resolver — returns true when the actor has `collaborate`
+   * access on the named agent. Wired by the composition root from
+   * `resolveAgentAccess`. Powers the open-by-default policy: workspace
+   * members of a `visibility='workspace'` agent can view AND publish
+   * to every session that agent ever runs, including resumed ones.
+   * Without this wired, the bridge falls back to owner-only publish
+   * + share-recipient read.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
   cookieName?: string;
 }
 
@@ -181,7 +197,12 @@ export function buildWsBridge(deps: WsBridgeDeps) {
     const agent = await deps.agents.findById(session.agentId);
     if (!agent) return { ok: false, code: "not_found" };
     const decision = await resolveSessionVisibility(
-      { adminGuard, shares: deps.sessionShares },
+      {
+        adminGuard,
+        platformAdminGuard: deps.platformAdminGuard,
+        shares: deps.sessionShares,
+        agentCollaborateResolver: deps.agentCollaborateResolver,
+      },
       actor,
       session,
       agent.workspaceId,
@@ -194,16 +215,36 @@ export function buildWsBridge(deps: WsBridgeDeps) {
     actor: UserId,
     sessionId: string,
   ): Promise<{ ok: true } | { ok: false; code: string }> {
-    // Publishes (input + presence) require ownership — a share
-    // recipient can read events but cannot inject new turns or keep
-    // the pod warm. This matches the existing UI: only the owner
-    // sees the composer.
+    // Publishes allowed when actor is:
+    //   1. session owner (triggered the session)
+    //   2. session-share `collaborator` (the per-session grant the UI
+    //      writes when sharing a single session)
+    //   3. agent-level `collaborate` — covers workspace-tier (open-by-
+    //      default) members AND explicit `collaborate` grants on
+    //      private agents. Survives resume because agent_id is stable.
+    //
+    // `viewer` session-share role stays read-only — no publish.
     const session = await deps.sessions.findById(SessionId(sessionId));
     if (!session) return { ok: false, code: "not_found" };
-    if (session.triggeredByUserId !== actor) {
-      return { ok: false, code: "forbidden" };
+    if (session.triggeredByUserId === actor) return { ok: true };
+
+    if (deps.sessionShares) {
+      const share = await deps.sessionShares.findForUser(
+        SessionId(sessionId),
+        actor,
+      );
+      if (share && share.role === "collaborator") return { ok: true };
     }
-    return { ok: true };
+
+    if (deps.agentCollaborateResolver) {
+      const ok = await deps.agentCollaborateResolver(
+        actor,
+        String(session.agentId),
+      );
+      if (ok) return { ok: true };
+    }
+
+    return { ok: false, code: "forbidden" };
   }
 
   async function startSessionEventSub(

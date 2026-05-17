@@ -63,11 +63,31 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
  * summarizer are swallowed — a missed summary is not a fatal state
  * and the next scheduled summary refresh tries again.
  */
-function buildSessionSummarizer(): SessionSummarizer {
+function buildSessionSummarizer(
+  sql: import("postgres").Sql<Record<string, unknown>>,
+): SessionSummarizer {
   const anthropicProvider = process.env.ANTHROPIC_PROVIDER ?? "api_key";
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
   const summaryModel = process.env.ANTHROPIC_SUMMARY_MODEL?.trim() || undefined;
+
+  // X1A-145: platform admins pick the summary model in the UI; the
+  // selection lives in platform_settings.anthropic.summary_model and
+  // wins over the env-time default. Each summarize() call re-reads
+  // (no caching) so an admin change takes effect within seconds — no
+  // api restart needed. The query is a single keyed point-lookup
+  // against a tiny table, well inside the noise floor.
+  const modelResolver = async (): Promise<string | undefined> => {
+    try {
+      const rows = await sql<{ value: string }[]>`
+        SELECT value FROM platform_settings
+        WHERE key = 'anthropic.summary_model'
+      `;
+      return rows[0]?.value as unknown as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   if (anthropicProvider === "vertex") {
     const projectId = process.env.ANTHROPIC_VERTEX_PROJECT_ID?.trim();
@@ -80,6 +100,7 @@ function buildSessionSummarizer(): SessionSummarizer {
         projectId,
         region,
         model: summaryModel,
+        modelResolver,
       });
     }
     console.warn(
@@ -92,6 +113,7 @@ function buildSessionSummarizer(): SessionSummarizer {
     return new AnthropicSessionSummarizer({
       apiKey: anthropicKey,
       model: summaryModel,
+      modelResolver,
     });
   }
 
@@ -256,6 +278,7 @@ const {
   accessGrantsRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  agentGrantRoutes,
   previewEnvironmentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
@@ -305,6 +328,8 @@ const {
   sessions: composedSessions,
   memberships: composedMemberships,
   sessionShares: composedSessionShares,
+  platformAdminGuard: composedPlatformAdminGuard,
+  agentCollaborateResolver: composedAgentCollaborateResolver,
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
@@ -444,6 +469,7 @@ app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route("/api/workspaces/:slug/agents/:agentId/grants", agentGrantRoutes);
 app.route(
   "/api/workspaces/:slug/preview-environments",
   previewEnvironmentRoutes,
@@ -612,7 +638,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       sessions: composedSessions,
       agents: composedAgents,
       tokenUsage: composedTokenUsage,
-      summarizer: buildSessionSummarizer(),
+      summarizer: buildSessionSummarizer(composedSql),
       summaryConfig: readSummaryConfigFromEnv(),
     });
     registerCleanup(() => sub.stop());
@@ -1023,6 +1049,8 @@ if (providerNats) {
     agents: composedAgents,
     memberships: composedMemberships,
     sessionShares: composedSessionShares,
+    platformAdminGuard: composedPlatformAdminGuard,
+    agentCollaborateResolver: composedAgentCollaborateResolver,
   });
   console.log("[ws-bridge] listening on /api/ws");
 } else {

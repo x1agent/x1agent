@@ -47,6 +47,16 @@ export interface ShareCommentAddedEvent {
    * REST refresh. `null` for a top-level comment.
    */
   parentCommentId: ShareCommentId | null;
+  /**
+   * Server-stamped insertion time. Carried on the wire so the browser
+   * can sort live-arriving comments against REST-loaded ones using a
+   * single clock — without this, NATS-arriving rows were timestamped
+   * with client wall-clock-on-receipt, which drifts from server time
+   * by network latency + any clock skew and produced visibly wrong
+   * comment ordering in a thread (e.g. me/agent/me/agent posted but
+   * rendered me/agent/agent/me).
+   */
+  createdAt: Date;
 }
 
 export interface ShareCommentThreadResolvedEvent {

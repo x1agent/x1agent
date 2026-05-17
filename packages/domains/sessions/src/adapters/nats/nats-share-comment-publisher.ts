@@ -52,6 +52,10 @@ export class NatsShareCommentPublisher implements ShareCommentPublisher {
       // render a reply indented under the right parent without
       // waiting for a REST refresh. Null for a top-level comment.
       parent_comment_id: e.parentCommentId,
+      // Server-stamped insertion time. Without this the browser fell
+      // back to client wall-clock at NATS receipt, which drifts vs
+      // REST-served rows (server clock) and broke thread ordering.
+      created_at: e.createdAt.toISOString(),
     });
   }
 

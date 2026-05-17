@@ -47,12 +47,31 @@ export interface SessionRoutesConfig {
   events: SessionEventRepository;
   adminGuard: AdminGuard;
   /**
+   * Platform-admin bypass. When provided, platform admins see every
+   * session in the workspace list and can read any session by id.
+   * Optional; when absent every read goes through the per-user filter.
+   * Workspace admin alone is not enough — that role is for managing
+   * the workspace, not reading every user's session history.
+   */
+  platformAdminGuard?: import("../../ports/platform-admin-guard.js").PlatformAdminGuard;
+  /**
    * Optional — when provided, session detail / events allow owner +
    * sharees through, not just workspace admins. Required for the
    * "sessions are private by default" policy. Composition root wires
    * this from PostgresSessionShareRepository.
    */
   shares?: SessionShareRepository;
+  /**
+   * Optional — when wired, the visibility resolver consults agent-level
+   * `collaborate` access. Lets workspace members of a `visibility=
+   * 'workspace'` agent see + post into every session that agent runs,
+   * across the resume chain, without a per-session share grant.
+   * Composition root wires this; tests can omit it.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
   /**
    * slug → workspace id, mirroring the agents + invitations routes. Used
    * only to reject cross-workspace agent ids in the URL.
@@ -318,7 +337,10 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     // else sees only what they own + what's explicitly shared with
     // them. See `session-visibility.ts` for the rule + extension point.
     const listMode = await pickSessionListMode(
-      { adminGuard: cfg.adminGuard },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+      },
       actor.userId,
       wsId,
     );
@@ -414,7 +436,12 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     // Single visibility primitive — see `session-visibility.ts`. Add
     // group-share support there, not here.
     const decision = await resolveSessionVisibility(
-      { adminGuard: cfg.adminGuard, shares: cfg.shares },
+      {
+        adminGuard: cfg.adminGuard,
+        platformAdminGuard: cfg.platformAdminGuard,
+        shares: cfg.shares,
+        agentCollaborateResolver: cfg.agentCollaborateResolver,
+      },
       actorId,
       session,
       agent.workspaceId,
@@ -458,6 +485,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       return c.json({ error: scope.error }, 404);
     }
     const afterRaw = c.req.query("after_seq");
+    const beforeRaw = c.req.query("before_seq");
     const limitRaw = c.req.query("limit");
     const limit = Math.max(
       1,
@@ -465,6 +493,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     );
     const events = await cfg.events.listBySession(scope.session.id, {
       afterSeq: afterRaw !== undefined ? Number(afterRaw) : undefined,
+      beforeSeq: beforeRaw !== undefined ? Number(beforeRaw) : undefined,
       limit,
     });
 
@@ -519,6 +548,49 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       events: events.map(serializeEvent),
       parent,
       children,
+    });
+  });
+
+  // Lightweight poll endpoint. Returns both the live children list
+  // (counter accuracy — parent NATS stream doesn't carry child
+  // lifecycle events) AND the current session record (summary +
+  // status updates the cached SessionDTO never sees otherwise — the
+  // detail page used to render "no summary yet" forever even after
+  // the periodic summarizer wrote one). One round trip, one cache
+  // refresh per tick.
+  app.get("/:sessionId/children", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const scope = await loadScoped(
+      c.req.param("slug")!,
+      c.req.param("sessionId")!,
+      actor.userId,
+    );
+    if ("error" in scope) {
+      return c.json({ error: scope.error }, 404);
+    }
+    const childRows = await cfg.sessions.listChildren(scope.session.id);
+    const childAgentIds = Array.from(
+      new Set(childRows.map((r) => r.agentId)),
+    );
+    const childAgents = await Promise.all(
+      childAgentIds.map((id) => cfg.agents.findById(id)),
+    );
+    const byId = new Map(
+      childAgents
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .map((a) => [a.id, { id: a.id, slug: a.slug, name: a.name }]),
+    );
+    return c.json({
+      session: serialize(scope.session),
+      children: childRows
+        .filter((r) => byId.has(r.agentId))
+        .map((r) => ({
+          id: r.id,
+          status: r.status,
+          triggered_at: r.triggeredAt.toISOString(),
+          agent: byId.get(r.agentId)!,
+        })),
     });
   });
 

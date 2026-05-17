@@ -199,6 +199,23 @@ previews:
   enabled: false
 
 # ============================================================================
+# Share content storage. When `gcsBucket` is set, the session sidecar
+# uploads share bytes directly to GCS and the api serves reads back
+# from GCS — durable across api restarts, multi-replica safe.
+#
+# Empty = local-disk fallback (api pod's /tmp/x1-shares). The fallback
+# is fine for `mise run dev` against OrbStack but is NOT durable in
+# any cluster you care about: a single api pod restart wipes every
+# share on the install.
+#
+# Customer installs on GCP: terraform creates the bucket + IAM and the
+# installer fills this in. Customer installs on other clouds: leave
+# empty until an equivalent object-store adapter ships.
+# ============================================================================
+shares:
+  gcsBucket: ""
+
+# ============================================================================
 # Secrets — backed by Google Secret Manager via External Secrets Operator.
 # Each entry binds an env var the api/preview pods read to a GSM secret name.
 # Terraform creates the GSM Secret resources; you populate values via gcloud.

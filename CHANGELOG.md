@@ -1,3 +1,171 @@
+# [1.37.0](https://github.com/x1agent/x1agent/compare/v1.36.1...v1.37.0) (2026-05-17)
+
+
+### Features
+
+* **agents:** per-agent collaborate grants + open-by-default Permissions tab ([#143](https://github.com/x1agent/x1agent/issues/143)) ([b4de510](https://github.com/x1agent/x1agent/commit/b4de510ebdf87c0fe75737e04dc3f8962ae2e9d5)), closes [#142](https://github.com/x1agent/x1agent/issues/142)
+
+## [1.36.1](https://github.com/x1agent/x1agent/compare/v1.36.0...v1.36.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **shares:** GCS-backed share storage + resume-chain auth ([#142](https://github.com/x1agent/x1agent/issues/142)) ([3376548](https://github.com/x1agent/x1agent/commit/337654879310bc0ab98fa5ad72957fed1705f3b8))
+
+# [1.36.0](https://github.com/x1agent/x1agent/compare/v1.35.1...v1.36.0) (2026-05-17)
+
+
+### Bug Fixes
+
+* **api:** orchestration — tighter watchdog backoff + no-hang pullFromChild ([d2b2714](https://github.com/x1agent/x1agent/commit/d2b2714997158167740c08d71bb5aa7c27740c61))
+* **app:** align summarizer-model URL with backend route ([d6a9f4b](https://github.com/x1agent/x1agent/commit/d6a9f4b988d9c35a7e23f69329277575117400ed))
+* **auth:** re-resolve platform-admin flag on /me + account switch ([fccdca5](https://github.com/x1agent/x1agent/commit/fccdca5fa4052787df6076be99270a0946b12609))
+
+
+### Features
+
+* **api:** admin/anthropic/summary-model endpoints + summarizer wire-up ([35fd493](https://github.com/x1agent/x1agent/commit/35fd4932e0d30b00910f674d1f1262f1fa5c5a68))
+* **app:** Model Settings — tabbed page replaces standalone Claude models ([8c9e78a](https://github.com/x1agent/x1agent/commit/8c9e78aa7b66bded52a21ead37ed6a95549a24df))
+* **sessions:** per-call modelResolver on Anthropic summarizers ([82dd6a7](https://github.com/x1agent/x1agent/commit/82dd6a745569241c576a256192996703dc48c809))
+
+## [1.35.1](https://github.com/x1agent/x1agent/compare/v1.35.0...v1.35.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **scheduler:** orchestrator schedules don't fire silently when anchor is stale ([dd646e9](https://github.com/x1agent/x1agent/commit/dd646e9bf0dc584c57845f45b0058179998a28e7))
+
+# [1.35.0](https://github.com/x1agent/x1agent/compare/v1.34.1...v1.35.0) (2026-05-17)
+
+
+### Bug Fixes
+
+* **agent-prompt:** worker drops share guidance; orchestrator gets update-mode ([1bd1f98](https://github.com/x1agent/x1agent/commit/1bd1f986f7e60d25a94322ef22a1cb6629f17a90))
+* **app:** iOS keyboard leaves no stuck gap below the composer (dvh) ([e62dae5](https://github.com/x1agent/x1agent/commit/e62dae5184c8a321328d86560f41fdc44b2e10b4))
+* **app:** keep agent image binding visible while the image is rebuilding ([1cf5fcc](https://github.com/x1agent/x1agent/commit/1cf5fccb06869b3a2af2d6145727b86fe1b98c01))
+* **chart:** allow CN=session-sidecar to publish x1.session.*.input ([d4e7d99](https://github.com/x1agent/x1agent/commit/d4e7d9900e67ddac85fff6aff395f54c13ce354b))
+
+
+### Features
+
+* **agent:** pull_from_child MCP tool + orchestrator/worker prompt split ([9dcf90c](https://github.com/x1agent/x1agent/commit/9dcf90c13e6953a0d3684b3013bb0073f16780df))
+* **api:** pull_from_child — orchestrator pulls a worker's /workspace ([4b9c7a4](https://github.com/x1agent/x1agent/commit/4b9c7a49dedd1f776f9975957610a0118bb7321a))
+* **sidecar:** pull_from_child handler — relay to api with parent stamp ([bb1be5c](https://github.com/x1agent/x1agent/commit/bb1be5c1a7103eecea761c074357ddb7e44d7690))
+
+
+### Performance Improvements
+
+* **app:** drop JS scrollHeight autosize for pure-CSS grid auto-grow ([94b3cb3](https://github.com/x1agent/x1agent/commit/94b3cb334c9ad9500bf3ac0d89cebfac5774008e))
+* **app:** per-session selectors + memo EventCard + content-visibility rows ([4069e68](https://github.com/x1agent/x1agent/commit/4069e680c30e7559ed7d39312fa630b540a1e60c))
+* **app:** stable callbacks + memo TurnComposer so WS events don't tear down the composer ([3a1bb87](https://github.com/x1agent/x1agent/commit/3a1bb879a2f2f0da0a203fea0e62633b1d5d2bb1))
+
+## [1.34.1](https://github.com/x1agent/x1agent/compare/v1.34.0...v1.34.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* **sessions:** use unprefixed Vertex host when CLOUD_ML_REGION=global ([5f231d4](https://github.com/x1agent/x1agent/commit/5f231d47b7a145e2d56fe8041a973f169284f88b))
+
+# [1.34.0](https://github.com/x1agent/x1agent/compare/v1.33.0...v1.34.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **agent-prompt:** make 'user cannot see your /workspace' explicit on the share tool ([662398a](https://github.com/x1agent/x1agent/commit/662398a6f0f78135bab1a5704fb97866638a4c40))
+* **app:** make cost amounts clickable to open the worker-breakdown panel ([70427f5](https://github.com/x1agent/x1agent/commit/70427f5f05c6987f247f6f5fb1af746ddf8fe69b))
+* **app:** poll children while session is running so the active-workers counter tracks reality (X1A-60) ([ea3b0c8](https://github.com/x1agent/x1agent/commit/ea3b0c8aa0aed661be39cdbafae2dcd5bdf4cb4b))
+* **app:** refresh session record on children poll + single-pill typing indicator + better session-page title ([22a211d](https://github.com/x1agent/x1agent/commit/22a211dd96750191fe631a2ca24493f649a770ff))
+* **comments:** server-stamp NATS payload so live + REST comments sort consistently ([1ae710e](https://github.com/x1agent/x1agent/commit/1ae710e68fa2e64fff248152a5469b09d8045ffe))
+* **wake:** tell agent not to narrate on main timeline when replying to a comment ([4d3d67d](https://github.com/x1agent/x1agent/commit/4d3d67d0b6482ac14702cc88dfa59202e7f1efe0))
+
+
+### Features
+
+* **sessions:** GET /sessions/:id/children for live worker counts ([fe1ca2d](https://github.com/x1agent/x1agent/commit/fe1ca2d9144a19995dd30e1765b85d4091c88441))
+
+
+### Reverts
+
+* **app:** restore original hash + colorField in RailCanvas shader ([4f0bbc6](https://github.com/x1agent/x1agent/commit/4f0bbc6f8c9d420a29e637e7f572809127e0ce52))
+
+# [1.33.0](https://github.com/x1agent/x1agent/compare/v1.32.0...v1.33.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **agent:** probe sidecar health on :9091, not :9090 ([c7248c5](https://github.com/x1agent/x1agent/commit/c7248c51a5869421eca605e647af0cd6b7cc6294))
+* **api:** reject preview-deploy for repos not linked to the agent ([83e4623](https://github.com/x1agent/x1agent/commit/83e46233fa02cad3690ff75814f4c881a032b4fc)), closes [#139](https://github.com/x1agent/x1agent/issues/139)
+* **api:** typecheck-clean uploads + job-watcher + uploads-raw response ([1acb0b1](https://github.com/x1agent/x1agent/commit/1acb0b128fe91a14d1605de5ef5a36cf6fbabff5))
+* **app:** style Delete button as an actual destructive button ([02fdb45](https://github.com/x1agent/x1agent/commit/02fdb45004d45c5ead7c3f672241f4218fa774d5))
+* **chart:** hybrid TLS solver — preview wildcard on DNS-01, app/api on HTTP-01 ([ea05f4d](https://github.com/x1agent/x1agent/commit/ea05f4d0052b8ccbd5f2fc4577d0d91d2bc83bc7))
+* **composition:** hoist workspaceBindingRepo above internalRoutes (TDZ) ([95005f8](https://github.com/x1agent/x1agent/commit/95005f89ad4535fb780f2df9577b27b556a6e621))
+* **composition:** hoist workspaceSecrets{Repo,Service} above internalRoutes (TDZ) ([8e9d452](https://github.com/x1agent/x1agent/commit/8e9d452633c4033850ae423661281a1efe6ff23d))
+* **domains:** real prod typecheck errors that bun-test let through ([de63a9a](https://github.com/x1agent/x1agent/commit/de63a9a3d0240b636f42b80e8d327dad82eec05e)), closes [#139](https://github.com/x1agent/x1agent/issues/139)
+* **migrations/058:** drop now() from partial-index predicate ([421baa9](https://github.com/x1agent/x1agent/commit/421baa9843ff129df13f314b9139a75558f3f290))
+* **preview:** make kaniko pod unpack base images + fix bun TLS to k8s API ([9f96262](https://github.com/x1agent/x1agent/commit/9f96262c6ff23272a671338b04730e8c4be928da))
+* **preview:** rename NATS subject from x1.providers.preview to x1.provider.preview ([f18c6d2](https://github.com/x1agent/x1agent/commit/f18c6d2d91514c47a914a4ba0b0b427ab4bd253d))
+
+
+### Features
+
+* **admin:** New-workspace button on /admin/workspaces ([896eca5](https://github.com/x1agent/x1agent/commit/896eca55acff1413d84a53db2012a6afdfeb0563))
+* **api:** pre-deploy upsert with status=provisioning ([1c8fbd9](https://github.com/x1agent/x1agent/commit/1c8fbd95f655d6b38cd33f16e85aae4382128475))
+* **api:** preview-environments routes + provider deploy upsert ([8cafa96](https://github.com/x1agent/x1agent/commit/8cafa963035a529dd4d9ae03deb97cc11e97729c))
+* **api:** right-size session pod resources ([b47721b](https://github.com/x1agent/x1agent/commit/b47721b29a00fbb3bdd723b04a635ce37eb09e00))
+* **api:** wire workspace env-bindings into composition + mount route ([4c56aad](https://github.com/x1agent/x1agent/commit/4c56aadfeb7aa1f48ee9de28dc49d4d838f318f4))
+* **app:** access-grants panel under workspace settings → Members ([a5c9ab0](https://github.com/x1agent/x1agent/commit/a5c9ab0b55edf456d932df7c5e13f8698786c193))
+* **app:** env-bindings UI — workspace settings panel + preview-env picker ([fc422d9](https://github.com/x1agent/x1agent/commit/fc422d9c25aff99962b7f65ff902ebf8f5c8e54c))
+* **app:** environment detail page with rename + delete ([0345e82](https://github.com/x1agent/x1agent/commit/0345e82700c7763b3bbe35900870d645de413464))
+* **app:** Environments sidebar entry + workspace list page ([26f55ef](https://github.com/x1agent/x1agent/commit/26f55efda57e31eeffbc67cdd5aba838188e9db7))
+* **chart:** preview provider template — namespace, RBAC, cert, deployment ([9d05e3c](https://github.com/x1agent/x1agent/commit/9d05e3c25ffa992d5db8176603a8f0f606c7273f))
+* **cli:** render providers.preview block in install values ([ecf3c44](https://github.com/x1agent/x1agent/commit/ecf3c44e607479d4e4f98a3d087806a5da40282d))
+* **env-bindings,image-builder:** preview-deploy resolves workspace bindings + image-catalog Kaniko gets a writer SA ([5f5fdd4](https://github.com/x1agent/x1agent/commit/5f5fdd42d1b4642a3c9528c990812063e09ccb65))
+* **env-bindings:** workspace-scope bindings + preview env-var-names ([aeb04e5](https://github.com/x1agent/x1agent/commit/aeb04e5bd739af14a52bfdb28e7734d73d89e5b3))
+* **preview-environments:** new domain package + migration ([f935846](https://github.com/x1agent/x1agent/commit/f9358467e1b35954231c719fb0631f52b3ffb7dd))
+* **preview:** plumb buildServiceAccount through the Kaniko Job spec ([f662d75](https://github.com/x1agent/x1agent/commit/f662d752e480df5f1e6d6239b791bf1b029bd424))
+* **preview:** teardown subject + slug in failure replies + delete fires teardown ([4cd2bff](https://github.com/x1agent/x1agent/commit/4cd2bff0e30bdbc52f3290d268ba7bea19a083f1))
+* **terraform/gcp:** preview build GSA with AR writer + WI binding ([288d2d4](https://github.com/x1agent/x1agent/commit/288d2d41d34254baea6a4107074e93aad8d48b8a))
+* **workspaces:** per-workspace access grants — domain + email allowlists ([42a15cd](https://github.com/x1agent/x1agent/commit/42a15cdbc1c0c26a8be6e3a99bcc7e8086e5210e))
+
+# [1.32.0](https://github.com/x1agent/x1agent/compare/v1.31.0...v1.32.0) (2026-05-16)
+
+
+### Bug Fixes
+
+* **app:** center agent detail page and move Edit inline beside title ([c945854](https://github.com/x1agent/x1agent/commit/c9458546458b61b7c6f079494d43f569da8ee05b))
+* **app:** disambiguate prepend vs append in EventStream anchor logic ([ffaad4e](https://github.com/x1agent/x1agent/commit/ffaad4e0ed59f21c7e5077f922b04b6592bb8a5d))
+* **app:** don't halt drift cycle on theme/resize during a tween ([c71ac86](https://github.com/x1agent/x1agent/commit/c71ac866f122f9ef4c56bff8fd4bf7e664d62f84))
+* **app:** stop EventStream from grabbing scroll on every new event ([1d1bb89](https://github.com/x1agent/x1agent/commit/1d1bb893b05a9775a82a6d533242d500fb704152))
+* **sessions:** switch comments load-older cursor from seq to created_at ([c36a489](https://github.com/x1agent/x1agent/commit/c36a489b1029a284b53924c7a8c910056c9b9177))
+* **shares:** zip-slip guard on download endpoint ([8c031ef](https://github.com/x1agent/x1agent/commit/8c031ef9564327ac6d11130d5be784eb8b05d32b))
+
+
+### Features
+
+* **app:** center timeline on deep-linked share ([510e0ca](https://github.com/x1agent/x1agent/commit/510e0cabc20549e5766b13281f9a7e40ad4bebea))
+* **app:** collapse comments sidebar when share is opened via deep-link ([9c6f4f0](https://github.com/x1agent/x1agent/commit/9c6f4f071d7d39c023138d56eeb2d7a9d5f6fecd))
+* **app:** MCP picker hidden by default + fuzzy search (X1A-86) ([b20bd17](https://github.com/x1agent/x1agent/commit/b20bd17fe66afc26c18b263aa062193cefc68d61))
+* **app:** paginate + fuzzy-search agent env bindings (X1A-86) ([33cb578](https://github.com/x1agent/x1agent/commit/33cb57816d1e643c8c55ffae08ae975ef45c2719))
+* **app:** paginate + fuzzy-search available repos on agent edit (X1A-86) ([fe6b5ac](https://github.com/x1agent/x1agent/commit/fe6b5ac74164ded240c6cb0e53f36e8972521aeb))
+* **app:** paginate comments sidebar with scroll-up to load older (X1A-72.4) ([ebefd0b](https://github.com/x1agent/x1agent/commit/ebefd0b173cc5f1a2e87b9452efd70fd41cd85a7))
+* **app:** paginate session event load with scroll-up to load older (X1A-72.3) ([a67128d](https://github.com/x1agent/x1agent/commit/a67128de8f4a6032b197f8ff8019eb1be51b2cf7))
+* **app:** render comment bodies as markdown (X1A-72.1) ([ef70a97](https://github.com/x1agent/x1agent/commit/ef70a974d78a66785bf15a5f4ef4a72a7d42ce92))
+* **app:** shares index links open the share in fullscreen mode ([165d140](https://github.com/x1agent/x1agent/commit/165d140dfc8c1fb9287728a0d4dc34398511bea5))
+* **app:** visual distinction for self-authored comments (X1A-72.2) ([effe270](https://github.com/x1agent/x1agent/commit/effe27060934ac0936510a85ed2cdbe1a056c815))
+* **sessions:** add PlatformAdminGuard port ([d920507](https://github.com/x1agent/x1agent/commit/d920507a226c6ef8eea11bc891b5841afd77088b))
+* **sessions:** hide superseded resume-chain entries from list queries ([b3d9751](https://github.com/x1agent/x1agent/commit/b3d9751b139bca436cff11c9f854d2413a02c0d2))
+* **sessions:** listBySession + events endpoint support before_seq (X1A-72.3 backend) ([3d4bd23](https://github.com/x1agent/x1agent/commit/3d4bd238c8048ac6d845fb31121895558aa31c8d))
+* **sessions:** listByShare + comments endpoint support thread pagination (X1A-72.4 backend) ([c5bbacc](https://github.com/x1agent/x1agent/commit/c5bbacc70a17a094fadc4a4af8e69e8f615761d4))
+* **sessions:** platform admin replaces workspace admin in visibility checks ([2f7ed40](https://github.com/x1agent/x1agent/commit/2f7ed40f454558a8bc26ede76c8616803e507859))
+* **sessions:** wire platform-admin guard through session/share routes ([a951391](https://github.com/x1agent/x1agent/commit/a95139105f9a702627fed71cd1c4f8df0fef7ed9))
+* **shares:** download icon returns a zip of the whole share ([f53ed11](https://github.com/x1agent/x1agent/commit/f53ed116dcbd7574dcf202a53636201040773fd5))
+
+
+### Performance Improvements
+
+* **app:** draw RailCanvas once on iPad / Android tablet instead of running 60fps shader ([b86e139](https://github.com/x1agent/x1agent/commit/b86e139f94ac8afe89137c037c99fccb3654ac2d))
+* **app:** drift-mode canvas + shader micro-optimizations ([acf4978](https://github.com/x1agent/x1agent/commit/acf497880c8e1a267f0bc2aa9400ba323dbf806d))
+
 # [1.31.0](https://github.com/x1agent/x1agent/compare/v1.30.0...v1.31.0) (2026-05-15)
 
 

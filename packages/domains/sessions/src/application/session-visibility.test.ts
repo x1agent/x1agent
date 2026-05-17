@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { UserId, WorkspaceId, DomainError } from "@x1agent/kernel";
+import { UserId, WorkspaceId } from "@x1agent/kernel";
 import {
   pickSessionListMode,
   resolveSessionVisibility,
@@ -7,31 +7,15 @@ import {
 import { SessionId } from "../domain/session.js";
 
 // ─── Fakes ────────────────────────────────────────────────────────────
-//
-// The visibility helper depends on an AdminGuard and (optionally) a
-// SessionShareRepository. We only need the methods it actually calls.
 
-class AdminGuardYes {
-  async assertAdmin() {
-    // workspace admin / owner — passes
-  }
-  async assertMember() {
-    // any member — passes
+class PlatformAdminYes {
+  async isPlatformAdmin() {
+    return true;
   }
 }
-
-class AdminGuardNo {
-  async assertAdmin() {
-    throw new (class extends DomainError {
-      readonly code = "admin_denied";
-      constructor() {
-        super("not admin");
-      }
-    })();
-  }
-  async assertMember() {
-    // Visibility tests use this guard for non-admin members; they should
-    // pass the member check (they're still a member, just not admin).
+class PlatformAdminNo {
+  async isPlatformAdmin() {
+    return false;
   }
 }
 
@@ -72,32 +56,46 @@ const WS_A = WorkspaceId("00000000-0000-7000-8000-0000000000a1");
 const SESSION = {
   id: SessionId("00000000-0000-7000-8000-000000000001"),
   triggeredByUserId: ALICE,
+  agentId: "00000000-0000-7000-8000-0000000000a9" as never,
 };
 
 describe("resolveSessionVisibility", () => {
   it("owner sees their own session (no admin/share check needed)", async () => {
-    const r = await resolveSessionVisibility(
-      { adminGuard: new AdminGuardNo() },
-      ALICE,
-      SESSION,
-      WS_A,
-    );
+    const r = await resolveSessionVisibility({}, ALICE, SESSION, WS_A);
     expect(r).toEqual({ visible: true, reason: "owner" });
   });
 
-  it("workspace admin sees a session they don't own and weren't shared", async () => {
+  it("platform admin sees a session they don't own and weren't shared", async () => {
     const r = await resolveSessionVisibility(
-      { adminGuard: new AdminGuardYes() },
+      { platformAdminGuard: new PlatformAdminYes() },
       BOB,
       SESSION,
       WS_A,
     );
-    expect(r).toEqual({ visible: true, reason: "workspace_admin" });
+    expect(r).toEqual({ visible: true, reason: "platform_admin" });
+  });
+
+  it("workspace admin does NOT bypass — needs ownership or an explicit share", async () => {
+    // This is the regression: workspace admin used to bypass visibility,
+    // which leaked every user's sessions to anyone with the admin role
+    // in the workspace. Platform admin is the only deployment-wide
+    // bypass; workspace admin must look at the same filter as everyone
+    // else.
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: new FakeShares() as never,
+      },
+      BOB,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: false });
   });
 
   it("non-owner, non-admin, no share → invisible", async () => {
     const r = await resolveSessionVisibility(
-      { adminGuard: new AdminGuardNo(), shares: new FakeShares() },
+      { platformAdminGuard: new PlatformAdminNo(), shares: new FakeShares() as never },
       CAROL,
       SESSION,
       WS_A,
@@ -109,7 +107,7 @@ describe("resolveSessionVisibility", () => {
     const shares = new FakeShares();
     shares.grant(SESSION.id, BOB);
     const r = await resolveSessionVisibility(
-      { adminGuard: new AdminGuardNo(), shares },
+      { platformAdminGuard: new PlatformAdminNo(), shares: shares as never },
       BOB,
       SESSION,
       WS_A,
@@ -117,9 +115,32 @@ describe("resolveSessionVisibility", () => {
     expect(r).toEqual({ visible: true, reason: "user_share" });
   });
 
-  it("missing shares repo + non-owner + non-admin → invisible (degrades safely)", async () => {
+  it("missing shares repo + non-owner + non-platform-admin → invisible (degrades safely)", async () => {
+    const r = await resolveSessionVisibility({}, CAROL, SESSION, WS_A);
+    expect(r).toEqual({ visible: false });
+  });
+
+  it("agent-collaborate resolver returns true → visible via agent_collaborator (the open-by-default workspace tier + explicit grants both flow through here)", async () => {
     const r = await resolveSessionVisibility(
-      { adminGuard: new AdminGuardNo() },
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: new FakeShares() as never,
+        agentCollaborateResolver: async () => true,
+      },
+      BOB,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: true, reason: "agent_collaborator" });
+  });
+
+  it("agent-collaborate resolver returns false → falls through to invisible", async () => {
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: new FakeShares() as never,
+        agentCollaborateResolver: async () => false,
+      },
       CAROL,
       SESSION,
       WS_A,
@@ -127,19 +148,35 @@ describe("resolveSessionVisibility", () => {
     expect(r).toEqual({ visible: false });
   });
 
-  it("owner takes precedence over share — no admin lookup performed", async () => {
-    // Tracks that the admin guard isn't called when owner check passes.
-    // Important: cheapest branch first, so the workspace_sessions list
-    // doesn't fire an admin check per row.
+  it("share grant wins before the agent-collaborate resolver is consulted (avoids redundant agent lookup)", async () => {
+    const shares = new FakeShares();
+    shares.grant(SESSION.id, BOB);
+    let resolverCalls = 0;
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: shares as never,
+        agentCollaborateResolver: async () => {
+          resolverCalls++;
+          return true;
+        },
+      },
+      BOB,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: true, reason: "user_share" });
+    expect(resolverCalls).toBe(0);
+  });
+
+  it("owner takes precedence over share — no platform-admin lookup performed", async () => {
     let called = false;
     const r = await resolveSessionVisibility(
       {
-        adminGuard: {
-          async assertAdmin() {
+        platformAdminGuard: {
+          async isPlatformAdmin() {
             called = true;
-          },
-          async assertMember() {
-            called = true;
+            return true;
           },
         },
       },
@@ -153,21 +190,26 @@ describe("resolveSessionVisibility", () => {
 });
 
 describe("pickSessionListMode", () => {
-  it("admin → mode 'all' (unfiltered query)", async () => {
+  it("platform admin → mode 'all' (unfiltered query)", async () => {
     const m = await pickSessionListMode(
-      { adminGuard: new AdminGuardYes() },
+      { platformAdminGuard: new PlatformAdminYes() },
       ALICE,
       WS_A,
     );
     expect(m).toEqual({ mode: "all" });
   });
 
-  it("non-admin → mode 'user' carrying the actor's userId", async () => {
+  it("workspace admin / regular user → mode 'user' carrying the actor's userId", async () => {
     const m = await pickSessionListMode(
-      { adminGuard: new AdminGuardNo() },
+      { platformAdminGuard: new PlatformAdminNo() },
       BOB,
       WS_A,
     );
+    expect(m).toEqual({ mode: "user", userId: BOB });
+  });
+
+  it("missing platformAdminGuard → mode 'user' (safe default)", async () => {
+    const m = await pickSessionListMode({}, BOB, WS_A);
     expect(m).toEqual({ mode: "user", userId: BOB });
   });
 });

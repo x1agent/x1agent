@@ -114,6 +114,12 @@ variable "artifact_registry_id" {
   default     = "x1agent"
 }
 
+variable "share_artifacts_bucket" {
+  description = "GCS bucket name for share content (HTML reports, exported files, site previews). Globally unique. Defaults to <project_id>-x1agent-shares."
+  type        = string
+  default     = ""
+}
+
 variable "gsm_secret_names" {
   description = "GSM secret resource names to create (empty values; operator populates via gcloud)."
   type        = list(string)

@@ -783,5 +783,72 @@ describe("scheduleDueSessions", () => {
       expect(result.created).toBe(0);
       expect((surfaced as Error).message).toContain("MessageInjector");
     });
+
+    it("no-backfill does NOT eat the first fire for an orchestrator whose anchor is far in the past", async () => {
+      // Operator-reported symptom (2026-05-17): set a daily schedule on
+      // an orchestrator that's been alive for days; the agent runs all
+      // night and no heartbeat fires. Root cause was that the no-backfill
+      // rule applied to orchestrators too. For orchestrators a missed
+      // slot does NOT create a session backlog (the tick injects into
+      // the live session), so the rule should only apply to workers.
+      const a = await makeAgent({
+        slug: "orch-stale-anchor",
+        schedule: "30 5 * * *",
+        kind: "orchestrator",
+      });
+      const live = await sessions.create({
+        agentId: a.id,
+        triggeredBy: "user",
+        triggeredByUserId: ACTOR,
+        parentSessionId: null,
+        parentAgentId: null,
+        resumedFromSessionId: null,
+        triggeredAt: new Date("2026-05-15T10:00:00Z"),
+      });
+      await sessions.updateStatus(live.id, { status: "running" });
+      // Seed lastSchedulerTickAt explicitly to a date 30 days back so
+      // the no-backfill branch fires deterministically (the in-memory
+      // agent fake stamps createdAt with real wall-clock time, not the
+      // FixedClock, so anchor-from-createdAt isn't reliable in tests).
+      // Pre-fix, the (now - due > intervalMs) check would advance the
+      // anchor to now and skip without injecting.
+      await agents.recordSchedulerTick(
+        a.id,
+        new Date("2026-04-17T12:00:00Z"),
+      );
+      clock.set(new Date("2026-05-17T05:35:00Z"));
+
+      const injector = new RecordingInjector();
+      const result = await scheduleDueSessions({
+        agents,
+        sessions,
+        clock,
+        injector,
+      });
+
+      expect(result.injected).toBe(1);
+      expect(result.created).toBe(0);
+      expect(injector.calls).toHaveLength(1);
+      expect(injector.calls[0]!.sessionId).toBe(live.id);
+    });
+
+    it("no-backfill STILL applies to worker kinds (does not regress phantom-session prevention)", async () => {
+      // Counter-test: the rule must keep firing for workers so a stale
+      // anchor doesn't spawn N sessions catching up.
+      const a = await makeAgent({
+        slug: "worker-stale-anchor",
+        schedule: "@hourly",
+        kind: "worker",
+      });
+      // Anchor 10 hours behind now — far enough to trigger no-backfill.
+      await seedPriorRun(a.id, new Date("2026-04-18T02:00:00Z"));
+      clock.set(new Date("2026-04-18T13:05:00Z"));
+
+      const result = await scheduleDueSessions({ agents, sessions, clock });
+
+      // Pre-existing behavior: skip the backlog, advance anchor, no
+      // new session row created.
+      expect(result.created).toBe(0);
+    });
   });
 });

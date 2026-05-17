@@ -156,6 +156,7 @@ export async function postShareComment(
     producingSessionId: producing.producingSessionId,
     producingAgentId: producing.producingAgentId,
     parentCommentId,
+    createdAt: comment.createdAt,
   });
 
   return { comment, threadId };

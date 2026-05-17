@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   openBridge,
   type BridgeHandle,
@@ -8,6 +8,7 @@ import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
 import { useSessionDetailStore } from "../../stores/sessionDetailStore";
+import { useShallow } from "zustand/react/shallow";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
@@ -29,6 +30,13 @@ import {
 } from "../../stores/typingIndicatorStore";
 import { MainTimelineTypingIndicators } from "./TypingIndicator";
 
+// Stable empty references for the per-session selectors. Inlining
+// `?? []` or `?? new Array()` outside the selector mints a fresh
+// reference each render and tanks React.memo on downstream consumers
+// (see project memory: zustand-foot-gun).
+const EMPTY_EVENTS: ReadonlyArray<never> = Object.freeze([]);
+const EMPTY_COMPACT_ITEMS: ReadonlyArray<never> = Object.freeze([]);
+
 interface Props {
   workspaceSlug: string;
   sessionId: string;
@@ -43,17 +51,38 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
 
 export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const { status: authStatus, fetchMe } = useAuthStore();
-  const {
-    sessionsById,
-    agentsBySession,
-    parentBySession,
-    eventsBySession,
-    errorBySession,
-    loadInitial,
-    appendEvent,
-    setError,
-    setSession,
-  } = useSessionDetailStore();
+  // Per-session selectors — each subscribes only to THIS session's
+  // slice of the store. Without this, SessionRoot re-rendered on
+  // every WS message in any session (the whole-store destructure used
+  // to live here), which cascaded down to a full EventStream rebuild
+  // on every keystroke — visible as iPad typing lag.
+  const session = useSessionDetailStore((s) => s.sessionsById[sessionId]);
+  const agent = useSessionDetailStore((s) => s.agentsBySession[sessionId]);
+  const parent =
+    useSessionDetailStore((s) => s.parentBySession[sessionId]) ?? null;
+  const events =
+    useSessionDetailStore((s) => s.eventsBySession[sessionId]) ?? EMPTY_EVENTS;
+  const error = useSessionDetailStore((s) => s.errorBySession[sessionId]);
+  // Actions never change reference — destructure with useShallow on a
+  // single render so React.memo'd children never see new function
+  // identities from us.
+  const { loadInitial, loadOlder, loadChildren, appendEvent, setError, setSession } =
+    useSessionDetailStore(
+      useShallow((s) => ({
+        loadInitial: s.loadInitial,
+        loadOlder: s.loadOlder,
+        loadChildren: s.loadChildren,
+        appendEvent: s.appendEvent,
+        setError: s.setError,
+        setSession: s.setSession,
+      })),
+    );
+  const hasOlder = useSessionDetailStore(
+    (s) => s.hasOlderBySession[sessionId] ?? false,
+  );
+  const loadingOlder = useSessionDetailStore(
+    (s) => s.loadingOlderBySession[sessionId] ?? false,
+  );
 
   const [verbose, setVerbose] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -76,7 +105,10 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     }
   };
 
-  const onPause = async () => {
+  // Stable across renders so TurnComposer (memo'd) doesn't tear down +
+  // remount on every SessionRoot re-render — was the second iPad
+  // typing lag source after WS events flooded SessionRoot updates.
+  const onPause = useCallback(async () => {
     if (!agent) return;
     try {
       const cancelled = await cancelAction(workspaceSlug, agent.id, sessionId);
@@ -88,19 +120,13 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     } catch (err) {
       setError(sessionId, (err as Error).message);
     }
-  };
+  }, [agent, cancelAction, workspaceSlug, sessionId, setSession, setError]);
 
-  const session = sessionsById[sessionId];
-  const agent = agentsBySession[sessionId];
-  const parent = parentBySession[sessionId] ?? null;
-  const events = eventsBySession[sessionId] ?? [];
-  const error = errorBySession[sessionId];
-  // Selector returns the cached array reference; `?? []` lives outside
-  // the selector per the project's zustand foot-gun rule (a default
-  // inside the selector would mint a new `[]` on every render and
-  // tank `React.memo` further down the tree).
+  // `session`, `agent`, `parent`, `events`, `error` are subscribed
+  // above via per-session selectors so we re-render only when THIS
+  // session's slice changes.
   const compactItems =
-    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? [];
+    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? EMPTY_COMPACT_ITEMS;
 
   useEffect(() => {
     if (authStatus === "idle") fetchMe();
@@ -210,7 +236,14 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         }
         // Bridge guarantees these three are present; defense in depth.
         if (!p.share_id || !p.thread_id || !p.comment_id) return;
-        const now = new Date().toISOString();
+        // Server-stamped time if the bridge carried it; only fall back
+        // to client wall-clock when an older api version doesn't yet
+        // emit created_at on the wire. The fallback path is the
+        // pre-fix behaviour and races vs server time, which is what
+        // produced visibly-wrong thread ordering when REST-loaded
+        // (server-time) and NATS-delivered (client-time) comments
+        // were interleaved.
+        const stamp = p.created_at ?? new Date().toISOString();
         const dto: ShareCommentDTO = {
           id: p.comment_id,
           share_id: p.share_id,
@@ -225,8 +258,8 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           author_session_id: p.actor_session_id,
           resolved_at: null,
           resolved_by_user_id: null,
-          created_at: now,
-          updated_at: now,
+          created_at: stamp,
+          updated_at: stamp,
           parent_comment_id: p.parent_comment_id,
         };
         useShareCommentsStore.getState().applyServerEvent(dto);
@@ -284,6 +317,27 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     };
   }, [workspaceSlug, sessionId, loadInitial, appendEvent, setError]);
 
+  // X1A-60 — poll the children list while the parent is alive. The
+  // parent's NATS stream doesn't fire when a child's lifecycle
+  // changes, and the spawn-result sniffer in sessionDetailStore is
+  // best-effort (races on subscribe, bails on payload-shape drift).
+  // 4s is a balance: tight enough to feel live, sparse enough that
+  // a long-running orchestrator doesn't generate one request per
+  // second forever. Stops when the session is no longer running.
+  useEffect(() => {
+    if (!session) return;
+    const alive =
+      session.status === "running" || session.status === "pending";
+    if (!alive) return;
+    // Fire immediately so the counter is correct on landing, then
+    // every 4 seconds.
+    void loadChildren(workspaceSlug, sessionId);
+    const id = setInterval(() => {
+      void loadChildren(workspaceSlug, sessionId);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [workspaceSlug, sessionId, session?.status, loadChildren]);
+
   // User input TTL: drop messages older than this on the consumer.
   // 2 min is "long enough to cover pod warmup (~30s typical, ~2min
   // worst-case on cold image pull) but short enough that a stale
@@ -294,7 +348,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // entries.
   const USER_INPUT_TTL_MS = 2 * 60 * 1000;
 
-  const sendMessage = async (text: string, requestId?: string) => {
+  const sendMessage = useCallback(async (text: string, requestId?: string) => {
     const bridge = bridgeRef.current;
     if (!bridge) return;
     const basePayload: Record<string, unknown> = { text };
@@ -337,7 +391,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         `failed to publish user input: ${(err as Error).message}`,
       );
     }
-  };
+  }, [sessionId]);
 
   // Auto-send a pending prompt once the agent is actually up. We wait
   // for the `session.started` event rather than the session row's
@@ -367,6 +421,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // stays canonical: paste the URL → someone else lands on the same view.
   const showArtifact = useArtifactPanelStore((s) => s.show);
   const maximizeArtifact = useArtifactPanelStore((s) => s.maximize);
+  const setCommentsCollapsed = useArtifactPanelStore(
+    (s) => s.setCommentsCollapsed,
+  );
   const deepLinkAppliedRef = useRef(false);
   useEffect(() => {
     if (deepLinkAppliedRef.current) return;
@@ -387,7 +444,30 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       artifact: evt.payload as AgentSharePayload,
     });
     if (params.get("mode") === "fullscreen") maximizeArtifact();
-  }, [events, sessionId, workspaceSlug, showArtifact, maximizeArtifact]);
+    // Comments sidebar starts collapsed when the user navigates directly
+    // to a share (deep-link or fullscreen). They opened the share to
+    // read it; if they want comments, they can expand from the gutter.
+    setCommentsCollapsed(true);
+    // Scroll the matching share pill to the center of the timeline so
+    // the user lands on the share they followed in, not at the bottom
+    // of the conversation. The pill is tagged with `data-share-id` by
+    // SharePill. Use requestAnimationFrame so the EventStream has
+    // finished its initial layout (and its own jump-to-bottom) first;
+    // our center-scroll wins on the next paint.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-share-id="${CSS.escape(target)}"]`,
+      );
+      if (el) el.scrollIntoView({ behavior: "auto", block: "center" });
+    });
+  }, [
+    events,
+    sessionId,
+    workspaceSlug,
+    showArtifact,
+    maximizeArtifact,
+    setCommentsCollapsed,
+  ]);
 
   const disabled =
     !session ||
@@ -425,7 +505,16 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />
-      <div className="flex h-[calc(100svh-56px)] gap-3 bg-canvas p-3">
+      {/* iOS Safari quirk: with `100svh` (smallest viewport), opening
+          the on-screen keyboard makes the page taller than the visible
+          area, the browser auto-scrolls to keep the composer in view,
+          and after the keyboard dismisses the scroll offset doesn't
+          reset — leaves a 150–200px gap at the bottom that doesn't
+          reclaim. `100dvh` follows the actual visible viewport
+          including the keyboard, so the layout shrinks while the
+          keyboard is open and grows back when it closes, no stuck
+          scroll. */}
+      <div className="flex h-[calc(100dvh-56px)] gap-3 bg-canvas p-3">
         <div className="surface-card flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-w-0 items-center gap-3 border-b border-border-soft px-4 py-2.5">
           <div className="min-w-0 flex-1">
@@ -513,6 +602,9 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
           agentId={agent?.id}
           sessionId={sessionId}
           tailSlot={<MainTimelineTypingIndicators sessionId={sessionId} />}
+          hasOlder={hasOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={() => loadOlder(workspaceSlug, sessionId)}
         />
 
         <div className="px-4 pt-3 pb-[60px]">
