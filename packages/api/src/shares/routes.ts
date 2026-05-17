@@ -340,25 +340,24 @@ export function createWorkspaceShareRoutes(
 
     const entries: { path: string; bytes: Buffer }[] = [];
     if (cfg.gcsArtifactsBucket) {
-      const token = await fetchGcsToken();
-      if (!token) {
-        return c.json({ error: "gcs_auth_failed" }, 500);
-      }
       for (const f of files) {
-        const objectName = `sessions/${sessionId}/shares/${shareId}/${f.path}`;
-        const gcsUrl = `https://storage.googleapis.com/storage/v1/b/${cfg.gcsArtifactsBucket}/o/${encodeURIComponent(objectName)}?alt=media`;
-        const res = await fetch(gcsUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) continue;
-        entries.push({
-          path: f.path,
-          bytes: Buffer.from(await res.arrayBuffer()),
-        });
+        try {
+          const bytes = await downloadShareFromGcs(
+            cfg.gcsArtifactsBucket,
+            shareId,
+            f.path,
+          );
+          if (!bytes) continue;
+          entries.push({ path: f.path, bytes });
+        } catch {
+          // Skip this file; the surrounding loop still produces a zip
+          // with whatever did fetch. The route 404s only if NO files
+          // came back at all.
+        }
       }
     } else {
       for (const f of files) {
-        const bytes = readShareFile(sessionId, shareId, f.path);
+        const bytes = readShareFile(shareId, f.path);
         if (!bytes) continue;
         entries.push({ path: f.path, bytes });
       }
@@ -578,19 +577,6 @@ export function createWorkspaceSharesIndexRoutes(
  * pointless when the caller wants JSON, and base64 is the lowest-fric
  * encoding for binary shares (PDF, PNG) over a JSON channel.
  */
-async function fetchGcsToken(): Promise<string | null> {
-  try {
-    const tokenRes = await fetch(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      { headers: { "Metadata-Flavor": "Google" } },
-    );
-    const tokenBody = (await tokenRes.json()) as { access_token?: string };
-    return tokenBody.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function readFromGcsAsJson(
   bucket: string,
   shareId: string,

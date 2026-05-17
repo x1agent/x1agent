@@ -45,7 +45,10 @@ export type InstallAction =
 const NAMESPACE = "x1agent";
 const RELEASE = "x1agent";
 
-export async function runInstall(action: InstallAction): Promise<boolean> {
+export async function runInstall(
+  action: InstallAction,
+  opts: { autoConfirm?: boolean } = {},
+): Promise<boolean> {
   intro(`x1agent install:${action}`);
 
   // Pick the active deployment up-front (auto if 1, prompt if many).
@@ -70,7 +73,7 @@ export async function runInstall(action: InstallAction): Promise<boolean> {
   }
 
   switch (action) {
-    case "up":            return await (await import("./up.ts")).runInstallUp();
+    case "up":            return await (await import("./up.ts")).runInstallUp(opts);
     case "plan":          return await doPlan();
     case "apply":         return await doApply();
     case "status":        return await doStatus();

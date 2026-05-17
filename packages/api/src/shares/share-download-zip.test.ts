@@ -186,7 +186,7 @@ describe("GET /:shareId/_download.zip", () => {
   it("returns a zip of every file declared by the agent.share event", async () => {
     // Stage two files on disk; declare them on the event payload so
     // the route's file list pulls both.
-    writeShareFiles(SESSION_A, SHARE_A, [
+    await writeShareFiles(SHARE_A, [
       {
         path: "index.html",
         content: Buffer.from("<h1>hi</h1>", "utf8").toString("base64"),
@@ -258,7 +258,7 @@ describe("GET /:shareId/_download.zip", () => {
     // Plant a real file at a safe name so the read side has something
     // to find — but the event declares only unsafe paths. The route
     // must reject them all and respond 404.
-    writeShareFiles(SESSION_A, SHARE_A, [
+    await writeShareFiles(SHARE_A, [
       {
         path: "ok.txt",
         content: Buffer.from("ok", "utf8").toString("base64"),
