@@ -107,6 +107,23 @@ function defaultFetchResponses() {
         }),
       );
     }
+    // Endpoints the new Anthropic tab fires on mount. Tests for those
+    // surfaces live elsewhere; here we just keep the renders alive.
+    if (u.endsWith("/api/admin/anthropic/models") && method === "GET") {
+      return Promise.resolve(
+        jsonRes({
+          provider: "api_key",
+          region: null,
+          filtering_active: false,
+          models: [],
+        }),
+      );
+    }
+    if (u.endsWith("/api/admin/anthropic/summary-model") && method === "GET") {
+      return Promise.resolve(
+        jsonRes({ model_id: null, updated_at: null, updated_by: null }),
+      );
+    }
     if (method === "PUT") {
       const provider = u.split("/").pop()!;
       return Promise.resolve(
@@ -142,6 +159,21 @@ function overrideLlmStatus(
       );
     if (u.endsWith("/api/admin/platform-secrets/llm") && (init?.method ?? "GET") === "GET") {
       return Promise.resolve(jsonRes({ providers }));
+    }
+    if (u.endsWith("/api/admin/anthropic/models") && (init?.method ?? "GET") === "GET") {
+      return Promise.resolve(
+        jsonRes({
+          provider: "api_key",
+          region: null,
+          filtering_active: false,
+          models: [],
+        }),
+      );
+    }
+    if (u.endsWith("/api/admin/anthropic/summary-model") && (init?.method ?? "GET") === "GET") {
+      return Promise.resolve(
+        jsonRes({ model_id: null, updated_at: null, updated_by: null }),
+      );
     }
     if (init?.method === "PUT") {
       const provider = u.split("/").pop()!;
@@ -179,32 +211,66 @@ describe("AdminSettingsRoot — gating", () => {
     expect(
       screen.getByText(/don't have permission/i),
     ).toBeDefined();
-    // Does NOT render the LLM Provider Keys section for non-admins.
-    expect(screen.queryByText(/llm provider keys/i)).toBeNull();
+    // Does NOT render any provider card for non-admins.
+    expect(screen.queryByTestId("provider-card-anthropic")).toBeNull();
   });
 
-  it("renders the LLM Provider Keys section for platform admins", async () => {
+  it("renders the Anthropic tab by default for platform admins", async () => {
     setAuthAdmin(true);
     render(<AdminSettingsRoot />);
     await waitFor(() => {
-      expect(screen.getByText(/llm provider keys/i)).toBeDefined();
+      expect(screen.getByTestId("provider-card-anthropic")).toBeDefined();
     });
-    expect(screen.getByTestId("provider-card-anthropic")).toBeDefined();
-    expect(screen.getByTestId("provider-card-openai")).toBeDefined();
+    // Heading reads "Model Settings" — replaced the old "Admin Settings"
+    // / "LLM Provider Keys" copy after the X1A-145 tab consolidation.
+    expect(
+      screen.getByRole("heading", { name: /model settings/i }),
+    ).toBeDefined();
+    expect(screen.getByRole("tab", { name: /anthropic/i })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /openai/i })).toBeDefined();
+    // OpenAI card lives behind its own tab — not rendered by default.
+    expect(screen.queryByTestId("provider-card-openai")).toBeNull();
+  });
+
+  it("renders the OpenAI provider card when defaultValue=openai (via ?tab=openai)", async () => {
+    setAuthAdmin(true);
+    // happy-dom's location.search isn't writable by default; the
+    // shipping code reads it via URLSearchParams. Stub it for this
+    // case so the page renders the OpenAI tab as default — exercises
+    // the same content slot without depending on Radix Tabs' click
+    // semantics under happy-dom.
+    const orig = window.location.search;
+    Object.defineProperty(window.location, "search", {
+      value: "?tab=openai",
+      configurable: true,
+    });
+    render(<AdminSettingsRoot />);
+    await waitFor(() => {
+      expect(screen.getByTestId("provider-card-openai")).toBeDefined();
+    });
+    Object.defineProperty(window.location, "search", {
+      value: orig,
+      configurable: true,
+    });
   });
 });
 
 describe("AdminSettingsRoot — status reflects booleans only", () => {
-  it("shows NOT CONFIGURED on a fresh install", async () => {
+  it("shows NOT CONFIGURED on a fresh install (Anthropic tab default)", async () => {
     setAuthAdmin(true);
     render(<AdminSettingsRoot />);
     await waitFor(() => {
-      const badges = screen.getAllByTestId("status-not-configured");
-      expect(badges.length).toBe(2);
+      // One badge visible — the Anthropic card. OpenAI is in the other
+      // tab and Radix renders inactive panels with hidden, so a
+      // queryAll still returns those elements. Pin to the visible
+      // card under provider-card-anthropic.
+      const card = screen.getByTestId("provider-card-anthropic");
+      expect(card.querySelector('[data-testid="status-not-configured"]'))
+        .not.toBeNull();
     });
   });
 
-  it("shows CONFIGURED when the api reports configured=true", async () => {
+  it("shows CONFIGURED on the Anthropic card when the api reports configured=true", async () => {
     overrideLlmStatus([
       { provider: "anthropic", configured: true },
       { provider: "openai", configured: false },
@@ -212,8 +278,9 @@ describe("AdminSettingsRoot — status reflects booleans only", () => {
     setAuthAdmin(true);
     render(<AdminSettingsRoot />);
     await waitFor(() => {
-      const ok = screen.getAllByTestId("status-configured");
-      expect(ok.length).toBe(1);
+      const card = screen.getByTestId("provider-card-anthropic");
+      expect(card.querySelector('[data-testid="status-configured"]'))
+        .not.toBeNull();
     });
   });
 });
@@ -223,14 +290,13 @@ describe("AdminSettingsRoot — Save flow", () => {
     setAuthAdmin(true);
     render(<AdminSettingsRoot />);
 
-    // Wait for initial load to finish so the cards render.
     await waitFor(() => {
-      expect(screen.getByTestId("key-input-openai")).toBeDefined();
+      expect(screen.getByTestId("key-input-anthropic")).toBeDefined();
     });
 
-    const input = screen.getByTestId("key-input-openai") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "sk-real" } });
-    fireEvent.click(screen.getByTestId("key-save-openai"));
+    const input = screen.getByTestId("key-input-anthropic") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "sk-ant-real" } });
+    fireEvent.click(screen.getByTestId("key-save-anthropic"));
 
     await waitFor(() => {
       expect(screen.getByTestId("restart-banner")).toBeDefined();
@@ -247,11 +313,11 @@ describe("AdminSettingsRoot — Save flow", () => {
     );
     expect(putCall).toBeDefined();
     expect(String(putCall![0])).toContain(
-      "/api/admin/platform-secrets/llm/openai",
+      "/api/admin/platform-secrets/llm/anthropic",
     );
     expect(
       JSON.parse(String((putCall![1] as RequestInit).body)),
-    ).toEqual({ value: "sk-real" });
+    ).toEqual({ value: "sk-ant-real" });
   });
 
   it("disables Save until the input has non-whitespace content", async () => {
@@ -333,10 +399,10 @@ describe("AdminSettingsRoot — no key values leak into the DOM", () => {
     setAuthAdmin(true);
     render(<AdminSettingsRoot />);
     await waitFor(() => {
-      expect(screen.getByTestId("key-input-openai")).toBeDefined();
+      expect(screen.getByTestId("key-input-anthropic")).toBeDefined();
     });
-    const secret = "sk-do-not-leak-12345";
-    fireEvent.change(screen.getByTestId("key-input-openai"), {
+    const secret = "sk-ant-do-not-leak-12345";
+    fireEvent.change(screen.getByTestId("key-input-anthropic"), {
       target: { value: secret },
     });
     // The HTMLInputElement's `value` of course contains it; what we're
@@ -344,7 +410,7 @@ describe("AdminSettingsRoot — no key values leak into the DOM", () => {
     // rendered markup, where a tooltip / data-attribute / debug span
     // could leak it. We strip the input's own value attribute before
     // checking the rest of the document.
-    const input = screen.getByTestId("key-input-openai") as HTMLInputElement;
+    const input = screen.getByTestId("key-input-anthropic") as HTMLInputElement;
     input.value = "";
     expect(document.body.textContent ?? "").not.toContain(secret);
   });
