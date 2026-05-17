@@ -279,14 +279,16 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         ...(body.idle_timeout_seconds !== undefined && {
           idleTimeoutSeconds: clampIdleTimeoutSeconds(body.idle_timeout_seconds),
         }),
-        ...(body.visibility !== undefined && {
-          visibility:
-            body.visibility === "private" ||
-            body.visibility === "workspace" ||
-            body.visibility === "via_grants"
-              ? body.visibility
-              : undefined,
-        }),
+        ...(body.visibility === "private" ||
+        body.visibility === "workspace" ||
+        body.visibility === "via_grants"
+          ? {
+              visibility: body.visibility as
+                | "private"
+                | "workspace"
+                | "via_grants",
+            }
+          : {}),
       };
       const a = await updateAgent(
         {
