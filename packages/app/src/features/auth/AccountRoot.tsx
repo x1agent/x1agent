@@ -12,6 +12,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useAccountsStore } from "../../stores/accountsStore";
 import { Plus, X } from "lucide-react";
 import { GitIdentitySection } from "./GitIdentitySection";
+import { TimezoneSection } from "./TimezoneSection";
 
 export function AccountRoot() {
   const { status, fetchMe } = useAuthStore();
@@ -107,6 +108,7 @@ export function AccountRoot() {
         </Button>
 
         <GitIdentitySection />
+        <TimezoneSection />
       </div>
     </AppShell>
   );

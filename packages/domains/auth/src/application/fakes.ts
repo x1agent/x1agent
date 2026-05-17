@@ -101,6 +101,7 @@ export class InMemoryUserRepository implements UserRepository {
       avatarUrl: profile.avatarUrl,
       isActive: true,
       gitIdentity: null,
+      timezone: null,
     };
     this.users.set(id, user);
     return user;
@@ -117,6 +118,11 @@ export class InMemoryUserRepository implements UserRepository {
     const u = this.users.get(userId);
     if (!u) return;
     this.users.set(userId, { ...u, gitIdentity: identity });
+  }
+  async setTimezone(userId: UserId, timezone: string | null): Promise<void> {
+    const u = this.users.get(userId);
+    if (!u) return;
+    this.users.set(userId, { ...u, timezone });
   }
 
   seedMembership(userId: UserId, slug: string, name: string, role: Role) {

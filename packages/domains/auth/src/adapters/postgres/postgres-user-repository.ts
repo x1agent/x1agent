@@ -16,6 +16,7 @@ interface UserRow {
   is_active: boolean;
   git_name: string | null;
   git_email: string | null;
+  timezone: string | null;
 }
 
 interface MembershipRow {
@@ -41,6 +42,7 @@ function toUser(r: UserRow): User {
     avatarUrl: r.avatar_url,
     isActive: r.is_active,
     gitIdentity,
+    timezone: r.timezone,
   };
 }
 
@@ -49,7 +51,7 @@ export class PostgresUserRepository implements UserRepository {
 
   async findById(id: UserId): Promise<User | null> {
     const rows = await this.sql<UserRow[]>`
-      SELECT id, email, name, avatar_url, is_active, git_name, git_email
+      SELECT id, email, name, avatar_url, is_active, git_name, git_email, timezone
       FROM users WHERE id = ${id}
     `;
     return rows[0] ? toUser(rows[0]) : null;
@@ -57,7 +59,7 @@ export class PostgresUserRepository implements UserRepository {
 
   async findByEmail(email: Email): Promise<User | null> {
     const rows = await this.sql<UserRow[]>`
-      SELECT id, email, name, avatar_url, is_active, git_name, git_email
+      SELECT id, email, name, avatar_url, is_active, git_name, git_email, timezone
       FROM users WHERE lower(email) = ${email}
     `;
     return rows[0] ? toUser(rows[0]) : null;
@@ -75,7 +77,7 @@ export class PostgresUserRepository implements UserRepository {
         google_sub = COALESCE(users.google_sub, EXCLUDED.google_sub),
         last_login_at = now(),
         updated_at = now()
-      RETURNING id, email, name, avatar_url, is_active, git_name, git_email
+      RETURNING id, email, name, avatar_url, is_active, git_name, git_email, timezone
     `;
     return toUser(rows[0]!);
   }
@@ -93,6 +95,15 @@ export class PostgresUserRepository implements UserRepository {
       UPDATE users
          SET git_name = ${identity?.name ?? null},
              git_email = ${identity?.email ?? null},
+             updated_at = now()
+       WHERE id = ${userId}
+    `;
+  }
+
+  async setTimezone(userId: UserId, timezone: string | null): Promise<void> {
+    await this.sql`
+      UPDATE users
+         SET timezone = ${timezone},
              updated_at = now()
        WHERE id = ${userId}
     `;
