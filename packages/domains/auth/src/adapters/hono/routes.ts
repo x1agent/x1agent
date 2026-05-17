@@ -30,6 +30,7 @@ import {
   LoginState,
   type OAuthLoginState,
 } from "../../domain/oauth-login-state.js";
+import { isPlatformAdmin } from "../../domain/platform-admin.js";
 import { Email, UserId } from "@x1agent/kernel";
 
 export interface AuthRoutesConfig {
@@ -420,6 +421,15 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
     if (!token) return c.json({ error: "unauthenticated" }, 401);
     try {
       const session = verifySessionToken(cfg.tokenizer, token);
+      // Re-resolve against the current allowlist instead of trusting
+      // the JWT-baked flag. Otherwise an operator who adds an email to
+      // PLATFORM_ADMIN_EMAILS doesn't pick up admin status until their
+      // existing session expires. Every /api/admin/* route already
+      // re-checks the email this way; /me had drifted.
+      const admin = isPlatformAdmin(
+        Email(session.email),
+        cfg.platformAdmins ?? [],
+      );
       return c.json({
         user: {
           id: session.userId,
@@ -433,7 +443,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           name: m.name,
           role: m.role,
         })),
-        is_platform_admin: session.isPlatformAdmin,
+        is_platform_admin: admin,
       });
     } catch (err) {
       return c.json(domainErrorBody(err), domainErrorStatus(err) as 401);
@@ -562,7 +572,15 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
         email: target.email,
         name: target.name,
         memberships,
-        isPlatformAdmin: session.isPlatformAdmin,
+        // Resolve against the target's email, not the current session.
+        // Otherwise switching from a platform-admin account into a
+        // linked non-admin account inherits the admin flag (and vice
+        // versa — losing it silently when the destination IS in the
+        // allowlist).
+        isPlatformAdmin: isPlatformAdmin(
+          target.email,
+          cfg.platformAdmins ?? [],
+        ),
       };
       const newToken = cfg.tokenizer.sign(newSession);
       c.header(

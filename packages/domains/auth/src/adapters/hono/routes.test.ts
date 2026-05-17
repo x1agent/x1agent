@@ -251,3 +251,65 @@ describe("/auth/google/callback", () => {
     expect(await res.json()).toEqual({ error: "oauth_state_invalid" });
   });
 });
+
+describe("/auth/me admin re-resolution (X1A-147 regression)", () => {
+  function appWithPlatformAdmins(admins: readonly string[]) {
+    return createAuthRoutes({
+      authProvider: provider,
+      users,
+      tokenizer,
+      loginStates,
+      clock,
+      appUrl: "http://app.test",
+      apiUrl: "http://api.test",
+      allowedDomains: ["example.com"],
+      platformAdmins: admins,
+    });
+  }
+
+  function tokenFor(opts: { email: string; admin: boolean }) {
+    return tokenizer.sign({
+      userId: "00000000-0000-7000-8000-000000000001" as never,
+      email: Email(opts.email),
+      name: "Alice",
+      memberships: [
+        {
+          workspaceId: "00000000-0000-7000-8000-0000000000aa" as never,
+          slug: "alice-ws" as never,
+          name: "Alice WS",
+          role: Role("owner"),
+        },
+      ],
+      isPlatformAdmin: opts.admin,
+    });
+  }
+
+  it("returns true when the JWT lacks the flag but the email IS in the current allowlist", async () => {
+    const app = appWithPlatformAdmins(["alice@example.com"]);
+    const token = tokenFor({ email: "alice@example.com", admin: false });
+    const res = await app.request("/me", {
+      headers: { Cookie: `x1_session=${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).is_platform_admin).toBe(true);
+  });
+
+  it("returns false when the JWT carries the flag but the email is NOT in the current allowlist", async () => {
+    const app = appWithPlatformAdmins([]);
+    const token = tokenFor({ email: "alice@example.com", admin: true });
+    const res = await app.request("/me", {
+      headers: { Cookie: `x1_session=${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).is_platform_admin).toBe(false);
+  });
+
+  it("is case-insensitive on the email side", async () => {
+    const app = appWithPlatformAdmins(["Alice@Example.COM"]);
+    const token = tokenFor({ email: "alice@example.com", admin: false });
+    const res = await app.request("/me", {
+      headers: { Cookie: `x1_session=${token}` },
+    });
+    expect((await res.json()).is_platform_admin).toBe(true);
+  });
+});
