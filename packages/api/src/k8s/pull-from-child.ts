@@ -40,6 +40,7 @@ export interface PullFromChildResult {
 }
 
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
+const DEFAULT_EXEC_TIMEOUT_MS = 90_000;
 
 export async function pullFromChild(
   opts: PullFromChildOptions,
@@ -173,24 +174,23 @@ async function captureExecStdout(
   stderr.on("data", (c: Buffer) => stderrChunks.push(c));
 
   let status: k8s.V1Status | undefined;
-  await new Promise<void>((resolve, reject) => {
-    void exec.exec(
-      namespace,
-      pod,
-      container,
-      command,
-      stdout,
-      stderr,
-      null,
-      false,
-      (s) => {
-        status = s;
-      },
-    ).then((ws) => {
-      ws.on("close", () => resolve());
-      ws.on("error", (err) => reject(err));
-    }).catch(reject);
-  });
+  await execWithStatusWait(
+    () =>
+      exec.exec(
+        namespace,
+        pod,
+        container,
+        command,
+        stdout,
+        stderr,
+        null,
+        false,
+        (s) => {
+          status = s;
+        },
+      ),
+    () => status,
+  );
 
   if (overflow) {
     const err = new Error(`workspace exceeds size cap (${maxBytes} bytes); pass narrower paths`);
@@ -221,24 +221,23 @@ async function pipeTarIntoPod(
   stdout.resume();
   stderr.on("data", (c: Buffer) => stderrChunks.push(c));
   let status: k8s.V1Status | undefined;
-  await new Promise<void>((resolve, reject) => {
-    void exec.exec(
-      namespace,
-      pod,
-      container,
-      ["tar", "xf", "-", "-C", destPath],
-      stdout,
-      stderr,
-      stdin,
-      false,
-      (s) => {
-        status = s;
-      },
-    ).then((ws) => {
-      ws.on("close", () => resolve());
-      ws.on("error", (err) => reject(err));
-    }).catch(reject);
-  });
+  await execWithStatusWait(
+    () =>
+      exec.exec(
+        namespace,
+        pod,
+        container,
+        ["tar", "xf", "-", "-C", destPath],
+        stdout,
+        stderr,
+        stdin,
+        false,
+        (s) => {
+          status = s;
+        },
+      ),
+    () => status,
+  );
   if (status?.status === "Failure") {
     const stderrText = Buffer.concat(stderrChunks).toString("utf8").slice(0, 500);
     const err = new Error(`tar extract failed in parent pod: ${status.message ?? "unknown"} ${stderrText}`);
@@ -260,21 +259,66 @@ async function runExec(
   const stderr = new PassThrough();
   if (!stdout) (out as PassThrough).resume();
   stderr.resume();
+  let status: k8s.V1Status | undefined;
+  await execWithStatusWait(
+    () =>
+      exec.exec(
+        namespace,
+        pod,
+        container,
+        command,
+        out,
+        stderr,
+        stdin,
+        false,
+        (s) => {
+          status = s;
+        },
+      ),
+    () => status,
+  );
+}
+
+/**
+ * Drive @kubernetes/client-node's Exec to completion without hanging when
+ * the underlying WebSocket fails to emit `close`. Resolves as soon as the
+ * server delivers a terminal V1Status via the status callback OR the
+ * WebSocket closes cleanly. Rejects on socket error or hard timeout so a
+ * stuck stream can't strand the request indefinitely.
+ */
+type WsLike = {
+  on(ev: "close", cb: () => void): void;
+  on(ev: "error", cb: (err: unknown) => void): void;
+};
+
+async function execWithStatusWait(
+  start: () => Promise<WsLike | unknown>,
+  getStatus: () => k8s.V1Status | undefined,
+  timeoutMs: number = DEFAULT_EXEC_TIMEOUT_MS,
+): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    void exec.exec(
-      namespace,
-      pod,
-      container,
-      command,
-      out,
-      stderr,
-      stdin,
-      false,
-      () => {},
-    ).then((ws) => {
-      ws.on("close", () => resolve());
-      ws.on("error", (err) => reject(err));
-    }).catch(reject);
+    let settled = false;
+    const done = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poller);
+      err ? reject(err) : resolve();
+    };
+    const timer = setTimeout(
+      () => done(new Error(`k8s exec timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    const poller = setInterval(() => {
+      if (getStatus() !== undefined) done();
+    }, 50);
+    start()
+      .then((ws) => {
+        const w = ws as WsLike;
+        w.on("close", () => done());
+        w.on("error", (err: unknown) => done(err as Error));
+      })
+      .catch((err) => done(err as Error));
   });
 }
 
