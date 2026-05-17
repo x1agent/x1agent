@@ -1,3 +1,10 @@
+## [1.36.1](https://github.com/x1agent/x1agent/compare/v1.36.0...v1.36.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **shares:** GCS-backed share storage + resume-chain auth ([#142](https://github.com/x1agent/x1agent/issues/142)) ([3376548](https://github.com/x1agent/x1agent/commit/337654879310bc0ab98fa5ad72957fed1705f3b8))
+
 # [1.36.0](https://github.com/x1agent/x1agent/compare/v1.35.1...v1.36.0) (2026-05-17)
 
 
