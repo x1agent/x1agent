@@ -73,18 +73,32 @@ pub struct SessionMessage {
 
 // Sentry init returns a guard that flushes pending events on drop.
 // Must outlive every code path in main, so we hold it in a local for
-// the entire main body. No-op when SENTRY_DSN_SIDECAR is unset.
+// the entire main body. No-op when SENTRY_DSN_SIDECAR is unset or
+// when the environment looks dev-shaped (matches the gate in
+// packages/api/src/instrument.ts so the api and sidecar agree on
+// when to suppress).
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
     let dsn = std::env::var("SENTRY_DSN_SIDECAR").ok()?;
     if dsn.trim().is_empty() {
+        return None;
+    }
+    let environment = std::env::var("SENTRY_ENVIRONMENT")
+        .unwrap_or_else(|_| "production".into());
+    let env_lc = environment.to_lowercase();
+    let is_dev_like = env_lc.starts_with("local")
+        || env_lc.starts_with("dev")
+        || env_lc.starts_with("test");
+    let force = std::env::var("SENTRY_FORCE_INIT").as_deref() == Ok("1");
+    if is_dev_like && !force {
+        eprintln!(
+            "[sentry] sidecar init skipped — env={environment} looks dev-shaped. Set SENTRY_FORCE_INIT=1 to opt in."
+        );
         return None;
     }
     let release = std::env::var("SENTRY_RELEASE")
         .ok()
         .or_else(|| std::env::var("IMAGE_TAG").ok())
         .map(std::borrow::Cow::Owned);
-    let environment = std::env::var("SENTRY_ENVIRONMENT")
-        .unwrap_or_else(|_| "production".into());
     let guard = sentry::init((
         dsn,
         sentry::ClientOptions {
@@ -104,11 +118,26 @@ async fn main() {
     // transport alive; drop happens at process exit and flushes.
     let _sentry_guard = init_sentry();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+    // The `tracing` feature on `sentry` gives us
+    // sentry::integrations::tracing — layer it onto the subscriber so
+    // every `tracing::error!` becomes a Sentry event and `warn!`
+    // becomes a breadcrumb. Without this only panics shipped; every
+    // logged Result-error path was invisible to Sentry.
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let sentry_layer = sentry::integrations::tracing::layer().event_filter(|md| {
+        match *md.level() {
+            tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
+            tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
+            _ => sentry::integrations::tracing::EventFilter::Ignore,
+        }
+    });
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(sentry_layer)
         .init();
 
     // Verify route hatch — `SIDECAR_DEBUG_PANIC=1` triggers a panic on

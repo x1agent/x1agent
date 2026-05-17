@@ -38,6 +38,7 @@ COPY packages/domains/agent-resources-postgres/package.json packages/domains/age
 COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-resources-redis/tsconfig.json ./packages/domains/agent-resources-redis/
 COPY packages/domains/mcp-catalog/package.json packages/domains/mcp-catalog/tsconfig.json ./packages/domains/mcp-catalog/
 COPY packages/domains/workspace-secrets/package.json packages/domains/workspace-secrets/tsconfig.json ./packages/domains/workspace-secrets/
+COPY packages/domains/preview-environments/package.json packages/domains/preview-environments/tsconfig.json ./packages/domains/preview-environments/
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
 COPY packages/providers/graph-surrealdb/package.json packages/providers/graph-surrealdb/tsconfig.json ./packages/providers/graph-surrealdb/

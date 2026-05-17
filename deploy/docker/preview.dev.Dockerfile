@@ -32,6 +32,7 @@ COPY packages/domains/agent-resources-redis/package.json packages/domains/agent-
 COPY packages/domains/workspace-secrets/package.json packages/domains/workspace-secrets/tsconfig.json ./packages/domains/workspace-secrets/
 COPY packages/domains/agent-env/package.json packages/domains/agent-env/tsconfig.json ./packages/domains/agent-env/
 COPY packages/domains/mcp-catalog/package.json packages/domains/mcp-catalog/tsconfig.json ./packages/domains/mcp-catalog/
+COPY packages/domains/preview-environments/package.json packages/domains/preview-environments/tsconfig.json ./packages/domains/preview-environments/
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
 COPY packages/mcp-oauth-proxy/package.json packages/mcp-oauth-proxy/tsconfig.json ./packages/mcp-oauth-proxy/
 COPY packages/providers/messaging-slack/package.json packages/providers/messaging-slack/tsconfig.json ./packages/providers/messaging-slack/
