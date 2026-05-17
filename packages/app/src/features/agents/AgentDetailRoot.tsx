@@ -80,8 +80,13 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadRepos(workspaceSlug, agent.id);
     if (hasCollections) loadCollections(workspaceSlug, agent.id);
     loadSpawnGrants(workspaceSlug, agent.id);
-    void loadMcpAttachments(workspaceSlug, agent.id);
-    void loadEnvBindings(workspaceSlug, agent.id);
+    // MCP attachments + env bindings are admin/owner-gated on the api
+    // (requireAgent in composition). Skip the fetch for plain members
+    // so they don't generate 403s on every page load.
+    if (canManage) {
+      void loadMcpAttachments(workspaceSlug, agent.id);
+      void loadEnvBindings(workspaceSlug, agent.id);
+    }
     // Sessions are also fetched by RecentRunsSection further down the
     // page; we mirror the load here so the runtime badge has its own
     // explicit dependency rather than depending on render order.
@@ -90,6 +95,7 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     agent,
     workspaceSlug,
     hasCollections,
+    canManage,
     loadRepos,
     loadCollections,
     loadSpawnGrants,

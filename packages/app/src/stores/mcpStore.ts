@@ -175,11 +175,17 @@ export const useMcpStore = create<McpState>((set, get) => ({
         errorAttachmentsByKey: { ...s.errorAttachmentsByKey, [key]: null },
       }));
     } catch (err) {
+      // Cache the error in state so the UI can render an inline notice;
+      // do NOT re-throw — the only caller (AgentDetailRoot's load
+      // effect) uses `void` and the rethrow lands as an unhandled
+      // rejection. Non-admin members hitting this page used to fire a
+      // Sentry event on every render. Internal callers (attach/detach
+      // refetches) accept a slightly-stale cache on transient failure;
+      // the refetch happens again on the next attach attempt.
       const msg = (err as Error).message;
       set((s) => ({
         errorAttachmentsByKey: { ...s.errorAttachmentsByKey, [key]: msg },
       }));
-      throw err;
     } finally {
       if (get().loadingAttachmentsKey === key) {
         set({ loadingAttachmentsKey: null });
