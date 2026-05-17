@@ -37,6 +37,11 @@ output "artifact_registry" {
   description = "Artifact Registry path. Push images here as <this>/api:<tag>, etc."
 }
 
+output "share_artifacts_bucket" {
+  value       = google_storage_bucket.share_artifacts.name
+  description = "GCS bucket holding share content. Wired into the chart as shares.gcsBucket → GCS_ARTIFACTS_BUCKET env on api + session sidecars."
+}
+
 output "api_workload_identity_gsa" {
   value       = google_service_account.api.email
   description = "GSA email the api ServiceAccount impersonates. Goes into helm values cloud.gcp.workloadIdentityServiceAccount."
