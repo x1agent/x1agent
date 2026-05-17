@@ -295,7 +295,7 @@ afterEach(() => {
 describe("GET /:shareId/content — Slice A", () => {
   it("returns the bytes of a share written in this session", async () => {
     const original = "# hello\n\nthis is a markdown share.";
-    writeShareFiles(SESSION_A, SHARE_A, [
+    await writeShareFiles(SHARE_A, [
       {
         path: "index.html",
         content: Buffer.from(original, "utf8").toString("base64"),
@@ -330,7 +330,7 @@ describe("GET /:shareId/content — Slice A", () => {
     // to this session' check rejects it as 403 even though Alice can
     // see Bob's session as a sharee — Slice A is narrower than the
     // visibility check.
-    writeShareFiles(SESSION_B, SHARE_B, [
+    await writeShareFiles(SHARE_B, [
       { path: "index.html", content: Buffer.from("bob", "utf8").toString("base64") },
     ]);
     actor = { userId: ALICE, email: "a@x.com" as Email };
@@ -371,7 +371,7 @@ describe("GET /:shareId/content — Slice A", () => {
   });
 
   it("addresses a sub-path inside a multi-file share via ?path=", async () => {
-    writeShareFiles(SESSION_A, SHARE_A, [
+    await writeShareFiles(SHARE_A, [
       { path: "index.html", content: Buffer.from("home", "utf8").toString("base64") },
       {
         path: "assets/main.css",
@@ -400,7 +400,7 @@ describe("GET /:shareId/content — Slice A", () => {
     // Random-looking binary so a naive utf8 path would mangle it.
     const big = Buffer.alloc(1024 * 1024 + 17);
     for (let i = 0; i < big.length; i += 1) big[i] = (i * 31 + 7) & 0xff;
-    writeShareFiles(SESSION_A, SHARE_A, [
+    await writeShareFiles(SHARE_A, [
       { path: "blob.bin", content: big.toString("base64") },
     ]);
     actor = { userId: ALICE, email: "a@x.com" as Email };
