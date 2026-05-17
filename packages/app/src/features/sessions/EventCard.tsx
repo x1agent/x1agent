@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -734,7 +734,7 @@ function ToolResultCard({ event }: { event: SessionEventDTO }) {
   );
 }
 
-export function EventCard({
+function EventCardInner({
   event,
   verbose,
   onRespond,
@@ -799,3 +799,14 @@ export function EventCard({
       ) : null;
   }
 }
+
+// EventStream renders one EventCard per row and re-renders on every
+// WS event. Without memo, typing in the composer (which holds local
+// state) was fine in isolation but a single child-emitted event from
+// the agent fanned out into N card re-renders. On iPad with hundreds
+// of events that single re-render swamped the main thread; combined
+// with the autosize forced-reflow it was the visible typing-lag
+// symptom. Equality is shallow on props — `event` is a stable cached
+// reference from the store, so the memo skips when the row's event
+// id hasn't changed.
+export const EventCard = memo(EventCardInner);

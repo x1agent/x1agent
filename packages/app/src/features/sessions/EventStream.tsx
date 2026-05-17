@@ -273,17 +273,30 @@ export function EventStream({
           </div>
         ) : (
           items.map((it) => {
+            // `content-visibility: auto` lets the browser skip layout
+            // + paint for any row currently outside the viewport, with
+            // the row's height re-acquired when it scrolls back in.
+            // `contain-intrinsic-size` is the placeholder height the
+            // browser uses while the row is virtualized — 80px is the
+            // typical compact-row height; the real height takes over
+            // on first paint. Cheap proper virtualization without
+            // adding a library; long timelines stop paying full layout
+            // cost on every store update.
             if (it.kind === "event") {
               return (
-                <EventCard
+                <div
                   key={it.key}
-                  event={it.event}
-                  verbose={false}
-                  onRespond={onRespond}
-                  workspaceSlug={workspaceSlug}
-                  agentId={agentId}
-                  sessionId={sessionId}
-                />
+                  className="[content-visibility:auto] [contain-intrinsic-size:0_80px]"
+                >
+                  <EventCard
+                    event={it.event}
+                    verbose={false}
+                    onRespond={onRespond}
+                    workspaceSlug={workspaceSlug}
+                    agentId={agentId}
+                    sessionId={sessionId}
+                  />
+                </div>
               );
             }
             if (it.kind === "status") {
@@ -291,24 +304,32 @@ export function EventStream({
               // node in place when a newer status arrives — no flash,
               // no scroll bump.
               return (
-                <EventCard
+                <div
                   key={`status-${it.key}`}
-                  event={it.latest}
-                  verbose={false}
+                  className="[content-visibility:auto] [contain-intrinsic-size:0_40px]"
+                >
+                  <EventCard
+                    event={it.latest}
+                    verbose={false}
+                    workspaceSlug={workspaceSlug}
+                    agentId={agentId}
+                    sessionId={sessionId}
+                  />
+                </div>
+              );
+            }
+            return (
+              <div
+                key={`tools-${it.key}`}
+                className="[content-visibility:auto] [contain-intrinsic-size:0_32px]"
+              >
+                <ToolGroupPill
+                  events={it.events}
                   workspaceSlug={workspaceSlug}
                   agentId={agentId}
                   sessionId={sessionId}
                 />
-              );
-            }
-            return (
-              <ToolGroupPill
-                key={`tools-${it.key}`}
-                events={it.events}
-                workspaceSlug={workspaceSlug}
-                agentId={agentId}
-                sessionId={sessionId}
-              />
+              </div>
             );
           })
         )}

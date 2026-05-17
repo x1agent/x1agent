@@ -8,6 +8,7 @@ import { AppShell } from "../../shell/AppShell";
 import { Button } from "../../components/ui/button";
 import { useAuthStore } from "../../stores/authStore";
 import { useSessionDetailStore } from "../../stores/sessionDetailStore";
+import { useShallow } from "zustand/react/shallow";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import type { SessionEventDTO, SessionStatus } from "@x1agent/shared";
 import { EventStream } from "./EventStream";
@@ -29,6 +30,13 @@ import {
 } from "../../stores/typingIndicatorStore";
 import { MainTimelineTypingIndicators } from "./TypingIndicator";
 
+// Stable empty references for the per-session selectors. Inlining
+// `?? []` or `?? new Array()` outside the selector mints a fresh
+// reference each render and tanks React.memo on downstream consumers
+// (see project memory: zustand-foot-gun).
+const EMPTY_EVENTS: ReadonlyArray<never> = Object.freeze([]);
+const EMPTY_COMPACT_ITEMS: ReadonlyArray<never> = Object.freeze([]);
+
 interface Props {
   workspaceSlug: string;
   sessionId: string;
@@ -43,19 +51,32 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
 
 export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const { status: authStatus, fetchMe } = useAuthStore();
-  const {
-    sessionsById,
-    agentsBySession,
-    parentBySession,
-    eventsBySession,
-    errorBySession,
-    loadInitial,
-    loadOlder,
-    loadChildren,
-    appendEvent,
-    setError,
-    setSession,
-  } = useSessionDetailStore();
+  // Per-session selectors — each subscribes only to THIS session's
+  // slice of the store. Without this, SessionRoot re-rendered on
+  // every WS message in any session (the whole-store destructure used
+  // to live here), which cascaded down to a full EventStream rebuild
+  // on every keystroke — visible as iPad typing lag.
+  const session = useSessionDetailStore((s) => s.sessionsById[sessionId]);
+  const agent = useSessionDetailStore((s) => s.agentsBySession[sessionId]);
+  const parent =
+    useSessionDetailStore((s) => s.parentBySession[sessionId]) ?? null;
+  const events =
+    useSessionDetailStore((s) => s.eventsBySession[sessionId]) ?? EMPTY_EVENTS;
+  const error = useSessionDetailStore((s) => s.errorBySession[sessionId]);
+  // Actions never change reference — destructure with useShallow on a
+  // single render so React.memo'd children never see new function
+  // identities from us.
+  const { loadInitial, loadOlder, loadChildren, appendEvent, setError, setSession } =
+    useSessionDetailStore(
+      useShallow((s) => ({
+        loadInitial: s.loadInitial,
+        loadOlder: s.loadOlder,
+        loadChildren: s.loadChildren,
+        appendEvent: s.appendEvent,
+        setError: s.setError,
+        setSession: s.setSession,
+      })),
+    );
   const hasOlder = useSessionDetailStore(
     (s) => s.hasOlderBySession[sessionId] ?? false,
   );
@@ -98,17 +119,11 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     }
   };
 
-  const session = sessionsById[sessionId];
-  const agent = agentsBySession[sessionId];
-  const parent = parentBySession[sessionId] ?? null;
-  const events = eventsBySession[sessionId] ?? [];
-  const error = errorBySession[sessionId];
-  // Selector returns the cached array reference; `?? []` lives outside
-  // the selector per the project's zustand foot-gun rule (a default
-  // inside the selector would mint a new `[]` on every render and
-  // tank `React.memo` further down the tree).
+  // `session`, `agent`, `parent`, `events`, `error` are subscribed
+  // above via per-session selectors so we re-render only when THIS
+  // session's slice changes.
   const compactItems =
-    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? [];
+    useSessionDetailStore((s) => s.compactItemsBySession[sessionId]) ?? EMPTY_COMPACT_ITEMS;
 
   useEffect(() => {
     if (authStatus === "idle") fetchMe();
