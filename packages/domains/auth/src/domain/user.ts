@@ -20,4 +20,11 @@ export interface User {
    * are left unset and the existing bot-attribution fallback stands.
    */
   gitIdentity: GitIdentity | null;
+  /**
+   * IANA timezone (e.g. "America/New_York"). Frontend uses it to
+   * format every UTC timestamp into the viewer's local time, and to
+   * convert ScheduleBuilder cron expressions local↔UTC. NULL → UI
+   * falls back to UTC.
+   */
+  timezone: string | null;
 }
