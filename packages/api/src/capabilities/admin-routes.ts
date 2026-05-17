@@ -245,6 +245,64 @@ export function createAdminAnthropicModelsRoutes(
     return c.json({ ok: true });
   });
 
+  // Summarizer model selection. The Vertex / API-key session
+  // summarizer (packages/domains/sessions/src/adapters/anthropic/...)
+  // calls readSummaryModel() before each request so a change here
+  // takes effect without an api restart.
+  //
+  // GET returns the current selection plus the last-update audit fields.
+  // PUT replaces it. PUT with model_id=null clears the selection — the
+  // summarizer falls back to its compiled-in default.
+  app.get("/summary-model", async (c) => {
+    const rows = await cfg.sql<
+      { value: string; updated_at: Date; updated_by: string | null }[]
+    >`
+      SELECT value, updated_at, updated_by
+      FROM platform_settings
+      WHERE key = 'anthropic.summary_model'
+    `;
+    const row = rows[0];
+    return c.json({
+      model_id: row ? (row.value as unknown as string) : null,
+      updated_at: row?.updated_at ?? null,
+      updated_by: row?.updated_by ?? null,
+    });
+  });
+
+  app.put("/summary-model", async (c) => {
+    const session = c.get("session");
+    const body = await c.req
+      .json<{ model_id?: string | null }>()
+      .catch(() => ({}) as { model_id?: string | null });
+
+    if (body.model_id === undefined) {
+      return c.json({ error: "model_id required (string or null)" }, 400);
+    }
+    if (body.model_id !== null && typeof body.model_id !== "string") {
+      return c.json({ error: "model_id must be string or null" }, 400);
+    }
+    if (typeof body.model_id === "string" && body.model_id.trim() === "") {
+      return c.json({ error: "model_id cannot be empty string" }, 400);
+    }
+
+    if (body.model_id === null) {
+      await cfg.sql`DELETE FROM platform_settings WHERE key = 'anthropic.summary_model'`;
+      return c.json({ ok: true, model_id: null });
+    }
+
+    const modelId = body.model_id;
+    const updatedBy = session?.email ?? null;
+    await cfg.sql`
+      INSERT INTO platform_settings (key, value, updated_at, updated_by)
+      VALUES ('anthropic.summary_model', ${cfg.sql.json(modelId)}, NOW(), ${updatedBy})
+      ON CONFLICT (key) DO UPDATE SET
+        value      = EXCLUDED.value,
+        updated_at = NOW(),
+        updated_by = EXCLUDED.updated_by
+    `;
+    return c.json({ ok: true, model_id: modelId });
+  });
+
   return app;
 }
 

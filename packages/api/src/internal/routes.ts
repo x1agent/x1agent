@@ -829,6 +829,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       return c.json({ error: "parent_not_live" }, 410);
     }
 
+    const startedAt = Date.now();
     try {
       const result = await pullFromChild({
         kubeConfig: cfg.kubeConfig,
@@ -837,6 +838,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         childSessionId: childId as unknown as string,
         paths: Array.isArray(body.paths) ? body.paths : undefined,
       });
+      console.log(
+        `[pull-for-parent] ok parent=${body.parent_session_id.slice(0, 8)} child=${childId.slice(0, 8)} files=${result.files} bytes=${result.totalBytes} elapsed=${Date.now() - startedAt}ms`,
+      );
       return c.json({ ok: true, ...result });
     } catch (err) {
       const code = (err as { code?: string }).code ?? "pull_failed";
@@ -845,6 +849,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           : code === "workspace_too_large" ? 413
           : code === "parent_pod_missing" ? 404
           : 502;
+      console.warn(
+        `[pull-for-parent] failed code=${code} parent=${body.parent_session_id.slice(0, 8)} child=${childId.slice(0, 8)} elapsed=${Date.now() - startedAt}ms: ${(err as Error).message}`,
+      );
       return c.json(
         { error: code, message: (err as Error).message },
         status,

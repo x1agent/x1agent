@@ -6,37 +6,28 @@ import {
   type LlmProvider,
   type ProviderStatus,
 } from "../../stores/platformSecretsStore";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { AnthropicModelsPanel, type ModelRow } from "./AnthropicModelsPanel";
+import { SummarizerModelPicker } from "./SummarizerModelPicker";
 
 /**
- * X1A-46 — Admin Settings page.
+ * Model Settings page (renamed from "Admin Settings" — X1A-145).
  *
- * Layout pinned to the CEO-greenlit mockup-v1 (Linear ticket comment
- * 2026-05-12):
- *   - Title + subtitle
- *   - Section "LLM Provider Keys" with side-by-side Anthropic / OpenAI
- *     cards. Letter-square glyphs (A on terracotta, O on green). Status
- *     badge. Masked input + Save (or Update + Clear) controls. Inline
- *     replacement on Update; inline confirm on Clear (no modal).
- *   - Non-admin who URL-pokes here gets the 403 affordance below; the
- *     real gate lives on /api/admin/* via requirePlatformAdmin.
+ * Single tabbed surface for every LLM provider the platform integrates
+ * with. The Anthropic tab folds in what used to be /admin/anthropic-
+ * models so the API key, the model curation list, and the summarizer
+ * picker all live in one place. Adding a new provider tab is: extend
+ * the tab list, drop a provider-shaped panel.
  *
- * Status booleans are the ONLY thing the api ever returns about
- * platform keys — never the value, never a prefix. Update / Save flow
- * goes through usePlatformSecretsStore, which calls the gated PUT
- * route and surfaces the "API will restart in ~30s" banner after a
- * successful write.
+ * Server-side requirePlatformAdmin middleware on /api/admin/* is the
+ * real gate. The render-time check here mirrors that so a non-admin
+ * URL-poker sees an explicit refusal, not a half-rendered shell.
  */
 export function AdminSettingsRoot() {
   const { status, fetchMe, isPlatformAdmin } = useAuthStore();
-  const {
-    providers,
-    loadStatus,
-    loadError,
-    saving,
-    banner,
-    load,
-    dismissBanner,
-  } = usePlatformSecretsStore();
+  const { providers, loadStatus, loadError, banner, load, dismissBanner } =
+    usePlatformSecretsStore();
+  const [enabledModels, setEnabledModels] = useState<ModelRow[]>([]);
 
   useEffect(() => {
     if (status === "idle") fetchMe();
@@ -48,89 +39,83 @@ export function AdminSettingsRoot() {
     }
   }, [status, isPlatformAdmin, loadStatus, load]);
 
-  // Auto-dismiss the restart banner after a beat — matches the mockup
-  // "subtle flash" intent. Long enough to read, short enough to stop
-  // covering the page once the message lands. The store action that
-  // mints a banner sets `at`, so a fresh save resets the timer.
   useEffect(() => {
     if (!banner) return;
     const t = setTimeout(() => dismissBanner(), 6000);
     return () => clearTimeout(t);
   }, [banner, dismissBanner]);
 
+  // Honor ?tab= so a future deep-link (e.g. the old anthropic-models
+  // route redirecting here) can target the right tab. Falls back to
+  // "anthropic" — the most-used surface.
+  const initialTab =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("tab") || "anthropic"
+      : "anthropic";
+
   if (status === "anonymous" && typeof window !== "undefined") {
     window.location.href = "/";
     return null;
   }
 
-  // Server-side 403 is what really protects this surface (route uses
-  // requirePlatformAdmin). This branch renders the same "forbidden"
-  // card from the mockup so a non-admin URL-poker sees the explicit
-  // refusal page, not a half-rendered shell.
   if (status === "authenticated" && !isPlatformAdmin) {
     return (
-      <AppShell breadcrumbs={[{ label: "Admin Settings" }]}>
+      <AppShell breadcrumbs={[{ label: "Model Settings" }]}>
         <ForbiddenCard />
       </AppShell>
     );
   }
 
+  const anthropic = providers.find((p) => p.provider === "anthropic");
+  const openai = providers.find((p) => p.provider === "openai");
+  const enabledRows = enabledModels.filter((m) => m.enabled);
+
   return (
-    <AppShell breadcrumbs={[{ label: "Admin Settings" }]}>
+    <AppShell breadcrumbs={[{ label: "Model Settings" }]}>
       <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">
-            Admin Settings
+            Model Settings
           </h1>
           <p className="mt-1 text-sm text-fg-muted">
-            Platform-wide configuration. Workspace-scoped settings are under
-            Workspace settings.
+            Platform-wide LLM provider configuration. Workspace-scoped
+            settings live under Workspace settings.
           </p>
         </header>
 
-        <section
-          aria-labelledby="llm-keys-heading"
-          className="overflow-hidden rounded-lg border border-border-soft bg-surface"
-        >
-          <div className="flex items-center justify-between border-b border-border-soft px-5 py-4">
-            <h2
-              id="llm-keys-heading"
-              className="text-sm font-semibold text-fg"
-            >
-              LLM Provider Keys
-            </h2>
-            <span className="text-xs text-fg-muted">
-              Used by every agent in every workspace · stored as platform
-              secrets
-            </span>
+        {loadError && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/5 px-4 py-2 text-sm text-red-300">
+            {loadError}
           </div>
+        )}
 
-          {loadError && (
-            <div className="px-5 py-3 text-sm text-red-400">{loadError}</div>
-          )}
+        <Tabs defaultValue={initialTab} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="anthropic">Anthropic</TabsTrigger>
+            <TabsTrigger value="openai">OpenAI</TabsTrigger>
+          </TabsList>
 
-          <div className="grid gap-4 p-5 md:grid-cols-2">
-            {providers.map((p) => (
-              <ProviderCard
-                key={p.provider}
-                provider={p}
-                saving={!!saving[p.provider]}
-              />
-            ))}
-          </div>
+          <TabsContent value="anthropic" className="space-y-4">
+            {anthropic && <ProviderCard provider={anthropic} />}
+            <AnthropicModelsPanel onModels={setEnabledModels} />
+            <SummarizerModelPicker enabledModels={enabledRows} />
+          </TabsContent>
 
-          {banner && <RestartBannerView />}
-        </section>
+          <TabsContent value="openai" className="space-y-4">
+            {openai && <ProviderCard provider={openai} />}
+          </TabsContent>
+        </Tabs>
+
+        {banner && <RestartBannerView />}
       </div>
     </AppShell>
   );
 }
 
-/* ---------- pieces ----------------------------------------------------- */
+/* ---------- API key card ---------------------------------------------- */
 
 interface ProviderCardProps {
   provider: ProviderStatus;
-  saving: boolean;
 }
 
 const PROVIDER_LABEL: Record<LlmProvider, string> = {
@@ -138,13 +123,6 @@ const PROVIDER_LABEL: Record<LlmProvider, string> = {
   openai: "OpenAI",
 };
 
-/**
- * Single-letter glyph on brand-color square. CEO greenlit letter
- * squares over proper SVG logos: ship faster, side-step trademark
- * drift. Anthropic = terracotta (matches --color-accent), OpenAI =
- * green (signature OpenAI brand). Promote to real logos as a phase-2
- * polish if anyone cares.
- */
 function ProviderGlyph({ provider }: { provider: LlmProvider }) {
   const isAnthropic = provider === "anthropic";
   return (
@@ -169,14 +147,11 @@ const KEY_PLACEHOLDER: Record<LlmProvider, string> = {
   openai: "sk-…",
 };
 
-function ProviderCard({ provider, saving }: ProviderCardProps) {
-  const { saveKey, clearKey } = usePlatformSecretsStore();
+function ProviderCard({ provider }: ProviderCardProps) {
+  const { saveKey, clearKey, saving } = usePlatformSecretsStore();
+  const isSaving = !!saving[provider.provider];
   const [draft, setDraft] = useState("");
-  // "editing" toggles the configured card into update-mode (inline
-  // replacement input). Per the mockup: NOT a modal.
   const [editing, setEditing] = useState(false);
-  // "confirmingClear" toggles the configured card's footer into the
-  // one-step inline confirm. Per the mockup: NOT a second modal.
   const [confirmingClear, setConfirmingClear] = useState(false);
 
   const onSave = async () => {
@@ -201,12 +176,11 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
       <header className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold text-fg">
           <ProviderGlyph provider={provider.provider} />
-          {PROVIDER_LABEL[provider.provider]}
+          {PROVIDER_LABEL[provider.provider]} API key
         </div>
         <StatusBadge configured={provider.configured} />
       </header>
 
-      {/* Empty state: not configured. Always shows the Save form. */}
       {!provider.configured && (
         <>
           <div className="flex gap-2">
@@ -224,10 +198,10 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
               type="button"
               data-testid={`key-save-${provider.provider}`}
               onClick={onSave}
-              disabled={saving || draft.trim().length === 0}
+              disabled={isSaving || draft.trim().length === 0}
               className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg transition disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {isSaving ? "Saving…" : "Save"}
             </button>
           </div>
           <p className="mt-2 text-[11px] text-fg-faint">
@@ -244,7 +218,6 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
         </>
       )}
 
-      {/* Configured + not editing: read-only mask + Update / Clear. */}
       {provider.configured && !editing && (
         <>
           <div className="flex gap-2">
@@ -293,10 +266,10 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
                   type="button"
                   data-testid={`key-clear-confirm-${provider.provider}`}
                   onClick={onClear}
-                  disabled={saving}
+                  disabled={isSaving}
                   className="rounded-md border border-red-400/40 bg-transparent px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                 >
-                  {saving ? "Clearing…" : "Yes, clear"}
+                  {isSaving ? "Clearing…" : "Yes, clear"}
                 </button>
               </span>
             ) : (
@@ -313,7 +286,6 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
         </>
       )}
 
-      {/* Configured + editing: inline replacement input (NOT a modal). */}
       {provider.configured && editing && (
         <>
           <div className="flex gap-2">
@@ -332,10 +304,10 @@ function ProviderCard({ provider, saving }: ProviderCardProps) {
               type="button"
               data-testid={`key-save-${provider.provider}`}
               onClick={onSave}
-              disabled={saving || draft.trim().length === 0}
+              disabled={isSaving || draft.trim().length === 0}
               className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg transition disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {isSaving ? "Saving…" : "Save"}
             </button>
             <button
               type="button"
@@ -380,14 +352,11 @@ function StatusBadge({ configured }: { configured: boolean }) {
 }
 
 function RestartBannerView() {
-  // CEO greenlit auto-restart-on-save with this exact copy. Worded
-  // active-voice + concrete duration so the admin doesn't refresh
-  // tabs trying to figure out if the save took.
   return (
     <div
       role="status"
       data-testid="restart-banner"
-      className="flex items-center gap-2 border-y border-amber-400/30 bg-amber-400/5 px-5 py-2.5 text-xs text-amber-200"
+      className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-400/5 px-4 py-2.5 text-xs text-amber-200"
     >
       <span className="h-2 w-2 rounded-full bg-amber-400" />
       Saved. API will restart in ~30s. Active sessions will reconnect

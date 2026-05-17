@@ -16,11 +16,11 @@ type Sql = postgres.Sql<Record<string, unknown>>;
  * wake spam.
  *
  * Backoff ladder (minutes of silence before the next wake):
- *   attempt 1:  5
- *   attempt 2: 10
- *   attempt 3: 20
- *   attempt 4: 40
- *   attempt 5+: 60 (cap)
+ *   attempt 1:  3
+ *   attempt 2:  5
+ *   attempt 3: 10
+ *   attempt 4: 15
+ *   attempt 5+: 20 (cap)
  *
  * Counter resets to attempt 1 whenever we observe new activity from
  * the child. State is per-api-process (in-memory); if the api
@@ -55,7 +55,7 @@ export interface ActivityWatchdogHandle {
  * Minutes of silence at each attempt. Index into this array with
  * clamp(attempt - 1, 0, BACKOFF_MINUTES.length - 1).
  */
-const BACKOFF_MINUTES = [5, 10, 20, 40, 60] as const;
+const BACKOFF_MINUTES = [3, 5, 10, 15, 20] as const;
 
 function thresholdSecondsForAttempt(attempt: number): number {
   const idx = Math.min(

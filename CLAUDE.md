@@ -108,6 +108,20 @@ docs(security): add credential proxy sequence diagram
 ci: add pre-push review hook
 ```
 
+## Code comments: brief by default
+
+Default to writing no comments. Only add one when the **why** is non-obvious — a hidden constraint, a workaround for a specific upstream bug, behavior that would surprise a reader of the surrounding code. If removing the comment wouldn't confuse a future reader, don't write it.
+
+Concretely:
+- One short line is the target. Multi-paragraph essays explaining a 5-line function are noise; they age into lies as the code evolves around them.
+- Never describe **what** the code does — well-named identifiers and short functions already do that. The comment carries information the reader can't get from the code alone.
+- Don't restate the rationale of the surrounding section. If a comment three lines up already said "we lock-step the X to avoid Y", don't repeat the same reasoning two more times.
+- Don't justify obvious choices ("we use `Map` here for O(1) lookup") or list alternatives you ruled out ("we considered using foo, but bar is better because…"). That belongs in the PR body or an ADR, not the source.
+- Don't reference the current task or ticket ("added for X1A-NN") unless the ticket carries a constraint that's still load-bearing months later. The commit message is the right place for "why this PR".
+- TODO comments without an owner + concrete next step are noise — either file the ticket and link it, or delete the TODO.
+
+Brevity bias is mandatory because every long comment is a future maintenance liability. When in doubt, write less.
+
 ## Code review
 
 A pre-push hook runs an automated Claude code review before pushing. The review uses parallel specialized agents (security, logic, boundary, error-handling, data-flow, contracts) that each focus on a narrow concern. Security scanning for exposed secrets runs first and blocks the push if anything is found.

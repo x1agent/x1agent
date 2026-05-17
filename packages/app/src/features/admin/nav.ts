@@ -1,4 +1,4 @@
-import { Cpu, KeyRound, LayoutGrid, Users } from "lucide-react";
+import { Cpu, LayoutGrid, Users } from "lucide-react";
 
 /**
  * Single source of truth for the global admin section. Used by the
@@ -27,17 +27,10 @@ export const ADMIN_NAV: AdminNavItem[] = [
     description: "Every workspace in the deployment with member and agent counts.",
   },
   {
-    title: "Claude models",
-    href: "/admin/anthropic-models",
-    icon: Cpu,
-    description: "Curate the list of Claude models the agent dropdown exposes.",
-  },
-  {
-    // X1A-46 — first section ships LLM Provider Keys; future sections
-    // (Telemetry, Workspace Defaults, Feature Flags) extend this page.
-    title: "Settings",
+    title: "Model Settings",
     href: "/admin/settings",
-    icon: KeyRound,
-    description: "Platform-wide configuration — LLM provider keys and more.",
+    icon: Cpu,
+    description:
+      "LLM provider keys, model curation, summarizer model — all in one tabbed page.",
   },
 ];
