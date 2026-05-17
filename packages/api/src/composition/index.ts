@@ -34,8 +34,12 @@ import {
   createWorkspaceInvitationRoutes,
 } from "@x1agent/domain-invitations";
 import {
+  AgentId,
   PostgresAgentRepository,
+  PostgresAgentGrantRepository,
   createAgentRoutes,
+  createAgentGrantRoutes,
+  resolveAgentAccess,
 } from "@x1agent/domain-agents";
 import {
   PostgresPreviewEnvironmentRepository,
@@ -192,6 +196,8 @@ export interface Composition {
   /** /api/workspaces/:slug/access-grants — workspace-admin-or-platform-admin domain/email grants. */
   accessGrantsRoutes: Hono;
   agentRoutes: Hono;
+  /** /api/workspaces/:slug/agents/:agentId/grants — per-agent grants (collaborate / invoke / view / edit). */
+  agentGrantRoutes: Hono;
   /** /api/workspaces/:slug/preview-environments — durable preview env list + admin mutations. */
   previewEnvironmentRoutes: Hono;
   sessionRoutes: Hono;
@@ -289,6 +295,14 @@ export interface Composition {
    * WS bridge can plumb it through resolveSessionVisibility without
    * rebuilding the adapter. */
   platformAdminGuard: import("@x1agent/domain-sessions").PlatformAdminGuard;
+  /**
+   * Returns true when actor has `collaborate` access on the named
+   * agent — wired by every `resolveSessionVisibility` call site so
+   * session visibility + publish gates honour both the open-by-default
+   * workspace tier and explicit `collaborate` grants. Exposed on the
+   * Composition so api/index.ts can wire it into the WS bridge.
+   */
+  agentCollaborateResolver: (actor: UserId, agentId: string) => Promise<boolean>;
   /** Doc-commenting persistence — exposed so the comment-wake subscriber
    * can re-verify NATS-supplied routing fields against the DB before
    * publishing a wake. Without this, an authenticated bus client could
@@ -415,6 +429,7 @@ export function compose(env: CompositionEnv): Composition {
   const memberships = new PostgresMembershipRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
+  const agentGrants = new PostgresAgentGrantRepository(env.sql);
   const sessions = new PostgresSessionRepository(env.sql);
   const sessionEvents = new PostgresSessionEventRepository(env.sql);
   const sessionShares = new PostgresSessionShareRepository(env.sql);
@@ -594,6 +609,34 @@ export function compose(env: CompositionEnv): Composition {
     natsConnection: env.natsConnection,
   });
 
+  // Resolver wired into every `resolveSessionVisibility` call so a user
+  // with `canCollaborate` on a session's agent (workspace tier, or
+  // explicit `collaborate` grant on a private agent) sees + publishes
+  // into every session that agent runs — including resumed ones. The
+  // agent_id is the stable handle across the resume chain, so this
+  // also solves "share grant evaporates on resume".
+  const agentCollaborateResolver = async (
+    actor: UserId,
+    agentIdRaw: string,
+  ): Promise<boolean> => {
+    const agent = await agents.findById(AgentId(agentIdRaw));
+    if (!agent) return false;
+    const membership = await memberships.findByUserAndWorkspace(
+      actor,
+      agent.workspaceId,
+    );
+    const isWorkspaceMember = !!membership;
+    const isWorkspaceAdmin =
+      membership?.role === "admin" || membership?.role === "owner";
+    const snap = await resolveAgentAccess(
+      { agents, grants: agentGrants },
+      AgentId(agentIdRaw),
+      actor,
+      { userGroupIds: [], isWorkspaceMember, isWorkspaceAdmin },
+    );
+    return snap.canCollaborate;
+  };
+
   const agentRoutes = createAgentRoutes({
     agents,
     adminGuard: new WorkspaceAdminGuard(memberships),
@@ -615,6 +658,25 @@ export function compose(env: CompositionEnv): Composition {
     // back to the deployment-wide ANTHROPIC_MODEL default until an
     // admin curates at /admin/anthropic-models.
     enabledModels: async () => listEnabledOverrides(env.sql),
+  });
+
+  // Per-agent grant routes — list/grant/revoke `view`, `invoke`,
+  // `collaborate`, `edit`. The UI's Permissions tab uses this for the
+  // Collaborators list on private agents.
+  const agentGrantRoutes = createAgentGrantRoutes({
+    agents,
+    grants: agentGrants,
+    findUserIdByEmail: async (email) => {
+      const u = await users.findByEmail(email as Email);
+      return u?.id ?? null;
+    },
+    isWorkspaceAdmin: async (userId, workspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m?.role === "admin" || m?.role === "owner";
+    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
   });
 
   // X1A-70 — Pause now deletes the K8s Job so the pod actually
@@ -640,6 +702,7 @@ export function compose(env: CompositionEnv): Composition {
     // Lets non-admin sharees read sessions they were granted; without
     // this the only ways through loadScoped are owner + admin.
     shares: sessionShares,
+    agentCollaborateResolver,
     resolveWorkspace: async (slug: string) =>
       resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
@@ -742,6 +805,7 @@ export function compose(env: CompositionEnv): Composition {
     // sessions granted to them. Mirrors the wiring on
     // workspaceSessionRoutes' loadScoped.
     shares: sessionShares,
+    agentCollaborateResolver,
     resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
     requireAuth,
     getActor,
@@ -1511,6 +1575,7 @@ export function compose(env: CompositionEnv): Composition {
     workspaceCreateRoutes,
     accessGrantsRoutes,
     agentRoutes,
+    agentGrantRoutes,
     previewEnvironmentRoutes,
     sessionRoutes,
     workspaceSessionRoutes,
@@ -1566,6 +1631,7 @@ export function compose(env: CompositionEnv): Composition {
     memberships,
     sessionShares,
     platformAdminGuard,
+    agentCollaborateResolver,
     shareComments,
     permissionGrants,
     collections: collectionsRepo,

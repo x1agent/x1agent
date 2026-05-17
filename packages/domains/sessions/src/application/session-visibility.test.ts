@@ -56,6 +56,7 @@ const WS_A = WorkspaceId("00000000-0000-7000-8000-0000000000a1");
 const SESSION = {
   id: SessionId("00000000-0000-7000-8000-000000000001"),
   triggeredByUserId: ALICE,
+  agentId: "00000000-0000-7000-8000-0000000000a9" as never,
 };
 
 describe("resolveSessionVisibility", () => {
@@ -117,6 +118,55 @@ describe("resolveSessionVisibility", () => {
   it("missing shares repo + non-owner + non-platform-admin → invisible (degrades safely)", async () => {
     const r = await resolveSessionVisibility({}, CAROL, SESSION, WS_A);
     expect(r).toEqual({ visible: false });
+  });
+
+  it("agent-collaborate resolver returns true → visible via agent_collaborator (the open-by-default workspace tier + explicit grants both flow through here)", async () => {
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: new FakeShares() as never,
+        agentCollaborateResolver: async () => true,
+      },
+      BOB,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: true, reason: "agent_collaborator" });
+  });
+
+  it("agent-collaborate resolver returns false → falls through to invisible", async () => {
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: new FakeShares() as never,
+        agentCollaborateResolver: async () => false,
+      },
+      CAROL,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: false });
+  });
+
+  it("share grant wins before the agent-collaborate resolver is consulted (avoids redundant agent lookup)", async () => {
+    const shares = new FakeShares();
+    shares.grant(SESSION.id, BOB);
+    let resolverCalls = 0;
+    const r = await resolveSessionVisibility(
+      {
+        platformAdminGuard: new PlatformAdminNo(),
+        shares: shares as never,
+        agentCollaborateResolver: async () => {
+          resolverCalls++;
+          return true;
+        },
+      },
+      BOB,
+      SESSION,
+      WS_A,
+    );
+    expect(r).toEqual({ visible: true, reason: "user_share" });
+    expect(resolverCalls).toBe(0);
   });
 
   it("owner takes precedence over share — no platform-admin lookup performed", async () => {

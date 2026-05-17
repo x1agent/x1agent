@@ -51,6 +51,16 @@ export interface WorkspaceShareRoutesConfig {
    * less useful).
    */
   shares?: SessionShareRepository;
+  /**
+   * Optional resolver — when wired, callers with `canCollaborate` on
+   * the session's agent (workspace tier OR explicit `collaborate`
+   * grant) can read every share the agent produced. Survives resume.
+   * Composition root wires this; unwired callers degrade gracefully.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
   resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
@@ -129,6 +139,7 @@ export function createWorkspaceShareRoutes(
         adminGuard: cfg.adminGuard,
         platformAdminGuard: cfg.platformAdminGuard,
         shares: cfg.shares,
+        agentCollaborateResolver: cfg.agentCollaborateResolver,
       },
       actorId,
       session,
