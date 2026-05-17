@@ -62,6 +62,17 @@ export interface SessionRoutesConfig {
    */
   shares?: SessionShareRepository;
   /**
+   * Optional — when wired, the visibility resolver consults agent-level
+   * `collaborate` access. Lets workspace members of a `visibility=
+   * 'workspace'` agent see + post into every session that agent runs,
+   * across the resume chain, without a per-session share grant.
+   * Composition root wires this; tests can omit it.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
+  /**
    * slug → workspace id, mirroring the agents + invitations routes. Used
    * only to reject cross-workspace agent ids in the URL.
    */
@@ -429,6 +440,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
         adminGuard: cfg.adminGuard,
         platformAdminGuard: cfg.platformAdminGuard,
         shares: cfg.shares,
+        agentCollaborateResolver: cfg.agentCollaborateResolver,
       },
       actorId,
       session,

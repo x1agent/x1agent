@@ -278,6 +278,7 @@ const {
   accessGrantsRoutes,
   publicInvitationRoutes,
   agentRoutes,
+  agentGrantRoutes,
   previewEnvironmentRoutes,
   sessionRoutes,
   workspaceSessionRoutes,
@@ -328,6 +329,7 @@ const {
   memberships: composedMemberships,
   sessionShares: composedSessionShares,
   platformAdminGuard: composedPlatformAdminGuard,
+  agentCollaborateResolver: composedAgentCollaborateResolver,
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
@@ -467,6 +469,7 @@ app.route("/api/workspaces/:slug/invitations", workspaceInvitationRoutes);
 app.route("/api/workspaces", workspaceCreateRoutes);
 app.route("/api/invitations", publicInvitationRoutes);
 app.route("/api/workspaces/:slug/agents", agentRoutes);
+app.route("/api/workspaces/:slug/agents/:agentId/grants", agentGrantRoutes);
 app.route(
   "/api/workspaces/:slug/preview-environments",
   previewEnvironmentRoutes,
@@ -1047,6 +1050,7 @@ if (providerNats) {
     memberships: composedMemberships,
     sessionShares: composedSessionShares,
     platformAdminGuard: composedPlatformAdminGuard,
+    agentCollaborateResolver: composedAgentCollaborateResolver,
   });
   console.log("[ws-bridge] listening on /api/ws");
 } else {

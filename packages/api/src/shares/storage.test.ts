@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { join, resolve, tmpdir } from "node:path";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { tmpdir as osTmpdir } from "node:os";
 import {
   writeShareFiles,

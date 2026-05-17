@@ -83,16 +83,21 @@ beforeAll(async () => {
       (${wsB}, ${daveId},  'admin')
   `;
 
-  // One agent per workspace.
+  // One agent per workspace. `visibility='private'` so the privacy-
+  // boundary tests below still hold under the open-by-default policy
+  // (workspace-tier agents auto-grant collaborate to every workspace
+  // member — that's covered by other tests). Private here means only
+  // the agent owner + their session-share recipients can see.
   const agents = await dbSql<{ id: string; workspace_id: string }[]>`
     INSERT INTO agents
       (workspace_id, slug, name, runtime_type, kind, system_prompt,
-       owner_user_id, created_by, scheduled_run_as_user_id, is_active)
+       owner_user_id, created_by, scheduled_run_as_user_id, is_active,
+       visibility)
     VALUES
       (${wsA}, 'agent-a', 'Agent A', 'claude_code', 'worker', '',
-       ${carolId}, ${carolId}, ${carolId}, true),
+       ${carolId}, ${carolId}, ${carolId}, true, 'private'),
       (${wsB}, 'agent-b', 'Agent B', 'claude_code', 'worker', '',
-       ${daveId}, ${daveId}, ${daveId}, true)
+       ${daveId}, ${daveId}, ${daveId}, true, 'private')
     RETURNING id, workspace_id
   `;
   agentA = agents.find((a) => a.workspace_id === wsA)!.id;
@@ -293,9 +298,16 @@ describe("X1A-9 — workspace session detail visibility", () => {
     expect(r.status).toBe(200);
   });
 
-  it("workspace admin does NOT bypass per-session reads — only platform admin does", async () => {
-    // Workspace admin role gates workspace management (agents,
-    // members, settings), not per-user session reads.
+  it("workspace admin sees sessions on agents they admin (agent-collaborate via admin branch)", async () => {
+    // Under the open-by-default policy: workspace admin gets
+    // `canCollaborate=true` on every agent in their workspace via the
+    // admin branch in resolveAgentAccess, which flows through
+    // `agentCollaborateResolver` into session visibility. Admins can
+    // see + post to every session in workspaces they administer.
+    //
+    // Use cases: incident response, debugging stuck sessions, helping
+    // a workspace member who's blocked. The privacy boundary is now
+    // the workspace, not the per-user session.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(
@@ -303,7 +315,7 @@ describe("X1A-9 — workspace session detail visibility", () => {
       `http://api.test/api/workspaces/ws-a/sessions/${aliceSession}`,
       c,
     );
-    expect(r.status).toBe(404);
+    expect(r.status).toBe(200);
   });
 
   it("non-owner, non-admin, non-sharee gets 404 (no info leak)", async () => {
@@ -357,9 +369,10 @@ describe("X1A-9 — per-session shares list visibility", () => {
     expect(r.status).toBe(404);
   });
 
-  it("workspace admin does NOT list shares on others' sessions — admin role is workspace mgmt only", async () => {
-    // Same rationale as the session-detail test above: workspace admin
-    // no longer bypasses per-user share visibility.
+  it("workspace admin lists shares on every session in their workspace (open-by-default)", async () => {
+    // Same rationale as the session-detail test above: admin → agent
+    // collaborator on every agent in the workspace → session-shares
+    // visible across the workspace.
     const c = await login("carol@example.com");
     app = await buildAppFor("carol@example.com");
     const r = await getJson(
@@ -367,7 +380,7 @@ describe("X1A-9 — per-session shares list visibility", () => {
       `http://api.test/api/workspaces/ws-a/sessions/${aliceSession}/shares`,
       c,
     );
-    expect(r.status).toBe(404);
+    expect(r.status).toBe(200);
   });
 
   it("cross-workspace: workspace B admin gets 404 on workspace A session shares", async () => {

@@ -52,7 +52,8 @@ import type { Session, SessionId } from "../domain/session.js";
 export type SessionVisibilityReason =
   | "owner"
   | "platform_admin"
-  | "user_share";
+  | "user_share"
+  | "agent_collaborator";
 // Future: | "group_share"
 
 export interface SessionVisibilityDeps {
@@ -74,6 +75,21 @@ export interface SessionVisibilityDeps {
    * reads (none today, but it keeps the dependency optional in tests).
    */
   shares?: SessionShareRepository;
+  /**
+   * Resolver for "does this user have collaborate access on this
+   * agent?". When wired, every session whose agent the user can
+   * collaborate on becomes visible — that covers both the open-by-
+   * default workspace tier and explicit `collaborate` grants on
+   * private agents. Composition root wires this to the agents
+   * domain's `userHasAgentVerb(..., 'collaborate')` helper.
+   *
+   * Optional only for legacy call sites + tests; production wires
+   * it. Returns false (denied) when omitted.
+   */
+  agentCollaborateResolver?: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
 }
 
 export type SessionVisibilityResult =
@@ -90,7 +106,7 @@ export type SessionVisibilityResult =
 export async function resolveSessionVisibility(
   deps: SessionVisibilityDeps,
   actor: UserId,
-  session: Pick<Session, "id" | "triggeredByUserId">,
+  session: Pick<Session, "id" | "triggeredByUserId" | "agentId">,
   workspaceId: WorkspaceId,
 ): Promise<SessionVisibilityResult> {
   // Owner check first — cheapest, no I/O, and the most common hit on
@@ -114,6 +130,17 @@ export async function resolveSessionVisibility(
       actor,
     );
     if (share) return { visible: true, reason: "user_share" };
+  }
+
+  // Agent-level collaborate covers (a) the open-by-default workspace
+  // tier and (b) explicit collaborate grants on private agents.
+  // Survives resume because the new session's agentId is unchanged.
+  if (deps.agentCollaborateResolver) {
+    const ok = await deps.agentCollaborateResolver(
+      actor,
+      String(session.agentId),
+    );
+    if (ok) return { visible: true, reason: "agent_collaborator" };
   }
 
   return { visible: false };

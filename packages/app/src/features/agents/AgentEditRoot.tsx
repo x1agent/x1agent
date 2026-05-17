@@ -45,6 +45,7 @@ import { useUrlSearchParam } from "../../lib/useUrlSearchParam";
 import { AgentReposSection } from "../github/AgentReposSection";
 import { CollectionsAttachCard } from "./CollectionsAttachCard";
 import { CanSpawnCard } from "./CanSpawnCard";
+import { AgentCollaboratorsCard } from "./AgentCollaboratorsCard";
 import { AgentMcpAttachmentsCard } from "./AgentMcpAttachmentsCard";
 import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
 import { AgentSlackBotCard } from "./AgentSlackBotCard";
@@ -860,7 +861,18 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                   />
                 </TabsContent>
 
-                <TabsContent value="permissions" className="mt-0">
+                <TabsContent value="permissions" className="mt-0 space-y-6">
+                  <AgentCollaboratorsCard
+                    workspaceSlug={workspaceSlug}
+                    agentId={existing.id}
+                    agentName={existing.name}
+                    visibility={
+                      (existing as { visibility?: "private" | "workspace" | "via_grants" })
+                        .visibility ?? "workspace"
+                    }
+                    canManage={!!canManage}
+                    onVisibilityChanged={() => load(workspaceSlug)}
+                  />
                   <CanSpawnCard
                     workspaceSlug={workspaceSlug}
                     parentAgentId={existing.id}

@@ -1,19 +1,37 @@
 import { DomainError, type Subject } from "@x1agent/kernel";
 
 /**
- * Three verbs an agent grant can carry. The owner has all three
+ * Four verbs an agent grant can carry. The owner has all four
  * implicitly; workspace admins/owners bypass the grant table.
  *
- *   view   — see the agent in lists, read its prompt + history
- *   invoke — spawn sessions of this agent
- *   edit   — change prompt, schedule, image, or delete
+ *   view        — see the agent in lists, read its prompt + history
+ *   invoke      — spawn sessions of this agent
+ *   collaborate — read AND publish messages into every session this agent runs.
+ *                 Lets a non-owner participate in chats — composer is enabled,
+ *                 ws-bridge publish accepts. Distinct from `invoke`: a
+ *                 collaborator can't start new sessions of the agent, but
+ *                 can talk to any existing session.
+ *   edit        — change prompt, schedule, image, or delete
+ *
+ * `visibility='workspace'` agents grant collaborate implicitly to every
+ * workspace member — no grant row needed for the open-by-default case.
+ * Explicit `collaborate` grants are for `private` / `via_grants` agents
+ * where the operator wants a narrow allowlist instead of the whole
+ * workspace.
  */
-export type AgentVerb = "view" | "invoke" | "edit";
-const VERBS: readonly AgentVerb[] = ["view", "invoke", "edit"] as const;
+export type AgentVerb = "view" | "invoke" | "collaborate" | "edit";
+const VERBS: readonly AgentVerb[] = [
+  "view",
+  "invoke",
+  "collaborate",
+  "edit",
+] as const;
 
 export function isAgentVerb(v: string): v is AgentVerb {
   return (VERBS as readonly string[]).includes(v);
 }
+
+export const ALL_AGENT_VERBS: readonly AgentVerb[] = VERBS;
 
 declare const agentGrantIdBrand: unique symbol;
 export type AgentGrantId = string & { readonly [agentGrantIdBrand]: true };

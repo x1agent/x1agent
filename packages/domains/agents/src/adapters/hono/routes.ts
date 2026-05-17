@@ -72,6 +72,7 @@ function serialize(a: Agent) {
     created_by: a.createdBy,
     scheduled_run_as_user_id: a.scheduledRunAsUserId,
     idle_timeout_seconds: a.idleTimeoutSeconds,
+    visibility: a.visibility,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
   };
@@ -278,6 +279,16 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         ...(body.idle_timeout_seconds !== undefined && {
           idleTimeoutSeconds: clampIdleTimeoutSeconds(body.idle_timeout_seconds),
         }),
+        ...(body.visibility === "private" ||
+        body.visibility === "workspace" ||
+        body.visibility === "via_grants"
+          ? {
+              visibility: body.visibility as
+                | "private"
+                | "workspace"
+                | "via_grants",
+            }
+          : {}),
       };
       const a = await updateAgent(
         {
