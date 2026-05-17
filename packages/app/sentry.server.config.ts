@@ -9,12 +9,16 @@ import * as Sentry from "@sentry/astro";
 
 const dsn = process.env.PUBLIC_SENTRY_DSN_APP;
 const release = process.env.SENTRY_RELEASE || process.env.IMAGE_TAG;
+const env = process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || "production";
+// See api/src/instrument.ts for rationale — local devspace pods get
+// the DSN piped through but shouldn't actually ship events.
+const isDevLike = /^(local|dev|development|test)/i.test(env);
 
-if (dsn) {
+if (dsn && !isDevLike) {
   Sentry.init({
     dsn,
     release,
-    environment: process.env.NODE_ENV,
+    environment: env,
     sendDefaultPii: true,
     tracesSampleRate: 0.1,
   });
