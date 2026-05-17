@@ -74,20 +74,30 @@ export async function scheduleDueSessions(
       const due = nextDueAfter(agent.schedule, anchor);
       if (due.getTime() > now.getTime()) continue;
 
-      // No-backfill policy: if `due` is more than one full interval
-      // behind `now`, the agent has been off long enough that catching
-      // up by emitting one session per missed slot is wrong — that's
-      // what produces phantom-session backlogs after a schedule is
-      // first activated, an agent is reactivated after pause, or the
-      // anchor falls back to `agent.createdAt` (which can be days or
-      // weeks old). Skip the missed slots entirely and advance the
-      // anchor to `now`. The next firing happens at the next
-      // future due time.
-      const slotAfterDue = nextDueAfter(agent.schedule, due);
-      const intervalMs = slotAfterDue.getTime() - due.getTime();
-      if (now.getTime() - due.getTime() > intervalMs) {
-        await deps.agents.recordSchedulerTick(agent.id, now);
-        continue;
+      // No-backfill policy applies ONLY to worker/scheduled kinds.
+      //
+      // For workers, a tick = sessions.create() = a new pod. Missing
+      // N slots and catching up would spawn N pods — the phantom-
+      // session backlog this rule exists to prevent. Skip those slots
+      // and advance the anchor to `now`.
+      //
+      // For orchestrators, a tick = injectHeartbeatWake() into the
+      // live session (or sessions.create() if there isn't one).
+      // There is NO backlog to create — one wake catches the agent
+      // up regardless of how many slots passed. The old behavior
+      // silently no-op'd the orchestrator schedule whenever
+      // `last_scheduler_tick_at` was NULL and `created_at` was more
+      // than one interval before the first cron-match (common: any
+      // operator who sets a daily schedule on an agent that's been
+      // alive more than a day). Fire one heartbeat instead of eating
+      // it.
+      if (!isOrchestratorKind(agent.kind)) {
+        const slotAfterDue = nextDueAfter(agent.schedule, due);
+        const intervalMs = slotAfterDue.getTime() - due.getTime();
+        if (now.getTime() - due.getTime() > intervalMs) {
+          await deps.agents.recordSchedulerTick(agent.id, now);
+          continue;
+        }
       }
 
       if (isOrchestratorKind(agent.kind)) {
