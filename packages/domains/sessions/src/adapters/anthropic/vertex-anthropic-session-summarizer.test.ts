@@ -55,3 +55,68 @@ describe("VertexAnthropicSessionSummarizer URL construction", () => {
     expect(url).toContain("/locations/global/");
   });
 });
+
+describe("VertexAnthropicSessionSummarizer modelResolver (X1A-145)", () => {
+  const minimalEvent: SessionEvent = {
+    id: "evt_1",
+    sessionId: "sess_1",
+    seq: 1,
+    type: "user.message",
+    payload: { text: "hello" },
+    createdAt: new Date(),
+  } as SessionEvent;
+
+  async function captureModelFromUrl(opts: {
+    staticModel?: string;
+    resolver?: () => Promise<string | null | undefined>;
+  }): Promise<string> {
+    let observedUrl = "";
+    const stubFetch: typeof fetch = (async (input: RequestInfo | URL) => {
+      observedUrl = typeof input === "string" ? input : input.toString();
+      return new Response(JSON.stringify({ content: [{ text: "ok" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    const summarizer = new VertexAnthropicSessionSummarizer({
+      projectId: "p",
+      region: "global",
+      model: opts.staticModel,
+      modelResolver: opts.resolver,
+      fetchImpl: stubFetch,
+      metadataBaseUrl: "http://stub-metadata",
+    });
+    (summarizer as unknown as { fetchAccessToken: () => Promise<string> })
+      .fetchAccessToken = async () => "stub-token";
+    await summarizer.summarize([minimalEvent]);
+    // The model id is URL-encoded into the path between `models/` and `:rawPredict`.
+    const m = observedUrl.match(/\/models\/([^:]+):rawPredict/);
+    return decodeURIComponent(m?.[1] ?? "");
+  }
+
+  it("uses the resolver value when it returns a non-empty string", async () => {
+    const got = await captureModelFromUrl({
+      staticModel: "claude-haiku-4-5@default",
+      resolver: async () => "claude-sonnet-4-6@20251022",
+    });
+    expect(got).toBe("claude-sonnet-4-6@20251022");
+  });
+
+  it("falls back to the static model when the resolver returns null", async () => {
+    const got = await captureModelFromUrl({
+      staticModel: "claude-haiku-4-5@default",
+      resolver: async () => null,
+    });
+    expect(got).toBe("claude-haiku-4-5@default");
+  });
+
+  it("falls back to the static model when the resolver throws", async () => {
+    const got = await captureModelFromUrl({
+      staticModel: "claude-haiku-4-5@default",
+      resolver: async () => {
+        throw new Error("db down");
+      },
+    });
+    expect(got).toBe("claude-haiku-4-5@default");
+  });
+});

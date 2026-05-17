@@ -37,6 +37,14 @@ export interface AnthropicSessionSummarizerOptions {
    */
   model?: string;
   /**
+   * Optional per-call resolver. The api composes this to read the
+   * admin's selected summary model from platform_settings; a successful
+   * read replaces the static `model` for that one request. Returning
+   * null/undefined falls through to `model` (then DEFAULT_MODEL).
+   * Failures are swallowed — the static default is the safe fallback.
+   */
+  modelResolver?: () => Promise<string | null | undefined>;
+  /**
    * Override fetch for tests. Defaults to `globalThis.fetch`.
    */
   fetchImpl?: typeof fetch;
@@ -63,12 +71,16 @@ const SYSTEM_PROMPT = [
 export class AnthropicSessionSummarizer implements SessionSummarizer {
   private readonly apiKey: string;
   private readonly model: string;
+  private readonly modelResolver:
+    | (() => Promise<string | null | undefined>)
+    | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
 
   constructor(opts: AnthropicSessionSummarizerOptions) {
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? DEFAULT_MODEL;
+    this.modelResolver = opts.modelResolver;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
     this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
   }
@@ -77,6 +89,8 @@ export class AnthropicSessionSummarizer implements SessionSummarizer {
     if (!this.apiKey) return null;
     const transcript = renderTranscript(events);
     if (!transcript.trim()) return null;
+
+    const model = await this.resolveModel();
 
     let res: Response;
     try {
@@ -88,7 +102,7 @@ export class AnthropicSessionSummarizer implements SessionSummarizer {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: this.model,
+          model,
           max_tokens: 80,
           system: SYSTEM_PROMPT,
           messages: [
@@ -126,6 +140,16 @@ export class AnthropicSessionSummarizer implements SessionSummarizer {
     const text = extractText(json);
     if (!text) return null;
     return text.slice(0, MAX_SUMMARY_CHARS);
+  }
+
+  private async resolveModel(): Promise<string> {
+    if (!this.modelResolver) return this.model;
+    try {
+      const v = await this.modelResolver();
+      return v && v.trim() ? v : this.model;
+    } catch {
+      return this.model;
+    }
   }
 }
 
