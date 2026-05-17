@@ -41,7 +41,7 @@ export function SummarizerModelPicker({
   const load = async () => {
     try {
       const r = await apiFetch<SummaryModelResponse>(
-        "/api/admin/anthropic/summary-model",
+        "/api/admin/anthropic/models/summary-model",
       );
       setCurrent(r);
       setLoadError(null);
@@ -55,7 +55,7 @@ export function SummarizerModelPicker({
     setSaveError(null);
     try {
       const r = await apiFetch<{ ok: boolean; model_id: string | null }>(
-        "/api/admin/anthropic/summary-model",
+        "/api/admin/anthropic/models/summary-model",
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },

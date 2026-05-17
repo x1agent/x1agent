@@ -119,7 +119,7 @@ function defaultFetchResponses() {
         }),
       );
     }
-    if (u.endsWith("/api/admin/anthropic/summary-model") && method === "GET") {
+    if (u.endsWith("/api/admin/anthropic/models/summary-model") && method === "GET") {
       return Promise.resolve(
         jsonRes({ model_id: null, updated_at: null, updated_by: null }),
       );
@@ -170,7 +170,7 @@ function overrideLlmStatus(
         }),
       );
     }
-    if (u.endsWith("/api/admin/anthropic/summary-model") && (init?.method ?? "GET") === "GET") {
+    if (u.endsWith("/api/admin/anthropic/models/summary-model") && (init?.method ?? "GET") === "GET") {
       return Promise.resolve(
         jsonRes({ model_id: null, updated_at: null, updated_by: null }),
       );
