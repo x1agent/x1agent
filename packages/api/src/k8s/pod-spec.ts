@@ -98,6 +98,22 @@ export interface SessionPodSpec {
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
   anthropicApiKey?: string;
   /**
+   * OpenAI API key for runtime-codex agents (the Codex CLI honors both
+   * OPENAI_API_KEY and CODEX_API_KEY; we forward OPENAI_API_KEY and let
+   * the runtime's entrypoint alias it into CODEX_API_KEY). Only emitted
+   * into the agent container when the resolved agent image carries the
+   * Codex runtime label — see isCodexRuntimeImage() below. Spike v0
+   * (codex-spike-gap-analysis.md §4): the platform secret is already
+   * wired through Terraform / installer / Helm; this just plumbs it to
+   * the pod when the agent's image asks for it.
+   */
+  openaiApiKey?: string;
+  /**
+   * Override for the OpenAI model the Codex runtime selects per turn.
+   * Defaults to `gpt-5.3-codex` inside the runtime when unset.
+   */
+  openaiModel?: string;
+  /**
    * Override for the Claude Code SDK's default model. When unset, the
    * SDK picks its own default — which on Vertex installs may resolve
    * to a model the operator's CLOUD_ML_REGION hasn't received yet.
@@ -196,11 +212,27 @@ export interface SessionPodSpec {
 }
 
 /**
+ * Heuristic runtime selector for the Codex harness spike (codex-spike-
+ * gap-analysis.md §6 open question 4). There is no `agents.runtime`
+ * column yet — for v0 we infer the runtime from the image ref the
+ * agent's catalog entry points at. Matches images whose ref or tag
+ * contains "runtime-codex" or "agent-codex" so both the spike's
+ * `runtime-codex:dev` and a productionised `x1agent/agent-codex:vN`
+ * tag light up. A real `agents.runtime` enum + schema migration
+ * lands as a v1 follow-up.
+ */
+function isCodexRuntimeImage(image: string | undefined): boolean {
+  if (!image) return false;
+  return /(?:runtime|agent)-codex/i.test(image);
+}
+
+/**
  * Build the V1Job manifest for a session pod. Keeps the generation pure
  * so the watcher's DB + K8s code is testable; no K8s client references
  * here.
  */
 export function buildSessionJob(spec: SessionPodSpec): V1Job {
+  const isCodex = isCodexRuntimeImage(spec.agentImage);
   const jobName = sessionJobName(spec.sessionId);
   const imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
   const labels = {
@@ -246,31 +278,48 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
     { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },
-    ...(spec.anthropicProvider === "vertex"
-      ? [
-          // Vertex path: Workload Identity supplies auth; the SDK reads
-          // these to route through Google Vertex instead of api.anthropic.com.
-          { name: "CLAUDE_CODE_USE_VERTEX", value: "1" },
-          { name: "CLOUD_ML_REGION", value: spec.vertexRegion ?? "us-east5" },
-          ...(spec.vertexProjectId
-            ? [
-                {
-                  name: "ANTHROPIC_VERTEX_PROJECT_ID",
-                  value: spec.vertexProjectId,
-                },
-              ]
-            : []),
-        ]
-      : spec.anthropicApiKey
-        ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
-        : []),
+    // Provider-credentials branch. The runtime selector
+    // (isCodexRuntimeImage) decides whether to emit OPENAI_API_KEY
+    // for the Codex spike runtime or fall through to the existing
+    // Anthropic env contract (Vertex Workload Identity or
+    // ANTHROPIC_API_KEY). The Codex branch deliberately mirrors the
+    // shape of the Anthropic one rather than introducing a new
+    // env-shape concept — see codex-spike-gap-analysis.md §4.
+    ...(isCodex
+      ? spec.openaiApiKey
+        ? [{ name: "OPENAI_API_KEY", value: spec.openaiApiKey }]
+        : []
+      : spec.anthropicProvider === "vertex"
+        ? [
+            // Vertex path: Workload Identity supplies auth; the SDK reads
+            // these to route through Google Vertex instead of api.anthropic.com.
+            { name: "CLAUDE_CODE_USE_VERTEX", value: "1" },
+            { name: "CLOUD_ML_REGION", value: spec.vertexRegion ?? "us-east5" },
+            ...(spec.vertexProjectId
+              ? [
+                  {
+                    name: "ANTHROPIC_VERTEX_PROJECT_ID",
+                    value: spec.vertexProjectId,
+                  },
+                ]
+              : []),
+          ]
+        : spec.anthropicApiKey
+          ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
+          : []),
+    // Codex model override. Mirrors the ANTHROPIC_MODEL knob below for
+    // the Codex runtime path; the runtime reads OPENAI_MODEL at boot
+    // and feeds it to `codex exec -m <model>`.
+    ...(isCodex && spec.openaiModel
+      ? [{ name: "OPENAI_MODEL", value: spec.openaiModel }]
+      : []),
     // Override the SDK's default model. Vertex installs need a model
     // identifier that Anthropic has actually rolled out to the
     // CLOUD_ML_REGION (the SDK's default may be ahead of Vertex). The
     // api reads ANTHROPIC_MODEL env at boot and propagates here so a
     // helm value flip rolls out cluster-wide. Per-agent overrides
     // come later via the agent.model column.
-    ...(spec.anthropicModel
+    ...(!isCodex && spec.anthropicModel
       ? [{ name: "ANTHROPIC_MODEL", value: spec.anthropicModel }]
       : []),
     // Account-level git identity (X1A-42). When the triggering user

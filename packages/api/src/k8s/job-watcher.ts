@@ -114,6 +114,20 @@ export interface JobWatcherConfig {
    */
   anthropicModel?: string;
   /**
+   * OpenAI API key for the Codex runtime spike. The api reads this
+   * from its own env (OPENAI_API_KEY) and forwards it to every session
+   * pod whose resolved image is a Codex runtime build. The Anthropic
+   * env contract above stays the default path for Claude runtime
+   * agents — pod-spec branches on the image ref to decide which
+   * credential to emit. See codex-spike-gap-analysis.md §4.
+   */
+  openaiApiKey?: string;
+  /**
+   * OpenAI model override for the Codex runtime. When unset the
+   * runtime defaults to gpt-5.3-codex inside the container.
+   */
+  openaiModel?: string;
+  /**
    * K8s ServiceAccount the session pod runs as. Required for the
    * Vertex path (the SA carries the Workload Identity annotation).
    * Helm chart's session-sa.yaml creates "x1agent-session"; the api
@@ -509,6 +523,12 @@ async function launchSession(
     anthropicProvider: cfg.anthropicProvider,
     // X1A-40 precedence — see selectSessionModel below.
     anthropicModel: selectSessionModel(session, agent, cfg.anthropicModel),
+    // Codex runtime spike — pod-spec emits these only when the
+    // resolved agent image is the Codex runtime (isCodexRuntimeImage).
+    // The Anthropic plumbing above stays the active path for every
+    // Claude-runtime agent.
+    openaiApiKey: cfg.openaiApiKey,
+    openaiModel: cfg.openaiModel,
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,
     serviceAccountName: cfg.sessionServiceAccount,
