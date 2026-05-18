@@ -1139,41 +1139,66 @@ export function compose(env: CompositionEnv): Composition {
     requireAuth,
   });
 
-  // Per-agent middleware: validates that :slug + :agentId pair is real,
-  // the user is admin/owner of that workspace, and stashes workspaceId
-  // + userId for downstream handlers. Used by both MCP attachments and
-  // Zone-2 env bindings — they share the same auth posture: only admins
-  // can edit the credentials and tools an agent runs with.
-  const requireAgent: import("hono").MiddlewareHandler = async (c, next) => {
-    const session = c.get("session") as
-      | {
-          email: string;
-          userId: string | null;
-          memberships: readonly { slug: string; workspaceId: string; role: string }[];
-        }
-      | undefined;
-    if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
+  // Per-agent guards: both validate that the URL :slug + :agentId pair
+  // is real and that the caller has membership in the slug's workspace.
+  // The agent-belongs-to-workspace re-check is the IDOR guard from the
+  // tenant-isolation rules in CLAUDE.md; both gates run it.
+  //
+  // Read gate (`requireAgentRead`): any workspace member passes — the
+  // agent detail page is a read surface every member can see. Only
+  // stashes workspaceId + userId because GET handlers don't need
+  // agentKind or the OAuth-on-orchestrator policy.
+  //
+  // Write gate (`requireAgentWrite`): admin/owner only, and additionally
+  // resolves agentKind + the workspace's `oauthMcpsOnOrchestrators`
+  // policy because mutation handlers (attach MCP, set env binding)
+  // branch on both.
+  type Session = {
+    email: string;
+    userId: string | null;
+    memberships: readonly { slug: string; workspaceId: string; role: string }[];
+  };
+  const resolveAgentScope = async (
+    c: import("hono").Context,
+  ): Promise<
+    | { kind: "ok"; membership: { slug: string; workspaceId: string; role: string }; agent: NonNullable<Awaited<ReturnType<typeof agents.findById>>>; session: Session }
+    | { kind: "error"; response: Response }
+  > => {
+    const session = c.get("session") as Session | undefined;
+    if (!session?.email)
+      return { kind: "error", response: c.json({ error: "unauthenticated" }, 401) };
     const slug = c.req.param("slug");
     const agentId = c.req.param("agentId");
-    if (!slug) return c.json({ error: "missing workspace slug" }, 400);
-    if (!agentId) return c.json({ error: "missing agent id" }, 400);
+    if (!slug)
+      return { kind: "error", response: c.json({ error: "missing workspace slug" }, 400) };
+    if (!agentId)
+      return { kind: "error", response: c.json({ error: "missing agent id" }, 400) };
     const m = session.memberships.find((x) => x.slug === slug);
-    if (!m) return c.json({ error: "forbidden" }, 403);
+    if (!m) return { kind: "error", response: c.json({ error: "forbidden" }, 403) };
+    const agent = await agents.findById(agentId as never);
+    if (!agent || (agent.workspaceId as unknown as string) !== m.workspaceId) {
+      return { kind: "error", response: c.json({ error: "agent not found" }, 404) };
+    }
+    return { kind: "ok", membership: m, agent, session };
+  };
+
+  const requireAgentRead: import("hono").MiddlewareHandler = async (c, next) => {
+    const scope = await resolveAgentScope(c);
+    if (scope.kind === "error") return scope.response;
+    c.set("workspaceId", scope.membership.workspaceId);
+    c.set("userId", scope.session.userId);
+    await next();
+  };
+
+  const requireAgentWrite: import("hono").MiddlewareHandler = async (c, next) => {
+    const scope = await resolveAgentScope(c);
+    if (scope.kind === "error") return scope.response;
+    const { membership: m, agent, session } = scope;
     if (m.role !== "admin" && m.role !== "owner") {
       return c.json({ error: "forbidden" }, 403);
     }
-    // Confirm agent belongs to the workspace before any write. Cheap
-    // guard against UI bugs that would otherwise let an admin in
-    // workspace A mutate an agent in workspace B by URL guessing.
-    const agent = await agents.findById(agentId as never);
-    if (!agent || (agent.workspaceId as unknown as string) !== m.workspaceId) {
-      return c.json({ error: "agent not found" }, 404);
-    }
     c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
-    // Surface agent kind so downstream routes can apply
-    // kind-specific policy (remote_oauth MCPs require worker, unless
-    // the workspace policy below relaxes that).
     c.set(
       "agentKind",
       (agent.kind as "worker" | "orchestrator" | "scheduled") ?? "worker",
@@ -1192,7 +1217,7 @@ export function compose(env: CompositionEnv): Composition {
         : false;
     } catch (err) {
       console.warn(
-        `[requireAgent] workspace settings lookup failed for ${m.workspaceId}: ${(err as Error).message} — treating as policy-off`,
+        `[requireAgentWrite] workspace settings lookup failed for ${m.workspaceId}: ${(err as Error).message} — treating as policy-off`,
       );
     }
     c.set("workspaceAllowsOauthOnNonWorkers", workspaceAllowsOauthOnNonWorkers);
@@ -1202,7 +1227,8 @@ export function compose(env: CompositionEnv): Composition {
   const agentMcpAttachmentRoutes = createAgentMcpAttachmentRoutes({
     attachments: attachmentService,
     requireAuth,
-    requireAgent,
+    requireAgentRead,
+    requireAgentWrite,
   });
 
   // Per-user OAuth flow for remote_oauth MCPs. Tokens encrypt under
@@ -1291,7 +1317,8 @@ export function compose(env: CompositionEnv): Composition {
   const agentEnvRoutes = createAgentEnvRoutes({
     service: bindingService,
     requireAuth,
-    requireAgent,
+    requireAgentRead,
+    requireAgentWrite,
   });
 
   // Workspace-scoped env bindings. Same env_bindings table, scope='workspace'.
