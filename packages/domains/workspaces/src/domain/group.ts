@@ -23,7 +23,7 @@ export interface Group {
   name: string;
   /**
    * X1A-107 — human-authored description shown in the Groups settings
-   * UI. Null when the group was created before migration 051 or the
+   * UI. Null when the group was created before migration 062 or the
    * creator didn't supply one.
    */
   description: string | null;
@@ -34,7 +34,7 @@ export interface Group {
   rule: Record<string, unknown> | null;
   /**
    * X1A-107 — userId of the creator. Nullable: not back-filled for
-   * rows created before migration 051, and no FK so a hard-deleted
+   * rows created before migration 062, and no FK so a hard-deleted
    * user doesn't cascade-delete the group.
    */
   createdBy: UserId | null;
@@ -55,7 +55,7 @@ export interface GroupMembership {
   addedAt: Date;
   /**
    * X1A-107 — userId of the workspace member who added this user.
-   * Nullable: not back-filled for rows created before migration 051,
+   * Nullable: not back-filled for rows created before migration 062,
    * SCIM-synced rows never set it, no FK.
    */
   addedBy: UserId | null;

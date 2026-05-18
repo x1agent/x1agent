@@ -82,7 +82,7 @@ export class PostgresGroupRepository implements GroupRepository {
       // Two unique constraints can fire here:
       //   1. (workspace_id, slug)             — from migration 027
       //   2. (workspace_id, lower(name)) WHERE active AND manual
-      //                                       — from migration 051
+      //                                       — from migration 062
       // The `constraint_name` field on the postgres error lets us tell
       // them apart so we throw the user-facing error that maps to the
       // right HTTP code (409 name_taken vs 409 group_slug_taken).

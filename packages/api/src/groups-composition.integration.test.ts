@@ -19,8 +19,8 @@ import { freshTestDb, dropTestDb } from "./test-helpers.js";
 //     across tenants).
 //   * Validation: empty / whitespace / 81-char / @-prefix names; 501-
 //     char description.
-//   * ACL: a non-admin member cannot create/patch/delete, but CAN
-//     list and read groups + memberships.
+//   * ACL: any workspace member can list, read, create, patch, delete
+//     groups + manage memberships (per X1A-107 spec).
 //
 // What's NOT covered here (deliberately): resolution-at-share-time
 // semantics. Those live in the share-recipient picker work (X1A-109).
@@ -287,7 +287,7 @@ describe("groups routes (X1A-107)", () => {
     // (workspace_id, slug) was non-partial. Re-creating a group with the
     // same name deterministically derives the same slug, so the slug
     // unique would 409 even though the name unique would (correctly)
-    // permit reuse. Migration 051 narrows the slug constraint to active
+    // permit reuse. Migration 062 narrows the slug constraint to active
     // manual groups; this test pins that.
     it("archived group's slug is reusable when re-creating the same name", async () => {
       const c = await login("admin@example.com");
@@ -312,7 +312,7 @@ describe("groups routes (X1A-107)", () => {
       expect(archived.status).toBe(204);
 
       // Same name → same derived slug → would have collided with the
-      // legacy non-partial slug unique before the 051 fix.
+      // legacy non-partial slug unique before the 062 fix.
       const reused = await app.fetch(
         new Request("http://api.test/api/workspaces/alpha/groups", {
           method: "POST",
@@ -420,7 +420,7 @@ describe("groups routes (X1A-107)", () => {
   });
 
   describe("ACL + cross-tenant isolation", () => {
-    it("non-admin member can list/read groups but cannot create or delete", async () => {
+    it("any workspace member can list, read, create, and delete groups", async () => {
       const c = await login("member@example.com");
 
       const listed = await app.fetch(
@@ -434,10 +434,58 @@ describe("groups routes (X1A-107)", () => {
         new Request("http://api.test/api/workspaces/alpha/groups", {
           method: "POST",
           headers: { Cookie: c, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Unauthorized" }),
+          body: JSON.stringify({ name: "MemberCreated" }),
         }),
       );
-      expect(created.status).toBe(403);
+      expect(created.status).toBe(201);
+      const { group } = (await created.json()) as { group: { id: string } };
+
+      const archived = await app.fetch(
+        new Request(
+          `http://api.test/api/workspaces/alpha/groups/${group.id}`,
+          { method: "DELETE", headers: { Cookie: c } },
+        ),
+      );
+      expect(archived.status).toBe(204);
+    });
+
+    // Proves the gate is member-on-workspace, not creator-only. One
+    // member creates, a *different* member edits — both succeed.
+    it("one member creates, a different member PATCHes — both succeed", async () => {
+      const creatorCookie = await login("member@example.com");
+      const editorCookie = await login("other@example.com");
+
+      const created = await app.fetch(
+        new Request("http://api.test/api/workspaces/alpha/groups", {
+          method: "POST",
+          headers: {
+            Cookie: creatorCookie,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name: "ShareEdit" }),
+        }),
+      );
+      expect(created.status).toBe(201);
+      const { group } = (await created.json()) as { group: { id: string } };
+
+      const patched = await app.fetch(
+        new Request(
+          `http://api.test/api/workspaces/alpha/groups/${group.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Cookie: editorCookie,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ name: "ShareEditRenamed" }),
+          },
+        ),
+      );
+      expect(patched.status).toBe(200);
+      const { group: updated } = (await patched.json()) as {
+        group: { name: string };
+      };
+      expect(updated.name).toBe("ShareEditRenamed");
     });
 
     it("cross-workspace probe returns 404 (not 403) — no id leakage", async () => {

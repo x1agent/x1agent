@@ -22,13 +22,6 @@ import {
   validateGroupName,
 } from "../../domain/group.js";
 
-class AdminDeniedError extends DomainError {
-  readonly code = "admin_denied";
-  constructor() {
-    super("only workspace admins can manage groups");
-  }
-}
-
 class NotAMemberError extends DomainError {
   readonly code = "not_a_member";
   constructor() {
@@ -59,18 +52,9 @@ export interface GroupRoutesConfig {
     workspaceId: WorkspaceId,
   ) => Promise<boolean>;
   /**
-   * Workspace admin check. X1A-107 spec says "any workspace member can
-   * manage" but for THIS PR we keep the existing admin gate (see PR
-   * description — flagged for CEO decision). Loosening to any-member
-   * is a one-line change in the route handlers below.
-   */
-  isWorkspaceAdmin: (
-    userId: UserId,
-    workspaceId: WorkspaceId,
-  ) => Promise<boolean>;
-  /**
-   * X1A-107 — any-member check for read endpoints (list, detail,
-   * memberships). Reads are accessible to every workspace member.
+   * X1A-107 — any-member check. Per the spec, every group endpoint
+   * (read and write) is open to any workspace member; the workspace
+   * boundary is the ACL.
    */
   isWorkspaceMember: (
     userId: UserId,
@@ -156,12 +140,6 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     }
   };
 
-  const requireAdmin = async (actor: UserId, wsId: WorkspaceId) => {
-    if (!(await cfg.isWorkspaceAdmin(actor, wsId))) {
-      throw new AdminDeniedError();
-    }
-  };
-
   /**
    * Loads a group and asserts it's in the actor's workspace + active.
    * 404 covers all three failure modes — never-existed, in a different
@@ -234,7 +212,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
-      await requireAdmin(actor.userId, wsId);
+      await requireMember(actor.userId, wsId);
     } catch (err) {
       return c.json(errBody(err), 403);
     }
@@ -362,7 +340,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
-      await requireAdmin(actor.userId, wsId);
+      await requireMember(actor.userId, wsId);
     } catch (err) {
       return c.json(errBody(err), 403);
     }
@@ -415,7 +393,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
-      await requireAdmin(actor.userId, wsId);
+      await requireMember(actor.userId, wsId);
     } catch (err) {
       return c.json(errBody(err), 403);
     }
@@ -461,7 +439,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
-      await requireAdmin(actor.userId, wsId);
+      await requireMember(actor.userId, wsId);
     } catch (err) {
       return c.json(errBody(err), 403);
     }
@@ -524,7 +502,7 @@ export function createGroupRoutes(cfg: GroupRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
     try {
-      await requireAdmin(actor.userId, wsId);
+      await requireMember(actor.userId, wsId);
     } catch (err) {
       return c.json(errBody(err), 403);
     }

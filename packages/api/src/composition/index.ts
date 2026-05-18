@@ -1064,9 +1064,8 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  // X1A-107 — Groups CRUD. Reuses the same admin gate as agent-grants
-  // (workspace owner/admin) for write endpoints; reads are open to any
-  // workspace member. See group-routes.ts for the per-endpoint policy.
+  // X1A-107 — Groups CRUD. Workspace-member ACL across the board
+  // (reads and writes); the workspace boundary is the gate.
   const groupRoutes = createGroupRoutes({
     groups,
     findUserIdByEmail: async (email) => {
@@ -1085,10 +1084,6 @@ export function compose(env: CompositionEnv): Composition {
     isUserInWorkspace: async (userId, workspaceId) => {
       const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
       return m !== null;
-    },
-    isWorkspaceAdmin: async (userId, workspaceId) => {
-      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
-      return m?.role === "admin" || m?.role === "owner";
     },
     isWorkspaceMember: async (userId, workspaceId) => {
       const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
