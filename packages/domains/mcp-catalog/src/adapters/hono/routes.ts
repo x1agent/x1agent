@@ -10,7 +10,7 @@ declare module "hono" {
     userId: string | null;
     agentKind: "worker" | "orchestrator" | "scheduled";
     /**
-     * Resolved by the composition layer's requireAgent middleware
+     * Resolved by the composition layer's requireAgentWrite middleware
      * from the workspace's `oauthMcpsOnOrchestrators` setting.
      * `true` when the policy is `on_attended` or `on`, `false` when
      * `off`. Routes use it to decide whether attaching a remote_oauth
@@ -27,10 +27,11 @@ export interface CatalogRoutesConfig {
 
 export interface AttachmentRoutesConfig {
   attachments: AttachmentService;
-  /** Validates that :agentId belongs to the slug's workspace and user can edit. */
   requireAuth: MiddlewareHandler;
-  /** Resolves and authorizes the agentId param. Returns 404/403 on failure. */
-  requireAgent: MiddlewareHandler;
+  /** Read gate: any workspace member can list attachments. */
+  requireAgentRead: MiddlewareHandler;
+  /** Write gate: admin/owner only — mutations also need agentKind + oauth policy in ctx. */
+  requireAgentWrite: MiddlewareHandler;
 }
 
 function entryToJson(e: CatalogEntry) {
@@ -168,9 +169,10 @@ export function createMcpCatalogRoutes(cfg: CatalogRoutesConfig): Hono {
  * Per-agent MCP attachments. Mounted at
  *   /api/workspaces/:slug/agents/:agentId/mcp-attachments
  *
- * Caller is expected to mount its own `requireAgent` middleware that
- * verifies the :agentId belongs to the workspace and the user has
- * edit rights — the agents domain owns that policy.
+ * The composition layer provides two agent guards: `requireAgentRead`
+ * (any workspace member) for GETs so the agent detail page can render
+ * its configuration view, and `requireAgentWrite` (admin/owner) for
+ * mutations. Both re-check that :agentId belongs to the URL workspace.
  */
 export function createAgentMcpAttachmentRoutes(
   cfg: AttachmentRoutesConfig,
@@ -178,15 +180,14 @@ export function createAgentMcpAttachmentRoutes(
   const app = new Hono();
 
   app.use("*", cfg.requireAuth);
-  app.use("*", cfg.requireAgent);
 
-  app.get("/", async (c) => {
+  app.get("/", cfg.requireAgentRead, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const items = await cfg.attachments.list(agentId);
     return c.json({ attachments: items.map(attachmentToJson) });
   });
 
-  app.put("/", async (c) => {
+  app.put("/", cfg.requireAgentWrite, async (c) => {
     const workspaceId = c.get("workspaceId") as string;
     const userId = c.get("userId") as string | null;
     const agentId = c.req.param("agentId") ?? "";
@@ -235,7 +236,7 @@ export function createAgentMcpAttachmentRoutes(
     }
   });
 
-  app.delete("/:id", async (c) => {
+  app.delete("/:id", cfg.requireAgentWrite, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const id = c.req.param("id") ?? "";
     const removed = await cfg.attachments.detach(agentId, id);
