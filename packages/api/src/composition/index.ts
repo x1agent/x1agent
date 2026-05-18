@@ -1191,12 +1191,24 @@ export function compose(env: CompositionEnv): Composition {
   };
 
   const requireAgentWrite: import("hono").MiddlewareHandler = async (c, next) => {
-    const scope = await resolveAgentScope(c);
-    if (scope.kind === "error") return scope.response;
-    const { membership: m, agent, session } = scope;
-    if (m.role !== "admin" && m.role !== "owner") {
+    // Role-gate against membership BEFORE the agent lookup so that a
+    // non-admin caller can't distinguish "real agent in my workspace
+    // but I lack the role" (would be 403) from "agent id doesn't
+    // exist / belongs to another workspace" (would be 404). Both
+    // responses must look identical to a member; doing the role
+    // check up-front keeps that property intact.
+    const session = c.get("session") as Session | undefined;
+    if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
+    const slug = c.req.param("slug");
+    if (!slug) return c.json({ error: "missing workspace slug" }, 400);
+    const preMembership = session.memberships.find((x) => x.slug === slug);
+    if (!preMembership) return c.json({ error: "forbidden" }, 403);
+    if (preMembership.role !== "admin" && preMembership.role !== "owner") {
       return c.json({ error: "forbidden" }, 403);
     }
+    const scope = await resolveAgentScope(c);
+    if (scope.kind === "error") return scope.response;
+    const { membership: m, agent } = scope;
     c.set("workspaceId", m.workspaceId);
     c.set("userId", session.userId);
     c.set(
