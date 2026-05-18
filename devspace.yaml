@@ -550,5 +550,6 @@ dev:
 pipelines:
   dev: |-
     run_dependencies --all
+    build_images agent sidecar mcp-oauth-proxy
     create_deployments --all
     start_dev --all
