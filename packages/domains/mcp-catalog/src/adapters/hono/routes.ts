@@ -54,12 +54,40 @@ function entryToJson(e: CatalogEntry) {
   };
 }
 
+// Strip literal values out of the wire response. `kind: "secret"` keeps
+// its ref (the workspace_secrets *name* — useful for the edit UI and
+// not itself sensitive). `kind: "value"` returns an empty string in
+// place of the user-supplied literal so the api never echoes back
+// configuration values that might (well-formed manifest or not) carry
+// sensitive data. The frontend already renders kind:value as "•••" and
+// pre-fills the edit form from local state, not from this payload —
+// nothing client-side reads `value.value`. Session-launch resolution
+// happens in-process via repository reads, never through this route.
+function redactEnvJson(
+  env: Record<string, { kind: string; value?: string; ref?: string }>,
+): Record<string, { kind: string; value?: string; ref?: string }> {
+  const out: Record<string, { kind: string; value?: string; ref?: string }> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v.kind === "secret") {
+      out[k] = { kind: "secret", ref: v.ref };
+    } else {
+      out[k] = { kind: "value", value: "" };
+    }
+  }
+  return out;
+}
+
 function attachmentToJson(a: Attachment) {
   return {
     id: a.id,
     agent_id: a.agentId,
     catalog_entry_id: a.catalogEntryId,
-    env_json: a.envJson,
+    env_json: redactEnvJson(
+      a.envJson as unknown as Record<
+        string,
+        { kind: string; value?: string; ref?: string }
+      >,
+    ),
     tool_scopes_granted: a.toolScopesGranted,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
@@ -203,13 +231,23 @@ export function createAgentMcpAttachmentRoutes(
         400,
       );
     }
-    const agentKind = (c.get("agentKind") as
+    // requireAgentWrite sets both unconditionally; if either is
+    // missing the gate is mis-wired and we fail loud rather than
+    // silently default to (worker, oauth=off) — that would silently
+    // bypass the workspace's OAuth-on-orchestrator policy.
+    const agentKind = c.get("agentKind") as
       | "worker"
       | "orchestrator"
       | "scheduled"
-      | undefined) ?? "worker";
-    const workspaceAllowsOauthOnNonWorkers =
-      c.get("workspaceAllowsOauthOnNonWorkers") ?? false;
+      | undefined;
+    const workspaceAllowsOauthOnNonWorkers = c.get(
+      "workspaceAllowsOauthOnNonWorkers",
+    ) as boolean | undefined;
+    if (agentKind === undefined || workspaceAllowsOauthOnNonWorkers === undefined) {
+      throw new Error(
+        "mcp-attachment PUT reached without agentKind/oauth policy in ctx — write guard mis-wired",
+      );
+    }
     try {
       const att = await cfg.attachments.attach({
         agentId,

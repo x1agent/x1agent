@@ -127,4 +127,56 @@ describe("createAgentMcpAttachmentRoutes — read/write split", () => {
     );
     expect(r2.status).toBe(204);
   });
+
+  it("GET / redacts kind:value literals from the wire response", async () => {
+    // Even an admin should not see the raw value back — those exist
+    // only to be injected into the MCP at session-launch, never to
+    // round-trip through this api.
+    const listing: AttachmentService = {
+      list: async () =>
+        [
+          {
+            id: "att-1",
+            agentId: "agent-1",
+            catalogEntryId: "cat-1",
+            envJson: {
+              REGION: { kind: "value", value: "us-east-1-PLAINTEXT" },
+              API_KEY: { kind: "secret", ref: "OPENAI_PROD" },
+            },
+            toolScopesGranted: [],
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            createdBy: "user-1",
+          },
+        ] as never,
+      attach: async () => ({} as never),
+      detach: async () => true,
+    } as unknown as AttachmentService;
+    const app = new Hono();
+    app.route(
+      "/api/workspaces/:slug/agents/:agentId/mcp-attachments",
+      createAgentMcpAttachmentRoutes({
+        attachments: listing,
+        requireAuth: passingAuth,
+        requireAgentRead: tagger("read", true),
+        requireAgentWrite: tagger("write", true),
+      }),
+    );
+    const res = await app.fetch(
+      new Request("http://t/api/workspaces/w/agents/a/mcp-attachments"),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      attachments: {
+        env_json: Record<string, { kind: string; value?: string; ref?: string }>;
+      }[];
+    };
+    const env = body.attachments[0]!.env_json;
+    expect(env.REGION!.kind).toBe("value");
+    expect(env.REGION!.value).toBe("");
+    expect(JSON.stringify(body)).not.toContain("us-east-1-PLAINTEXT");
+    // Secret refs are still surfaced (workspace-secret names are not
+    // sensitive — the values they resolve to are).
+    expect(env.API_KEY).toEqual({ kind: "secret", ref: "OPENAI_PROD" });
+  });
 });
