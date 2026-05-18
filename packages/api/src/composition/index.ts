@@ -20,11 +20,13 @@ import {
   type SessionTokenizer,
 } from "@x1agent/domain-auth";
 import {
+  PostgresAccessGrantRepository,
+  PostgresGroupRepository,
   PostgresMembershipRepository,
   PostgresWorkspaceRepository,
-  PostgresAccessGrantRepository,
-  createWorkspaceRoutes,
   createAccessGrantsRoutes,
+  createGroupRoutes,
+  createWorkspaceRoutes,
 } from "@x1agent/domain-workspaces";
 import { composeSlack } from "./slack.js";
 import {
@@ -228,6 +230,12 @@ export interface Composition {
   /** /api/slack/events — Slack inbound event webhook (one URL, all bots). */
   slackEventsRoutes: Hono;
   workspaceGrantRoutes: Hono;
+  /**
+   * X1A-107 — /api/workspaces/:slug/groups — manual groups for the
+   * share-recipient picker (full picker extension lands in X1A-109).
+   * Admin gate today; spec says any-member, pending CEO call.
+   */
+  groupRoutes: Hono;
   /** /api/workspaces/:slug/secrets — workspace-admin-only env var store. */
   workspaceSecretsRoutes: Hono;
   /** /api/workspaces/:slug/mcp-catalog — workspace-admin MCP image registry. */
@@ -427,6 +435,7 @@ export function compose(env: CompositionEnv): Composition {
   // The service + routes are still constructed lower down.
   const workspaceBindingRepo = new PostgresWorkspaceBindingRepository(env.sql);
   const memberships = new PostgresMembershipRepository(env.sql);
+  const groups = new PostgresGroupRepository(env.sql);
   const invitations = new PostgresInvitationRepository(env.sql);
   const agents = new PostgresAgentRepository(env.sql);
   const agentGrants = new PostgresAgentGrantRepository(env.sql);
@@ -1055,9 +1064,39 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
   });
 
-  // Workspace secret store. workspaceSecretsRepo + workspaceSecretsService
-  // are hoisted above internalRoutes (the env-binding resolver needs
-  // them eagerly); routes wire here.
+  // X1A-107 — Groups CRUD. Workspace-member ACL across the board
+  // (reads and writes); the workspace boundary is the gate.
+  const groupRoutes = createGroupRoutes({
+    groups,
+    findUserIdByEmail: async (email) => {
+      const u = await users.findByEmail(email as Email);
+      return u?.id ?? null;
+    },
+    findUserById: async (userId) => {
+      const u = await users.findById(userId);
+      if (!u) return null;
+      return {
+        id: u.id,
+        email: u.email as unknown as string,
+        name: u.name,
+      };
+    },
+    isUserInWorkspace: async (userId, workspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m !== null;
+    },
+    isWorkspaceMember: async (userId, workspaceId) => {
+      const m = await memberships.findByUserAndWorkspace(userId, workspaceId);
+      return m !== null;
+    },
+    resolveWorkspace: async (slug) => resolveWorkspace(WorkspaceSlug(slug)),
+    requireAuth,
+    getActor,
+  });
+
+  // workspaceSecretsRepo + workspaceSecretsService are hoisted above
+  // internalRoutes (the env-binding resolver needs them eagerly);
+  // routes wire here.
   const workspaceSecretsRoutes = createWorkspaceSecretsRoutes({
     service: workspaceSecretsService,
     requireAuth,
@@ -1594,6 +1633,7 @@ export function compose(env: CompositionEnv): Composition {
     slackBotApiRoutes,
     slackEventsRoutes,
     workspaceGrantRoutes,
+    groupRoutes,
     workspaceSecretsRoutes,
     mcpCatalogRoutes,
     agentMcpAttachmentRoutes,
