@@ -1,3 +1,11 @@
+# [1.38.0](https://github.com/x1agent/x1agent/compare/v1.37.1...v1.38.0) (2026-05-19)
+
+
+### Features
+
+* **agent-codex:** spike v0 Codex harness package ([ffc5680](https://github.com/x1agent/x1agent/commit/ffc5680321c86c2b63e368ab142fb049fa43ad56))
+* **api:** pod-spec OPENAI_API_KEY branch for Codex runtime spike ([2fd9afd](https://github.com/x1agent/x1agent/commit/2fd9afd1c8f67025c3ab615546d45509fa6c5cfc))
+
 ## [1.37.1](https://github.com/x1agent/x1agent/compare/v1.37.0...v1.37.1) (2026-05-17)
 
 
