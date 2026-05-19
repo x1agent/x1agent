@@ -357,6 +357,21 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     ...(process.env.GCS_ARTIFACTS_BUCKET
       ? [{ name: "GCS_ARTIFACTS_BUCKET", value: process.env.GCS_ARTIFACTS_BUCKET }]
       : []),
+    // Sentry — propagate from the api process so every spawned sidecar
+    // can report panics + tracing::error! events to the same project
+    // the api/app already use. Without this, the sidecar's
+    // SENTRY_DSN_SIDECAR env was never set inside pods → init_sentry()
+    // returned None silently and Sentry had zero sidecar events while
+    // the platform shipped real production runtime errors.
+    ...(process.env.SENTRY_DSN_SIDECAR
+      ? [{ name: "SENTRY_DSN_SIDECAR", value: process.env.SENTRY_DSN_SIDECAR }]
+      : []),
+    ...(process.env.SENTRY_ENVIRONMENT
+      ? [{ name: "SENTRY_ENVIRONMENT", value: process.env.SENTRY_ENVIRONMENT }]
+      : []),
+    ...(process.env.IMAGE_TAG
+      ? [{ name: "IMAGE_TAG", value: process.env.IMAGE_TAG }]
+      : []),
   ];
 
   // Pod-shape branching by agent kind. Orchestrators are long-lived

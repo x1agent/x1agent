@@ -81,5 +81,69 @@ export function createMeRoutes(cfg: MeRoutesConfig): Hono {
     return c.body(null, 204);
   });
 
+  // GET /api/me/timezone → { timezone: string | null }
+  app.get("/timezone", async (c) => {
+    const session = c.get("session");
+    const user = await cfg.users.findById(UserId(session.userId));
+    if (!user) return c.json({ error: "user_not_found" }, 404);
+    return c.json({ timezone: user.timezone });
+  });
+
+  // PUT /api/me/timezone body: { timezone: string | null }
+  //
+  // Validates against the runtime's IANA list — anything else is a
+  // 400 rather than silently storing garbage. `null` / empty string
+  // clears the value; the UI then falls back to UTC formatting.
+  app.put("/timezone", async (c) => {
+    const session = c.get("session");
+    const raw = (await c.req.json<{ timezone?: unknown }>().catch(() => ({}))) as {
+      timezone?: unknown;
+    };
+    const value = raw.timezone;
+    if (value === null || value === "") {
+      await cfg.users.setTimezone(UserId(session.userId), null);
+      return c.json({ timezone: null });
+    }
+    if (typeof value !== "string") {
+      return c.json(
+        { error: "validation_error", message: "timezone must be a string or null" },
+        400,
+      );
+    }
+    if (!isValidIanaTimezone(value)) {
+      return c.json(
+        {
+          error: "validation_error",
+          message: `'${value}' is not a recognized IANA timezone`,
+        },
+        400,
+      );
+    }
+    await cfg.users.setTimezone(UserId(session.userId), value);
+    return c.json({ timezone: value });
+  });
+
   return app;
+}
+
+/**
+ * Use the runtime's authoritative IANA list when available
+ * (`Intl.supportedValuesOf`). Falls back to a constructor probe so
+ * older Node / Bun versions still validate something — an invalid id
+ * makes `new Intl.DateTimeFormat(undefined, { timeZone })` throw.
+ */
+function isValidIanaTimezone(tz: string): boolean {
+  type IntlExtended = typeof Intl & {
+    supportedValuesOf?: (key: string) => string[];
+  };
+  const ext = Intl as IntlExtended;
+  if (typeof ext.supportedValuesOf === "function") {
+    return ext.supportedValuesOf("timeZone").includes(tz);
+  }
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }

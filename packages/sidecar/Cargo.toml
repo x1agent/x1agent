@@ -11,7 +11,12 @@ bytes = "1"
 # openssl-libs-static so the build works. Tried `rustls` feature first
 # but rustls 0.23 demands an explicit CryptoProvider that sentry's
 # feature-gating doesn't pick — caused a runtime panic on init.
-sentry = "0.48"
+#
+# The `tracing` feature enables sentry::integrations::tracing so
+# `tracing::error!` lines become Sentry events and `warn!` lines
+# become breadcrumbs. Without it, only panics shipped — every Result
+# error logged via `tracing::error!` was invisible.
+sentry = { version = "0.48", features = ["tracing"] }
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"

@@ -22,6 +22,11 @@ export interface User {
   email: string;
   name: string;
   avatar_url: string | null;
+  /**
+   * IANA timezone (e.g. "America/New_York"). NULL → UI falls back to
+   * UTC. Read once on /auth/me; mutated via PUT /api/me/timezone.
+   */
+  timezone: string | null;
 }
 
 export interface AuthMeResponse {

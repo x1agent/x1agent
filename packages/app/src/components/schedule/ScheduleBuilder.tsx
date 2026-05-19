@@ -9,6 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import {
+  localTimeToUtc,
+  shortTzLabel,
+  utcCronToLocal,
+} from "../../lib/datetime";
 
 /**
  * Frequency-first schedule builder. Reusable wherever the app needs
@@ -119,19 +124,35 @@ function parseCron(value: string): StructuredSchedule {
     const minute = parseSingleInt(minF);
     const hour = parseSingleInt(hourF);
     if (minute !== null && hour !== null && monF === "*") {
+      // Stored cron is UTC; structured state is in the viewer's tz.
+      // Convert at this boundary so the controls (and the cronstrue
+      // description) render in the user's local clock.
+      const local = utcCronToLocal(hour, minute);
       // Daily: day-of-month and day-of-week both wildcards.
       if (domF === "*" && dowF === "*") {
-        return { kind: "daily", hour, minute };
+        return { kind: "daily", hour: local.hour, minute: local.minute };
       }
       // Weekly: dom wildcard, dow specifies one or more days.
       if (domF === "*" && dowF !== "*") {
         const days = parseDowField(dowF);
-        if (days) return { kind: "weekly", hour, minute, days };
+        if (days)
+          return {
+            kind: "weekly",
+            hour: local.hour,
+            minute: local.minute,
+            days,
+          };
       }
       // Monthly: dom is a specific day-of-month, dow wildcard.
       if (dowF === "*" && domF !== "*") {
         const day = parseSingleInt(domF);
-        if (day !== null) return { kind: "monthly", day, hour, minute };
+        if (day !== null)
+          return {
+            kind: "monthly",
+            day,
+            hour: local.hour,
+            minute: local.minute,
+          };
       }
     }
   }
@@ -178,6 +199,20 @@ function dowToNum(token: string): number | null {
 
 // ── Serialization ────────────────────────────────────────────────
 
+/**
+ * Schedule TZ handling lives at this boundary. StructuredSchedule's
+ * hour/minute fields are in the VIEWER'S local timezone (what the
+ * user types in the time input). The wire format we ship to the api
+ * is a plain 5-field cron in UTC, since the scheduler interprets
+ * cron strings against the api container's clock (UTC).
+ *
+ * toCron() converts local → UTC on the way out; parseCron() reverses
+ * it on the way in. The conversion samples DST at "now", so a cron
+ * authored in EDT will keep its stored UTC hour after DST ends —
+ * meaning the local time shifts by an hour for the dormant half of
+ * the year. Per design decision; users with strict anchoring needs
+ * use the Custom cron entry.
+ */
 function toCron(s: StructuredSchedule): string {
   switch (s.kind) {
     case "manual":
@@ -186,19 +221,20 @@ function toCron(s: StructuredSchedule): string {
       return `@every ${clampInt(s.interval, 1, 59)}m`;
     case "hours":
       return `@every ${clampInt(s.interval, 1, 23)}h`;
-    case "daily":
-      return `${clampInt(s.minute, 0, 59)} ${clampInt(s.hour, 0, 23)} * * *`;
+    case "daily": {
+      const u = localTimeToUtc(clampInt(s.hour, 0, 23), clampInt(s.minute, 0, 59));
+      return `${u.minute} ${u.hour} * * *`;
+    }
     case "weekly": {
+      const u = localTimeToUtc(clampInt(s.hour, 0, 23), clampInt(s.minute, 0, 59));
       const days = [...s.days].sort((a, b) => a - b);
       const dow = days.length === 0 ? "*" : days.join(",");
-      return `${clampInt(s.minute, 0, 59)} ${clampInt(s.hour, 0, 23)} * * ${dow}`;
+      return `${u.minute} ${u.hour} * * ${dow}`;
     }
-    case "monthly":
-      return `${clampInt(s.minute, 0, 59)} ${clampInt(s.hour, 0, 23)} ${clampInt(
-        s.day,
-        1,
-        31,
-      )} * *`;
+    case "monthly": {
+      const u = localTimeToUtc(clampInt(s.hour, 0, 23), clampInt(s.minute, 0, 59));
+      return `${u.minute} ${u.hour} ${clampInt(s.day, 1, 31)} * *`;
+    }
     case "custom":
       return s.raw;
   }
@@ -242,8 +278,22 @@ function describe(cron: string): string | null {
     "@annually": "At 00:00 on January 1st",
   };
   if (macros[lower]) return macros[lower];
+  // Stored cron is UTC; cronstrue renders the digits as-is. Rewrite
+  // the hour+minute fields into the viewer's local clock before
+  // handing off so the caption matches the time input above it.
+  const parts = raw.split(/\s+/);
+  let forCronstrue = raw;
+  if (parts.length === 5) {
+    const minute = parseSingleInt(parts[0]!);
+    const hour = parseSingleInt(parts[1]!);
+    if (minute !== null && hour !== null) {
+      const local = utcCronToLocal(hour, minute);
+      forCronstrue = [local.minute, local.hour, parts[2], parts[3], parts[4]].join(" ");
+    }
+  }
   try {
-    return cronstrue.toString(raw, { use24HourTimeFormat: true });
+    const base = cronstrue.toString(forCronstrue, { use24HourTimeFormat: true });
+    return parts.length === 5 ? `${base} (${shortTzLabel()})` : base;
   } catch {
     return null;
   }
@@ -445,6 +495,12 @@ function TimeRow({
         }}
         className="w-32"
       />
+      <span
+        className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-faint"
+        title="Your timezone — set in /account. Stored cron is converted to UTC."
+      >
+        {shortTzLabel()}
+      </span>
     </div>
   );
 }

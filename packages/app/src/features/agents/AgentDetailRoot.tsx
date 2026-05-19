@@ -80,6 +80,11 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
     loadRepos(workspaceSlug, agent.id);
     if (hasCollections) loadCollections(workspaceSlug, agent.id);
     loadSpawnGrants(workspaceSlug, agent.id);
+    // Reads are workspace-member-gated on the api (requireAgentRead in
+    // composition); mutations stay admin/owner. Members need these
+    // values to render the configuration summary — without them the
+    // "MCP servers" and "Environment variables" rows show as empty,
+    // indistinguishable from "nothing configured".
     void loadMcpAttachments(workspaceSlug, agent.id);
     void loadEnvBindings(workspaceSlug, agent.id);
     // Sessions are also fetched by RecentRunsSection further down the

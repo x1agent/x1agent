@@ -1,3 +1,18 @@
+## [1.37.1](https://github.com/x1agent/x1agent/compare/v1.37.0...v1.37.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **app:** don't 403-storm on agent detail page for non-admin members ([bce4429](https://github.com/x1agent/x1agent/commit/bce442911621326987a735b665002bc96e6b4a93))
+* **docker:** add domain-preview-environments to every dev Dockerfile ([8a3a953](https://github.com/x1agent/x1agent/commit/8a3a953d422fc6cefb3ac394ff2cd217017aba2d))
+* **observability:** suppress Sentry init in dev-shaped environments ([2699886](https://github.com/x1agent/x1agent/commit/269988617d64b025be5740df4850ee8e701a1d84))
+* **sidecar:** wire Sentry end-to-end — DSN propagation + tracing layer ([db76dc9](https://github.com/x1agent/x1agent/commit/db76dc9e9c5db86b4a91502bba8bd6e61f2febaf))
+
+
+### Features
+
+* **auth,app:** users.timezone + ScheduleBuilder local↔UTC + /account picker ([#145](https://github.com/x1agent/x1agent/issues/145)) ([cb6e25c](https://github.com/x1agent/x1agent/commit/cb6e25c68c61c4ae2164711112a3f5dbbe82c769))
+
 # [1.37.0](https://github.com/x1agent/x1agent/compare/v1.36.1...v1.37.0) (2026-05-17)
 
 

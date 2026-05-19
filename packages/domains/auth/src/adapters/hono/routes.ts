@@ -416,7 +416,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
     c.req.header("Authorization")?.replace(/^Bearer\s+/, "") ||
     null;
 
-  app.get("/me", (c) => {
+  app.get("/me", async (c) => {
     const token = tokenFromRequest(c);
     if (!token) return c.json({ error: "unauthenticated" }, 401);
     try {
@@ -430,12 +430,17 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
         Email(session.email),
         cfg.platformAdmins ?? [],
       );
+      // One DB lookup for the user's IANA timezone so the frontend
+      // can localize every UTC timestamp without baking the value
+      // into the JWT (which would force re-issue on every change).
+      const user = await cfg.users.findById(UserId(session.userId));
       return c.json({
         user: {
           id: session.userId,
           email: session.email,
           name: session.name,
           avatar_url: null,
+          timezone: user?.timezone ?? null,
         },
         memberships: session.memberships.map((m) => ({
           workspace_id: m.workspaceId,

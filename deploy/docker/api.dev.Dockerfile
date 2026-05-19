@@ -35,6 +35,7 @@ COPY packages/domains/workspace-secrets/package.json packages/domains/workspace-
 COPY packages/domains/mcp-catalog/package.json packages/domains/mcp-catalog/tsconfig.json ./packages/domains/mcp-catalog/
 COPY packages/domains/image-catalog/package.json packages/domains/image-catalog/tsconfig.json ./packages/domains/image-catalog/
 COPY packages/domains/uploads/package.json packages/domains/uploads/tsconfig.json ./packages/domains/uploads/
+COPY packages/domains/preview-environments/package.json packages/domains/preview-environments/tsconfig.json ./packages/domains/preview-environments/
 COPY packages/infrastructure/kaniko/package.json packages/infrastructure/kaniko/tsconfig.json ./packages/infrastructure/kaniko/
 COPY packages/domains/agent-env/package.json packages/domains/agent-env/tsconfig.json ./packages/domains/agent-env/
 COPY packages/mcp-oauth-proxy/package.json packages/mcp-oauth-proxy/tsconfig.json ./packages/mcp-oauth-proxy/

@@ -10,7 +10,7 @@ declare module "hono" {
     userId: string | null;
     agentKind: "worker" | "orchestrator" | "scheduled";
     /**
-     * Resolved by the composition layer's requireAgent middleware
+     * Resolved by the composition layer's requireAgentWrite middleware
      * from the workspace's `oauthMcpsOnOrchestrators` setting.
      * `true` when the policy is `on_attended` or `on`, `false` when
      * `off`. Routes use it to decide whether attaching a remote_oauth
@@ -27,10 +27,11 @@ export interface CatalogRoutesConfig {
 
 export interface AttachmentRoutesConfig {
   attachments: AttachmentService;
-  /** Validates that :agentId belongs to the slug's workspace and user can edit. */
   requireAuth: MiddlewareHandler;
-  /** Resolves and authorizes the agentId param. Returns 404/403 on failure. */
-  requireAgent: MiddlewareHandler;
+  /** Read gate: any workspace member can list attachments. */
+  requireAgentRead: MiddlewareHandler;
+  /** Write gate: admin/owner only — mutations also need agentKind + oauth policy in ctx. */
+  requireAgentWrite: MiddlewareHandler;
 }
 
 function entryToJson(e: CatalogEntry) {
@@ -53,12 +54,40 @@ function entryToJson(e: CatalogEntry) {
   };
 }
 
+// Strip literal values out of the wire response. `kind: "secret"` keeps
+// its ref (the workspace_secrets *name* — useful for the edit UI and
+// not itself sensitive). `kind: "value"` returns an empty string in
+// place of the user-supplied literal so the api never echoes back
+// configuration values that might (well-formed manifest or not) carry
+// sensitive data. The frontend already renders kind:value as "•••" and
+// pre-fills the edit form from local state, not from this payload —
+// nothing client-side reads `value.value`. Session-launch resolution
+// happens in-process via repository reads, never through this route.
+function redactEnvJson(
+  env: Record<string, { kind: string; value?: string; ref?: string }>,
+): Record<string, { kind: string; value?: string; ref?: string }> {
+  const out: Record<string, { kind: string; value?: string; ref?: string }> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v.kind === "secret") {
+      out[k] = { kind: "secret", ref: v.ref };
+    } else {
+      out[k] = { kind: "value", value: "" };
+    }
+  }
+  return out;
+}
+
 function attachmentToJson(a: Attachment) {
   return {
     id: a.id,
     agent_id: a.agentId,
     catalog_entry_id: a.catalogEntryId,
-    env_json: a.envJson,
+    env_json: redactEnvJson(
+      a.envJson as unknown as Record<
+        string,
+        { kind: string; value?: string; ref?: string }
+      >,
+    ),
     tool_scopes_granted: a.toolScopesGranted,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
@@ -168,9 +197,10 @@ export function createMcpCatalogRoutes(cfg: CatalogRoutesConfig): Hono {
  * Per-agent MCP attachments. Mounted at
  *   /api/workspaces/:slug/agents/:agentId/mcp-attachments
  *
- * Caller is expected to mount its own `requireAgent` middleware that
- * verifies the :agentId belongs to the workspace and the user has
- * edit rights — the agents domain owns that policy.
+ * The composition layer provides two agent guards: `requireAgentRead`
+ * (any workspace member) for GETs so the agent detail page can render
+ * its configuration view, and `requireAgentWrite` (admin/owner) for
+ * mutations. Both re-check that :agentId belongs to the URL workspace.
  */
 export function createAgentMcpAttachmentRoutes(
   cfg: AttachmentRoutesConfig,
@@ -178,15 +208,14 @@ export function createAgentMcpAttachmentRoutes(
   const app = new Hono();
 
   app.use("*", cfg.requireAuth);
-  app.use("*", cfg.requireAgent);
 
-  app.get("/", async (c) => {
+  app.get("/", cfg.requireAgentRead, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const items = await cfg.attachments.list(agentId);
     return c.json({ attachments: items.map(attachmentToJson) });
   });
 
-  app.put("/", async (c) => {
+  app.put("/", cfg.requireAgentWrite, async (c) => {
     const workspaceId = c.get("workspaceId") as string;
     const userId = c.get("userId") as string | null;
     const agentId = c.req.param("agentId") ?? "";
@@ -202,13 +231,23 @@ export function createAgentMcpAttachmentRoutes(
         400,
       );
     }
-    const agentKind = (c.get("agentKind") as
+    // requireAgentWrite sets both unconditionally; if either is
+    // missing the gate is mis-wired and we fail loud rather than
+    // silently default to (worker, oauth=off) — that would silently
+    // bypass the workspace's OAuth-on-orchestrator policy.
+    const agentKind = c.get("agentKind") as
       | "worker"
       | "orchestrator"
       | "scheduled"
-      | undefined) ?? "worker";
-    const workspaceAllowsOauthOnNonWorkers =
-      c.get("workspaceAllowsOauthOnNonWorkers") ?? false;
+      | undefined;
+    const workspaceAllowsOauthOnNonWorkers = c.get(
+      "workspaceAllowsOauthOnNonWorkers",
+    ) as boolean | undefined;
+    if (agentKind === undefined || workspaceAllowsOauthOnNonWorkers === undefined) {
+      throw new Error(
+        "mcp-attachment PUT reached without agentKind/oauth policy in ctx — write guard mis-wired",
+      );
+    }
     try {
       const att = await cfg.attachments.attach({
         agentId,
@@ -235,7 +274,7 @@ export function createAgentMcpAttachmentRoutes(
     }
   });
 
-  app.delete("/:id", async (c) => {
+  app.delete("/:id", cfg.requireAgentWrite, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const id = c.req.param("id") ?? "";
     const removed = await cfg.attachments.detach(agentId, id);
