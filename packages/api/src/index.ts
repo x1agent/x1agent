@@ -827,6 +827,12 @@ if (process.env.JOB_WATCHER !== "disabled") {
       // or Anthropic API) when the env is unset, so a fresh install
       // doesn't have to manually pick a model just to spawn a session.
       anthropicModel: await resolveDefaultAnthropicModel(),
+      // Codex runtime spike — only consumed when the resolved agent
+      // image is a Codex runtime build (see isCodexRuntimeImage in
+      // pod-spec.ts). OPENAI_API_KEY is already wired through the
+      // four-layer install pattern documented in CLAUDE.md.
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      openaiModel: process.env.OPENAI_MODEL || undefined,
       sessionServiceAccount:
         process.env.SESSION_SERVICE_ACCOUNT || undefined,
       natsClientTlsSecret:
