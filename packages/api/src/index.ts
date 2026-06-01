@@ -297,6 +297,7 @@ const {
   slackBotApiRoutes,
   slackEventsRoutes,
   workspaceGrantRoutes,
+  groupRoutes,
   workspaceSecretsRoutes,
   mcpCatalogRoutes,
   agentMcpAttachmentRoutes,
@@ -504,6 +505,8 @@ app.route(
 app.route("/api/internal/share-comments", internalShareCommentRoutes);
 app.route("/api/workspaces/:slug/agents/:agentId/repos", agentRepoRoutes);
 app.route("/api/workspaces/:slug/grants", workspaceGrantRoutes);
+// X1A-107 — Groups CRUD + memberships.
+app.route("/api/workspaces/:slug/groups", groupRoutes);
 app.route("/api/workspaces/:slug/secrets", workspaceSecretsRoutes);
 app.route("/api/workspaces/:slug/mcp-catalog", mcpCatalogRoutes);
 app.route(

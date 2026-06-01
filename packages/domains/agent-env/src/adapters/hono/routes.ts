@@ -12,8 +12,10 @@ declare module "hono" {
 export interface AgentEnvRoutesConfig {
   service: BindingService;
   requireAuth: MiddlewareHandler;
-  /** Validates that :agentId belongs to the slug's workspace. */
-  requireAgent: MiddlewareHandler;
+  /** Read gate: any workspace member can list bindings. */
+  requireAgentRead: MiddlewareHandler;
+  /** Write gate: admin/owner only. */
+  requireAgentWrite: MiddlewareHandler;
 }
 
 function bindingToJson(b: AgentEnvBinding) {
@@ -40,15 +42,14 @@ export function createAgentEnvRoutes(cfg: AgentEnvRoutesConfig): Hono {
   const app = new Hono();
 
   app.use("*", cfg.requireAuth);
-  app.use("*", cfg.requireAgent);
 
-  app.get("/", async (c) => {
+  app.get("/", cfg.requireAgentRead, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const items = await cfg.service.list(agentId);
     return c.json({ bindings: items.map(bindingToJson) });
   });
 
-  app.put("/:envName", async (c) => {
+  app.put("/:envName", cfg.requireAgentWrite, async (c) => {
     const workspaceId = c.get("workspaceId") as string;
     const userId = c.get("userId") as string | null;
     const agentId = c.req.param("agentId") ?? "";
@@ -81,7 +82,7 @@ export function createAgentEnvRoutes(cfg: AgentEnvRoutesConfig): Hono {
     }
   });
 
-  app.delete("/:envName", async (c) => {
+  app.delete("/:envName", cfg.requireAgentWrite, async (c) => {
     const agentId = c.req.param("agentId") ?? "";
     const envName = c.req.param("envName") ?? "";
     try {
