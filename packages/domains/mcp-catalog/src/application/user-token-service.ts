@@ -7,7 +7,10 @@ import {
 import type { CatalogEntry } from "../domain/catalog-entry.js";
 import type { UserMcpToken } from "../domain/user-token.js";
 import type { CatalogRepository } from "../ports/catalog-repository.js";
-import type { OAuthClientRepository } from "../ports/oauth-client-repository.js";
+import type {
+  EncryptedOAuthClientBlob,
+  OAuthClientRepository,
+} from "../ports/oauth-client-repository.js";
 import type { UserTokenRepository } from "../ports/user-token-repository.js";
 import {
   buildAuthorizeUrl,
@@ -17,6 +20,7 @@ import {
   refreshAccessToken,
   type PkcePair,
 } from "./oauth-flow.js";
+import { registerOAuthClient } from "./oauth-dcr.js";
 
 export interface OAuthFlowState {
   /** Random string echoed in the redirect; the callback validates. */
@@ -72,6 +76,11 @@ export interface UserTokenServiceDeps {
     catalogName: string;
   }) => string;
   workspaceSlugFor: (workspaceId: string) => Promise<string | null>;
+  /** Test seam — defaults to the live DCR call. Used to re-register a
+   * catalog entry whose oauth_clients row is missing (orphan from a
+   * partial create on May 3 2026, or any future non-transactional
+   * failure between the two writes in CatalogService.set()). */
+  registerClient?: typeof registerOAuthClient;
 }
 
 /**
@@ -94,13 +103,6 @@ export class UserTokenService {
       input.workspaceId,
       input.catalogEntryName,
     );
-    const oauthClient = await this.deps.oauthClients.getBlob(entry.id);
-    if (!oauthClient) {
-      throw new ValidationError(
-        "catalog_entry",
-        "OAuth client not registered for this catalog entry — try removing and re-creating it",
-      );
-    }
     const slug = await this.deps.workspaceSlugFor(input.workspaceId);
     if (!slug) {
       throw new ValidationError("workspace", "workspace not found");
@@ -108,6 +110,11 @@ export class UserTokenService {
     const redirectUri = this.deps.redirectUriFor({
       workspaceSlug: slug,
       catalogName: entry.name as unknown as string,
+    });
+    const oauthClient = await this.resolveOAuthClient({
+      entry,
+      workspaceSlug: slug,
+      redirectUri,
     });
     const pkce = generatePkce();
     const state = generateState();
@@ -149,21 +156,6 @@ export class UserTokenService {
         "catalog entry mismatch between start and callback",
       );
     }
-    const oauthClient = await this.deps.oauthClients.getBlob(entry.id);
-    if (!oauthClient) {
-      throw new ValidationError(
-        "catalog_entry",
-        "OAuth client not registered for this catalog entry",
-      );
-    }
-    const clientSecret = decrypt(
-      {
-        ciphertext: oauthClient.ciphertext,
-        nonce: oauthClient.nonce,
-        authTag: oauthClient.authTag,
-      },
-      this.deps.cipherKey,
-    );
     const slug = await this.deps.workspaceSlugFor(input.workspaceId);
     if (!slug) {
       throw new ValidationError("workspace", "workspace not found");
@@ -172,6 +164,19 @@ export class UserTokenService {
       workspaceSlug: slug,
       catalogName: entry.name as unknown as string,
     });
+    const oauthClient = await this.resolveOAuthClient({
+      entry,
+      workspaceSlug: slug,
+      redirectUri,
+    });
+    const clientSecret = decrypt(
+      {
+        ciphertext: oauthClient.ciphertext,
+        nonce: oauthClient.nonce,
+        authTag: oauthClient.authTag,
+      },
+      this.deps.cipherKey,
+    );
     const tokens = await exchangeCodeForTokens({
       authorizationServer: entry.oauthAuthorizationServer as never,
       clientId: oauthClient.clientId,
@@ -286,6 +291,51 @@ export class UserTokenService {
   }
 
   // ── helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Return the OAuth client blob for a catalog entry, re-registering
+   * via DCR if the row is missing. The catalog entry caches the auth
+   * server metadata at create time, so DCR is fully replayable from
+   * just (entry, workspaceSlug, redirectUri). This is the recovery
+   * path for any catalog entry whose `mcp_oauth_clients` row vanished
+   * — either because of the non-transactional create flow in
+   * CatalogService.set() (May 3 2026: entry inserted, oauth_clients
+   * insert failed, no rollback) or a manual cleanup that touched only
+   * one side. The previous behaviour was to hard-error and ask the
+   * operator to delete + re-add, which loses agent attachments and
+   * connected-user tokens for everyone else in the workspace.
+   */
+  private async resolveOAuthClient(input: {
+    entry: CatalogEntry;
+    workspaceSlug: string;
+    redirectUri: string;
+  }): Promise<EncryptedOAuthClientBlob> {
+    const existing = await this.deps.oauthClients.getBlob(input.entry.id);
+    if (existing) return existing;
+    const register = this.deps.registerClient ?? registerOAuthClient;
+    const registered = await register({
+      authorizationServer: input.entry.oauthAuthorizationServer as never,
+      redirectUri: input.redirectUri,
+      clientName: `x1agent / ${input.workspaceSlug} / ${input.entry.name as unknown as string}`,
+    });
+    const blob = encrypt(registered.clientSecret, this.deps.cipherKey);
+    await this.deps.oauthClients.upsert({
+      catalogEntryId: input.entry.id,
+      clientId: registered.clientId,
+      tokenEndpointAuthMethod: registered.tokenEndpointAuthMethod,
+      ciphertext: blob.ciphertext,
+      nonce: blob.nonce,
+      authTag: blob.authTag,
+    });
+    return {
+      catalogEntryId: input.entry.id,
+      clientId: registered.clientId,
+      tokenEndpointAuthMethod: registered.tokenEndpointAuthMethod,
+      ciphertext: blob.ciphertext,
+      nonce: blob.nonce,
+      authTag: blob.authTag,
+    };
+  }
 
   private async lookupRemoteOAuthEntry(
     workspaceId: string,
