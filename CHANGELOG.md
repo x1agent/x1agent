@@ -1,3 +1,22 @@
+# [1.39.0](https://github.com/x1agent/x1agent/compare/v1.38.0...v1.39.0) (2026-06-01)
+
+
+### Bug Fixes
+
+* **api:** close agent-existence leak in requireAgentWrite ([e254ccb](https://github.com/x1agent/x1agent/commit/e254ccb27a0d6007bf8ba4020efb27c2bb5e7475))
+* **api:** expose agent reads to any workspace member ([89aa31a](https://github.com/x1agent/x1agent/commit/89aa31afa3d56bc33f49461e3d0bc590e9fa8613))
+* **app:** always fetch MCP + env on agent detail page ([3408940](https://github.com/x1agent/x1agent/commit/340894004100d27a0af19616a3265527884488bc))
+* **chart:** allow http01 cert solver + gate preview wildcard ([d9fe37a](https://github.com/x1agent/x1agent/commit/d9fe37acaa1652faa7d88c60e25a26661627cda8))
+* **db:** renumber users_timezone migration to 063 to clear 062 collision ([560a67f](https://github.com/x1agent/x1agent/commit/560a67f2c1ea29dbd846fe313a90fc718f240f1b))
+* **domains:** redact env_json literal values on the wire ([8afd256](https://github.com/x1agent/x1agent/commit/8afd256f76d43f29bf445fc4592aab7544ebe514))
+* **groups:** scope legacy slug uniqueness to active+manual groups ([5f716e0](https://github.com/x1agent/x1agent/commit/5f716e002f0127e6cd1143fec946c6ec4c1cb480))
+
+
+### Features
+
+* **domains:** split agent route factories into read + write guards ([d3229b2](https://github.com/x1agent/x1agent/commit/d3229b27befb06dacd92fce8e4a463fe06501e49))
+* **workspaces:** groups backend foundation (X1A-107) ([d55932c](https://github.com/x1agent/x1agent/commit/d55932c4e57c87a7ab1dacadda1b688678f674d7))
+
 # [1.38.0](https://github.com/x1agent/x1agent/compare/v1.37.1...v1.38.0) (2026-05-19)
 
 
