@@ -576,10 +576,27 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       `;
       const existingOwner = rows[0]?.session_id;
       if (existingOwner && existingOwner !== sessionId) {
-        const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
-        if (!chain.includes(existingOwner)) {
+        // Updating an existing share id is allowed for any session in
+        // the same workspace — that's how "update this share" works
+        // across paused/resumed sessions and across explicitly-shared
+        // artifacts inside the workspace. Cross-workspace remains
+        // forbidden: share_id is globally unique and a workspace-B
+        // session writing to a workspace-A share would clobber the
+        // tenant boundary.
+        const ownerSession = await cfg.sessions.findById(
+          existingOwner as never,
+        );
+        const callerAgent = await cfg.agents.findById(session.agentId);
+        const ownerAgent = ownerSession
+          ? await cfg.agents.findById(ownerSession.agentId)
+          : null;
+        if (
+          !ownerAgent ||
+          !callerAgent ||
+          ownerAgent.workspaceId !== callerAgent.workspaceId
+        ) {
           return c.json(
-            { error: "share_id_owned_by_other_session" },
+            { error: "share_id_owned_by_other_workspace" },
             403,
           );
         }

@@ -163,7 +163,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "read_share",
       description:
-        "Read the content of a share THIS session previously published with the `share` tool. The share content lives in persistent storage (GCS in prod, /tmp in dev) and survives the pod, so resumed sessions can read back their own past output even after `/workspace` was wiped.\n\nSlice A (PRD 0006) scope: 200 only when the share belongs to THIS session. Reading another session's share returns 403 (Slice B will widen this once explicit grants ship); a share_id that doesn't exist anywhere returns 404.\n\nReturns `{ share_id, path?, mime_type, size, content_b64 }`. `content_b64` is always base64 because shares can be binary (PNG, PDF, ZIP). Decode locally before use.\n\nUse `path` only for multi-file shares (sites with assets); single-file shares (markdown, image, csv) take the default and don't need it.",
+        "Read the content of a share previously published with the `share` tool from anywhere in this workspace. Content lives in persistent storage (GCS in prod, /tmp in dev) and survives the pod, so a resumed session — or any later session in the same workspace — can read its predecessor's past output even after `/workspace` was wiped.\n\nScope: 200 when the share belongs to ANY session in this workspace (this session, a session you resumed from, OR an unrelated session a workspace teammate ran). The user may paste a share URL from a prior session and ask you to keep iterating on it — call read_share with that share_id and you'll get the bytes. Cross-workspace reads return 403 (`cross_workspace_read_forbidden`); a share_id that doesn't exist anywhere returns 404.\n\nReturns `{ share_id, path?, mime_type, size, content_b64 }`. `content_b64` is always base64 because shares can be binary (PNG, PDF, ZIP). Decode locally before use.\n\nUse `path` only for multi-file shares (sites with assets); single-file shares (markdown, image, csv) take the default and don't need it.\n\nTo UPDATE a share rather than create a new one, read it with read_share, modify the bytes, and pass the SAME `share_id` back to the `share` tool — the existing pill is overwritten and any comment thread stays attached.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -928,7 +928,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: "text" as const,
-                text: `read_share failed: share ${shareId} belongs to a different session. Slice A only allows reading shares this session produced.`,
+                text: `read_share failed: share ${shareId} belongs to a different workspace (cross-workspace reads are forbidden by tenant isolation).`,
               },
             ],
             isError: true,

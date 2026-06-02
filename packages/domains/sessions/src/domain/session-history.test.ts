@@ -115,6 +115,37 @@ describe("formatEventsAsMarkdown", () => {
     expect(joined).toContain("report");
     expect(joined).toContain("# hello");
   });
+
+  it("includes the share_id on agent.share lines so a resumed session can call read_share / update", () => {
+    // The agent recall flow depends on the share_id being visible in
+    // /workspace/session_history.md. Without it the resumed agent
+    // remembers it published an artifact but can't address it
+    // programmatically, which forces the "please re-upload" loop
+    // observed on the customer install 2026-05-22.
+    const lines = formatEventsAsMarkdown([
+      mkEvent("s1", 0, "agent.share", {
+        title: "Service Blueprint",
+        share_type: "html",
+        share_id: "058394aa-081b-4b06-b4d5-04d217329dec",
+      }),
+    ]);
+    const joined = lines.join("\n");
+    expect(joined).toContain("**Shared** — Service Blueprint");
+    expect(joined).toContain("058394aa-081b-4b06-b4d5-04d217329dec");
+    expect(joined).toContain("share_id:");
+  });
+
+  it("falls back to a bare Shared line when share_id is missing (legacy events)", () => {
+    const lines = formatEventsAsMarkdown([
+      mkEvent("s1", 0, "agent.share", {
+        title: "Old artifact",
+        share_type: "markdown",
+      }),
+    ]);
+    const joined = lines.join("\n");
+    expect(joined).toContain("**Shared** — Old artifact");
+    expect(joined).not.toContain("share_id:");
+  });
 });
 
 describe("buildSessionHistory", () => {
@@ -146,5 +177,11 @@ describe("SESSION_RESUME_PROMPT", () => {
     expect(SESSION_RESUME_PROMPT).toContain(
       "/workspace/session_history.md",
     );
+  });
+
+  it("tells the agent how to use share_ids surfaced in the history", () => {
+    expect(SESSION_RESUME_PROMPT).toContain("share_id");
+    expect(SESSION_RESUME_PROMPT).toContain("mcp__x1agent__read_share");
+    expect(SESSION_RESUME_PROMPT).toContain("SAME id");
   });
 });
