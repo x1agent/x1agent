@@ -30,6 +30,11 @@ export function extFromMime(mime: string): string {
     "image/webp": "webp",
     "image/svg+xml": "svg",
     "application/pdf": "pdf",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "md",
+    "text/csv": "csv",
+    "application/json": "json",
   };
   return map[base] ?? "bin";
 }

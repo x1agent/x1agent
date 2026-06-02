@@ -23,7 +23,23 @@ export interface UploadsConfig {
 
 export const DEFAULT_UPLOADS_CONFIG: UploadsConfig = {
   maxBytes: 10 * 1024 * 1024,
-  allowedMimes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+  // Agents' Read tool handles images as visual content blocks and
+  // text/PDF as text. Anything in this list is something the agent
+  // can usefully open from /workspace/.x1/uploads/<id>.<ext>.
+  // Resuming work on a previous-session artifact (HTML report, doc,
+  // CSV) is the primary use case for the non-image types.
+  allowedMimes: [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "text/html",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/pdf",
+  ],
   pendingTtlMs: 24 * 60 * 60 * 1000,
   attachedTtlMs: 30 * 24 * 60 * 60 * 1000,
   perMessageMax: 4,

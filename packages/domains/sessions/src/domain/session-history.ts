@@ -91,7 +91,18 @@ export function formatEventsAsMarkdown(
       case "agent.share": {
         const title = String(payload.title ?? "Untitled");
         const shareKind = String(payload.share_type ?? "");
-        lines.push(`**Shared** — ${title} (${shareKind})\n`);
+        // share_id is the load-bearing field — without it the agent
+        // can recall *that* it made a share but not call read_share()
+        // or update the same share by id. Surface it explicitly so a
+        // resumed session can `mcp__x1agent__read_share(share_id=…)`
+        // to fetch the bytes and pass the same id back to `share`
+        // when publishing the next revision.
+        const shareId = String(payload.share_id ?? "");
+        lines.push(
+          shareId
+            ? `**Shared** — ${title} (${shareKind}) · share_id: \`${shareId}\`\n`
+            : `**Shared** — ${title} (${shareKind})\n`,
+        );
         break;
       }
       case "agent.status":
@@ -155,4 +166,4 @@ export function buildSessionHistory(
  * user message.
  */
 export const SESSION_RESUME_PROMPT =
-  "You are resuming a previous session. Read /workspace/session_history.md for full context of what happened before. Then wait for the user's next message.";
+  "You are resuming a previous session. Read /workspace/session_history.md for full context of what happened before. Any **Shared** entries list the `share_id` of an artifact you published earlier — call `mcp__x1agent__read_share` with that id to fetch the bytes, and pass the SAME id back to the `share` tool when you publish an updated version so it lands on the same pill instead of creating a new one. Then wait for the user's next message.";
