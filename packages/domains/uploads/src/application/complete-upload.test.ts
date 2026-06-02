@@ -115,4 +115,68 @@ describe("completeUpload", () => {
       }),
     ).rejects.toBeInstanceOf(UploadNotFoundError);
   });
+
+  it("completes an HTML upload — sniffs the leading '<'", async () => {
+    const clock = new FixedClock(new Date("2026-05-13T04:00:00Z"));
+    const uploads = new InMemoryUploadRepository();
+    const storage = new InMemoryUploadStorage();
+    const deps = {
+      uploads,
+      storage,
+      clock,
+      config: DEFAULT_UPLOADS_CONFIG,
+      uuid: () => UploadId("55555555-5555-7555-8555-555555555555"),
+    };
+    const { upload } = await initUpload(deps, {
+      userId: USER,
+      filename: "report.html",
+      mimeHint: "text/html",
+      sizeBytes: 32,
+      sessionId: null,
+    });
+    const bytes = new Uint8Array(32);
+    bytes.set(
+      Array.from("<!doctype html><html></html>").map((c) => c.charCodeAt(0)),
+      0,
+    );
+    await storage.putObject(upload.storageKey, bytes, "text/html");
+    const out = await completeUpload(deps, {
+      uploadId: upload.id,
+      userId: USER,
+    });
+    expect(out.status).toBe("ready");
+    expect(out.mime).toBe("text/html");
+  });
+
+  it("completes a JSON upload via the textlike trust path (no magic bytes)", async () => {
+    const clock = new FixedClock(new Date("2026-05-13T04:00:00Z"));
+    const uploads = new InMemoryUploadRepository();
+    const storage = new InMemoryUploadStorage();
+    const deps = {
+      uploads,
+      storage,
+      clock,
+      config: DEFAULT_UPLOADS_CONFIG,
+      uuid: () => UploadId("66666666-6666-7666-8666-666666666666"),
+    };
+    const { upload } = await initUpload(deps, {
+      userId: USER,
+      filename: "data.json",
+      mimeHint: "application/json",
+      sizeBytes: 16,
+      sessionId: null,
+    });
+    const bytes = new Uint8Array(16);
+    bytes.set(
+      Array.from('{"hello":"x"}').map((c) => c.charCodeAt(0)),
+      0,
+    );
+    await storage.putObject(upload.storageKey, bytes, "application/json");
+    const out = await completeUpload(deps, {
+      uploadId: upload.id,
+      userId: USER,
+    });
+    expect(out.status).toBe("ready");
+    expect(out.mime).toBe("application/json");
+  });
 });

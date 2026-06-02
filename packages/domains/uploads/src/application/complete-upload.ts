@@ -74,22 +74,36 @@ export async function completeUpload(
 
   const head = await deps.storage.readHead(existing.storageKey, 32);
   const sniffed = sniffImageMime(head);
-  if (sniffed === null || sniffed !== existing.mime) {
+  // Sniffable types (images, PDF, HTML) MUST match the declared mime
+  // hint exactly. Text-like types that carry no magic bytes
+  // (text/plain, text/markdown, text/csv, application/json) fall
+  // through to a trust-the-hint path — these can't be byte-spoofed
+  // into something dangerous because storage just delivers bytes and
+  // the agent's Read tool reads them as text, never executes them.
+  const effective = sniffed ?? (TEXTLIKE_MIMES.has(existing.mime) ? existing.mime : null);
+  if (effective === null || effective !== existing.mime) {
     await deps.storage.deleteObject(existing.storageKey);
     await deps.uploads.markDeleted(existing.id);
     throw new UploadMimeMismatchError(existing.mime, sniffed);
   }
-  if (!deps.config.allowedMimes.includes(sniffed)) {
+  if (!deps.config.allowedMimes.includes(effective)) {
     await deps.storage.deleteObject(existing.storageKey);
     await deps.uploads.markDeleted(existing.id);
-    throw new UploadMimeNotAllowedError(sniffed);
+    throw new UploadMimeNotAllowedError(effective);
   }
 
-  await deps.uploads.markReady(existing.id, sniffed, size);
+  await deps.uploads.markReady(existing.id, effective, size);
   return {
     ...existing,
     status: "ready",
-    mime: sniffed,
+    mime: effective,
     sizeBytes: size,
   };
 }
+
+const TEXTLIKE_MIMES = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);

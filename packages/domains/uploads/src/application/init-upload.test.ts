@@ -65,12 +65,24 @@ describe("initUpload", () => {
     await expect(
       initUpload(d, {
         userId: USER,
-        filename: "doc.pdf",
-        mimeHint: "application/pdf",
+        filename: "archive.zip",
+        mimeHint: "application/zip",
         sizeBytes: 100,
         sessionId: null,
       }),
     ).rejects.toBeInstanceOf(UploadMimeNotAllowedError);
+  });
+
+  it("accepts text/html (added so previous-session HTML artifacts can be re-attached)", async () => {
+    const d = deps();
+    const r = await initUpload(d, {
+      userId: USER,
+      filename: "report.html",
+      mimeHint: "text/html",
+      sizeBytes: 100,
+      sessionId: null,
+    });
+    expect(r.upload.mime).toBe("text/html");
   });
 
   it("sanitizes the filename", async () => {

@@ -172,8 +172,8 @@ describe("upload routes", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        filename: "doc.pdf",
-        mime_hint: "application/pdf",
+        filename: "archive.zip",
+        mime_hint: "application/zip",
         size_bytes: 100,
         session_id: null,
       }),
