@@ -34,9 +34,32 @@ describe("sniffImageMime", () => {
     expect(sniffImageMime(buf(head))).toBe("image/webp");
   });
 
-  it("returns null for non-image content", () => {
+  it("detects PDF via %PDF- magic", () => {
+    expect(sniffImageMime(buf([0x25, 0x50, 0x44, 0x46, 0x2d]))).toBe(
+      "application/pdf",
+    );
+  });
+
+  it("detects HTML via a leading '<'", () => {
+    const html = Array.from("<!doctype html>\n<html></html>").map((c) =>
+      c.charCodeAt(0),
+    );
+    expect(sniffImageMime(buf(html))).toBe("text/html");
+  });
+
+  it("detects HTML with a UTF-8 BOM + leading whitespace", () => {
+    const head = [
+      0xef, 0xbb, 0xbf, // BOM
+      0x20, 0x09, 0x0a, // space, tab, newline
+      0x3c, 0x68, 0x74, 0x6d, 0x6c, // <html
+    ];
+    expect(sniffImageMime(buf(head))).toBe("text/html");
+  });
+
+  it("returns null for non-sniffable content", () => {
     expect(sniffImageMime(buf([0x00, 0x00, 0x00, 0x00]))).toBeNull();
-    expect(sniffImageMime(buf([0x25, 0x50, 0x44, 0x46]))).toBeNull(); // %PDF
+    // plain text without a leading '<' isn't HTML
+    expect(sniffImageMime(buf([0x68, 0x65, 0x6c, 0x6c, 0x6f]))).toBeNull(); // "hello"
   });
 
   it("returns null for too-short buffers", () => {
@@ -45,15 +68,24 @@ describe("sniffImageMime", () => {
 });
 
 describe("extensionFor", () => {
-  it("returns canonical extensions", () => {
+  it("returns canonical extensions for images", () => {
     expect(extensionFor("image/png")).toBe("png");
     expect(extensionFor("image/jpeg")).toBe("jpg");
     expect(extensionFor("image/gif")).toBe("gif");
     expect(extensionFor("image/webp")).toBe("webp");
   });
 
+  it("returns canonical extensions for documents and text", () => {
+    expect(extensionFor("text/html")).toBe("html");
+    expect(extensionFor("text/plain")).toBe("txt");
+    expect(extensionFor("text/markdown")).toBe("md");
+    expect(extensionFor("text/csv")).toBe("csv");
+    expect(extensionFor("application/json")).toBe("json");
+    expect(extensionFor("application/pdf")).toBe("pdf");
+  });
+
   it("returns null for unsupported MIMEs", () => {
-    expect(extensionFor("application/pdf")).toBeNull();
     expect(extensionFor("image/bmp")).toBeNull();
+    expect(extensionFor("application/zip")).toBeNull();
   });
 });

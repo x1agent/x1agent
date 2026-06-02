@@ -88,6 +88,12 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   const [resuming, setResuming] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const bridgeRef = useRef<BridgeHandle | null>(null);
+  // Parallel state flag so dependent effects can react to the bridge
+  // coming online. Refs don't trigger re-renders, so an effect gated
+  // on bridgeRef.current that fires before the async connect resolves
+  // never re-runs — the pending-prompt drain used to lose the prompt
+  // whenever the events HTTP fetch beat the WS bridge.
+  const [bridgeReady, setBridgeReady] = useState(false);
   const seqRef = useRef(0);
   const takePendingPrompt = usePendingPromptStore((s) => s.take);
   const pendingPromptSentRef = useRef(false);
@@ -281,6 +287,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
         return;
       }
       bridgeRef.current = bridge;
+      setBridgeReady(true);
       bridge.subscribeSession(sessionId);
       bridge.subscribeComments();
 
@@ -311,6 +318,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
       }
       bridgeRef.current?.close();
       bridgeRef.current = null;
+      setBridgeReady(false);
       // X1A-104: indicators are transient — dropping them on unmount
       // matches the "fresh page load = clean" rule from X1A-103.
       useTypingIndicatorStore.getState().clearAllForSession(sessionId);
@@ -405,7 +413,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
   // send; we still guard with a ref for the same-render case.
   useEffect(() => {
     if (pendingPromptSentRef.current) return;
-    if (!bridgeRef.current) return;
+    if (!bridgeReady || !bridgeRef.current) return;
     if (!events.some((e) => e.type === "session.started")) return;
     const pending = takePendingPrompt(sessionId);
     if (!pending) return;
@@ -413,7 +421,7 @@ export function SessionRoot({ workspaceSlug, sessionId }: Props) {
     void sendMessage(pending).catch((err) => {
       console.error("[pending-prompt] send failed", err);
     });
-  }, [events, sessionId, takePendingPrompt]);
+  }, [events, bridgeReady, sessionId, takePendingPrompt]);
 
   // Deep-link: if the URL carries `?share=<shareId>`, open that share in
   // the right-rail artifact panel once the events stream loads it.
