@@ -1,3 +1,10 @@
+## [1.40.3](https://github.com/x1agent/x1agent/compare/v1.40.2...v1.40.3) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mcp-oauth:** use path-relative redirect for self-heal /start bounce ([823cd48](https://github.com/x1agent/x1agent/commit/823cd48cf040c746349256e422444fbb9e1507e8))
+
 ## [1.40.2](https://github.com/x1agent/x1agent/compare/v1.40.1...v1.40.2) (2026-06-02)
 
 
