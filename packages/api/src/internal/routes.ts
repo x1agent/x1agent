@@ -576,10 +576,27 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       `;
       const existingOwner = rows[0]?.session_id;
       if (existingOwner && existingOwner !== sessionId) {
-        const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
-        if (!chain.includes(existingOwner)) {
+        // Updating an existing share id is allowed for any session in
+        // the same workspace — that's how "update this share" works
+        // across paused/resumed sessions and across explicitly-shared
+        // artifacts inside the workspace. Cross-workspace remains
+        // forbidden: share_id is globally unique and a workspace-B
+        // session writing to a workspace-A share would clobber the
+        // tenant boundary.
+        const ownerSession = await cfg.sessions.findById(
+          existingOwner as never,
+        );
+        const callerAgent = await cfg.agents.findById(session.agentId);
+        const ownerAgent = ownerSession
+          ? await cfg.agents.findById(ownerSession.agentId)
+          : null;
+        if (
+          !ownerAgent ||
+          !callerAgent ||
+          ownerAgent.workspaceId !== callerAgent.workspaceId
+        ) {
           return c.json(
-            { error: "share_id_owned_by_other_session" },
+            { error: "share_id_owned_by_other_workspace" },
             403,
           );
         }
@@ -633,28 +650,50 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     });
 
     if (!sharedHere) {
-      // Disambiguate "exists in another session" (403) from "doesn't
-      // exist anywhere" (404) when sql is wired. A resumed session
-      // legitimately needs to read shares its ancestor created, so we
-      // walk the chain before 403-ing.
+      // The share lives in a different session. We used to require the
+      // owner session to be in this session's resume chain, but in
+      // practice users paste any share URL from elsewhere in the same
+      // workspace ("can you keep iterating on this artifact?") and the
+      // ancestor-only check made every cross-workspace-internal read
+      // 403. The correct tenant boundary is workspace_id — workspace
+      // isolation is the security guarantee; cross-session within a
+      // workspace is just internal-product UX.
       if (cfg.sql) {
-        const rows = await cfg.sql<{ session_id: string }[]>`
-          SELECT session_id
-          FROM session_events
-          WHERE type = 'agent.share'
-            AND (payload->>'share_id') = ${shareId}
-          LIMIT 1
+        // Owner workspace is derived through agents — `sessions` itself
+        // has no workspace_id column; workspace is pinned via the agent.
+        const rows = await cfg.sql<{
+          owner_workspace_id: string;
+          caller_workspace_id: string;
+        }[]>`
+          WITH owner AS (
+            SELECT s.id AS session_id, a.workspace_id
+            FROM session_events se
+            JOIN sessions s ON s.id = se.session_id
+            JOIN agents   a ON a.id = s.agent_id
+            WHERE se.type = 'agent.share'
+              AND (se.payload->>'share_id') = ${shareId}
+            LIMIT 1
+          ),
+          caller AS (
+            SELECT a.workspace_id
+            FROM sessions s
+            JOIN agents   a ON a.id = s.agent_id
+            WHERE s.id = ${sessionId}
+            LIMIT 1
+          )
+          SELECT
+            owner.workspace_id  AS owner_workspace_id,
+            caller.workspace_id AS caller_workspace_id
+          FROM owner CROSS JOIN caller
         `;
-        const owner = rows[0]?.session_id;
-        if (owner) {
-          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
-          if (!chain.includes(owner)) {
-            return c.json({ error: "cross_session_read_forbidden" }, 403);
-          }
-          // Owner is an ancestor — allow the read to fall through.
-        } else {
-          return c.json({ error: "share_not_found" }, 404);
+        const row = rows[0];
+        if (!row) return c.json({ error: "share_not_found" }, 404);
+        if (row.owner_workspace_id !== row.caller_workspace_id) {
+          return c.json({ error: "cross_workspace_read_forbidden" }, 403);
         }
+        // Owner is in the same workspace — allow the read to fall
+        // through. (`resumeChainSessionIds` retained as a no-op import
+        // in case other call sites still need ancestor-only semantics.)
       } else {
         return c.json({ error: "share_not_found" }, 404);
       }
