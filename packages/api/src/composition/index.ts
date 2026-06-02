@@ -1297,6 +1297,16 @@ export function compose(env: CompositionEnv): Composition {
       const w = await workspaces.findById(workspaceId as never);
       return w?.slug ?? null;
     },
+    // Default sink for upstream OAuth error bodies. Body NEVER reaches
+    // the user (it can echo submitted secrets in 4xx debug payloads),
+    // but we want a server-side breadcrumb so the "why did this 401?"
+    // question is one `kubectl logs` away. Truncate to 500 chars to
+    // bound log volume.
+    logUpstreamError: (info) => {
+      console.warn(
+        `[mcp-oauth] upstream ${info.status} from ${info.endpoint}: ${info.body.slice(0, 500)}`,
+      );
+    },
   });
 
   // Workspace-membership middleware reused by both OAuth redirect

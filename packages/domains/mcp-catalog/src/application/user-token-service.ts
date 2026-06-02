@@ -15,8 +15,27 @@ import {
   generatePkce,
   generateState,
   refreshAccessToken,
+  StaleClientRegistrationError,
   type PkcePair,
 } from "./oauth-flow.js";
+
+/**
+ * Thrown by `complete()` when the upstream auth server rejected our
+ * client credentials at token-exchange time. The route handler is
+ * expected to redirect the user back to `/auth/mcp/start/<slug>/<name>`
+ * — by the time they re-hit start(), the `mcp_oauth_clients` row is
+ * gone (we deleted it) and `resolveOAuthClient` will re-DCR, mint a
+ * fresh authorize URL with the new client_id, and the next round-trip
+ * succeeds. No operator action required.
+ */
+export class ClientRegistrationRecoveredError extends Error {
+  constructor(public readonly retryStartPath: string) {
+    super(
+      "stale DCR client_id wiped; user should be redirected to retry the OAuth flow",
+    );
+    this.name = "ClientRegistrationRecoveredError";
+  }
+}
 
 export interface OAuthFlowState {
   /** Random string echoed in the redirect; the callback validates. */
@@ -72,6 +91,17 @@ export interface UserTokenServiceDeps {
     catalogName: string;
   }) => string;
   workspaceSlugFor: (workspaceId: string) => Promise<string | null>;
+  /** Optional DCR override for tests; defaults to the live registerOAuthClient. */
+  registerClient?: typeof registerOAuthClient;
+  /** Optional server-side logger for upstream error bodies. The
+   *  bodies can echo submitted secrets so they NEVER reach the user;
+   *  this lets the composition root pipe them to a sink (e.g.
+   *  `console.error` or Sentry breadcrumbs) for ops debugging. */
+  logUpstreamError?: (info: {
+    endpoint: string;
+    status: number;
+    body: string;
+  }) => void;
 }
 
 /**
@@ -172,15 +202,36 @@ export class UserTokenService {
       workspaceSlug: slug,
       catalogName: entry.name as unknown as string,
     });
-    const tokens = await exchangeCodeForTokens({
-      authorizationServer: entry.oauthAuthorizationServer as never,
-      clientId: oauthClient.clientId,
-      clientSecret,
-      authMethod: oauthClient.tokenEndpointAuthMethod,
-      redirectUri,
-      code: input.code,
-      codeVerifier: input.flowState.codeVerifier,
-    });
+    let tokens;
+    try {
+      tokens = await exchangeCodeForTokens(
+        {
+          authorizationServer: entry.oauthAuthorizationServer as never,
+          clientId: oauthClient.clientId,
+          clientSecret,
+          authMethod: oauthClient.tokenEndpointAuthMethod,
+          redirectUri,
+          code: input.code,
+          codeVerifier: input.flowState.codeVerifier,
+        },
+        { logUpstreamError: this.deps.logUpstreamError },
+      );
+    } catch (err) {
+      if (err instanceof StaleClientRegistrationError) {
+        // The DCR client_id we stored is no longer accepted at the
+        // upstream token endpoint (RFC 6749 invalid_client /
+        // unauthorized_client). Drop the row so the next /start hit
+        // re-DCRs through resolveOAuthClient, and signal the route
+        // to redirect there. The user sees a single round-trip
+        // through the provider's consent screen and that's it —
+        // never any "delete from settings, click re-add" surgery.
+        await this.deps.oauthClients.delete(entry.id);
+        throw new ClientRegistrationRecoveredError(
+          `/auth/mcp/start/${slug}/${entry.name as unknown as string}`,
+        );
+      }
+      throw err;
+    }
     return this.persistTokens({
       userId: input.userId,
       catalogEntryId: entry.id,
@@ -244,13 +295,16 @@ export class UserTokenService {
       this.deps.cipherKey,
     );
     try {
-      const refreshed = await refreshAccessToken({
-        authorizationServer: entry.oauthAuthorizationServer as never,
-        clientId: oauthClient.clientId,
-        clientSecret,
-        authMethod: oauthClient.tokenEndpointAuthMethod,
-        refreshToken,
-      });
+      const refreshed = await refreshAccessToken(
+        {
+          authorizationServer: entry.oauthAuthorizationServer as never,
+          clientId: oauthClient.clientId,
+          clientSecret,
+          authMethod: oauthClient.tokenEndpointAuthMethod,
+          refreshToken,
+        },
+        { logUpstreamError: this.deps.logUpstreamError },
+      );
       // Some providers omit `expires_in` from refresh responses (legal
        // per RFC 6749 §5.1). If we wrote `null` we'd treat the cached
        // access token as never-expiring and ride it past its real death.
@@ -271,8 +325,19 @@ export class UserTokenService {
         accessToken: refreshed.access_token,
         expiresAt: persisted.accessTokenExpiresAt,
       };
-    } catch {
-      // Refresh failed — likely revoked. Force the user to reconnect.
+    } catch (err) {
+      if (err instanceof StaleClientRegistrationError) {
+        // Same recovery shape as `complete()`: the upstream rejected
+        // our cached client_id at refresh time. Wipe the row so the
+        // user's next interactive Connect re-DCRs through the
+        // self-heal path. Return null here — the session-launch
+        // caller treats null as "user needs to reconnect", which
+        // shows the dim Connect pill rather than crashing.
+        await this.deps.oauthClients.delete(entry.id);
+        return null;
+      }
+      // Refresh failed (revoked / network / other). Force the user to
+      // reconnect — same null-return signal as the stale-client path.
       return null;
     }
   }

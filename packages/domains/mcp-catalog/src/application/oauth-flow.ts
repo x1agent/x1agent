@@ -97,7 +97,42 @@ export type TokenEndpointAuthMethod =
 export interface OAuthFlowOptions {
   /** Test seam — defaults to the SSRF-safe fetcher. */
   fetcher?: SafeFetch;
+  /** Optional logger for upstream error bodies. The body is never
+   *  reflected in thrown errors (it can echo submitted secrets), so
+   *  server-side logging is the only place to see it. */
+  logUpstreamError?: (info: {
+    endpoint: string;
+    status: number;
+    body: string;
+  }) => void;
 }
+
+/**
+ * Thrown when the upstream auth server rejects our credentials
+ * (`invalid_client`, `unauthorized_client`) or the registration was
+ * invalidated upstream — usually means the DCR client_id we stored at
+ * catalog-creation time is no longer accepted. The caller treats this
+ * as a signal to wipe the oauth_clients row so the next Connect click
+ * triggers self-heal (re-DCR + fresh authorize URL with the new id).
+ *
+ * Distinct from a "code expired / replay" 401: those carry
+ * `invalid_grant` and are user-actionable (try again), not client-
+ * rotation events.
+ */
+export class StaleClientRegistrationError extends Error {
+  constructor(
+    public readonly upstreamError: string,
+    public readonly endpoint: string,
+  ) {
+    super(`upstream rejected client credentials at ${endpoint}: ${upstreamError}`);
+    this.name = "StaleClientRegistrationError";
+  }
+}
+
+const STALE_CLIENT_ERRORS = new Set([
+  "invalid_client",
+  "unauthorized_client",
+]);
 
 export interface ExchangeCodeInput {
   authorizationServer: AuthorizationServerMetadata;
@@ -195,8 +230,20 @@ export async function exchangeCodeForTokens(
     fetcher,
   );
   if (!res.ok) {
-    // Don't surface upstream body — auth servers sometimes echo
-    // submitted secrets in 4xx debug payloads. Caller logs internally.
+    // Don't surface upstream body to the user — auth servers sometimes
+    // echo submitted secrets in 4xx debug payloads. Log server-side
+    // and inspect `error` for self-heal signals.
+    const errorCode = await consumeAndLogUpstreamError(
+      res,
+      input.authorizationServer.token_endpoint,
+      options.logUpstreamError,
+    );
+    if (res.status === 401 && STALE_CLIENT_ERRORS.has(errorCode)) {
+      throw new StaleClientRegistrationError(
+        errorCode,
+        input.authorizationServer.token_endpoint,
+      );
+    }
     throw new ValidationError(
       "token",
       `code exchange failed: HTTP ${res.status}`,
@@ -207,6 +254,33 @@ export async function exchangeCodeForTokens(
     throw new ValidationError("token", "token endpoint returned no access_token");
   }
   return parsed;
+}
+
+/**
+ * Consume a 4xx/5xx token-endpoint response, log it server-side via
+ * the optional logger, and return the upstream `error` code if the
+ * body is JSON. Returns an empty string when the body isn't parseable
+ * — the caller treats that as "unknown reason, surface generic 4xx".
+ */
+async function consumeAndLogUpstreamError(
+  res: SafeFetchResponse,
+  endpoint: string,
+  logUpstreamError?: OAuthFlowOptions["logUpstreamError"],
+): Promise<string> {
+  let body = "";
+  try {
+    body = await res.text();
+  } catch {
+    /* ignore body-read failures */
+  }
+  logUpstreamError?.({ endpoint, status: res.status, body });
+  if (!body) return "";
+  try {
+    const parsed = JSON.parse(body) as { error?: string };
+    return typeof parsed.error === "string" ? parsed.error : "";
+  } catch {
+    return "";
+  }
 }
 
 export interface RefreshTokensInput {
@@ -239,6 +313,17 @@ export async function refreshAccessToken(
     fetcher,
   );
   if (!res.ok) {
+    const errorCode = await consumeAndLogUpstreamError(
+      res,
+      input.authorizationServer.token_endpoint,
+      options.logUpstreamError,
+    );
+    if (res.status === 401 && STALE_CLIENT_ERRORS.has(errorCode)) {
+      throw new StaleClientRegistrationError(
+        errorCode,
+        input.authorizationServer.token_endpoint,
+      );
+    }
     throw new ValidationError(
       "refresh_token",
       `refresh failed: HTTP ${res.status}`,
