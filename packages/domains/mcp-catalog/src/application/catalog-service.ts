@@ -223,7 +223,7 @@ export class CatalogService {
     const registered = await register({
       authorizationServer: discovery.authorizationServer,
       redirectUri,
-      clientName: `x1agent / ${slug} / ${input.name as unknown as string}`,
+      clientName: `x1agent / ${slug}`,
     });
 
     // 3. Persist the catalog entry first so we have an id for the
