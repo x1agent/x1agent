@@ -1,3 +1,10 @@
+## [1.40.2](https://github.com/x1agent/x1agent/compare/v1.40.1...v1.40.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** self-heal on upstream-rejected DCR client (not just on missing row) ([7f8a53d](https://github.com/x1agent/x1agent/commit/7f8a53df85d01d5504afb6a43d1609e2b4c0c1e1))
+
 ## [1.40.1](https://github.com/x1agent/x1agent/compare/v1.40.0...v1.40.1) (2026-06-02)
 
 
