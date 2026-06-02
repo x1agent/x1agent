@@ -1,3 +1,20 @@
+# [1.40.0](https://github.com/x1agent/x1agent/compare/v1.39.0...v1.40.0) (2026-06-02)
+
+
+### Bug Fixes
+
+* **agent,sidecar:** update read_share scope wording so agents stop bailing pre-flight ([10b0b7b](https://github.com/x1agent/x1agent/commit/10b0b7bf44f32cfc9ca912ce4c415282cb0d7e0b))
+* **api:** allow share updates from any session in the same workspace ([6216b31](https://github.com/x1agent/x1agent/commit/6216b310ecf4f32027fb1c3540890e160571a122))
+* **api:** scope share reads by workspace, not resume chain ([08140b9](https://github.com/x1agent/x1agent/commit/08140b9399496f88e72182071d8fab8b52559dd4))
+* **app:** block Send on failed attachments + fix pending-prompt race ([41a1ce9](https://github.com/x1agent/x1agent/commit/41a1ce9382967951d0bc335b8401862515bf2df8))
+* **sessions:** surface share_id in session_history.md + resume prompt ([e6856da](https://github.com/x1agent/x1agent/commit/e6856daa7c2b817b36f6cebf690ef189fcfb5c1b))
+
+
+### Features
+
+* **agent:** extend extFromMime to match the widened uploads MIME list ([b33e244](https://github.com/x1agent/x1agent/commit/b33e244e0097e232ddebb8d5905ec98fd6646ac7))
+* **uploads:** accept text/html, PDF, plain text, markdown, csv, json ([f710456](https://github.com/x1agent/x1agent/commit/f7104562989d1084d7664ef55b7108560e159991))
+
 # [1.39.0](https://github.com/x1agent/x1agent/compare/v1.38.0...v1.39.0) (2026-06-01)
 
 
