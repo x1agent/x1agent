@@ -106,6 +106,33 @@ export function createWorkspaceShareRoutes(
   });
   app.use("*", cfg.requireAuth);
 
+  // See `resolveShareDefaultFilename` in packages/api/src/internal/
+  // routes.ts for the same logic on the internal route. The workspace
+  // route needs the same resolver: when the caller omits `path` we
+  // look up the recorded filename from session_events instead of
+  // guessing index.html.
+  const resolveShareDefaultFilenameViaSql = async (
+    routesCfg: WorkspaceShareRoutesConfig,
+    shareId: string,
+  ): Promise<string | null> => {
+    if (!routesCfg.sql) return null;
+    const rows = await routesCfg.sql<{ entry_point: string | null; path: string | null }[]>`
+      SELECT
+        (payload->>'entry_point') AS entry_point,
+        (payload->>'path')        AS path
+      FROM session_events
+      WHERE type = 'agent.share'
+        AND (payload->>'share_id') = ${shareId}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    const candidate = row.entry_point ?? row.path;
+    if (!candidate || candidate.length === 0) return null;
+    return candidate;
+  };
+
   const loadScoped = async (
     slugRaw: string,
     sessionIdRaw: string,
@@ -263,27 +290,29 @@ export function createWorkspaceShareRoutes(
       }
     }
 
-    // For single-file shares (markdown, image, csv) the agent does
-    // not need to know the on-disk path — default to "index.html"
-    // because that's the convention `writeShareFiles` uses for the
-    // canonical entry point, and the share write path lays single
-    // files down with the user-provided basename. The empty-string
-    // case is what falls through here.
-    const filePath = requestedPath || "index.html";
+    // Resolve the real filename from the share's `agent.share` event
+    // metadata when the caller didn't pass `path`. The previous
+    // `index.html` fallback 404'd every single-file share (markdown,
+    // csv, image, pdf) because writeShareFiles lays them down at
+    // shares/<id>/<original-name>, not shares/<id>/index.html.
+    const filePath =
+      requestedPath ||
+      (await resolveShareDefaultFilenameViaSql(cfg, shareId)) ||
+      "index.html";
 
     if (cfg.gcsArtifactsBucket) {
       return readFromGcsAsJson(
         cfg.gcsArtifactsBucket,
         shareId,
         filePath,
-        requestedPath,
+        requestedPath || filePath,
       );
     }
     const bytes = readShareFile(shareId, filePath);
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,
-      path: requestedPath || undefined,
+      path: requestedPath || filePath,
       mime_type: getMimeType(filePath),
       size: bytes.length,
       content_b64: bytes.toString("base64"),
