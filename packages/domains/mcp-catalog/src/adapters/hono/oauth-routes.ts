@@ -271,20 +271,22 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
           // URL with the new client_id. From the user's POV: one
           // extra redirect, one re-consent at the provider (often
           // silent if they've already approved), then done.
-          const startUrl = new URL(
-            `${cfg.appUrl}${err.retryStartPath}`,
-          );
-          // Carry the original return_to forward so the second
-          // round-trip lands the user where they intended.
+          //
+          // The /auth/mcp/* routes are mounted on the api host (NOT
+          // the app host) — use a path-relative redirect so the
+          // browser stays on the api origin for the next hop. An
+          // earlier version used `${cfg.appUrl}...` and 404'd on the
+          // app host.
           const persistedReturn = safeReturnTo(flowState.returnTo, cfg.appUrl);
-          if (persistedReturn) {
-            startUrl.searchParams.set("return_to", persistedReturn);
-          }
+          const retryQs = persistedReturn
+            ? `?return_to=${encodeURIComponent(persistedReturn)}`
+            : "";
+          const retryPath = `${err.retryStartPath}${retryQs}`;
           console.warn(
             "[mcp-oauth] stale DCR client_id wiped — bouncing user through /start for re-DCR",
-            { slug, name, userId, retry: startUrl.toString() },
+            { slug, name, userId, retry: retryPath },
           );
-          return c.redirect(startUrl.toString(), 302);
+          return c.redirect(retryPath, 302);
         }
         const e = err as { field?: string; message?: string };
         console.warn(
