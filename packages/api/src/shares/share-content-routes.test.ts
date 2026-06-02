@@ -324,23 +324,75 @@ describe("GET /:shareId/content — Slice A", () => {
     );
   });
 
-  it("returns 403 when reading a share owned by a different session (sql wired)", async () => {
-    // Alice has visibility to SESSION_A (owner) but tries to read
-    // SHARE_B which lives in SESSION_B's history. The path 'belongs
-    // to this session' check rejects it as 403 even though Alice can
-    // see Bob's session as a sharee — Slice A is narrower than the
-    // visibility check.
+  it("allows cross-session reads inside the same workspace", async () => {
+    // Alice has visibility to SESSION_A (owner) and reads SHARE_B which
+    // lives in SESSION_B's history. Both sessions live in WS_A; we used
+    // to 403 on cross-session even within the same workspace, which
+    // broke "resume the previous artifact" — the user pastes a share
+    // URL from another session in the same workspace and the agent
+    // needs to read it. Workspace is the tenant boundary, not session.
+    const bobBytes = Buffer.from("bob", "utf8");
     await writeShareFiles(SHARE_B, [
-      { path: "index.html", content: Buffer.from("bob", "utf8").toString("base64") },
+      { path: "index.html", content: bobBytes.toString("base64") },
     ]);
     actor = { userId: ALICE, email: "a@x.com" as Email };
     const app = build({ withSql: true });
     const res = await app.request(
       `/api/workspaces/ws-a/sessions/${SESSION_A}/shares/${SHARE_B}/content`,
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      share_id: string;
+      content_b64: string;
+    };
+    expect(body.share_id).toBe(SHARE_B);
+    expect(Buffer.from(body.content_b64, "base64").toString("utf8")).toBe(
+      "bob",
+    );
+  });
+
+  it("returns 403 when the share's owning session lives in a different workspace", async () => {
+    // Alice owns SESSION_A in WS_A. She tries to read a share whose
+    // owning session lives in WS_B. Workspace boundary MUST hold —
+    // this is the tenant-isolation guarantee. Same-workspace cross-
+    // session is allowed; cross-workspace is not.
+    actor = { userId: ALICE, email: "a@x.com" as Email };
+    const app = build({ withSql: true });
+    const otherWsAgent = makeAgent(
+      AgentId("00000000-0000-7000-8000-0000000000b0"),
+      WS_B,
+    );
+    agents.add(otherWsAgent);
+    const otherWsSession = makeSession(
+      SessionId("00000000-0000-7000-8000-00000000c0c0"),
+      otherWsAgent.id,
+      BOB,
+    );
+    sessions.add(otherWsSession);
+    const otherShareId = SessionShareId(
+      "00000000-0000-7000-8000-000000000ccc",
+    );
+    events.add(otherWsSession.id, {
+      seq: 1,
+      sessionId: otherWsSession.id as never,
+      type: "agent.share",
+      payload: { share_id: otherShareId },
+      ts: new Date(),
+    } as never);
+    await writeShareFiles(otherShareId, [
+      {
+        path: "index.html",
+        content: Buffer.from("ws-b only", "utf8").toString("base64"),
+      },
+    ]);
+    const res = await app.request(
+      `/api/workspaces/ws-a/sessions/${SESSION_A}/shares/${otherShareId}/content`,
+    );
     const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("cross_session_read_forbidden");
+    expect({ status: res.status, error: body.error }).toEqual({
+      status: 403,
+      error: "cross_workspace_read_forbidden",
+    });
   });
 
   it("returns 404 for a share_id that doesn't exist anywhere", async () => {

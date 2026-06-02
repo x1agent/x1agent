@@ -115,6 +115,7 @@ export function createWorkspaceShareRoutes(
         session: NonNullable<
           Awaited<ReturnType<SessionRepository["findById"]>>
         >;
+        workspaceId: WorkspaceId;
       }
     | { error: "workspace_not_found" | "session_not_found" }
   > => {
@@ -146,7 +147,7 @@ export function createWorkspaceShareRoutes(
       agent.workspaceId,
     );
     if (!decision.visible) return { error: "session_not_found" };
-    return { session };
+    return { session, workspaceId: wsId };
   };
 
   // List every share published in this session. Derived from
@@ -228,10 +229,14 @@ export function createWorkspaceShareRoutes(
     });
 
     if (!sharedHere) {
-      // Disambiguate "exists elsewhere → 403" from "doesn't exist →
-      // 404" so the agent can branch programmatically. A resumed
-      // session is allowed to read shares its ancestor created, so we
-      // walk the chain before 403-ing.
+      // The share lives in a different session. We used to require the
+      // owner session to be in this session's resume chain; in practice
+      // users want to keep iterating on any prior artifact in their
+      // workspace, so the right boundary is workspace_id. Workspace
+      // isolation is the security guarantee — cross-session within a
+      // workspace is internal UX. `loadScoped` already proved the
+      // caller is a workspace member; we just need to confirm the
+      // owner is in the same workspace before serving bytes.
       if (cfg.sql) {
         const rows = await cfg.sql<{ session_id: string }[]>`
           SELECT session_id
@@ -240,16 +245,19 @@ export function createWorkspaceShareRoutes(
             AND (payload->>'share_id') = ${shareId}
           LIMIT 1
         `;
-        const owner = rows[0]?.session_id;
-        if (owner) {
-          const chain = await resumeChainSessionIds(cfg.sessions, sessionId);
-          if (!chain.includes(owner)) {
-            return c.json({ error: "cross_session_read_forbidden" }, 403);
-          }
-          // Owner is an ancestor — allow the read to fall through.
-        } else {
-          return c.json({ error: "share_not_found" }, 404);
+        const ownerSessionId = rows[0]?.session_id;
+        if (!ownerSessionId) return c.json({ error: "share_not_found" }, 404);
+        const ownerSession = await cfg.sessions.findById(
+          ownerSessionId as never,
+        );
+        if (!ownerSession) return c.json({ error: "share_not_found" }, 404);
+        const ownerAgent = await cfg.agents.findById(ownerSession.agentId);
+        if (!ownerAgent || ownerAgent.workspaceId !== scope.workspaceId) {
+          return c.json({ error: "cross_workspace_read_forbidden" }, 403);
         }
+        // Owner is in the same workspace — allow the read to fall
+        // through. `resumeChainSessionIds` import kept for downstream
+        // callers that still need ancestor semantics.
       } else {
         return c.json({ error: "share_not_found" }, 404);
       }
