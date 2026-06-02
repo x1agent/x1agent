@@ -125,14 +125,19 @@ class AdminGuard {
  * `agent.share` event we registered, no real Postgres.
  */
 function makeFakeSql(events: FakeEvents) {
-  type Row = { session_id: string };
   return (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?");
     if (!sql.includes("session_events") || !sql.includes("share_id")) {
       throw new Error(`fake sql: unexpected query: ${sql}`);
     }
     const wanted = values.find((v) => typeof v === "string") as string;
-    const matches: Row[] = [];
+
+    // Two query shapes the routes use:
+    //   (a) SELECT session_id ... — cross-session owner lookup.
+    //   (b) SELECT (payload->>'entry_point'), (payload->>'path') ... —
+    //       single-file vs multi-file filename resolver.
+    const wantsFilename = sql.includes("entry_point") && sql.includes("path");
+    const matches: Record<string, unknown>[] = [];
     for (const [sessionId, evs] of events.bySession.entries()) {
       for (const ev of evs) {
         if (ev.type !== "agent.share") continue;
@@ -140,7 +145,16 @@ function makeFakeSql(events: FakeEvents) {
           typeof ev.payload === "string"
             ? (JSON.parse(ev.payload) as Record<string, unknown>)
             : (ev.payload as Record<string, unknown>);
-        if (payload?.share_id === wanted) {
+        if (payload?.share_id !== wanted) continue;
+        if (wantsFilename) {
+          matches.push({
+            entry_point:
+              typeof payload?.entry_point === "string"
+                ? payload.entry_point
+                : null,
+            path: typeof payload?.path === "string" ? payload.path : null,
+          });
+        } else {
           matches.push({ session_id: sessionId });
         }
       }
@@ -318,9 +332,106 @@ describe("GET /:shareId/content — Slice A", () => {
     expect(body.share_id).toBe(SHARE_A);
     expect(body.mime_type).toBe("text/html");
     expect(body.size).toBe(original.length);
-    expect(body.path).toBeUndefined();
+    // The response now echoes the resolved filename even when the
+    // caller omitted `path`. Lets the agent know which file it
+    // actually got — useful for single-file shares where the filename
+    // ISN'T `index.html`.
+    expect(body.path).toBe("index.html");
     expect(Buffer.from(body.content_b64, "base64").toString("utf8")).toBe(
       original,
+    );
+  });
+
+  it("resolves the filename from agent.share metadata when path is omitted (single-file share)", async () => {
+    // Regression for the customer-install bug: a markdown share lives
+    // at shares/<id>/<original-name>.md, not shares/<id>/index.html.
+    // Before this fix the route defaulted to index.html and 404'd
+    // every single-file share — agent's read_share MCP tool doesn't
+    // know the filename, so it never passes `path`.
+    const original = "# Hello\n\nfirst version\n";
+    const singleFileShareId = SessionShareId(
+      "00000000-0000-7000-8000-00000000001f",
+    );
+    await writeShareFiles(singleFileShareId, [
+      {
+        path: "reproduction_note.md",
+        content: Buffer.from(original, "utf8").toString("base64"),
+      },
+    ]);
+    events.add(SESSION_A, {
+      id: "e-single" as never,
+      sessionId: SESSION_A as never,
+      seq: 2,
+      type: "agent.share",
+      payload: {
+        share_id: singleFileShareId,
+        title: "Reproduction Note",
+        path: "reproduction_note.md",
+        entry_point: null,
+      },
+      timestamp: new Date(),
+    } as unknown as SessionEvent);
+
+    actor = { userId: ALICE, email: "a@x.com" as Email };
+    const app = build({ withSql: true });
+    const res = await app.request(
+      `/api/workspaces/ws-a/sessions/${SESSION_A}/shares/${singleFileShareId}/content`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      share_id: string;
+      mime_type: string;
+      size: number;
+      content_b64: string;
+      path?: string;
+    };
+    expect(body.share_id).toBe(singleFileShareId);
+    expect(body.path).toBe("reproduction_note.md");
+    expect(Buffer.from(body.content_b64, "base64").toString("utf8")).toBe(
+      original,
+    );
+  });
+
+  it("prefers entry_point over path for multi-file site shares when path is omitted", async () => {
+    // A site share writes many files; the entry_point payload field
+    // points at the canonical landing page. We honour that over the
+    // single-file `path` shorthand so the same route serves both
+    // shapes correctly when the caller omits an explicit ?path=.
+    const html = "<!doctype html><title>site</title>";
+    const siteShareId = SessionShareId(
+      "00000000-0000-7000-8000-00000000002f",
+    );
+    await writeShareFiles(siteShareId, [
+      { path: "home.html", content: Buffer.from(html, "utf8").toString("base64") },
+      {
+        path: "assets/main.css",
+        content: Buffer.from("body{}", "utf8").toString("base64"),
+      },
+    ]);
+    events.add(SESSION_A, {
+      id: "e-site" as never,
+      sessionId: SESSION_A as never,
+      seq: 3,
+      type: "agent.share",
+      payload: {
+        share_id: siteShareId,
+        title: "Site",
+        path: null,
+        entry_point: "home.html",
+      },
+      timestamp: new Date(),
+    } as unknown as SessionEvent);
+
+    actor = { userId: ALICE, email: "a@x.com" as Email };
+    const app = build({ withSql: true });
+    const res = await app.request(
+      `/api/workspaces/ws-a/sessions/${SESSION_A}/shares/${siteShareId}/content`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { path?: string; content_b64: string };
+    expect(body.path).toBe("home.html");
+    expect(Buffer.from(body.content_b64, "base64").toString("utf8")).toBe(
+      html,
     );
   });
 
