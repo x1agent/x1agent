@@ -316,7 +316,7 @@ export class UserTokenService {
     const registered = await register({
       authorizationServer: input.entry.oauthAuthorizationServer as never,
       redirectUri: input.redirectUri,
-      clientName: `x1agent / ${input.workspaceSlug} / ${input.entry.name as unknown as string}`,
+      clientName: `x1agent / ${input.workspaceSlug}`,
     });
     const blob = encrypt(registered.clientSecret, this.deps.cipherKey);
     await this.deps.oauthClients.upsert({
