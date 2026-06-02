@@ -509,16 +509,23 @@ pub struct ReadShareError {
     pub message: Option<String>,
 }
 
-/// GET /read_share/{share_id} — read back the content of a share this
-/// session previously published. PRD 0006 Slice A scope: only the
-/// producing session can read its own past output.
+/// GET /read_share/{share_id} — read back the content of any share in
+/// the caller session's workspace. Scope is workspace_id (not session
+/// id) — same-workspace cross-session is the load-bearing case for
+/// "resume the previous artifact": the user pastes a share URL from
+/// any prior session in their workspace and the agent fetches the
+/// bytes here to iterate on. Cross-workspace is still forbidden.
 ///
 /// Two backends, mirroring the write path:
 ///   - GCS in prod (`GCS_ARTIFACTS_BUCKET` set): fetch directly via the
 ///     GCE metadata server. The pod SA needs `storage.objectViewer`.
+///     The object key is `shares/<share_id>/<path>` — no session id
+///     in the path, so cross-session within a workspace is implicitly
+///     allowed at the storage layer; the api's workspace check
+///     (applied on the local-dev path) is the authoritative gate.
 ///   - api service in local dev: forward to the internal route which
-///     reads the bytes off the share directory. The api enforces the
-///     cross-session guard there.
+///     reads the bytes off the share directory after the api confirms
+///     the owner session lives in the caller's workspace.
 ///
 /// Response shape mirrors the workspace `/:shareId/content` route so
 /// the agent dispatcher handles both surfaces identically.
