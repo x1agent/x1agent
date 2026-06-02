@@ -66,7 +66,16 @@ function TurnComposerInner({
     uploads.clear();
   };
 
-  const canSend = !disabled && text.trim().length > 0 && !uploads.isUploading;
+  // Block Send when an attachment is still uploading OR has failed.
+  // Without the failed-guard the composer silently strips failed
+  // attachments at submit (readyUploadIds excludes them), so the
+  // message lands attachment-less and the agent asks the user to
+  // re-attach a file they thought they sent.
+  const canSend =
+    !disabled &&
+    text.trim().length > 0 &&
+    !uploads.isUploading &&
+    !uploads.hasFailed;
 
   const leftSlot = statusLabel ? (
     <span className="inline-flex items-center gap-1.5 px-2 py-1 text-[13px] text-fg-faint">

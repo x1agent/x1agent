@@ -175,9 +175,17 @@ export function useUploadAttachments(sessionId?: string | null) {
     .filter((a) => a.status === "ready" && a.uploadId)
     .map((a) => a.uploadId as string);
 
+  /** True when any attachment is in the `failed` state. The composer
+   *  consults this to block Send — silently dropping a failed upload
+   *  (the previous behaviour) makes the user think their file went
+   *  through when the message lands attachment-less and the agent
+   *  asks them to attach again. Surfaced as a hint in the composer. */
+  const hasFailed = attachments.some((a) => a.status === "failed");
+
   return {
     attachments,
     isUploading,
+    hasFailed,
     readyUploadIds,
     addFiles,
     remove,
