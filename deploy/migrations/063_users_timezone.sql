@@ -8,7 +8,7 @@
 -- Intl.DateTimeFormat().resolvedOptions().timeZone on first save.
 
 ALTER TABLE users
-  ADD COLUMN timezone TEXT NULL;
+  ADD COLUMN IF NOT EXISTS timezone TEXT NULL;
 
 COMMENT ON COLUMN users.timezone IS
   'IANA timezone (e.g. America/New_York). NULL → format in UTC.';
