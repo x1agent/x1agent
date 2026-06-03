@@ -58,6 +58,42 @@ import {
 
 const WS_PATH = "/api/ws";
 
+/**
+ * Pure decision for "may this actor publish turns into this session?"
+ * Extracted from the WS bridge so the policy is testable in isolation
+ * — the bridge does the I/O (sessions.findById) and hands the loaded
+ * row here.
+ *
+ * Session-actor isolation: only the user who triggered the session
+ * may publish into it. Any other workspace member — even one with
+ * `collaborate` grants or an open-by-default workspace agent — gets
+ * `not_session_owner` here.
+ *
+ * Why publish is stricter than view: the agent pod binds
+ * remote_oauth credentials at session-launch keyed by the triggering
+ * user's `user_mcp_tokens`. A second user sending turns would have
+ * the agent act on those upstream services AS the triggerer —
+ * triggerer's connection, scopes, and audit trail. That's an
+ * authentication-context confusion, not collaboration. View remains
+ * workspace-wide so teammates can still watch a session unfold;
+ * publish is per-actor.
+ *
+ * Future: a per-agent `allow_publish_by_collaborators` flag with a
+ * strict default would unlock multi-driver flows where the actor
+ * model is explicit. Until then every session has exactly one
+ * driver.
+ */
+export function decideSessionPublish(input: {
+  session: { triggeredByUserId: string | null } | null;
+  actor: UserId;
+}): { ok: true } | { ok: false; code: string } {
+  if (!input.session) return { ok: false, code: "not_found" };
+  if (input.session.triggeredByUserId !== input.actor) {
+    return { ok: false, code: "not_session_owner" };
+  }
+  return { ok: true };
+}
+
 export interface WsBridgeDeps {
   tokenizer: SessionTokenizer;
   nats: NatsConnection;
@@ -215,36 +251,8 @@ export function buildWsBridge(deps: WsBridgeDeps) {
     actor: UserId,
     sessionId: string,
   ): Promise<{ ok: true } | { ok: false; code: string }> {
-    // Publishes allowed when actor is:
-    //   1. session owner (triggered the session)
-    //   2. session-share `collaborator` (the per-session grant the UI
-    //      writes when sharing a single session)
-    //   3. agent-level `collaborate` — covers workspace-tier (open-by-
-    //      default) members AND explicit `collaborate` grants on
-    //      private agents. Survives resume because agent_id is stable.
-    //
-    // `viewer` session-share role stays read-only — no publish.
     const session = await deps.sessions.findById(SessionId(sessionId));
-    if (!session) return { ok: false, code: "not_found" };
-    if (session.triggeredByUserId === actor) return { ok: true };
-
-    if (deps.sessionShares) {
-      const share = await deps.sessionShares.findForUser(
-        SessionId(sessionId),
-        actor,
-      );
-      if (share && share.role === "collaborator") return { ok: true };
-    }
-
-    if (deps.agentCollaborateResolver) {
-      const ok = await deps.agentCollaborateResolver(
-        actor,
-        String(session.agentId),
-      );
-      if (ok) return { ok: true };
-    }
-
-    return { ok: false, code: "forbidden" };
+    return decideSessionPublish({ session, actor });
   }
 
   async function startSessionEventSub(
