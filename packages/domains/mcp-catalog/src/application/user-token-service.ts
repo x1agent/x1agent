@@ -9,6 +9,7 @@ import type { UserMcpToken } from "../domain/user-token.js";
 import type { CatalogRepository } from "../ports/catalog-repository.js";
 import type { OAuthClientRepository } from "../ports/oauth-client-repository.js";
 import type { UserTokenRepository } from "../ports/user-token-repository.js";
+import { registerOAuthClient } from "./oauth-dcr.js";
 import {
   buildAuthorizeUrl,
   exchangeCodeForTokens,
