@@ -32,6 +32,35 @@ export interface AttachmentRoutesConfig {
   requireAgentRead: MiddlewareHandler;
   /** Write gate: admin/owner only — mutations also need agentKind + oauth policy in ctx. */
   requireAgentWrite: MiddlewareHandler;
+  /** Lookup of the calling user's persisted OAuth tokens. Powers the
+   *  `/connection-status` endpoint that the agent detail / session
+   *  pages call to render per-MCP "Connected" / "Connect" pills for
+   *  the active user. */
+  catalog: CatalogReadOnlyForConnectionStatus;
+  userTokens: UserTokenReadOnly;
+}
+
+/**
+ * Narrow read-only surfaces for the connection-status endpoint. The
+ * route only needs to look up the catalog entry by id (to get name +
+ * display_name + kind) and check whether the calling user has any
+ * token row for it — not the full repositories.
+ */
+export interface CatalogReadOnlyForConnectionStatus {
+  getById(
+    workspaceId: string,
+    catalogEntryId: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    displayName: string | null;
+    kind: string;
+  } | null>;
+}
+
+export interface UserTokenReadOnly {
+  /** Returns every catalog_entry_id the user has a token row for. */
+  listForUser(userId: string): Promise<{ catalogEntryId: string }[]>;
 }
 
 function entryToJson(e: CatalogEntry) {
@@ -213,6 +242,59 @@ export function createAgentMcpAttachmentRoutes(
     const agentId = c.req.param("agentId") ?? "";
     const items = await cfg.attachments.list(agentId);
     return c.json({ attachments: items.map(attachmentToJson) });
+  });
+
+  /**
+   * Per-user connection status for the remote_oauth MCPs attached to
+   * this agent. The agent detail / session pages render a small pill
+   * per attachment: "Connected" / "Connect" / "Reconnect". A Connect
+   * pill links the caller into `/auth/mcp/start/<slug>/<name>` in a
+   * new window so the user can authorise without losing their place
+   * in the active session view; on return (window-focus refresh)
+   * the page re-fetches this endpoint and the pill flips.
+   *
+   * Returns only `remote_oauth` attachments — stdio MCPs don't have
+   * a per-user auth step.
+   *
+   * Response shape:
+   *   { connections: [
+   *     { catalog_entry_id, name, display_name, connected }
+   *   ] }
+   */
+  app.get("/connection-status", cfg.requireAgentRead, async (c) => {
+    const workspaceId = c.get("workspaceId") as string;
+    const userId = c.get("userId") as string | null;
+    const agentId = c.req.param("agentId") ?? "";
+    if (!userId) {
+      return c.json({ error: "unauthenticated" }, 401);
+    }
+
+    const items = await cfg.attachments.list(agentId);
+    const tokens = await cfg.userTokens.listForUser(userId);
+    const connectedIds = new Set(tokens.map((t) => t.catalogEntryId));
+
+    const connections: {
+      catalog_entry_id: string;
+      name: string;
+      display_name: string | null;
+      connected: boolean;
+    }[] = [];
+    for (const att of items) {
+      const entry = await cfg.catalog.getById(
+        workspaceId,
+        att.catalogEntryId as unknown as string,
+      );
+      // Skip stdio / removed entries — they don't surface a Connect
+      // pill since there's no per-user step.
+      if (!entry || entry.kind !== "remote_oauth") continue;
+      connections.push({
+        catalog_entry_id: entry.id,
+        name: entry.name,
+        display_name: entry.displayName,
+        connected: connectedIds.has(entry.id),
+      });
+    }
+    return c.json({ connections });
   });
 
   app.put("/", cfg.requireAgentWrite, async (c) => {

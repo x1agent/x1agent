@@ -1275,18 +1275,44 @@ export function compose(env: CompositionEnv): Composition {
     await next();
   };
 
+  // Per-user OAuth flow for remote_oauth MCPs. Tokens encrypt under
+  // the same workspace_secrets master key. Flow state cookie is
+  // signed with the same JWT_SECRET used for session cookies — short
+  // TTL (5 min, set by the route) bounds replay risk. Init this
+  // before the attachment routes so they can use it for per-user
+  // connection-status lookups.
+  const userTokenRepo = new PostgresUserTokenRepository(env.sql);
+
   const agentMcpAttachmentRoutes = createAgentMcpAttachmentRoutes({
     attachments: attachmentService,
     requireAuth,
     requireAgentRead,
     requireAgentWrite,
+    catalog: {
+      getById: async (workspaceId, catalogEntryId) => {
+        const entry = await mcpCatalogRepo.getById(
+          workspaceId as never,
+          catalogEntryId as never,
+        );
+        if (!entry) return null;
+        return {
+          id: entry.id,
+          name: entry.name as unknown as string,
+          displayName: entry.displayName,
+          kind: entry.kind,
+        };
+      },
+    },
+    userTokens: {
+      listForUser: async (userId) => {
+        const rows = await userTokenRepo.listForUser(userId as never);
+        return rows.map((r) => ({ catalogEntryId: r.catalogEntryId }));
+      },
+    },
   });
 
-  // Per-user OAuth flow for remote_oauth MCPs. Tokens encrypt under
-  // the same workspace_secrets master key. Flow state cookie is
-  // signed with the same JWT_SECRET used for session cookies — short
-  // TTL (5 min, set by the route) bounds replay risk.
-  const userTokenRepo = new PostgresUserTokenRepository(env.sql);
+  // (userTokenRepo is initialised above so it can be reused by the
+  // agent-mcp-attachments connection-status endpoint.)
   const userTokenService = new UserTokenService({
     catalog: mcpCatalogRepo,
     oauthClients: mcpOAuthClientRepo,
