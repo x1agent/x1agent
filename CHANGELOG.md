@@ -1,3 +1,10 @@
+## [1.40.5](https://github.com/x1agent/x1agent/compare/v1.40.4...v1.40.5) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-oauth:** always include client_id in token-exchange body ([0d611f0](https://github.com/x1agent/x1agent/commit/0d611f02fe40e1c2f43769d3d750332f290a6fd8))
+
 ## [1.40.4](https://github.com/x1agent/x1agent/compare/v1.40.3...v1.40.4) (2026-06-03)
 
 
