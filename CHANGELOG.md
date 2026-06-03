@@ -1,3 +1,10 @@
+## [1.40.4](https://github.com/x1agent/x1agent/compare/v1.40.3...v1.40.4) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** restore missing-row self-heal + add Miro to picker seed ([fff31fc](https://github.com/x1agent/x1agent/commit/fff31fc766117712f63686b92695d93c9947a707))
+
 ## [1.40.3](https://github.com/x1agent/x1agent/compare/v1.40.2...v1.40.3) (2026-06-02)
 
 
