@@ -11,10 +11,10 @@ import type { OAuthClientRepository } from "../ports/oauth-client-repository.js"
 import type { UserTokenRepository } from "../ports/user-token-repository.js";
 import {
   buildAuthorizeUrl,
-  exchangeCodeForTokens,
+  exchangeCodeForTokens as defaultExchangeCodeForTokens,
   generatePkce,
   generateState,
-  refreshAccessToken,
+  refreshAccessToken as defaultRefreshAccessToken,
   StaleClientRegistrationError,
   type PkcePair,
 } from "./oauth-flow.js";
@@ -93,6 +93,12 @@ export interface UserTokenServiceDeps {
   workspaceSlugFor: (workspaceId: string) => Promise<string | null>;
   /** Optional DCR override for tests; defaults to the live registerOAuthClient. */
   registerClient?: typeof registerOAuthClient;
+  /** Optional token-exchange override for tests; defaults to the live
+   *  exchangeCodeForTokens. */
+  exchangeCodeForTokens?: typeof defaultExchangeCodeForTokens;
+  /** Optional refresh override for tests; defaults to the live
+   *  refreshAccessToken. */
+  refreshAccessToken?: typeof defaultRefreshAccessToken;
   /** Optional server-side logger for upstream error bodies. The
    *  bodies can echo submitted secrets so they NEVER reach the user;
    *  this lets the composition root pipe them to a sink (e.g.
@@ -202,9 +208,11 @@ export class UserTokenService {
       },
       this.deps.cipherKey,
     );
+    const exchange =
+      this.deps.exchangeCodeForTokens ?? defaultExchangeCodeForTokens;
     let tokens;
     try {
-      tokens = await exchangeCodeForTokens(
+      tokens = await exchange(
         {
           authorizationServer: entry.oauthAuthorizationServer as never,
           clientId: oauthClient.clientId,
@@ -294,8 +302,10 @@ export class UserTokenService {
       },
       this.deps.cipherKey,
     );
+    const refresh =
+      this.deps.refreshAccessToken ?? defaultRefreshAccessToken;
     try {
-      const refreshed = await refreshAccessToken(
+      const refreshed = await refresh(
         {
           authorizationServer: entry.oauthAuthorizationServer as never,
           clientId: oauthClient.clientId,
