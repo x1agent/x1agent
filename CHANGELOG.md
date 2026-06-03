@@ -1,3 +1,10 @@
+## [1.40.6](https://github.com/x1agent/x1agent/compare/v1.40.5...v1.40.6) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** restore missing registerOAuthClient import ([7e73899](https://github.com/x1agent/x1agent/commit/7e738999035a17276b171566e25adc6bb4df0fc2))
+
 ## [1.40.5](https://github.com/x1agent/x1agent/compare/v1.40.4...v1.40.5) (2026-06-03)
 
 
