@@ -203,6 +203,13 @@ function applyAuth(
     body.set("client_secret", clientSecret);
     return { authHeader: null };
   }
+  // RFC 6749 §2.3.1 explicitly allows `client_id` in the body even
+  // when sending HTTP Basic credentials in the header; some servers
+  // (mcp.miro.com observed 2026-06-03) require the body field for
+  // discovery-derived basic auth to be accepted. Sending it always
+  // is spec-permitted and unambiguous — a server that ONLY looks at
+  // the Basic header just ignores the extra body field.
+  body.set("client_id", clientId);
   return { authHeader: basicAuth(clientId, clientSecret) };
 }
 
