@@ -143,7 +143,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
     return (
       <Card className="mt-4">
         <CardContent className="py-4 text-sm text-fg-faint">
-          Only workspace admins and owners can manage environment variables.
+          Only workspace admins and owners can manage workspace secrets.
         </CardContent>
       </Card>
     );
@@ -154,12 +154,14 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
       {dialog}
       <Card>
         <CardHeader>
-          <CardTitle>Environment variables</CardTitle>
+          <CardTitle>Workspace secrets</CardTitle>
           <CardDescription>
-            Named values that MCP servers, siblings, and runtime services
-            reference via <code className="rounded bg-bg-muted px-1">{"${NAME}"}</code> template syntax.
-            Values are encrypted at rest and never returned by the API —
-            rotate by setting again.
+            Named encrypted values used by MCP servers, siblings, runtime
+            services, agent sessions, and preview environments. MCP and
+            sibling configs reference them with <code className="rounded bg-bg-muted px-1">{"${NAME}"}</code> template
+            syntax; agents and previews opt in via the env-var aliases
+            you set under Env-var aliases. Values are encrypted at rest
+            and never returned by the API — rotate by setting again.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -168,7 +170,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
           )}
           {!loading && items.length === 0 && (
             <div className="text-sm text-fg-faint">
-              No environment variables yet. Add one below.
+              No workspace secrets yet. Add one below.
             </div>
           )}
           {!loading && items.length > 0 && (
@@ -218,7 +220,7 @@ export function WorkspaceSecretsPanel({ slug, canManage }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>
-            {editingName ? `Rotate ${editingName}` : "Add environment variable"}
+            {editingName ? `Rotate ${editingName}` : "Add workspace secret"}
           </CardTitle>
           <CardDescription>
             Names follow the bare-reference syntax: uppercase letters,

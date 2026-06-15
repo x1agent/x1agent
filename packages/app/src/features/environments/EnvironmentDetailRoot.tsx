@@ -316,6 +316,7 @@ import {
   useWorkspaceEnvBindingsStore,
   type WorkspaceEnvBindingDTO,
 } from "../../stores/workspaceEnvBindingsStore";
+import { EnvBindingForm } from "../workspaces/EnvBindingForm";
 
 const EMPTY_BINDINGS: WorkspaceEnvBindingDTO[] = [];
 
@@ -344,9 +345,14 @@ function EnvVarsSection({
   const loadBindings = useWorkspaceEnvBindingsStore(
     (s) => s.loadForWorkspace,
   );
+  const setBinding = useWorkspaceEnvBindingsStore((s) => s.set);
   const [picked, setPicked] = useState<Set<string>>(new Set(selected));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Lets the operator open an inline add-binding form without
+  // leaving the Environment detail page (X1A request: "why aren't
+  // the variables linked in the environments admin?").
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (bindingsStatus === "idle") loadBindings(slug);
@@ -384,39 +390,74 @@ function EnvVarsSection({
     <section className="space-y-3 rounded-lg border border-border-soft bg-bg-elevated/30 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-fg">Environment variables</h2>
+          <h2 className="text-sm font-semibold text-fg">Env vars to expose</h2>
           <p className="mt-1 text-xs text-fg-muted">
-            Workspace bindings this preview opts into. Selected names land
-            in the per-preview pod's env (resolved against the workspace
-            secret store at deploy time). Manage bindings under
-            {" "}<a
-              href={`/workspaces/${slug}/settings/integrations/env-bindings`}
-              className="text-accent hover:underline"
-            >Settings → Integrations → Env bindings</a>.
+            Workspace env-var aliases this preview opts into. Selected
+            names land in the per-preview pod's env (resolved against
+            workspace secrets at deploy time).
           </p>
         </div>
-        {canManage && dirty && (
-          <button
-            type="button"
-            onClick={save}
-            disabled={busy}
-            className="shrink-0 rounded-md bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg/90 disabled:opacity-50"
-          >
-            {busy ? "Saving…" : "Save"}
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {canManage && !adding && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="rounded-md border border-border-soft px-3 py-1.5 text-sm text-fg-muted hover:text-fg"
+            >
+              + Add alias
+            </button>
+          )}
+          {canManage && dirty && (
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy}
+              className="rounded-md bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg/90 disabled:opacity-50"
+            >
+              {busy ? "Saving…" : "Save"}
+            </button>
+          )}
+        </div>
       </div>
       {err && <p className="text-sm text-red-300">{err}</p>}
-      {bindings.length === 0 ? (
+      {adding && canManage && (
+        <div className="rounded-md border border-border-soft bg-bg-elevated/40 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-fg-muted">
+              Pick a workspace secret to expose, or create one inline.
+              The new alias appears in the list below; tick it to
+              expose it to this preview.
+            </p>
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="text-xs text-fg-faint hover:text-fg"
+            >
+              Close
+            </button>
+          </div>
+          <EnvBindingForm
+            slug={slug}
+            submitLabel="Add alias"
+            alreadyBoundSecretNames={bindings.map((b) => b.secret_name)}
+            onSubmit={async (envName, secretName) => {
+              await setBinding(slug, envName, secretName);
+              setPicked((prev) => {
+                const next = new Set(prev);
+                next.add(envName);
+                return next;
+              });
+            }}
+          />
+        </div>
+      )}
+      {bindings.length === 0 && !adding ? (
         <p className="text-sm text-fg-muted">
-          No workspace bindings yet. Add some under
-          {" "}<a
-            href={`/workspaces/${slug}/settings/integrations/env-bindings`}
-            className="text-accent hover:underline"
-          >Settings → Integrations → Env bindings</a>{" "}
-          and they'll show here.
+          No workspace env-var aliases yet. Click + Add alias to expose
+          a workspace secret under an env-var name this preview can
+          opt into.
         </p>
-      ) : (
+      ) : bindings.length > 0 ? (
         <ul className="space-y-1.5">
           {bindings.map((b) => (
             <li key={b.id}>
@@ -436,7 +477,7 @@ function EnvVarsSection({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </section>
   );
 }
