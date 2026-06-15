@@ -404,7 +404,7 @@ function EnvVarsSection({
               onClick={() => setAdding(true)}
               className="rounded-md border border-border-soft px-3 py-1.5 text-sm text-fg-muted hover:text-fg"
             >
-              + Add alias
+              + Expose a secret here
             </button>
           )}
           {canManage && dirty && (
@@ -438,7 +438,7 @@ function EnvVarsSection({
           </div>
           <EnvBindingForm
             slug={slug}
-            submitLabel="Add alias"
+            submitLabel="Expose"
             alreadyBoundSecretNames={bindings.map((b) => b.secret_name)}
             onSubmit={async (envName, secretName) => {
               await setBinding(slug, envName, secretName);
@@ -453,9 +453,9 @@ function EnvVarsSection({
       )}
       {bindings.length === 0 && !adding ? (
         <p className="text-sm text-fg-muted">
-          No workspace env-var aliases yet. Click + Add alias to expose
-          a workspace secret under an env-var name this preview can
-          opt into.
+          No workspace secrets are exposed to this preview yet. Click
+          "+ Expose a secret here" to pick one (or create one inline)
+          and tick it below to roll into the next deploy.
         </p>
       ) : bindings.length > 0 ? (
         <ul className="space-y-1.5">

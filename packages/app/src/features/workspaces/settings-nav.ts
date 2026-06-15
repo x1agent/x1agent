@@ -70,14 +70,7 @@ export const WORKSPACE_SETTINGS_NAV: SettingsSection[] = [
         pathSuffix: "/integrations/environment-variables",
         icon: KeyRound,
         description:
-          "Encrypted values used by MCPs, agent sessions, and preview environments.",
-      },
-      {
-        title: "Env-var aliases",
-        pathSuffix: "/integrations/env-bindings",
-        icon: KeyRound,
-        description:
-          "Expose a workspace secret under an env-var name agents and previews can opt into.",
+          "Encrypted values + env-var aliases that expose them to agents and preview environments.",
       },
       {
         title: "MCP servers",
