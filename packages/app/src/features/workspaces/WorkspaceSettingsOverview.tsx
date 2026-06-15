@@ -263,7 +263,7 @@ export function WorkspaceSettingsOverview({
       >
         <SummaryRow
           href={`${baseHref}/integrations/environment-variables`}
-          label="Environment variables"
+          label="Workspace secrets"
           value={
             secrets.length === 0
               ? "No secrets configured"
