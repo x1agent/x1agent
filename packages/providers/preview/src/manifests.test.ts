@@ -153,6 +153,76 @@ spec:
   });
 });
 
+describe("buildDeployment — workspace env-binding injection", () => {
+  // Spec declares NODE_ENV literal + PUBLIC_URL preview.self_url. The
+  // workspace opted into ANTHROPIC_API_KEY via env_var_names; the
+  // resolver stuffed the plaintext into the per-preview bundle's
+  // stringData keyed by env-var name (deploy.ts), and now buildDeployment
+  // has to surface it as a container env.
+  it("injects extraEnvNames entries as secretKeyRefs into the bundle", () => {
+    const d = buildDeployment({
+      ...inputs,
+      secretBundleName: "preview-secrets-hirer-app",
+      extraEnvNames: ["ANTHROPIC_API_KEY"],
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    const ant = env.find((e) => e.name === "ANTHROPIC_API_KEY");
+    expect(ant?.valueFrom?.secretKeyRef).toEqual({
+      name: "preview-secrets-hirer-app",
+      key: "ANTHROPIC_API_KEY",
+    });
+    expect(ant?.value).toBeUndefined();
+    // Pre-existing spec entries are untouched.
+    expect(env.find((e) => e.name === "NODE_ENV")?.value).toBe("production");
+  });
+
+  it("when a spec env name collides with extraEnvNames, the binding wins", () => {
+    // Spec sets NODE_ENV=production; workspace also exposes NODE_ENV.
+    // The spec entry must be dropped so the manifest is K8s-valid (one
+    // entry per name) and so the workspace override actually applies.
+    const d = buildDeployment({
+      ...inputs,
+      secretBundleName: "preview-secrets-hirer-app",
+      extraEnvNames: ["NODE_ENV"],
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    const nodeEntries = env.filter((e) => e.name === "NODE_ENV");
+    expect(nodeEntries).toHaveLength(1);
+    expect(nodeEntries[0]!.valueFrom?.secretKeyRef).toEqual({
+      name: "preview-secrets-hirer-app",
+      key: "NODE_ENV",
+    });
+    expect(nodeEntries[0]!.value).toBeUndefined();
+  });
+
+  it("emits no extraEnv entries when the bundle is undefined (defensive)", () => {
+    const d = buildDeployment({
+      ...inputs,
+      // deploy.ts guarantees a bundle whenever extraEnvNames is
+      // non-empty, but the manifest builder must not crash if a future
+      // caller forgets.
+      extraEnvNames: ["ANTHROPIC_API_KEY"],
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    expect(env.find((e) => e.name === "ANTHROPIC_API_KEY")).toBeUndefined();
+  });
+
+  it("is a no-op when extraEnvNames is empty", () => {
+    const d = buildDeployment({
+      ...inputs,
+      secretBundleName: "preview-secrets-hirer-app",
+      extraEnvNames: [],
+    });
+    const env = d.spec!.template.spec!.containers![0]!.env!;
+    // Spec env present; nothing extra.
+    expect(env.find((e) => e.name === "NODE_ENV")?.value).toBe("production");
+    expect(env.find((e) => e.name === "PUBLIC_URL")?.value).toBe(
+      "https://hirer-app.preview.local.x1agent.dev",
+    );
+    expect(env).toHaveLength(2);
+  });
+});
+
 describe("buildService", () => {
   const s = buildService(inputs);
 
