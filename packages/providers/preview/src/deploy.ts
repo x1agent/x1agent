@@ -451,7 +451,7 @@ export async function deployPreview(
     tlsSecretName: inputs.tlsSecretName,
     selfUrl,
     secretBundleName,
-    extraEnv,
+    extraEnvNames: Object.keys(extraEnv),
   };
   const deployment = buildDeployment(deployInputs);
   const service = buildService(deployInputs);
