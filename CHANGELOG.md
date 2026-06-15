@@ -1,3 +1,62 @@
+## [1.40.6](https://github.com/x1agent/x1agent/compare/v1.40.5...v1.40.6) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** restore missing registerOAuthClient import ([7e73899](https://github.com/x1agent/x1agent/commit/7e738999035a17276b171566e25adc6bb4df0fc2))
+
+## [1.40.5](https://github.com/x1agent/x1agent/compare/v1.40.4...v1.40.5) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-oauth:** always include client_id in token-exchange body ([0d611f0](https://github.com/x1agent/x1agent/commit/0d611f02fe40e1c2f43769d3d750332f290a6fd8))
+
+## [1.40.4](https://github.com/x1agent/x1agent/compare/v1.40.3...v1.40.4) (2026-06-03)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** restore missing-row self-heal + add Miro to picker seed ([fff31fc](https://github.com/x1agent/x1agent/commit/fff31fc766117712f63686b92695d93c9947a707))
+
+## [1.40.3](https://github.com/x1agent/x1agent/compare/v1.40.2...v1.40.3) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mcp-oauth:** use path-relative redirect for self-heal /start bounce ([823cd48](https://github.com/x1agent/x1agent/commit/823cd48cf040c746349256e422444fbb9e1507e8))
+
+## [1.40.2](https://github.com/x1agent/x1agent/compare/v1.40.1...v1.40.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mcp-catalog:** self-heal on upstream-rejected DCR client (not just on missing row) ([7f8a53d](https://github.com/x1agent/x1agent/commit/7f8a53df85d01d5504afb6a43d1609e2b4c0c1e1))
+
+## [1.40.1](https://github.com/x1agent/x1agent/compare/v1.40.0...v1.40.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* **shares:** resolve recorded filename from agent.share metadata when read path omitted ([e085c70](https://github.com/x1agent/x1agent/commit/e085c70544feae8573569fd3a1e65c0bfe6b3ef4))
+
+# [1.40.0](https://github.com/x1agent/x1agent/compare/v1.39.0...v1.40.0) (2026-06-02)
+
+
+### Bug Fixes
+
+* **agent,sidecar:** update read_share scope wording so agents stop bailing pre-flight ([10b0b7b](https://github.com/x1agent/x1agent/commit/10b0b7bf44f32cfc9ca912ce4c415282cb0d7e0b))
+* **api:** allow share updates from any session in the same workspace ([6216b31](https://github.com/x1agent/x1agent/commit/6216b310ecf4f32027fb1c3540890e160571a122))
+* **api:** scope share reads by workspace, not resume chain ([08140b9](https://github.com/x1agent/x1agent/commit/08140b9399496f88e72182071d8fab8b52559dd4))
+* **app:** block Send on failed attachments + fix pending-prompt race ([41a1ce9](https://github.com/x1agent/x1agent/commit/41a1ce9382967951d0bc335b8401862515bf2df8))
+* **sessions:** surface share_id in session_history.md + resume prompt ([e6856da](https://github.com/x1agent/x1agent/commit/e6856daa7c2b817b36f6cebf690ef189fcfb5c1b))
+
+
+### Features
+
+* **agent:** extend extFromMime to match the widened uploads MIME list ([b33e244](https://github.com/x1agent/x1agent/commit/b33e244e0097e232ddebb8d5905ec98fd6646ac7))
+* **uploads:** accept text/html, PDF, plain text, markdown, csv, json ([f710456](https://github.com/x1agent/x1agent/commit/f7104562989d1084d7664ef55b7108560e159991))
+
 # [1.39.0](https://github.com/x1agent/x1agent/compare/v1.38.0...v1.39.0) (2026-06-01)
 
 
