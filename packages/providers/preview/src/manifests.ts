@@ -44,6 +44,17 @@ export interface PreviewDeploymentInputs {
    * Plaintext never lands in this manifest.
    */
   secretBundleName?: string;
+  /**
+   * Names of workspace env-binding values the preview opted into. The
+   * plaintext is already in `secretBundleName`'s stringData, keyed by
+   * env-var name (see deploy.ts: stringData[envName] = value). Each
+   * name listed here becomes a container env var that reads from the
+   * bundle. On name collision with spec.env, the binding wins — the
+   * spec entry is dropped — matching the existing "extraEnv collisions
+   * win since they're the explicit per-environment override" rule
+   * documented in deploy.ts.
+   */
+  extraEnvNames?: readonly string[];
 }
 
 export interface KanikoBuildInputs {
@@ -171,31 +182,52 @@ export function buildDeployment(
     "x1-preview": "true",
     "x1-component": "preview-app",
   };
-  const envVars = inputs.spec.spec.env.map((e) => {
-    if (e.from === "preview.self_url") {
-      return { name: e.name, value: inputs.selfUrl };
-    }
-    const secretName = parseSecretFrom(e.from);
-    if (secretName) {
-      if (!inputs.secretBundleName) {
-        // Spec asked for a workspace secret but the deploy path
-        // didn't mint a bundle. Emit empty string and let the app
-        // surface its own missing-config error rather than silently
-        // crashing the pod with a Secret-not-found event.
-        return { name: e.name, value: "" };
+  const extraEnvNames = inputs.extraEnvNames ?? [];
+  const overriddenBySpec = new Set(extraEnvNames);
+  const specEnvVars = inputs.spec.spec.env
+    .filter((e) => !overriddenBySpec.has(e.name))
+    .map((e) => {
+      if (e.from === "preview.self_url") {
+        return { name: e.name, value: inputs.selfUrl };
       }
-      return {
-        name: e.name,
+      const secretName = parseSecretFrom(e.from);
+      if (secretName) {
+        if (!inputs.secretBundleName) {
+          // Spec asked for a workspace secret but the deploy path
+          // didn't mint a bundle. Emit empty string and let the app
+          // surface its own missing-config error rather than silently
+          // crashing the pod with a Secret-not-found event.
+          return { name: e.name, value: "" };
+        }
+        return {
+          name: e.name,
+          valueFrom: {
+            secretKeyRef: {
+              name: inputs.secretBundleName,
+              key: secretName,
+            },
+          },
+        };
+      }
+      return { name: e.name, value: e.value ?? "" };
+    });
+  // Workspace env-binding values land here. deploy.ts has already
+  // written each name into the bundle's stringData keyed by env-var
+  // name; we only need a secretKeyRef per entry. Skip silently when no
+  // bundle exists — deploy.ts only sets extraEnvNames when the bundle
+  // is minted, so this branch is defensive against future callers.
+  const extraEnvVars = inputs.secretBundleName
+    ? extraEnvNames.map((name) => ({
+        name,
         valueFrom: {
           secretKeyRef: {
-            name: inputs.secretBundleName,
-            key: secretName,
+            name: inputs.secretBundleName!,
+            key: name,
           },
         },
-      };
-    }
-    return { name: e.name, value: e.value ?? "" };
-  });
+      }))
+    : [];
+  const envVars = [...specEnvVars, ...extraEnvVars];
   return {
     apiVersion: "apps/v1",
     kind: "Deployment",

@@ -7,7 +7,10 @@ import {
 import type { CatalogEntry } from "../domain/catalog-entry.js";
 import type { UserMcpToken } from "../domain/user-token.js";
 import type { CatalogRepository } from "../ports/catalog-repository.js";
-import type { OAuthClientRepository } from "../ports/oauth-client-repository.js";
+import type {
+  EncryptedOAuthClientBlob,
+  OAuthClientRepository,
+} from "../ports/oauth-client-repository.js";
 import type { UserTokenRepository } from "../ports/user-token-repository.js";
 import { registerOAuthClient } from "./oauth-dcr.js";
 import {
@@ -92,7 +95,10 @@ export interface UserTokenServiceDeps {
     catalogName: string;
   }) => string;
   workspaceSlugFor: (workspaceId: string) => Promise<string | null>;
-  /** Optional DCR override for tests; defaults to the live registerOAuthClient. */
+  /** Test seam — defaults to the live DCR call. Used to re-register a
+   * catalog entry whose oauth_clients row is missing (orphan from a
+   * partial create on May 3 2026, or any future non-transactional
+   * failure between the two writes in CatalogService.set()). */
   registerClient?: typeof registerOAuthClient;
   /** Optional server-side logger for upstream error bodies. The
    *  bodies can echo submitted secrets so they NEVER reach the user;
@@ -377,7 +383,7 @@ export class UserTokenService {
     entry: CatalogEntry;
     workspaceSlug: string;
     redirectUri: string;
-  }) {
+  }): Promise<EncryptedOAuthClientBlob> {
     const existing = await this.deps.oauthClients.getBlob(input.entry.id);
     if (existing) return existing;
     const register = this.deps.registerClient ?? registerOAuthClient;

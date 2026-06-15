@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useWorkspaceEnvBindingsStore, type WorkspaceEnvBindingDTO } from "../../stores/workspaceEnvBindingsStore";
+import { EnvBindingForm } from "./EnvBindingForm";
 
 interface Props {
   slug: string;
@@ -34,11 +35,6 @@ export function WorkspaceEnvBindingsPanel({ slug, canManage }: Props) {
   const setBinding = useWorkspaceEnvBindingsStore((s) => s.set);
   const remove = useWorkspaceEnvBindingsStore((s) => s.remove);
 
-  const [envName, setEnvName] = useState("");
-  const [secretName, setSecretName] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
   useEffect(() => {
     if (status === "idle") load(slug);
   }, [status, slug, load]);
@@ -50,91 +46,38 @@ export function WorkspaceEnvBindingsPanel({ slug, canManage }: Props) {
     return <p className="text-sm text-red-300">{error}</p>;
   }
 
-  const onAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!envName.trim() || !secretName.trim()) return;
-    setSubmitting(true);
-    setFormError(null);
-    try {
-      await setBinding(slug, envName.trim(), secretName.trim());
-      setEnvName("");
-      setSecretName("");
-    } catch (err) {
-      setFormError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-base font-semibold text-fg">Workspace env bindings</h2>
+        <h2 className="text-base font-semibold text-fg">Env-var aliases</h2>
         <p className="mt-1 text-sm text-fg-muted">
-          Map an env-var name to a workspace secret. Agents and preview
-          environments opt into a binding by name; the secret value flows
+          Expose a workspace secret to agents and preview environments
+          under an env-var name they can opt into. The secret value flows
           to the pod via a Kubernetes Secret reference — plaintext never
           appears in pod specs or this UI. Rotate the underlying secret
-          to roll the value everywhere it's used.
+          (under Workspace secrets) to roll the value everywhere it's used.
         </p>
       </div>
 
       {canManage && (
-        <form onSubmit={onAdd} className="rounded-lg border border-border-soft bg-bg-elevated/30 p-4 space-y-3">
-          <h3 className="text-sm font-medium text-fg">Add binding</h3>
-          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-fg-muted mb-1">
-                Env var
-              </label>
-              <input
-                value={envName}
-                onChange={(e) => setEnvName(e.target.value)}
-                placeholder="DATABASE_URL"
-                autoComplete="off"
-                className="w-full rounded-md border border-border-soft bg-bg-elevated px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-fg-faint">
-                What <code>process.env</code> sees.
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-fg-muted mb-1">
-                Secret
-              </label>
-              <input
-                value={secretName}
-                onChange={(e) => setSecretName(e.target.value)}
-                placeholder="DATABASE_URL"
-                autoComplete="off"
-                className="w-full rounded-md border border-border-soft bg-bg-elevated px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-fg-faint">
-                Workspace secret name (case-insensitive).
-              </p>
-            </div>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={submitting || !envName.trim() || !secretName.trim()}
-                className="rounded-md bg-fg px-3 py-2 text-sm font-medium text-bg hover:bg-fg/90 disabled:opacity-50"
-              >
-                {submitting ? "Adding…" : "Add"}
-              </button>
-            </div>
-          </div>
-          {formError && (
-            <p className="text-sm text-red-300">{formError}</p>
-          )}
-        </form>
+        <div className="rounded-lg border border-border-soft bg-bg-elevated/30 p-4 space-y-3">
+          <h3 className="text-sm font-medium text-fg">Add alias</h3>
+          <EnvBindingForm
+            slug={slug}
+            submitLabel="Add"
+            alreadyBoundSecretNames={bindings.map((b) => b.secret_name)}
+            onSubmit={(envName, secretName) =>
+              setBinding(slug, envName, secretName)
+            }
+          />
+        </div>
       )}
 
       {bindings.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border-soft p-6 text-sm text-fg-muted">
-          No bindings yet. Add one above — for example
-          {" "}<code className="rounded bg-bg-elevated px-1">DATABASE_URL → DATABASE_URL</code>{" "}
-          (the env-var name and the secret name don't have to match, but
-          they usually do).
+          No aliases yet. Pick a secret above and the env-var name will
+          default to the same string — that's the right shape unless you
+          need to expose the same value under a different name.
         </div>
       ) : (
         <ul className="space-y-2">
