@@ -1,3 +1,18 @@
+# [1.41.0](https://github.com/x1agent/x1agent/compare/v1.40.6...v1.41.0) (2026-06-15)
+
+
+### Bug Fixes
+
+* **db:** make 063_users_timezone idempotent for renumber-survivors ([3238f95](https://github.com/x1agent/x1agent/commit/3238f95d5facc4335ef2b8806d4191f9edb1965f))
+* **mcp-catalog:** drop catalog name from DCR client_name ([8a83f68](https://github.com/x1agent/x1agent/commit/8a83f68f4d7738240abe5215a1a65417bdd000ec))
+* **mcp-catalog:** self-heal missing oauth_clients row via re-DCR ([f0f98a2](https://github.com/x1agent/x1agent/commit/f0f98a2a78b9d1ca485506737593c7a21745ab8d))
+* **preview:** inject workspace env-binding values into the Deployment ([71829a6](https://github.com/x1agent/x1agent/commit/71829a679b6c5ccc1369325786bb177f244d6d3c))
+
+
+### Features
+
+* **app:** clarify workspace secrets vs env-var aliases UX ([7cd111b](https://github.com/x1agent/x1agent/commit/7cd111b3aed8aafa39b5a370e7ed52f9d653cc34))
+
 ## [1.40.6](https://github.com/x1agent/x1agent/compare/v1.40.5...v1.40.6) (2026-06-03)
 
 
