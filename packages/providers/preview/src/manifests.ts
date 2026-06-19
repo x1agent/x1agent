@@ -55,6 +55,22 @@ export interface PreviewDeploymentInputs {
    * documented in deploy.ts.
    */
   extraEnvNames?: readonly string[];
+  /**
+   * Additional hostnames the Ingress should answer on, beyond the
+   * default `host`. Each alias gets its own TLS entry (with a
+   * per-alias secretName cert-manager mints via ingress-shim) and
+   * its own Ingress rule pointing at the same Service. Operator-owned
+   * DNS for each alias must already CNAME at the cluster ingress.
+   */
+  aliasHosts?: readonly string[];
+  /**
+   * cert-manager ClusterIssuer to annotate the Ingress with when
+   * `aliasHosts` is non-empty. Setting this on the annotation tells
+   * ingress-shim to mint a Certificate for each per-alias TLS entry's
+   * secretName. Defaults are platform-supplied; the chart wires this
+   * to the install's prod issuer.
+   */
+  aliasClusterIssuer?: string;
 }
 
 export interface KanikoBuildInputs {
@@ -306,44 +322,86 @@ export function buildService(inputs: PreviewDeploymentInputs): V1Service {
   };
 }
 
+/**
+ * Per-alias TLS secretName. Stable across deploys (same input host
+ * yields the same secret name) so cert-manager can reuse the issued
+ * Certificate instead of provisioning a new one each time.
+ *
+ * Uses a SHA-256 truncated to 16 hex chars (64 bits). Earlier
+ * iterations used FNV-1a 32-bit — collisions are findable in ~65k
+ * tries against a chosen target with that hash, which would let a
+ * malicious admin grind alias-host strings until the secretName
+ * matches another tenant's existing alias Secret in the shared
+ * `x1-previews` namespace. SHA-256@64-bit raises the cost to ~2^32
+ * tries to chosen-collide a specific secretName, with no realistic
+ * birthday-collision risk across the alias count we cap at.
+ *
+ * Format: `alias-<slug>-<16-hex>`. DNS-1123 subdomain compliant; the
+ * 253-char K8s limit is irrelevant for sensible slug lengths.
+ */
+export function aliasTlsSecretName(slug: string, host: string): string {
+  // Use Node's built-in crypto for SHA-256. The provider always runs
+  // under Node/Bun; this import is sync and zero-cost on cold start.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  const tag = createHash("sha256").update(host).digest("hex").slice(0, 16);
+  // Slug is already DNS-1123-validated upstream; trim only if the
+  // combined name would exceed 63 chars (the safe label limit for
+  // most clients, not the 253 subdomain ceiling).
+  const base = `alias-${slug}-${tag}`;
+  return base.length <= 63 ? base : base.slice(0, 63);
+}
+
 export function buildIngress(inputs: PreviewDeploymentInputs): V1Ingress {
+  const aliasHosts = (inputs.aliasHosts ?? []).filter(
+    // Drop anything matching the default host so we don't double-emit.
+    (h) => h && h !== inputs.host,
+  );
+
+  const ingressBackend = {
+    service: { name: inputs.slug, port: { number: 80 } },
+  } as const;
+  const ingressPath = {
+    path: "/",
+    pathType: "Prefix" as const,
+    backend: ingressBackend,
+  };
+
+  const tls = [
+    { hosts: [inputs.host], secretName: inputs.tlsSecretName },
+    ...aliasHosts.map((h) => ({
+      hosts: [h],
+      secretName: aliasTlsSecretName(inputs.slug, h),
+    })),
+  ];
+  const rules = [inputs.host, ...aliasHosts].map((h) => ({
+    host: h,
+    http: { paths: [ingressPath] },
+  }));
+
+  const annotations: Record<string, string> = {
+    "nginx.ingress.kubernetes.io/ssl-redirect": "true",
+  };
+  // When aliases are present, tell cert-manager's ingress-shim to
+  // mint a Certificate for each non-wildcard TLS entry's secretName.
+  // The wildcard cert backing the default host already exists and
+  // is left untouched.
+  if (aliasHosts.length > 0 && inputs.aliasClusterIssuer) {
+    annotations["cert-manager.io/cluster-issuer"] = inputs.aliasClusterIssuer;
+  }
+
   return {
     apiVersion: "networking.k8s.io/v1",
     kind: "Ingress",
     metadata: {
       name: inputs.slug,
       namespace: inputs.namespace,
-      annotations: {
-        "nginx.ingress.kubernetes.io/ssl-redirect": "true",
-      },
+      annotations,
     },
     spec: {
       ingressClassName: "nginx",
-      tls: [
-        {
-          hosts: [inputs.host],
-          secretName: inputs.tlsSecretName,
-        },
-      ],
-      rules: [
-        {
-          host: inputs.host,
-          http: {
-            paths: [
-              {
-                path: "/",
-                pathType: "Prefix",
-                backend: {
-                  service: {
-                    name: inputs.slug,
-                    port: { number: 80 },
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
+      tls,
+      rules,
     },
   };
 }

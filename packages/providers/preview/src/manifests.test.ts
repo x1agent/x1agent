@@ -255,6 +255,100 @@ describe("buildIngress", () => {
       i.metadata?.annotations?.["nginx.ingress.kubernetes.io/ssl-redirect"],
     ).toBe("true");
   });
+
+  it("does NOT add a cert-manager annotation when no aliases are set", () => {
+    expect(
+      i.metadata?.annotations?.["cert-manager.io/cluster-issuer"],
+    ).toBeUndefined();
+  });
+});
+
+describe("buildIngress — custom hostnames", () => {
+  const baseInputs = {
+    ...inputs,
+    aliasHosts: ["app.customer.example", "preview.customer.example"],
+    aliasClusterIssuer: "letsencrypt-prod",
+  };
+
+  it("emits one Ingress rule per alias plus the default host", () => {
+    const i = buildIngress(baseInputs);
+    const hosts = i.spec!.rules!.map((r) => r.host!);
+    expect(hosts).toEqual([
+      "hirer-app.preview.local.x1agent.dev",
+      "app.customer.example",
+      "preview.customer.example",
+    ]);
+    // Every rule routes to the same Service:port.
+    for (const rule of i.spec!.rules!) {
+      expect(
+        rule.http!.paths![0]!.backend!.service!.name,
+      ).toBe("hirer-app");
+    }
+  });
+
+  it("emits a per-alias TLS entry with a stable, slug-scoped secretName (SHA-256 64-bit hash)", () => {
+    const i = buildIngress(baseInputs);
+    // Wildcard TLS entry is preserved; one extra per alias.
+    expect(i.spec!.tls!).toHaveLength(3);
+    expect(i.spec!.tls![0]!.hosts).toEqual([
+      "hirer-app.preview.local.x1agent.dev",
+    ]);
+    expect(i.spec!.tls![0]!.secretName).toBe("x1agent-wildcard");
+    expect(i.spec!.tls![1]!.hosts).toEqual(["app.customer.example"]);
+    // Format: `alias-<slug>-<16-hex>`. Asserting the hex shape is
+    // load-bearing — a regression to a shorter / non-crypto hash
+    // (e.g. FNV) would let a malicious admin grind alias-host
+    // strings until the secretName collides with a victim tenant's
+    // existing alias Secret in the shared namespace.
+    expect(i.spec!.tls![1]!.secretName).toMatch(
+      /^alias-hirer-app-[a-f0-9]{16}$/,
+    );
+    expect(i.spec!.tls![2]!.secretName).toMatch(
+      /^alias-hirer-app-[a-f0-9]{16}$/,
+    );
+    // Different hosts → different hashes.
+    expect(i.spec!.tls![1]!.secretName).not.toBe(
+      i.spec!.tls![2]!.secretName,
+    );
+    // Stable across calls — cert-manager keys off the Secret name.
+    const again = buildIngress(baseInputs);
+    expect(again.spec!.tls![1]!.secretName).toBe(
+      i.spec!.tls![1]!.secretName,
+    );
+  });
+
+  it("annotates with the cert-manager cluster-issuer only when issuer is set", () => {
+    const i = buildIngress(baseInputs);
+    expect(
+      i.metadata!.annotations!["cert-manager.io/cluster-issuer"],
+    ).toBe("letsencrypt-prod");
+
+    const noIssuer = buildIngress({ ...baseInputs, aliasClusterIssuer: undefined });
+    expect(
+      noIssuer.metadata!.annotations!["cert-manager.io/cluster-issuer"],
+    ).toBeUndefined();
+  });
+
+  it("drops an alias that duplicates the default host (no duplicate Ingress rule)", () => {
+    const i = buildIngress({
+      ...baseInputs,
+      aliasHosts: [
+        baseInputs.host,
+        "app.customer.example",
+      ],
+    });
+    const hosts = i.spec!.rules!.map((r) => r.host!);
+    expect(hosts).toEqual([
+      baseInputs.host,
+      "app.customer.example",
+    ]);
+  });
+
+  it("emits no extra TLS / rule when aliasHosts is empty", () => {
+    const i = buildIngress({ ...inputs, aliasHosts: [] });
+    expect(i.spec!.rules).toHaveLength(1);
+    expect(i.spec!.tls).toHaveLength(1);
+  });
 });
 
 describe("buildKanikoJob", () => {

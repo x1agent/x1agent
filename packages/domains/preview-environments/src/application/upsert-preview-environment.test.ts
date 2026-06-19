@@ -49,6 +49,7 @@ class FakeRepo implements PreviewEnvironmentRepository {
       lastDeployStatusReason: input.deploy.statusReason,
       lastDeployAt: input.deploy.at,
       envVarNames: existing?.envVarNames ?? [],
+      aliasHosts: existing?.aliasHosts ?? [],
       createdAt: existing?.createdAt ?? new Date(),
       updatedAt: new Date(),
     };
@@ -63,6 +64,9 @@ class FakeRepo implements PreviewEnvironmentRepository {
   }
   async delete() { /* not used */ }
   async setEnvVarNames(): Promise<PreviewEnvironment> {
+    throw new Error("not used");
+  }
+  async setAliasHosts(): Promise<PreviewEnvironment> {
     throw new Error("not used");
   }
 }

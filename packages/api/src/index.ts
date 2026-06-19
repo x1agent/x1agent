@@ -240,6 +240,61 @@ if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET env var is required");
 }
 
+/**
+ * Reserved hostname suffixes for the preview-environment alias gate.
+ * The provider's Ingress rule matches per-host, so a workspace admin
+ * registering a hostname inside the install's own domain (e.g.
+ * `victim-slug.preview.<install>` or `api.<install>`) would silently
+ * shadow platform traffic. Built from every available env source so a
+ * partial install config (e.g. only PREVIEW_DOMAIN set) can't leak the
+ * api / app hostnames into the claimable surface.
+ *
+ * Throws at boot if the result is empty — fail closed. Operators
+ * MUST configure at least one of BASE_DOMAIN, PUBLIC_URL, or
+ * API_PUBLIC_URL before the alias feature is usable.
+ */
+function deriveReservedDomains(): readonly string[] {
+  const out = new Set<string>();
+  const add = (raw: string | undefined | null) => {
+    if (!raw) return;
+    const v = raw.trim().toLowerCase();
+    if (v.length > 0) out.add(v);
+  };
+  const hostOf = (raw: string | undefined): string | undefined => {
+    if (!raw) return undefined;
+    try {
+      const u = new URL(raw);
+      return u.hostname;
+    } catch {
+      return undefined;
+    }
+  };
+  add(process.env.BASE_DOMAIN);
+  add(process.env.PREVIEW_DOMAIN);
+  add(hostOf(process.env.PUBLIC_URL));
+  add(hostOf(process.env.API_PUBLIC_URL));
+  const list = [...out];
+  if (list.length === 0) {
+    throw new Error(
+      "Reserved domains list is empty — preview-environment alias gate would fail open. " +
+        "Set at least one of BASE_DOMAIN, PUBLIC_URL, API_PUBLIC_URL (with a non-localhost host).",
+    );
+  }
+  // Localhost-only configurations would technically pass the empty
+  // check but still leave the platform exposed. Localhost is fine for
+  // dev (the alias feature isn't usable from outside the host anyway)
+  // — flag in logs so an operator who left a localhost URL in prod
+  // notices.
+  const onlyLocalhost = list.every((h) => h === "localhost" || h === "127.0.0.1");
+  if (onlyLocalhost) {
+    console.warn(
+      "[security] reservedDomains=[localhost…] — preview-environment alias gate is effectively open. " +
+        "Set BASE_DOMAIN / PUBLIC_URL / API_PUBLIC_URL to your install's public hostnames.",
+    );
+  }
+  return list;
+}
+
 // NATS connection for the provider gateway — separate from the one
 // startSessionEventSubscriber opens so the two paths don't block each
 // other on reconnect. Dev stack's NATS is reachable at nats://nats:4222;
@@ -382,6 +437,18 @@ const {
   natsConnection: providerNats,
   kubeConfig: sharedKubeConfig,
   sharedResourcesNamespace: process.env.K8S_NAMESPACE || "x1agent",
+  // Reserved domains gate aliases on preview environments — any host
+  // matching one of these (or being a subdomain of one) is refused at
+  // the API layer. Without this gate, a workspace admin can claim
+  // platform-owned hostnames (collide with another workspace's
+  // preview slug or intercept api / app traffic via the Ingress's
+  // per-host rule matching).
+  //
+  // Pulled from multiple env sources so a partial config (e.g. only
+  // PREVIEW_DOMAIN set) can't quietly leave the api / app hostnames
+  // claimable. The route's own check fails closed if this list ends
+  // up empty — see `reserved-domains.ts`.
+  reservedDomains: deriveReservedDomains(),
 });
 
 const app = new Hono();

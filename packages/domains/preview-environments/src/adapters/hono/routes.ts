@@ -8,6 +8,8 @@ import {
 } from "@x1agent/kernel";
 import {
   PreviewEnvironmentId,
+  InvalidAliasHostError,
+  isValidAliasHost,
   type PreviewEnvironment,
 } from "../../domain/preview-environment.js";
 import {
@@ -61,7 +63,34 @@ export interface PreviewEnvironmentRoutesConfig {
    * and leaves the K8s resources dangling.
    */
   natsConnection?: import("nats").NatsConnection;
+  /**
+   * Hostnames an operator MUST NOT be able to register as an alias —
+   * the install's own base domain, the preview domain, and any other
+   * platform-controlled hostnames.
+   *
+   * Without this gate, a workspace admin could claim
+   * `victim-slug.preview.<install>` (collide with another workspace's
+   * preview), or `api.<install>` / `app.<install>` (intercept platform
+   * traffic via Ingress host matching). Strictly server-side: the API
+   * rejects the alias, no provider call ever happens.
+   *
+   * Rule per suffix `S`: reject `host === S` AND `host endsWith "." + S`.
+   * Pass the install's apex (e.g. `x1agent.atomic.health`) and any
+   * additional reserved domains (e.g. preview domain) — both are
+   * covered by the suffix check.
+   */
+  forbiddenAliasSuffixes?: readonly string[];
 }
+
+/**
+ * Maximum number of custom hostnames a single preview environment
+ * may carry. Each alias becomes a cert-manager Certificate request
+ * to Let's Encrypt on the next deploy; LE rate-limits to 50 certs
+ * per registered domain per week. 32 leaves headroom for legitimate
+ * operator use while preventing an admin from intentionally burning
+ * the install's entire LE budget.
+ */
+const MAX_ALIAS_HOSTS = 32;
 
 function serialize(e: PreviewEnvironment) {
   return {
@@ -78,6 +107,7 @@ function serialize(e: PreviewEnvironment) {
     last_deploy_status_reason: e.lastDeployStatusReason,
     last_deploy_at: e.lastDeployAt?.toISOString() ?? null,
     env_var_names: e.envVarNames,
+    alias_hosts: e.aliasHosts,
     created_at: e.createdAt.toISOString(),
     updated_at: e.updatedAt.toISOString(),
   };
@@ -87,6 +117,7 @@ function errStatus(err: unknown): number {
   if (err instanceof PreviewEnvironmentNotFoundError) return 404;
   if (err instanceof PreviewEnvironmentNotInWorkspaceError) return 404;
   if (err instanceof PreviewSlugTakenError) return 409;
+  if (err instanceof InvalidAliasHostError) return 400;
   if (err instanceof DomainError) {
     if (err.code === "admin_denied" || err.code === "not_a_member") return 403;
     if (err.code === "validation_error" || err.code === "invalid_preview_slug")
@@ -188,6 +219,109 @@ export function createPreviewEnvironmentRoutes(
         body.env_var_names.filter(
           (x): x is string => typeof x === "string",
         ),
+      );
+      return c.json({ preview_environment: serialize(env) });
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
+  });
+
+  // Replace the alias-hosts list (vanity domains the preview should
+  // also answer on). Admin-only. Each entry is validated against
+  // RFC 1123 hostname rules; first invalid entry rejects the whole
+  // call. Operators are expected to CNAME each host at the cluster
+  // ingress before adding it here.
+  app.put("/:id/alias-hosts", async (c) => {
+    const actor = cfg.getActor(c);
+    if (!actor) return c.json({ error: "unauthenticated" }, 401);
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      alias_hosts?: unknown;
+    };
+    if (!Array.isArray(body.alias_hosts)) {
+      return c.json(
+        { error: "missing_fields", message: "alias_hosts must be an array" },
+        400,
+      );
+    }
+    // Hard cap on list length. Each alias becomes a cert-manager
+    // Certificate request to Let's Encrypt — and LE rate-limits to
+    // 50 certs / registered-domain / week. An admin who can register
+    // 10k aliases can intentionally burn the install's entire LE
+    // budget. 32 is generous for legitimate operator use.
+    if (body.alias_hosts.length > MAX_ALIAS_HOSTS) {
+      return c.json(
+        {
+          error: "too_many_alias_hosts",
+          message: `alias_hosts may contain at most ${MAX_ALIAS_HOSTS} entries (got ${body.alias_hosts.length})`,
+        },
+        400,
+      );
+    }
+    const forbiddenSuffixes = (cfg.forbiddenAliasSuffixes ?? [])
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0);
+    // Fail closed: if the platform didn't populate any reserved
+    // suffixes, refuse the whole call rather than accept hosts that
+    // can't be checked against the install's own apex. This is the
+    // second line of defense — the boot also throws when no
+    // suffixes can be derived (packages/api/src/index.ts), but a
+    // misconfigured composition that wires forbiddenAliasSuffixes
+    // through as empty should not become a silent fail-open.
+    if (body.alias_hosts.length > 0 && forbiddenSuffixes.length === 0) {
+      return c.json(
+        {
+          error: "alias_gate_unconfigured",
+          message:
+            "alias gate is not configured for this install (no reserved hostnames). " +
+            "Have an admin set BASE_DOMAIN / PUBLIC_URL on the api before adding aliases.",
+        },
+        503,
+      );
+    }
+    const isForbidden = (host: string): string | null => {
+      for (const s of forbiddenSuffixes) {
+        if (host === s || host.endsWith("." + s)) return s;
+      }
+      return null;
+    };
+    const normalized: string[] = [];
+    for (const raw of body.alias_hosts) {
+      if (typeof raw !== "string") {
+        return c.json(
+          { error: "missing_fields", message: "alias_hosts must be strings" },
+          400,
+        );
+      }
+      const v = raw.trim().toLowerCase();
+      if (v === "") continue;
+      if (!isValidAliasHost(v)) {
+        return c.json(errBody(new InvalidAliasHostError(raw)), 400);
+      }
+      const collidesWith = isForbidden(v);
+      if (collidesWith) {
+        // Hard refuse: the install's base/preview domain (or any
+        // explicitly-reserved domain) can never be claimed as an
+        // alias. Without this, a workspace admin could collide with
+        // another workspace's preview slug or intercept platform
+        // traffic via Ingress host matching.
+        return c.json(
+          {
+            error: "alias_host_forbidden",
+            message: `${v} is on the platform's reserved domain (${collidesWith}). Use a hostname you own.`,
+          },
+          400,
+        );
+      }
+      normalized.push(v);
+    }
+    try {
+      await cfg.adminGuard.requireWorkspaceAdmin(wsId, actor.userId);
+      const env = await cfg.repository.setAliasHosts(
+        PreviewEnvironmentId(c.req.param("id")!),
+        wsId,
+        normalized,
       );
       return c.json({ preview_environment: serialize(env) });
     } catch (err) {

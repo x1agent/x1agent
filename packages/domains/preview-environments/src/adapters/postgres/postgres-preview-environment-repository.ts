@@ -29,11 +29,12 @@ interface Row {
   last_deploy_status_reason: string | null;
   last_deploy_at: Date | string | null;
   env_var_names: unknown;
+  alias_hosts: unknown;
   created_at: Date | string;
   updated_at: Date | string;
 }
 
-function parseEnvVarNames(raw: unknown): string[] {
+function parseStringArray(raw: unknown): string[] {
   if (Array.isArray(raw)) {
     return raw.filter((x): x is string => typeof x === "string");
   }
@@ -57,7 +58,8 @@ function toEnv(r: Row): PreviewEnvironment {
     lastDeployStatus: status,
     lastDeployStatusReason: r.last_deploy_status_reason,
     lastDeployAt: r.last_deploy_at ? new Date(r.last_deploy_at) : null,
-    envVarNames: parseEnvVarNames(r.env_var_names),
+    envVarNames: parseStringArray(r.env_var_names),
+    aliasHosts: parseStringArray(r.alias_hosts),
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
   };
@@ -67,7 +69,7 @@ const SELECT = `
   id, workspace_id, slug, title, repo_full_name, branch,
   last_deploy_sha, last_deploy_url, last_deploy_image_ref,
   last_deploy_status, last_deploy_status_reason, last_deploy_at,
-  env_var_names,
+  env_var_names, alias_hosts,
   created_at, updated_at
 `;
 
@@ -214,6 +216,36 @@ export class PostgresPreviewEnvironmentRepository
     const rows = await this.sql<Row[]>`
       UPDATE preview_environments
       SET env_var_names = ${this.sql.json(list)}::jsonb
+      WHERE id = ${id} AND workspace_id = ${workspaceId}
+      RETURNING ${this.sql.unsafe(SELECT)};
+    `;
+    if (rows.length === 0) {
+      const { PreviewEnvironmentNotFoundError } = await import(
+        "../../domain/errors.js"
+      );
+      throw new PreviewEnvironmentNotFoundError({ id });
+    }
+    return toEnv(rows[0]!);
+  }
+
+  async setAliasHosts(
+    id: PreviewEnvironmentId,
+    workspaceId: WorkspaceId,
+    aliasHosts: readonly string[],
+  ): Promise<PreviewEnvironment> {
+    // De-dupe + lowercase + trim. Validation is the application
+    // layer's job; this writes what it's handed.
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const raw of aliasHosts) {
+      const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+      if (v === "" || seen.has(v)) continue;
+      seen.add(v);
+      list.push(v);
+    }
+    const rows = await this.sql<Row[]>`
+      UPDATE preview_environments
+      SET alias_hosts = ${this.sql.json(list)}::jsonb
       WHERE id = ${id} AND workspace_id = ${workspaceId}
       RETURNING ${this.sql.unsafe(SELECT)};
     `;

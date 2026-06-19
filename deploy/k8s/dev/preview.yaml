@@ -147,6 +147,11 @@ spec:
               value: preview.local.x1agent.dev
             - name: TLS_SECRET_NAME
               value: x1agent-wildcard
+            # Dev installs typically don't have a public cert-manager
+            # issuer; empty keeps the alias flow opt-in. Set to a real
+            # cluster-issuer name when testing custom hostnames locally.
+            - name: ALIAS_CLUSTER_ISSUER
+              value: ""
           # Secrets read from the dev-secrets Secret when present.
           # NOTE: inline `env:` above always wins over `envFrom` for the
           # same key (K8s precedence rule), so API_INTERNAL_TOKEN here

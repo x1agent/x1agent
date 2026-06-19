@@ -227,6 +227,14 @@ spec:
               value: {{ $previewDomain | quote }}
             - name: TLS_SECRET_NAME
               value: x1agent-preview-wildcard-tls
+            # cert-manager ClusterIssuer used to mint per-alias TLS
+            # certs when a preview environment registers custom
+            # hostnames. Defaults to the install's prod issuer; null
+            # disables the automatic Certificate flow (the alias rule
+            # still routes, but TLS won't terminate until an operator
+            # populates the Secret by hand).
+            - name: ALIAS_CLUSTER_ISSUER
+              value: {{ .Values.providers.preview.aliasClusterIssuer | default "x1agent-letsencrypt" | quote }}
           # API_INTERNAL_TOKEN comes from the ESO-synced x1agent-secrets
           # bundle (same Secret the api consumes). The provider POSTs to
           # /api/internal/git-credential to mint short-lived GitHub App
