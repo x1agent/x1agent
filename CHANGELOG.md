@@ -1,3 +1,16 @@
+# [1.42.0](https://github.com/x1agent/x1agent/compare/v1.41.0...v1.42.0) (2026-06-19)
+
+
+### Bug Fixes
+
+* **preview:** security-review hardening on the alias-hosts gate ([13f8cee](https://github.com/x1agent/x1agent/commit/13f8ceee7e228d48ec3dbb37dd1c75b8cf587404))
+
+
+### Features
+
+* **app:** collapse env-var aliases into workspace secrets row ([4977874](https://github.com/x1agent/x1agent/commit/49778748673a2bd1b7991e6adc6f6eec9b60eb97))
+* **preview:** custom hostnames (aliases) per preview environment ([a4f81e2](https://github.com/x1agent/x1agent/commit/a4f81e213386726488c47f0297b946e0deba9e0d))
+
 # [1.41.0](https://github.com/x1agent/x1agent/compare/v1.40.6...v1.41.0) (2026-06-15)
 
 
