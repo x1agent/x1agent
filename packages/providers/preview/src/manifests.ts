@@ -325,20 +325,31 @@ export function buildService(inputs: PreviewDeploymentInputs): V1Service {
 /**
  * Per-alias TLS secretName. Stable across deploys (same input host
  * yields the same secret name) so cert-manager can reuse the issued
- * Certificate instead of provisioning a new one each time. Truncated
- * + suffixed with a short host hash to keep names <=253 chars and
- * collision-resistant across slugs whose alias hosts share a prefix.
+ * Certificate instead of provisioning a new one each time.
+ *
+ * Uses a SHA-256 truncated to 16 hex chars (64 bits). Earlier
+ * iterations used FNV-1a 32-bit — collisions are findable in ~65k
+ * tries against a chosen target with that hash, which would let a
+ * malicious admin grind alias-host strings until the secretName
+ * matches another tenant's existing alias Secret in the shared
+ * `x1-previews` namespace. SHA-256@64-bit raises the cost to ~2^32
+ * tries to chosen-collide a specific secretName, with no realistic
+ * birthday-collision risk across the alias count we cap at.
+ *
+ * Format: `alias-<slug>-<16-hex>`. DNS-1123 subdomain compliant; the
+ * 253-char K8s limit is irrelevant for sensible slug lengths.
  */
 export function aliasTlsSecretName(slug: string, host: string): string {
-  // FNV-1a 32-bit — tiny, deterministic, zero deps.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < host.length; i++) {
-    h ^= host.charCodeAt(i);
-    h = (h >>> 0) * 0x01000193;
-  }
-  const tag = (h >>> 0).toString(36).padStart(7, "0").slice(0, 7);
-  // Keep the operator-recognizable prefix; cap to a safe length.
-  return `alias-${slug}-${tag}`.slice(0, 60);
+  // Use Node's built-in crypto for SHA-256. The provider always runs
+  // under Node/Bun; this import is sync and zero-cost on cold start.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  const tag = createHash("sha256").update(host).digest("hex").slice(0, 16);
+  // Slug is already DNS-1123-validated upstream; trim only if the
+  // combined name would exceed 63 chars (the safe label limit for
+  // most clients, not the 253 subdomain ceiling).
+  const base = `alias-${slug}-${tag}`;
+  return base.length <= 63 ? base : base.slice(0, 63);
 }
 
 export function buildIngress(inputs: PreviewDeploymentInputs): V1Ingress {

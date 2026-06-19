@@ -82,6 +82,16 @@ export interface PreviewEnvironmentRoutesConfig {
   forbiddenAliasSuffixes?: readonly string[];
 }
 
+/**
+ * Maximum number of custom hostnames a single preview environment
+ * may carry. Each alias becomes a cert-manager Certificate request
+ * to Let's Encrypt on the next deploy; LE rate-limits to 50 certs
+ * per registered domain per week. 32 leaves headroom for legitimate
+ * operator use while preventing an admin from intentionally burning
+ * the install's entire LE budget.
+ */
+const MAX_ALIAS_HOSTS = 32;
+
 function serialize(e: PreviewEnvironment) {
   return {
     id: e.id,
@@ -235,9 +245,41 @@ export function createPreviewEnvironmentRoutes(
         400,
       );
     }
+    // Hard cap on list length. Each alias becomes a cert-manager
+    // Certificate request to Let's Encrypt — and LE rate-limits to
+    // 50 certs / registered-domain / week. An admin who can register
+    // 10k aliases can intentionally burn the install's entire LE
+    // budget. 32 is generous for legitimate operator use.
+    if (body.alias_hosts.length > MAX_ALIAS_HOSTS) {
+      return c.json(
+        {
+          error: "too_many_alias_hosts",
+          message: `alias_hosts may contain at most ${MAX_ALIAS_HOSTS} entries (got ${body.alias_hosts.length})`,
+        },
+        400,
+      );
+    }
     const forbiddenSuffixes = (cfg.forbiddenAliasSuffixes ?? [])
       .map((s) => s.trim().toLowerCase())
       .filter((s) => s.length > 0);
+    // Fail closed: if the platform didn't populate any reserved
+    // suffixes, refuse the whole call rather than accept hosts that
+    // can't be checked against the install's own apex. This is the
+    // second line of defense — the boot also throws when no
+    // suffixes can be derived (packages/api/src/index.ts), but a
+    // misconfigured composition that wires forbiddenAliasSuffixes
+    // through as empty should not become a silent fail-open.
+    if (body.alias_hosts.length > 0 && forbiddenSuffixes.length === 0) {
+      return c.json(
+        {
+          error: "alias_gate_unconfigured",
+          message:
+            "alias gate is not configured for this install (no reserved hostnames). " +
+            "Have an admin set BASE_DOMAIN / PUBLIC_URL on the api before adding aliases.",
+        },
+        503,
+      );
+    }
     const isForbidden = (host: string): string | null => {
       for (const s of forbiddenSuffixes) {
         if (host === s || host.endsWith("." + s)) return s;
