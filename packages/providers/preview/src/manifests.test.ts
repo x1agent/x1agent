@@ -286,7 +286,7 @@ describe("buildIngress — custom hostnames", () => {
     }
   });
 
-  it("emits a per-alias TLS entry with a stable, slug-scoped secretName", () => {
+  it("emits a per-alias TLS entry with a stable, slug-scoped secretName (SHA-256 64-bit hash)", () => {
     const i = buildIngress(baseInputs);
     // Wildcard TLS entry is preserved; one extra per alias.
     expect(i.spec!.tls!).toHaveLength(3);
@@ -295,9 +295,21 @@ describe("buildIngress — custom hostnames", () => {
     ]);
     expect(i.spec!.tls![0]!.secretName).toBe("x1agent-wildcard");
     expect(i.spec!.tls![1]!.hosts).toEqual(["app.customer.example"]);
-    expect(i.spec!.tls![1]!.secretName).toMatch(/^alias-hirer-app-/);
-    expect(i.spec!.tls![2]!.hosts).toEqual(["preview.customer.example"]);
-    expect(i.spec!.tls![2]!.secretName).toMatch(/^alias-hirer-app-/);
+    // Format: `alias-<slug>-<16-hex>`. Asserting the hex shape is
+    // load-bearing — a regression to a shorter / non-crypto hash
+    // (e.g. FNV) would let a malicious admin grind alias-host
+    // strings until the secretName collides with a victim tenant's
+    // existing alias Secret in the shared namespace.
+    expect(i.spec!.tls![1]!.secretName).toMatch(
+      /^alias-hirer-app-[a-f0-9]{16}$/,
+    );
+    expect(i.spec!.tls![2]!.secretName).toMatch(
+      /^alias-hirer-app-[a-f0-9]{16}$/,
+    );
+    // Different hosts → different hashes.
+    expect(i.spec!.tls![1]!.secretName).not.toBe(
+      i.spec!.tls![2]!.secretName,
+    );
     // Stable across calls — cert-manager keys off the Secret name.
     const again = buildIngress(baseInputs);
     expect(again.spec!.tls![1]!.secretName).toBe(
