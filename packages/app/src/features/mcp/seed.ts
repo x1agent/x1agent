@@ -96,6 +96,16 @@ export const MCP_SEED: readonly McpSeedEntry[] = [
     tags: ["banking", "finance", "treasury"],
   },
   {
+    slug: "miro",
+    display_name: "Miro",
+    description: "Visual collaboration boards. Read and write to your team's Miro boards.",
+    simple_icon: "miro",
+    homepage: "https://miro.com/",
+    kind: "remote_oauth",
+    mcp_url: "https://mcp.miro.com/mcp",
+    tags: ["collaboration", "design", "whiteboard"],
+  },
+  {
     slug: "stripe",
     display_name: "Stripe",
     description: "Payments, customers, subscriptions, invoices.",

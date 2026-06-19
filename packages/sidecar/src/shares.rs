@@ -573,11 +573,6 @@ async fn read_from_gcs(
     share_id: &str,
     requested_path: &str,
 ) -> Result<ReadShareResponse, (StatusCode, ReadShareError)> {
-    let file_path = if requested_path.is_empty() {
-        "index.html".to_string()
-    } else {
-        requested_path.to_string()
-    };
     let token = get_gce_token().await.ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         ReadShareError {
@@ -586,6 +581,24 @@ async fn read_from_gcs(
         },
     ))?;
     let _ = session_id;
+    // When the caller didn't pass `path`, resolve the recorded
+    // filename from the GCS bucket listing under `shares/<id>/`. The
+    // previous default of `index.html` 404'd every single-file share
+    // (markdown, csv, image, pdf) because writeShareFiles lays single
+    // files at `shares/<id>/<original-name>`, not `index.html`. List
+    // the prefix; if exactly one object lives under it, that's the
+    // file. Multi-file shares (sites) still default to `index.html`
+    // when one is present in the prefix. This is the same fallback
+    // semantics the api applies via session_events metadata, kept in
+    // sync so prod (GCS direct) and dev (api forward) match.
+    let file_path = if requested_path.is_empty() {
+        match resolve_gcs_default_filename(&token, bucket, share_id).await {
+            Some(p) => p,
+            None => "index.html".to_string(),
+        }
+    } else {
+        requested_path.to_string()
+    };
     let object_name = format!("shares/{}/{}", share_id, file_path);
     let url = format!(
         "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
@@ -644,6 +657,55 @@ async fn read_from_gcs(
         size: bytes.len() as u64,
         content_b64: base64_encode(&bytes),
     })
+}
+
+/// List the GCS objects under `shares/<share_id>/` and return the
+/// single object's filename when there's exactly one (the single-file
+/// share case). For multi-file shares the bucket carries every asset,
+/// so we prefer `index.html` if present and otherwise fall back to
+/// `None` (caller defaults to `index.html` which then 404s — same
+/// shape as before, but single-file shares now resolve correctly).
+async fn resolve_gcs_default_filename(
+    token: &str,
+    bucket: &str,
+    share_id: &str,
+) -> Option<String> {
+    let prefix = format!("shares/{}/", share_id);
+    let url = format!(
+        "https://storage.googleapis.com/storage/v1/b/{}/o?prefix={}",
+        bucket,
+        urlencoding::encode(&prefix),
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let items = body.get("items")?.as_array()?;
+    let mut names: Vec<String> = items
+        .iter()
+        .filter_map(|o| o.get("name").and_then(|n| n.as_str()))
+        .filter_map(|name| name.strip_prefix(&prefix).map(|s| s.to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    if names.len() == 1 {
+        return Some(names.remove(0));
+    }
+    // Multi-file: prefer index.html when present so site shares keep
+    // working without an explicit path.
+    if names.iter().any(|n| n == "index.html") {
+        return Some("index.html".to_string());
+    }
+    None
 }
 
 async fn read_from_api(

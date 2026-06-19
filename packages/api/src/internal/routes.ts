@@ -311,6 +311,37 @@ function scopeIsCovered(
   return implicators.some((s) => granted.includes(s));
 }
 
+/**
+ * Resolve the recorded filename for a share when the caller didn't
+ * pass `path`. Reads the `agent.share` event from session_events and
+ * returns `payload.entry_point` (multi-file site) or `payload.path`
+ * (single-file shorthand). Returns null when the share isn't in any
+ * session's events — the caller will fall back to "index.html" and
+ * the disk/GCS read will 404, which is the right shape for an
+ * unknown share.
+ */
+async function resolveShareDefaultFilename(
+  cfg: InternalRoutesConfig,
+  shareId: string,
+): Promise<string | null> {
+  if (!cfg.sql) return null;
+  const rows = await cfg.sql<{ entry_point: string | null; path: string | null }[]>`
+    SELECT
+      (payload->>'entry_point') AS entry_point,
+      (payload->>'path')        AS path
+    FROM session_events
+    WHERE type = 'agent.share'
+      AND (payload->>'share_id') = ${shareId}
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  const candidate = row.entry_point ?? row.path;
+  if (!candidate || candidate.length === 0) return null;
+  return candidate;
+}
+
 function requireInternalToken(token: string): MiddlewareHandler {
   return async (c, next) => {
     if (!token) {
@@ -699,7 +730,19 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
     }
 
-    const filePath = requestedPath || "index.html";
+    // Resolve the actual filename when the caller didn't pass `path`.
+    // The agent.share event in session_events IS the metadata record —
+    // it carries `entry_point` (multi-file site) and `path` (single-
+    // file shorthand). Without this, the code used to fall back to
+    // `index.html` and 404 every single-file share (markdown, csv,
+    // image, pdf), because the agent's read_share MCP tool doesn't
+    // know the original filename and never passes a path. That's the
+    // bug Fausto saw — bytes are in GCS, but `index.html` doesn't
+    // exist for a single markdown file.
+    const filePath =
+      requestedPath ||
+      (await resolveShareDefaultFilename(cfg, shareId)) ||
+      "index.html";
     let bytes: Buffer | null;
     try {
       bytes = cfg.gcsArtifactsBucket
@@ -712,7 +755,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (!bytes) return c.json({ error: "file_not_found" }, 404);
     return c.json({
       share_id: shareId,
-      path: requestedPath || undefined,
+      path: requestedPath || filePath,
       mime_type: getMimeType(filePath),
       size: bytes.length,
       content_b64: bytes.toString("base64"),

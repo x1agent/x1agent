@@ -12,15 +12,34 @@ import type {
   OAuthClientRepository,
 } from "../ports/oauth-client-repository.js";
 import type { UserTokenRepository } from "../ports/user-token-repository.js";
+import { registerOAuthClient } from "./oauth-dcr.js";
 import {
   buildAuthorizeUrl,
   exchangeCodeForTokens,
   generatePkce,
   generateState,
   refreshAccessToken,
+  StaleClientRegistrationError,
   type PkcePair,
 } from "./oauth-flow.js";
-import { registerOAuthClient } from "./oauth-dcr.js";
+
+/**
+ * Thrown by `complete()` when the upstream auth server rejected our
+ * client credentials at token-exchange time. The route handler is
+ * expected to redirect the user back to `/auth/mcp/start/<slug>/<name>`
+ * — by the time they re-hit start(), the `mcp_oauth_clients` row is
+ * gone (we deleted it) and `resolveOAuthClient` will re-DCR, mint a
+ * fresh authorize URL with the new client_id, and the next round-trip
+ * succeeds. No operator action required.
+ */
+export class ClientRegistrationRecoveredError extends Error {
+  constructor(public readonly retryStartPath: string) {
+    super(
+      "stale DCR client_id wiped; user should be redirected to retry the OAuth flow",
+    );
+    this.name = "ClientRegistrationRecoveredError";
+  }
+}
 
 export interface OAuthFlowState {
   /** Random string echoed in the redirect; the callback validates. */
@@ -81,6 +100,15 @@ export interface UserTokenServiceDeps {
    * partial create on May 3 2026, or any future non-transactional
    * failure between the two writes in CatalogService.set()). */
   registerClient?: typeof registerOAuthClient;
+  /** Optional server-side logger for upstream error bodies. The
+   *  bodies can echo submitted secrets so they NEVER reach the user;
+   *  this lets the composition root pipe them to a sink (e.g.
+   *  `console.error` or Sentry breadcrumbs) for ops debugging. */
+  logUpstreamError?: (info: {
+    endpoint: string;
+    status: number;
+    body: string;
+  }) => void;
 }
 
 /**
@@ -111,6 +139,10 @@ export class UserTokenService {
       workspaceSlug: slug,
       catalogName: entry.name as unknown as string,
     });
+    // Self-heal on a missing oauth_clients row: re-DCR transparently
+    // rather than asking the operator to delete the catalog entry.
+    // Same helper handles the "complete() wiped the row because
+    // upstream rejected the client_id" recovery path.
     const oauthClient = await this.resolveOAuthClient({
       entry,
       workspaceSlug: slug,
@@ -177,15 +209,36 @@ export class UserTokenService {
       },
       this.deps.cipherKey,
     );
-    const tokens = await exchangeCodeForTokens({
-      authorizationServer: entry.oauthAuthorizationServer as never,
-      clientId: oauthClient.clientId,
-      clientSecret,
-      authMethod: oauthClient.tokenEndpointAuthMethod,
-      redirectUri,
-      code: input.code,
-      codeVerifier: input.flowState.codeVerifier,
-    });
+    let tokens;
+    try {
+      tokens = await exchangeCodeForTokens(
+        {
+          authorizationServer: entry.oauthAuthorizationServer as never,
+          clientId: oauthClient.clientId,
+          clientSecret,
+          authMethod: oauthClient.tokenEndpointAuthMethod,
+          redirectUri,
+          code: input.code,
+          codeVerifier: input.flowState.codeVerifier,
+        },
+        { logUpstreamError: this.deps.logUpstreamError },
+      );
+    } catch (err) {
+      if (err instanceof StaleClientRegistrationError) {
+        // The DCR client_id we stored is no longer accepted at the
+        // upstream token endpoint (RFC 6749 invalid_client /
+        // unauthorized_client). Drop the row so the next /start hit
+        // re-DCRs through resolveOAuthClient, and signal the route
+        // to redirect there. The user sees a single round-trip
+        // through the provider's consent screen and that's it —
+        // never any "delete from settings, click re-add" surgery.
+        await this.deps.oauthClients.delete(entry.id);
+        throw new ClientRegistrationRecoveredError(
+          `/auth/mcp/start/${slug}/${entry.name as unknown as string}`,
+        );
+      }
+      throw err;
+    }
     return this.persistTokens({
       userId: input.userId,
       catalogEntryId: entry.id,
@@ -249,13 +302,16 @@ export class UserTokenService {
       this.deps.cipherKey,
     );
     try {
-      const refreshed = await refreshAccessToken({
-        authorizationServer: entry.oauthAuthorizationServer as never,
-        clientId: oauthClient.clientId,
-        clientSecret,
-        authMethod: oauthClient.tokenEndpointAuthMethod,
-        refreshToken,
-      });
+      const refreshed = await refreshAccessToken(
+        {
+          authorizationServer: entry.oauthAuthorizationServer as never,
+          clientId: oauthClient.clientId,
+          clientSecret,
+          authMethod: oauthClient.tokenEndpointAuthMethod,
+          refreshToken,
+        },
+        { logUpstreamError: this.deps.logUpstreamError },
+      );
       // Some providers omit `expires_in` from refresh responses (legal
        // per RFC 6749 §5.1). If we wrote `null` we'd treat the cached
        // access token as never-expiring and ride it past its real death.
@@ -276,8 +332,19 @@ export class UserTokenService {
         accessToken: refreshed.access_token,
         expiresAt: persisted.accessTokenExpiresAt,
       };
-    } catch {
-      // Refresh failed — likely revoked. Force the user to reconnect.
+    } catch (err) {
+      if (err instanceof StaleClientRegistrationError) {
+        // Same recovery shape as `complete()`: the upstream rejected
+        // our cached client_id at refresh time. Wipe the row so the
+        // user's next interactive Connect re-DCRs through the
+        // self-heal path. Return null here — the session-launch
+        // caller treats null as "user needs to reconnect", which
+        // shows the dim Connect pill rather than crashing.
+        await this.deps.oauthClients.delete(entry.id);
+        return null;
+      }
+      // Refresh failed (revoked / network / other). Force the user to
+      // reconnect — same null-return signal as the stale-client path.
       return null;
     }
   }
@@ -293,17 +360,24 @@ export class UserTokenService {
   // ── helpers ──────────────────────────────────────────────────────
 
   /**
-   * Return the OAuth client blob for a catalog entry, re-registering
-   * via DCR if the row is missing. The catalog entry caches the auth
-   * server metadata at create time, so DCR is fully replayable from
-   * just (entry, workspaceSlug, redirectUri). This is the recovery
-   * path for any catalog entry whose `mcp_oauth_clients` row vanished
-   * — either because of the non-transactional create flow in
-   * CatalogService.set() (May 3 2026: entry inserted, oauth_clients
-   * insert failed, no rollback) or a manual cleanup that touched only
-   * one side. The previous behaviour was to hard-error and ask the
-   * operator to delete + re-add, which loses agent attachments and
-   * connected-user tokens for everyone else in the workspace.
+   * Self-heal helper: return the OAuth client blob for a catalog
+   * entry, re-running DCR if the row is missing. The catalog entry
+   * caches the auth-server metadata at create time, so DCR is fully
+   * replayable from (entry, slug, redirectUri).
+   *
+   * Two callers trigger the missing-row path:
+   *   1. A first-ever Connect after the catalog row was inserted but
+   *      the mcp_oauth_clients write failed (the May 3 Mercury orphan
+   *      pattern — non-transactional create flow).
+   *   2. complete() wiped the row because the upstream returned
+   *      invalid_client / unauthorized_client at token exchange,
+   *      and the route bounced the user back to /start to recover.
+   *
+   * Both arrive here with `getBlob() == null` and we re-DCR
+   * transparently. The previous explicit "OAuth client not
+   * registered — try removing and re-creating it" error required
+   * the operator to surgically delete the catalog entry; this helper
+   * makes that unnecessary.
    */
   private async resolveOAuthClient(input: {
     entry: CatalogEntry;

@@ -5,6 +5,7 @@ import type {
   OAuthFlowState,
   UserTokenService,
 } from "../../application/user-token-service.js";
+import { ClientRegistrationRecoveredError } from "../../application/user-token-service.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -262,6 +263,31 @@ export function createMcpOAuthRoutes(cfg: OAuthRoutesConfig): Hono {
         // pulling @sentry/node into this domain. Tracked in the Hono
         // hardening punch-list.
         wipeFlowCookie();
+        if (err instanceof ClientRegistrationRecoveredError) {
+          // Self-heal: the upstream rejected our DCR client_id at the
+          // token endpoint. complete() has already wiped the row;
+          // bouncing the user through /start re-DCRs (resolveOAuth
+          // Client sees a missing row) and mints a fresh authorize
+          // URL with the new client_id. From the user's POV: one
+          // extra redirect, one re-consent at the provider (often
+          // silent if they've already approved), then done.
+          //
+          // The /auth/mcp/* routes are mounted on the api host (NOT
+          // the app host) — use a path-relative redirect so the
+          // browser stays on the api origin for the next hop. An
+          // earlier version used `${cfg.appUrl}...` and 404'd on the
+          // app host.
+          const persistedReturn = safeReturnTo(flowState.returnTo, cfg.appUrl);
+          const retryQs = persistedReturn
+            ? `?return_to=${encodeURIComponent(persistedReturn)}`
+            : "";
+          const retryPath = `${err.retryStartPath}${retryQs}`;
+          console.warn(
+            "[mcp-oauth] stale DCR client_id wiped — bouncing user through /start for re-DCR",
+            { slug, name, userId, retry: retryPath },
+          );
+          return c.redirect(retryPath, 302);
+        }
         const e = err as { field?: string; message?: string };
         console.warn(
           "[mcp-oauth] token exchange failed",
