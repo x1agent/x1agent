@@ -21,6 +21,7 @@ export interface PreviewEnvironmentDTO {
   last_deploy_status_reason: string | null;
   last_deploy_at: string | null;
   env_var_names?: string[];
+  alias_hosts?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +42,11 @@ interface PreviewEnvironmentsState {
     workspaceSlug: string,
     id: string,
     envVarNames: string[],
+  ): Promise<void>;
+  setAliasHosts(
+    workspaceSlug: string,
+    id: string,
+    aliasHosts: string[],
   ): Promise<void>;
 }
 
@@ -148,6 +154,29 @@ export const usePreviewEnvironmentsStore = create<PreviewEnvironmentsState>(
       }>(
         `/api/workspaces/${workspaceSlug}/preview-environments/${id}/env-vars`,
         { method: "PUT", body: JSON.stringify({ env_var_names: envVarNames }) },
+      );
+      set((s) => {
+        const list = s.byWorkspace[workspaceSlug];
+        const updated = res.preview_environment;
+        return {
+          byId: setForKey(s.byId, id, updated),
+          byWorkspace: list
+            ? setForKey(
+                s.byWorkspace,
+                workspaceSlug,
+                list.map((e) => (e.id === id ? updated : e)),
+              )
+            : s.byWorkspace,
+        };
+      });
+    },
+
+    async setAliasHosts(workspaceSlug, id, aliasHosts) {
+      const res = await apiFetch<{
+        preview_environment: PreviewEnvironmentDTO;
+      }>(
+        `/api/workspaces/${workspaceSlug}/preview-environments/${id}/alias-hosts`,
+        { method: "PUT", body: JSON.stringify({ alias_hosts: aliasHosts }) },
       );
       set((s) => {
         const list = s.byWorkspace[workspaceSlug];

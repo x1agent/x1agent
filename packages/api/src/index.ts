@@ -382,6 +382,14 @@ const {
   natsConnection: providerNats,
   kubeConfig: sharedKubeConfig,
   sharedResourcesNamespace: process.env.K8S_NAMESPACE || "x1agent",
+  // Reserved domains gate aliases on preview environments — any host
+  // matching the install apex or the preview domain (and their
+  // subdomains) is refused at the API layer. Without this, a
+  // workspace admin could claim platform-owned hostnames.
+  reservedDomains: [
+    process.env.BASE_DOMAIN?.trim(),
+    process.env.PREVIEW_DOMAIN?.trim(),
+  ].filter((s): s is string => !!s && s.length > 0),
 });
 
 const app = new Hono();

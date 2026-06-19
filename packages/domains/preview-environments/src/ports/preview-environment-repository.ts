@@ -91,4 +91,15 @@ export interface PreviewEnvironmentRepository {
     workspaceId: WorkspaceId,
     envVarNames: readonly string[],
   ): Promise<PreviewEnvironment>;
+
+  /**
+   * Replace the alias-hosts list for an env. Each entry is a bare
+   * RFC 1123 hostname; the provider emits one TLS entry + Ingress
+   * rule per alias on the next deploy.
+   */
+  setAliasHosts(
+    id: PreviewEnvironmentId,
+    workspaceId: WorkspaceId,
+    aliasHosts: readonly string[],
+  ): Promise<PreviewEnvironment>;
 }

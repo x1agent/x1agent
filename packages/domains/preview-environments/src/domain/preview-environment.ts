@@ -87,6 +87,49 @@ export interface PreviewEnvironment {
    * preview pod via a per-preview K8s Secret bundle. Empty by default.
    */
   envVarNames: string[];
+  /**
+   * Additional public hostnames the preview should answer on, beyond
+   * its default `<slug>.<preview-domain>`. Bare hostnames only —
+   * validated against RFC 1123 at the application layer. The provider
+   * materializes one TLS entry + Ingress rule per alias on the next
+   * deploy; cert-manager mints per-alias certs via ingress-shim.
+   *
+   * The operator owns the DNS for each alias and is expected to CNAME
+   * it at the cluster's ingress hostname/IP before adding it here.
+   */
+  aliasHosts: string[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * RFC 1123 hostname check. Used at the application layer when adding
+ * an alias; we reject early so a bad value can't reach the provider
+ * (where it would fail Kubernetes' DNS-1123 validation deeper in the
+ * stack with a less actionable error).
+ *
+ * Rules: lowercase, 1–253 chars total, labels 1–63 chars each, labels
+ * start + end with alphanumeric, may contain hyphens internally, at
+ * least one dot (single-label hostnames like `localhost` aren't valid
+ * targets for public CNAMEs).
+ */
+const HOSTNAME_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function isValidAliasHost(raw: string): boolean {
+  if (typeof raw !== "string") return false;
+  const host = raw.trim().toLowerCase();
+  if (host.length === 0 || host.length > 253) return false;
+  const labels = host.split(".");
+  if (labels.length < 2) return false;
+  return labels.every((l) => HOSTNAME_LABEL_RE.test(l));
+}
+
+export class InvalidAliasHostError extends DomainError {
+  readonly code = "invalid_alias_host";
+  constructor(public readonly raw: string) {
+    super(
+      `alias host ${JSON.stringify(raw)} must be a valid RFC 1123 hostname (lowercase, ≥1 dot, labels 1–63 chars)`,
+    );
+    this.name = "InvalidAliasHostError";
+  }
 }

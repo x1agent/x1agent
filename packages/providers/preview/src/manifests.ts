@@ -55,6 +55,22 @@ export interface PreviewDeploymentInputs {
    * documented in deploy.ts.
    */
   extraEnvNames?: readonly string[];
+  /**
+   * Additional hostnames the Ingress should answer on, beyond the
+   * default `host`. Each alias gets its own TLS entry (with a
+   * per-alias secretName cert-manager mints via ingress-shim) and
+   * its own Ingress rule pointing at the same Service. Operator-owned
+   * DNS for each alias must already CNAME at the cluster ingress.
+   */
+  aliasHosts?: readonly string[];
+  /**
+   * cert-manager ClusterIssuer to annotate the Ingress with when
+   * `aliasHosts` is non-empty. Setting this on the annotation tells
+   * ingress-shim to mint a Certificate for each per-alias TLS entry's
+   * secretName. Defaults are platform-supplied; the chart wires this
+   * to the install's prod issuer.
+   */
+  aliasClusterIssuer?: string;
 }
 
 export interface KanikoBuildInputs {
@@ -306,44 +322,75 @@ export function buildService(inputs: PreviewDeploymentInputs): V1Service {
   };
 }
 
+/**
+ * Per-alias TLS secretName. Stable across deploys (same input host
+ * yields the same secret name) so cert-manager can reuse the issued
+ * Certificate instead of provisioning a new one each time. Truncated
+ * + suffixed with a short host hash to keep names <=253 chars and
+ * collision-resistant across slugs whose alias hosts share a prefix.
+ */
+export function aliasTlsSecretName(slug: string, host: string): string {
+  // FNV-1a 32-bit — tiny, deterministic, zero deps.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < host.length; i++) {
+    h ^= host.charCodeAt(i);
+    h = (h >>> 0) * 0x01000193;
+  }
+  const tag = (h >>> 0).toString(36).padStart(7, "0").slice(0, 7);
+  // Keep the operator-recognizable prefix; cap to a safe length.
+  return `alias-${slug}-${tag}`.slice(0, 60);
+}
+
 export function buildIngress(inputs: PreviewDeploymentInputs): V1Ingress {
+  const aliasHosts = (inputs.aliasHosts ?? []).filter(
+    // Drop anything matching the default host so we don't double-emit.
+    (h) => h && h !== inputs.host,
+  );
+
+  const ingressBackend = {
+    service: { name: inputs.slug, port: { number: 80 } },
+  } as const;
+  const ingressPath = {
+    path: "/",
+    pathType: "Prefix" as const,
+    backend: ingressBackend,
+  };
+
+  const tls = [
+    { hosts: [inputs.host], secretName: inputs.tlsSecretName },
+    ...aliasHosts.map((h) => ({
+      hosts: [h],
+      secretName: aliasTlsSecretName(inputs.slug, h),
+    })),
+  ];
+  const rules = [inputs.host, ...aliasHosts].map((h) => ({
+    host: h,
+    http: { paths: [ingressPath] },
+  }));
+
+  const annotations: Record<string, string> = {
+    "nginx.ingress.kubernetes.io/ssl-redirect": "true",
+  };
+  // When aliases are present, tell cert-manager's ingress-shim to
+  // mint a Certificate for each non-wildcard TLS entry's secretName.
+  // The wildcard cert backing the default host already exists and
+  // is left untouched.
+  if (aliasHosts.length > 0 && inputs.aliasClusterIssuer) {
+    annotations["cert-manager.io/cluster-issuer"] = inputs.aliasClusterIssuer;
+  }
+
   return {
     apiVersion: "networking.k8s.io/v1",
     kind: "Ingress",
     metadata: {
       name: inputs.slug,
       namespace: inputs.namespace,
-      annotations: {
-        "nginx.ingress.kubernetes.io/ssl-redirect": "true",
-      },
+      annotations,
     },
     spec: {
       ingressClassName: "nginx",
-      tls: [
-        {
-          hosts: [inputs.host],
-          secretName: inputs.tlsSecretName,
-        },
-      ],
-      rules: [
-        {
-          host: inputs.host,
-          http: {
-            paths: [
-              {
-                path: "/",
-                pathType: "Prefix",
-                backend: {
-                  service: {
-                    name: inputs.slug,
-                    port: { number: 80 },
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
+      tls,
+      rules,
     },
   };
 }

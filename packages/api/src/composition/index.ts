@@ -411,6 +411,14 @@ export interface CompositionEnv {
    * are a future enhancement.
    */
   sharedResourcesNamespace?: string;
+  /**
+   * Hostnames reserved by the platform — any preview-environment alias
+   * matching one of these (or being a subdomain of one) is rejected at
+   * the API layer. Always includes the install's base domain; the api
+   * boot passes BASE_DOMAIN + the configured PREVIEW_DOMAIN here so
+   * `*.preview.<install>` and `*.<install>` are both off-limits.
+   */
+  reservedDomains?: readonly string[];
 }
 
 export function compose(env: CompositionEnv): Composition {
@@ -616,6 +624,12 @@ export function compose(env: CompositionEnv): Composition {
     // dropping the row, so the cluster Deployment/Service/Ingress goes
     // away with the row instead of dangling.
     natsConnection: env.natsConnection,
+    // Server-side gate so a workspace admin can't register an alias
+    // colliding with the install's own hostnames. Without this gate,
+    // a malicious admin could squat `<other-slug>.preview.<install>`
+    // or intercept `api.<install>` / `app.<install>` traffic via the
+    // Ingress's per-host rule matching.
+    forbiddenAliasSuffixes: env.reservedDomains,
   });
 
   // Resolver wired into every `resolveSessionVisibility` call so a user

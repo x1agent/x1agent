@@ -263,6 +263,14 @@ export function EnvironmentDetailRoot({ workspaceSlug, envId }: Props) {
           }}
         />
 
+        <AliasHostsSection
+          slug={workspaceSlug}
+          envId={env.id}
+          aliasHosts={env.alias_hosts ?? []}
+          previewUrl={env.last_deploy_url}
+          canManage={canManage}
+        />
+
         {canManage && (
           <section className="space-y-3 rounded-lg border border-red-500/30 bg-red-500/5 p-5">
             <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
@@ -478,6 +486,188 @@ function EnvVarsSection({
           ))}
         </ul>
       ) : null}
+    </section>
+  );
+}
+
+interface AliasHostsSectionProps {
+  slug: string;
+  envId: string;
+  aliasHosts: string[];
+  previewUrl: string | null;
+  canManage: boolean;
+}
+
+/**
+ * Custom hostnames the preview also answers on. Operators register a
+ * vanity domain (e.g. `app.<their-domain>.com`) here after pointing
+ * its DNS at the cluster ingress. The next deploy emits an Ingress
+ * rule + per-alias TLS entry, and cert-manager provisions a Let's
+ * Encrypt cert via HTTP-01 automatically.
+ *
+ * Validation is server-side: the API rejects hosts on the install's
+ * reserved domains, so a workspace admin can't shadow platform
+ * traffic with an alias. Bad hostnames surface as a 400 with a
+ * specific error code we render inline.
+ */
+function AliasHostsSection({
+  slug,
+  envId,
+  aliasHosts,
+  previewUrl,
+  canManage,
+}: AliasHostsSectionProps) {
+  const setAliasHosts = usePreviewEnvironmentsStore((s) => s.setAliasHosts);
+  const [adding, setAdding] = useState(false);
+  const [newHost, setNewHost] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const previewHost = (() => {
+    if (!previewUrl) return null;
+    try {
+      return new URL(previewUrl).host;
+    } catch {
+      return null;
+    }
+  })();
+
+  const onAdd = async () => {
+    const target = newHost.trim().toLowerCase();
+    if (!target) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await setAliasHosts(slug, envId, [...aliasHosts, target]);
+      setNewHost("");
+      setAdding(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRemove = async (host: string) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await setAliasHosts(slug, envId, aliasHosts.filter((h) => h !== host));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="space-y-3 rounded-lg border border-border-soft bg-bg-elevated/30 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-fg">Custom hostnames</h2>
+          <p className="mt-1 text-xs text-fg-muted">
+            Extra hostnames this preview answers on. The platform emits one
+            Ingress rule + a cert-manager-issued TLS cert per alias on the
+            next deploy. You handle DNS — CNAME or A-record the host at the
+            cluster's ingress before adding it.
+            {previewHost ? (
+              <>
+                {" "}For this install:{" "}
+                <code className="rounded bg-bg-elevated px-1">{previewHost}</code>{" "}
+                is the canonical name.
+              </>
+            ) : null}
+          </p>
+        </div>
+        {canManage && !adding && (
+          <button
+            type="button"
+            onClick={() => {
+              setAdding(true);
+              setErr(null);
+            }}
+            className="shrink-0 rounded-md border border-border-soft px-3 py-1.5 text-sm text-fg-muted hover:text-fg"
+          >
+            + Add hostname
+          </button>
+        )}
+      </div>
+
+      {adding && canManage && (
+        <div className="rounded-md border border-border-soft bg-bg-elevated/40 p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-fg-faint">host:</span>
+            <input
+              value={newHost}
+              onChange={(e) => setNewHost(e.target.value.toLowerCase())}
+              placeholder="app.example.com"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void onAdd();
+                if (e.key === "Escape") {
+                  setAdding(false);
+                  setNewHost("");
+                  setErr(null);
+                }
+              }}
+              className="w-72 rounded-md border border-border-soft bg-bg-elevated px-2 py-1 font-mono text-sm text-fg focus:border-accent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={onAdd}
+              disabled={busy || !newHost.trim()}
+              className="rounded-md bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg/90 disabled:opacity-50"
+            >
+              {busy ? "Adding…" : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(false);
+                setNewHost("");
+                setErr(null);
+              }}
+              disabled={busy}
+              className="rounded-md border border-border-soft px-3 py-1.5 text-sm text-fg-muted hover:text-fg"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-xs text-fg-faint">
+            Bare hostname (no scheme, no port, no path). The API refuses
+            hosts on the install's reserved domains.
+          </p>
+        </div>
+      )}
+
+      {err && <p className="text-sm text-red-300">{err}</p>}
+
+      {aliasHosts.length === 0 ? (
+        <p className="text-sm text-fg-muted">
+          No custom hostnames. Click "+ Add hostname" to register one.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {aliasHosts.map((h) => (
+            <li
+              key={h}
+              className="flex items-center justify-between gap-2 rounded-md border border-border-soft bg-bg-elevated/40 px-3 py-2 text-sm"
+            >
+              <code className="text-fg">{h}</code>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => void onRemove(h)}
+                  disabled={busy}
+                  className="text-xs text-red-300 hover:text-red-200"
+                >
+                  remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

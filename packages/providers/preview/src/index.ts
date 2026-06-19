@@ -58,6 +58,13 @@ interface ProvisionRequest {
    * into the per-preview K8s Secret bundle alongside spec.env entries.
    */
   extra_env?: Record<string, string>;
+  /**
+   * Custom hostnames the Ingress should answer on, beyond the default
+   * `<slug>.<preview-domain>`. Each gets a per-alias TLS entry + rule
+   * and a cert-manager Certificate via ingress-shim (when the provider
+   * is configured with ALIAS_CLUSTER_ISSUER).
+   */
+  alias_hosts?: readonly string[];
 }
 
 type ProvisionReply =
@@ -113,6 +120,11 @@ async function main() {
   const previewDomain =
     process.env.PREVIEW_DOMAIN || "preview.local.x1agent.dev";
   const tlsSecretName = process.env.TLS_SECRET_NAME || "x1agent-wildcard";
+  // cert-manager ClusterIssuer used to mint per-alias certs when a
+  // preview registers custom hostnames. Empty/undefined disables the
+  // automatic Certificate flow; alias rules still route, but the
+  // operator has to populate the TLS Secret themselves.
+  const aliasClusterIssuer = process.env.ALIAS_CLUSTER_ISSUER || undefined;
 
   const nc = await connect({
     servers: natsUrl,
@@ -253,6 +265,10 @@ async function main() {
           !Array.isArray(req.extra_env)
             ? (req.extra_env as Record<string, string>)
             : undefined,
+        aliasHosts: Array.isArray(req.alias_hosts)
+          ? req.alias_hosts.filter((h): h is string => typeof h === "string")
+          : undefined,
+        aliasClusterIssuer,
       });
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       console.log(

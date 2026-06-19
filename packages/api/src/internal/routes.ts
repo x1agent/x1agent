@@ -1190,6 +1190,10 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     // the agent's app sees that env var as unset rather than crashing
     // the deploy. Logged so the operator can spot misconfigurations.
     const extraEnv: Record<string, string> = {};
+    // Custom hostnames the preview answers on, beyond `<slug>.<preview-domain>`.
+    // Operator-curated list on the preview_environments row; pulled here
+    // so the provider can emit alias TLS + Ingress rules on this deploy.
+    let aliasHosts: readonly string[] = [];
     if (
       cfg.previewEnvironments &&
       cfg.workspaceBindings &&
@@ -1201,6 +1205,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           agent.workspaceId,
           earlySlug as never,
         );
+        aliasHosts = existingEnv?.aliasHosts ?? [];
         const names = existingEnv?.envVarNames ?? [];
         if (names.length > 0) {
           const bindings = await cfg.workspaceBindings.findByNames(
@@ -1244,6 +1249,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           commit_sha: body.commit_sha,
           installation_id: installationId,
           extra_env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
+          alias_hosts: aliasHosts.length > 0 ? aliasHosts : undefined,
         }),
         { timeout: 20 * 60 * 1000 },
       );

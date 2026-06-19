@@ -80,6 +80,21 @@ export interface DeployInputs {
    * env block references the Secret via valueFrom.secretKeyRef.
    */
   extraEnv?: Record<string, string>;
+  /**
+   * Custom hostnames the Ingress should answer on, beyond the default
+   * `<slug>.<previewDomain>`. Each alias gets its own TLS entry +
+   * Ingress rule; cert-manager mints per-alias certs via ingress-shim
+   * (annotation seeded from `aliasClusterIssuer`).
+   */
+  aliasHosts?: readonly string[];
+  /**
+   * cert-manager ClusterIssuer the provider annotates the Ingress
+   * with when aliases are present. Defaults to undefined — without
+   * it the alias TLS entries reference Secrets nothing will mint,
+   * and the alias rules will serve traffic without TLS until an
+   * operator manually populates the Secret.
+   */
+  aliasClusterIssuer?: string;
 }
 
 export interface DeployResult {
@@ -452,6 +467,8 @@ export async function deployPreview(
     selfUrl,
     secretBundleName,
     extraEnvNames: Object.keys(extraEnv),
+    aliasHosts: inputs.aliasHosts,
+    aliasClusterIssuer: inputs.aliasClusterIssuer,
   };
   const deployment = buildDeployment(deployInputs);
   const service = buildService(deployInputs);
