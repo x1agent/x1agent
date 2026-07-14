@@ -19,6 +19,11 @@ import { startSessionEventSubscriber } from "./nats/subscriber.js";
 import { startSessionAuditSubscriber } from "./nats/audit-subscriber.js";
 import { startCommentWakeSubscriber } from "./nats/comment-wake-subscriber.js";
 import {
+  startCommentMentionSubscriber,
+  startCommentReplySubscriber,
+  startShareGrantSubscriber,
+} from "@x1agent/domain-notifications";
+import {
   AnthropicSessionSummarizer,
   OpenAISessionSummarizer,
   StubSessionSummarizer,
@@ -388,6 +393,7 @@ const {
   agentCollaborateResolver: composedAgentCollaborateResolver,
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
+  notifications: composedNotifications,
   agentRepoStore: composedAgentRepos,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
@@ -744,6 +750,37 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
   } catch (err) {
     console.warn(
       `[comment-wake] subscriber failed to start: ${(err as Error).message} — orchestrator will not be woken on new comments`,
+    );
+  }
+
+  // X1A-111 — notifications-writer subscribers. Three stubs are mounted
+  // here so the wiring slot exists; each one stays a no-op until its
+  // producer ticket lands:
+  //   * `comment_mention` — waiting on X1A-73 (mention writes)
+  //   * `comment_reply`   — waiting on X1A-110 (reply parenthood)
+  //   * `share_grant`     — waiting on the share-grant flow
+  // Production-safe because `startXxxSubscriber` does NOT open a NATS
+  // connection in stub mode; the `natsUrl` is accepted only so the real
+  // implementation has a stable signature.
+  try {
+    const mention = await startCommentMentionSubscriber({
+      natsUrl,
+      notifications: composedNotifications,
+    });
+    registerCleanup(() => mention.close());
+    const reply = await startCommentReplySubscriber({
+      natsUrl,
+      notifications: composedNotifications,
+    });
+    registerCleanup(() => reply.close());
+    const grant = await startShareGrantSubscriber({
+      natsUrl,
+      notifications: composedNotifications,
+    });
+    registerCleanup(() => grant.close());
+  } catch (err) {
+    console.warn(
+      `[notifications-writer] subscriber stubs failed to mount: ${(err as Error).message}`,
     );
   }
 

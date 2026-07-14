@@ -75,6 +75,10 @@ import {
 import { runUploadsCleanup } from "@x1agent/domain-uploads";
 import { composeUploads } from "./uploads.js";
 import {
+  PostgresNotificationRepository,
+  type NotificationRepository,
+} from "@x1agent/domain-notifications";
+import {
   PostgresSecretRepository,
   SecretService,
   loadMasterKey,
@@ -317,6 +321,13 @@ export interface Composition {
    * forge `producing_session_id` to inject text into another
    * workspace's session. */
   shareComments: PostgresShareCommentRepository;
+  /**
+   * X1A-111 — notification write-side repository. The api process
+   * mounts three subscriber stubs (`comment_mention`, `comment_reply`,
+   * `share_grant`) that close over this; they're no-ops until their
+   * producer tickets land (X1A-73 / X1A-110 / share-grant flow).
+   */
+  notifications: NotificationRepository;
   permissionGrants: PostgresPermissionGrantRepository;
   collections: PostgresCollectionRepository;
   agentRepoStore: PostgresAgentRepoStore;
@@ -883,6 +894,11 @@ export function compose(env: CompositionEnv): Composition {
   // succeed; events are dropped to memory. Production deploys always
   // have `env.natsConnection` set.
   const shareComments = new PostgresShareCommentRepository(env.sql);
+  // X1A-111 — write-side notifications repo. Read APIs and UI land in
+  // X1A-112 / X1A-113; here we just stand up the writer so subscriber
+  // stubs in api/index.ts have somewhere to insert when they wake up.
+  const notifications: NotificationRepository =
+    new PostgresNotificationRepository(env.sql);
   const shareCommentPublisher: ShareCommentPublisher = env.natsConnection
     ? new NatsShareCommentPublisher({
         publish: async (subject, payload) => {
@@ -1726,6 +1742,7 @@ export function compose(env: CompositionEnv): Composition {
     platformAdminGuard,
     agentCollaborateResolver,
     shareComments,
+    notifications,
     permissionGrants,
     collections: collectionsRepo,
     agentRepoStore: agentRepos,
