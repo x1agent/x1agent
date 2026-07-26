@@ -4,6 +4,16 @@ import Default from '@astrojs/starlight/components/Head.astro';
 
 <Default><slot /></Default>
 
+<!--
+  metrikk — our own analytics, running alongside GA4 rather than replacing it.
+  One beacon per page load, no cookies, no localStorage, no fingerprinting.
+  Events land in the R2 bucket we own (metrikk-events), partitioned by domain.
+  The collector endpoint is derived from this script's own src, so this tag is
+  the entire integration. Read it with the metrikk MCP server: `list_domains`,
+  `pageviews`. Keeping GA4 gives us a control to check metrikk's numbers against.
+-->
+<script defer src="https://collect.metrikk.dev/m.js"></script>
+
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-7QDKMS8GBD"></script>
 <script is:inline>
