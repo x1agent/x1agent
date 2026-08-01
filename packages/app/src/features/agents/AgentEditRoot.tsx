@@ -267,6 +267,18 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     }
   }, [existing]);
 
+  // Codex requires its dedicated runtime image. Once the platform preset
+  // catalog arrives, select that image automatically for a new Codex agent
+  // unless the operator has already chosen an image explicitly.
+  useEffect(() => {
+    if (isCreate && runtimeType === "codex" && imageId === "") {
+      const codexImage = images.find(
+        (image) => image.is_preset && image.name === "runtime-codex",
+      );
+      if (codexImage) setImageId(codexImage.id);
+    }
+  }, [imageId, images, isCreate, runtimeType]);
+
   if (status === "anonymous" && typeof window !== "undefined") {
     window.location.href = "/";
     return null;
@@ -317,6 +329,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           kind,
           system_prompt: systemPrompt,
           heartbeat_md: heartbeatMd,
+          image_id: imageId === "" ? null : imageId,
+          model: model.trim() === "" ? null : model.trim(),
           schedule: schedule.trim() ? schedule.trim() : null,
           scheduled_run_as_user_id: scheduledRunAsUserId || null,
           idle_timeout_seconds: idleTimeoutSeconds.trim() === ""
@@ -446,6 +460,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                           <SelectItem value="claude_code">
                             claude_code
                           </SelectItem>
+                          <SelectItem value="codex">codex</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -586,8 +601,17 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     pick a preset or a workspace image to override per agent.
                   </p>
                   <div className="space-y-1.5 pt-2">
-                    <Label htmlFor="agent-model">Claude model</Label>
-                    {modelCatalog.length > 0 ? (
+                    <Label htmlFor="agent-model">
+                      {runtimeType === "codex" ? "Codex model" : "Claude model"}
+                    </Label>
+                    {runtimeType === "codex" ? (
+                      <Input
+                        id="agent-model"
+                        placeholder="gpt-5.3-codex"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                      />
+                    ) : modelCatalog.length > 0 ? (
                       <Select
                         value={
                           model === ""
@@ -637,7 +661,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         )}
                       </div>
                     )}
-                    {modelCatalog.length > 0 &&
+                    {runtimeType !== "codex" && modelCatalog.length > 0 &&
                       model !== "" &&
                       !modelCatalog.some((m) => m.id === model) && (
                         <Input
@@ -648,12 +672,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         />
                       )}
                     <p className="text-xs text-fg-faint">
-                      The list shows only models a platform admin has
-                      enabled at /admin/anthropic-models. The full
-                      Agent Platform (formerly Vertex AI) catalog is
-                      intentionally not exposed — it lists models that
-                      aren't actually servable in the deployment's
-                      region.
+                      {runtimeType === "codex"
+                        ? "Codex uses the OpenAI model name entered here. Leave it blank to use the deployment default."
+                        : "The list shows only models a platform admin has enabled at /admin/anthropic-models. The full Agent Platform (formerly Vertex AI) catalog is intentionally not exposed — it lists models that aren't actually servable in the deployment's region."}
                     </p>
                   </div>
                 </CardContent>

@@ -191,6 +191,29 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
     });
   });
 
+  describe("Codex runtime propagation", () => {
+    it("injects OpenAI credentials and model only for the Codex image", () => {
+      const job = buildSessionJob({
+        ...baseSpec("worker"),
+        agentImage: "x1agent/runtime-codex:v1",
+        openaiApiKey: "sk-test",
+        openaiModel: "gpt-5.3-codex",
+        anthropicApiKey: "sk-ant-should-not-be-used",
+        anthropicModel: "claude-sonnet-4-5",
+      });
+      const agent = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "agent",
+      )!;
+      const env = Object.fromEntries(
+        (agent.env ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(env.OPENAI_API_KEY).toBe("sk-test");
+      expect(env.OPENAI_MODEL).toBe("gpt-5.3-codex");
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_MODEL).toBeUndefined();
+    });
+  });
+
   describe("USE_JETSTREAM_* propagation", () => {
     function sidecarEnv(): Array<{ name: string; value?: string }> {
       const job = buildSessionJob(baseSpec("worker"));

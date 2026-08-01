@@ -528,7 +528,10 @@ async function launchSession(
     // The Anthropic plumbing above stays the active path for every
     // Claude-runtime agent.
     openaiApiKey: cfg.openaiApiKey,
-    openaiModel: cfg.openaiModel,
+    openaiModel:
+      agent.runtimeType === "codex"
+        ? selectSessionModel(session, agent, cfg.openaiModel)
+        : cfg.openaiModel,
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,
     serviceAccountName: cfg.sessionServiceAccount,

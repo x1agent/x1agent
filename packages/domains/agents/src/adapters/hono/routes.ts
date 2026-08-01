@@ -148,6 +148,8 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       system_prompt?: string;
       heartbeat_md?: string;
       schedule?: string | null;
+      image_id?: string | null;
+      model?: string | null;
       scheduled_run_as_user_id?: string | null;
       idle_timeout_seconds?: number | string | null;
     };
@@ -170,6 +172,8 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
           kind: body.kind ? AgentKind(body.kind) : undefined,
           systemPrompt: body.system_prompt,
           heartbeatMd: body.heartbeat_md,
+          imageId: body.image_id === undefined ? undefined : body.image_id,
+          model: body.model === undefined ? undefined : body.model,
           schedule:
             body.schedule === null || body.schedule === undefined
               ? null

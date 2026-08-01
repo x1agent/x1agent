@@ -3,29 +3,25 @@
  *
  * Parallel to packages/agent/src/run.ts (the Claude SDK harness). Differences:
  *
- *   - Agent loop driver: spawns `codex exec --json` as a subprocess per turn
- *     rather than driving the Claude Agent SDK in-process. v0 is one-shot per
- *     turn; the App Server JSON-RPC path that supports interactive
- *     turn-injection lands in v1.
- *   - Event source: parses Codex JSONL from the subprocess's stdout and
- *     translates each event to platform wire shapes via normalize.ts.
- *   - Inject endpoint (:8788/inject) is a STUB. POSTs are accepted with 202
- *     and logged; no follow-up turn happens because v0 ships without the
- *     App Server. The sidecar's existing inject path stays valid for v1.
+ *   - Agent loop driver: drives one long-lived `codex app-server --stdio`
+ *     subprocess over JSON-RPC, preserving thread state across turns.
+ *   - Event source: parses app-server JSONL notifications and translates
+ *     them to platform wire shapes via normalize.ts.
+ *   - Inject endpoint (:8788/inject) starts a real follow-up turn on the
+ *     same Codex thread.
  *
  * The SSE :3100 contract, idle-timer, shutdown sequence, X1A-103
  * wake-classification, and sidecar /event POST are all identical to the
  * Claude harness — same downstream consumers (sidecar stream.rs → NATS →
  * api subscriber → browser), no changes required there.
  */
-import { spawn, type ChildProcess } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { normalizeCodexEvent, type NormalizedEvent } from "./normalize.js";
-import { createInputChannel } from "./input-channel.js";
+import { normalizeCodexNotification, type NormalizedEvent } from "./normalize.js";
+import { CodexAppServer } from "./app-server.js";
 import { IdleTimer } from "./idle-timer.js";
 import {
   buildAgentThinkingCancelledEvent,
@@ -163,14 +159,6 @@ streamServer.listen(3100, "0.0.0.0", () => {
   console.log("[agent-codex] SSE stream listening on :3100");
 });
 
-// ── Input channel (parked in v0) ────────────────────────
-
-// Reserved for the v1 App Server path. v0 spawns a fresh `codex exec`
-// per prompt and ignores subsequent injects; we still construct the
-// channel so the stub /inject endpoint can push onto something
-// addressable for debugging.
-const inputChannel = createInputChannel();
-
 // ── Wait for the sidecar ────────────────────────────────
 
 const sidecarReady = await waitForSidecar();
@@ -296,7 +284,8 @@ console.log(
 
 // ── Codex subprocess driver ─────────────────────────────
 
-let activeCodex: ChildProcess | null = null;
+let activeCodex: CodexAppServer | null = null;
+let codexThreadId: string | null = null;
 
 function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   if (!event) return;
@@ -304,18 +293,46 @@ function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   for (const e of list) emitToStream(e);
 }
 
+async function runCodexTurn(turnPrompt: string): Promise<void> {
+  if (activeCodex) {
+    if (!(activeCodex instanceof CodexAppServer) || !codexThreadId) {
+      console.warn("[agent-codex] turn already in flight — ignoring overlap");
+      return;
+    }
+    await activeCodex.turn(codexThreadId, turnPrompt);
+    return;
+  }
+  idleTimer.setBusy(true);
+  const server = new CodexAppServer({
+    binary: codexBin,
+    cwd: workspaceDir,
+    model: codexModel,
+    sandbox: codexSandbox === "danger-full-access" ? "danger-full-access" : "workspace-write",
+    onEvent: ({ method, params }) => emitNormalized(normalizeCodexNotification(method, params)),
+    onServerRequest: (request) => {
+      if (request.id !== undefined) server.respond(request.id, { decision: "decline" });
+    },
+    onStderr: (line) => console.error(`[codex] ${line}`),
+  });
+  activeCodex = server;
+  try {
+    codexThreadId = await server.start();
+    await server.turn(codexThreadId, turnPrompt);
+  } catch (error) {
+    emitToStream({ type: "agent.error", payload: { message: (error as Error).message, recoverable: false } });
+    server.stop();
+    activeCodex = null;
+  } finally {
+    idleTimer.setBusy(false);
+  }
+}
+
 /**
  * Spawn `codex exec --json` for a single prompt. Pipes JSONL stdout
  * through the normaliser. Resolves when the subprocess exits.
  */
-async function runCodexTurn(turnPrompt: string): Promise<void> {
-  if (activeCodex) {
-    console.warn(
-      "[agent-codex] turn already in flight — ignoring overlap (v0 is one-shot per turn)",
-    );
-    return;
-  }
-  idleTimer.setBusy(true);
+/* Retained as a source reference while the app-server driver is exercised.
+async function runCodexTurnLegacy(turnPrompt: string): Promise<void> {
   const args = [
     "exec",
     "--json",
@@ -401,8 +418,9 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
     });
   });
 }
+*/
 
-// ── Inject endpoint on :8788 (STUB in v0) ──────────────
+// ── Inject endpoint on :8788 ───────────────────────────
 
 const injectServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -460,18 +478,16 @@ const injectServer = http.createServer(async (req, res) => {
         });
       }
 
-      // v0: park the message on the channel so future turns can drain
-      // it but DO NOT spawn a follow-up `codex exec`. Interactive
-      // turn-injection is a v1 feature (gated on the App Server
-      // JSON-RPC path). The 202 makes that contract explicit to the
-      // sidecar; ordinary HTTP `/inject` consumers don't distinguish
-      // 200 vs 202, so the wake delivery is unchanged.
-      inputChannel.push(parsed.text, parsed.request_id || undefined);
+      // Send the message into the long-lived app-server thread. The
+      // thread preserves Codex conversation state across browser turns.
+      void runCodexTurn(parsed.text).catch((error) => {
+        emitToStream({ type: "agent.error", payload: { message: (error as Error).message, recoverable: false } });
+      });
       console.log(
-        `[agent-codex] /inject (stub) queued user message: ${parsed.text.slice(0, 100)}`,
+        `[agent-codex] /inject sent user message: ${parsed.text.slice(0, 100)}`,
       );
       res.writeHead(202);
-      res.end("accepted — v0 stub, no follow-up turn");
+      res.end("accepted");
     } catch (err) {
       res.writeHead(500);
       res.end((err as Error).message);
@@ -510,7 +526,7 @@ const injectServer = http.createServer(async (req, res) => {
 });
 
 injectServer.listen(8788, "0.0.0.0", () => {
-  console.log("[agent-codex] inject endpoint listening on :8788 (v0 stub)");
+  console.log("[agent-codex] inject endpoint listening on :8788");
 });
 
 // ── Idle timeout ────────────────────────────────────────
@@ -542,7 +558,7 @@ async function shutdown(
   idleTimer.dispose();
   if (activeCodex) {
     try {
-      activeCodex.kill("SIGTERM");
+      activeCodex.stop();
     } catch {
       // process may have already exited.
     }

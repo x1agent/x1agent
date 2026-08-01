@@ -1,8 +1,8 @@
-# @x1agent/agent-codex (spike v0)
+# @x1agent/agent-codex
 
 Alternative agent runtime that drives [OpenAI Codex](https://platform.openai.com/docs/codex) instead of the Claude Agent SDK. Parallel to `packages/agent/` (the Claude runtime) and produces the `x1agent/runtime-codex` container image.
 
-**Status: spike.** Cut for CEO-greenlit cost-crisis evaluation (2026-05-18). The image exists to prove an x1agent pod can run Codex end-to-end and emit the platform's standard wire events. It is **not** a production runtime — interactive turn injection, sub-agent spawning, approval flow, and cost telemetry are all explicitly out of scope. See `codex-spike-gap-analysis.md` §5 for the full IN/OUT list.
+**Status: testable integration.** The runtime uses the Codex app-server JSON-RPC protocol, so interactive follow-up turns work through `/inject`. Approval requests are declined because the x1agent pod is the sandbox boundary; OpenAI cost telemetry and sub-agent spawning remain future work.
 
 ## What's in the image
 
@@ -16,14 +16,14 @@ Alternative agent runtime that drives [OpenAI Codex](https://platform.openai.com
 ```
 pod (container: x1agent/runtime-codex)
  └─ x1agent-runner (Node + tsx, packages/agent-codex/src/run.ts)
-     ├─ subprocess: `codex exec --json -m $OPENAI_MODEL --sandbox $CODEX_SANDBOX --cd /workspace <prompt>`
-     │  └─ stdout: JSONL → normalize.ts → {type, payload} events
+     ├─ subprocess: `codex app-server --stdio`
+     │  └─ JSON-RPC JSONL → normalize.ts → {type, payload} events
      ├─ stdio MCP: x1-mcp.ts (POSTs to sidecar :9090)
      ├─ HTTP :3100 (SSE — sidecar consumes)
-     └─ HTTP :8788 (inject — STUB in v0, returns 202)
+     └─ HTTP :8788 (inject — starts a follow-up turn)
 ```
 
-The harness reads `AGENT_PROMPT` and spawns one `codex exec` invocation. Each line of Codex JSONL stdout is parsed and translated to the platform event shapes the api subscriber and the browser already understand (`session.init`, `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.thinking`, `agent.error`). The full mapping table lives in `src/normalize.ts` and is asserted by `src/run-codex.test.ts`.
+The harness initializes one Codex thread, reads `AGENT_PROMPT` as its first turn, and sends subsequent `/inject` messages through `turn/start` on that same thread. App-server deltas and completed items are translated to the platform event shapes the api subscriber and browser already understand (`session.init`, `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.thinking`, `agent.error`).
 
 `turn.completed` is logged to stdout (model + token counts) but **not** emitted as `agent.usage`. The api's cost-rollup pricing table has Anthropic models only; sending a Codex usage row would break the integration. Adding OpenAI pricing rows is v1 work.
 
@@ -35,13 +35,13 @@ Environment variables consumed by `src/run.ts`:
 |---|---|---|
 | `SESSION_ID` | (required) | Session UUID. |
 | `OPENAI_API_KEY` | (required) | Aliased to `CODEX_API_KEY` inside the entrypoint. |
-| `OPENAI_MODEL` | `gpt-5.3-codex` | Passed via `codex exec -m`. |
+| `OPENAI_MODEL` | `gpt-5.3-codex` | Passed to `thread/start` and `turn/start`. |
 | `CODEX_SANDBOX` | `workspace-write` | Try first; flip to `danger-full-access` if Bubblewrap fails under the pod's securityContext. |
 | `CODEX_PATH` | `codex` | Override for the CLI binary (only useful in local dev). |
 | `WORKSPACE_DIR` | `/workspace` | `--cd` value. |
 | `SIDECAR_URL` | `http://localhost:9090` | Where x1-mcp POSTs tool events. |
 | `SIDECAR_HEALTH_URL` | `http://localhost:9091` | Polled on boot before any sidecar POST. |
-| `AGENT_PROMPT` | `""` | Seed prompt. Empty → harness parks on the idle timer (v0 doesn't support interactive injection). |
+| `AGENT_PROMPT` | `""` | Seed prompt. Empty → harness waits for the first `/inject` turn. |
 | `IDLE_TIMEOUT_MS` | `900000` | Pod exits after this many ms with no activity. |
 
 The image's `x1-entrypoint.sh` aliases `OPENAI_API_KEY` into `CODEX_API_KEY` so we don't need a separate env-var slot on every pod — the Codex CLI accepts either, and the platform already plumbs `OPENAI_API_KEY` through Terraform → GSM → ESO → api pod env.
@@ -86,14 +86,13 @@ kubectl -n x1agent logs job/<session-job-name> -c agent
 
 Common failure modes:
 
-- `codex exec: command not found` — image didn't install `@openai/codex`. Rebuild.
-- `codex exec` exits non-zero immediately — usually missing/invalid `CODEX_API_KEY`. The entrypoint logs whether the alias landed.
+- `codex: command not found` — image didn't install `@openai/codex`. Rebuild.
+- `codex app-server` fails during initialization — usually missing/invalid `CODEX_API_KEY`. Check the agent container log.
 - `Bubblewrap failed` / `sandbox setup error` — pod's securityContext is rejecting the workspace-write sandbox. Set `CODEX_SANDBOX=danger-full-access` on the agent's env (or via a one-off pod-spec patch) and re-run; the pod is already the security boundary.
 
 ## What this spike deliberately doesn't do
 
-- **No App Server JSON-RPC.** The v1 path is to embed `codex app-server` as a long-lived subprocess and drive it via JSON-RPC for `turn/steer`, `turn/interrupt`, `serverRequest/approval` bridging. v0 is one-shot `codex exec`.
-- **No `:8788/inject`.** The endpoint accepts POSTs and returns 202; no follow-up Codex turn is spawned. Interactive sessions are degenerate in v0 — they answer the seed prompt then idle until timeout.
+- **No explicit turn steering/interrupt yet.** Follow-up turns work, but the harness does not yet expose separate `turn/steer` or `turn/interrupt` controls.
 - **No additional MCPs.** Only `x1-mcp.ts` is mounted. Files / Sheets / Docs / Calendar / Email / Zone-3 remote_oauth MCPs are out for v0.
 - **No `agent.usage` event.** Logged to stdout only; the api's cost-rollup needs OpenAI pricing rows before this can be wired safely.
 - **No `agents.runtime` column.** The runtime is inferred from `agents.image_id`. A schema migration adding an explicit enum is v1 work.
@@ -103,6 +102,6 @@ Common failure modes:
 
 - Extract `idle-timer.ts`, `input-channel.ts`, `image-tokens.ts`, `event-correlator.ts`, `wake-classifier.ts`, `x1-mcp.ts` into a shared `packages/agent-runtime-base/` (or `packages/agent-mcp-x1/` for the MCP) so both runtimes pull from one source. Marked with `TODO(codex-spike)` comments at the top of each duplicated file.
 - Land the `agents.runtime` schema migration and surface a runtime picker in the agent edit UI.
-- Migrate from `codex exec` to `codex app-server` for streaming + turn-steering + approval bridging.
+- Add explicit `turn/steer` / `turn/interrupt` handling and surface approval events in the UI if x1agent later wants user-mediated approvals.
 - Add OpenAI pricing rows to the cost-rollup tables and emit `agent.usage` for Codex turns.
 - Decide whether Codex Enterprise access tokens (GA May 2026) belong as a third auth source alongside API key and Vertex.

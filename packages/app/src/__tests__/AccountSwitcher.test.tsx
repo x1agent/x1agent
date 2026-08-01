@@ -26,8 +26,8 @@ import { useAccountsStore } from "../stores/accountsStore";
 
 const baseUser = {
   id: "u_1",
-  name: "Christian Toivola",
-  email: "c.toivola@gmail.com",
+  name: "Test User",
+  email: "test.user@example.com",
   avatar_url: null,
 };
 
@@ -62,7 +62,7 @@ async function openMenu() {
   // the Radix state. Send the pair explicitly. (This mirrors what
   // @testing-library/user-event does under the hood for pointer-driven
   // overlays.)
-  const trigger = await screen.findByRole("button", { name: /c\.toivola/ });
+  const trigger = await screen.findByRole("button", { name: /test\.user/ });
   fireEvent.pointerDown(trigger, { button: 0 });
   fireEvent.pointerUp(trigger, { button: 0 });
   fireEvent.click(trigger);

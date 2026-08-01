@@ -1,7 +1,11 @@
 import { ValidationError } from "@x1agent/kernel";
+import {
+  RUNTIME_TYPES,
+  type RuntimeType as SharedRuntimeType,
+} from "@x1agent/shared";
 
-export const RUNTIME_TYPES = ["claude_code"] as const;
-export type RuntimeType = (typeof RUNTIME_TYPES)[number];
+export { RUNTIME_TYPES } from "@x1agent/shared";
+export type RuntimeType = SharedRuntimeType;
 
 export function RuntimeType(raw: string): RuntimeType {
   if ((RUNTIME_TYPES as readonly string[]).includes(raw)) {

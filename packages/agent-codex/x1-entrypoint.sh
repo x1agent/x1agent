@@ -1,7 +1,6 @@
 #!/bin/sh
-# x1agent Codex runtime entrypoint. Spike v0: spawns `codex exec --json`
-# as a subprocess and translates its JSONL event stream into the
-# platform's wire events. See packages/agent-codex/README.md.
+# x1agent Codex runtime entrypoint. Drives `codex app-server --stdio`
+# and translates its JSON-RPC event stream into platform wire events.
 #
 # Codex CLI honors both CODEX_API_KEY and OPENAI_API_KEY; we alias the
 # latter to the former here so the existing platform-wide OPENAI_API_KEY

@@ -1,5 +1,9 @@
 export type Role = "member" | "admin" | "owner";
 
+/** Agent runtimes that can be selected for a workspace agent. */
+export const RUNTIME_TYPES = ["claude_code", "codex"] as const;
+export type RuntimeType = (typeof RUNTIME_TYPES)[number];
+
 export interface WorkspaceMembership {
   workspace_id: string;
   slug: string;

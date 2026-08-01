@@ -1,5 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { normalizeCodexEvent, type NormalizedEvent } from "./normalize.js";
+import {
+  normalizeCodexEvent,
+  normalizeCodexNotification,
+  type NormalizedEvent,
+} from "./normalize.js";
 
 function asArray(
   e: NormalizedEvent | NormalizedEvent[] | null,
@@ -221,5 +225,44 @@ describe("normalizeCodexEvent", () => {
     expect(
       (toolCall?.payload as { tool_name: string } | undefined)?.tool_name,
     ).toBe("mcp__x1agent__emit_status");
+  });
+});
+
+describe("normalizeCodexNotification (Codex app-server v2)", () => {
+  it("maps streamed assistant deltas without waiting for item completion", () => {
+    expect(
+      normalizeCodexNotification("item/agentMessage/delta", { delta: "hello" }),
+    ).toEqual({ type: "agent.text", payload: { text: "hello" } });
+  });
+
+  it("maps current camelCase command and MCP items", () => {
+    const command = normalizeCodexNotification("item/completed", {
+      item: {
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "pwd",
+        aggregatedOutput: "/workspace",
+        exitCode: 0,
+        status: "completed",
+      },
+    });
+    expect(asArray(command).map((event) => event.type)).toEqual([
+      "agent.tool_call",
+      "agent.tool_result",
+    ]);
+
+    const mcp = normalizeCodexNotification("item/completed", {
+      item: {
+        type: "mcpToolCall",
+        id: "mcp-1",
+        tool: "emit_status",
+        arguments: { status: "working" },
+        result: { ok: true },
+        status: "completed",
+      },
+    });
+    expect((asArray(mcp)[0]!.payload as { tool_name: string }).tool_name).toBe(
+      "emit_status",
+    );
   });
 });

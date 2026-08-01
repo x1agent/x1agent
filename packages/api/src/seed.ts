@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { sql } from "./db/client.js";
 
 const TEST_USER = process.env.TEST_USER;
@@ -22,6 +22,14 @@ const REGISTRY =
   process.env.IMAGE_REGISTRY ||
   "x1-registry.x1agent.svc.cluster.local:5000";
 const PLATFORM_PRESETS = [
+  {
+    name: "runtime-codex",
+    display_name: "Codex (OpenAI)",
+    description:
+      "OpenAI Codex CLI runtime with the x1agent event harness and MCP bridge.",
+    built_ref: `${REGISTRY}/x1agent/runtime-codex:v1`,
+    dockerfile_path: "packages/agent-codex/Dockerfile",
+  },
   {
     name: "runtime-core",
     display_name: "Lightweight (no language toolchain)",
@@ -70,10 +78,11 @@ function readDockerfile(relativePath: string): string {
   // Fall back to empty if the file isn't there — detail view will
   // render a placeholder note.
   try {
-    return readFileSync(
-      join(process.cwd(), "..", "..", "deploy", "images", relativePath),
-      "utf8",
-    );
+    const root = resolve(process.cwd(), "..", "..");
+    const path = relativePath.startsWith("packages/")
+      ? join(root, relativePath)
+      : join(root, "deploy", "images", relativePath);
+    return readFileSync(path, "utf8");
   } catch {
     return "";
   }
@@ -157,4 +166,3 @@ export async function seedIfDev() {
     }
   }
 }
-
