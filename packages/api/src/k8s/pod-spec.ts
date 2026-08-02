@@ -112,7 +112,7 @@ export interface SessionPodSpec {
   openaiApiKey?: string;
   /**
    * Override for the OpenAI model the Codex runtime selects per turn.
-   * Defaults to `gpt-5.3-codex` inside the runtime when unset.
+   * Defaults to `gpt-5-codex` inside the runtime when unset.
    */
   openaiModel?: string;
   /**

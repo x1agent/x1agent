@@ -35,7 +35,7 @@ Environment variables consumed by `src/run.ts`:
 |---|---|---|
 | `SESSION_ID` | (required) | Session UUID. |
 | `OPENAI_API_KEY` | (required) | Aliased to `CODEX_API_KEY` inside the entrypoint. |
-| `OPENAI_MODEL` | `gpt-5.3-codex` | Passed to `thread/start` and `turn/start`. |
+| `OPENAI_MODEL` | `gpt-5-codex` | Passed to `thread/start` and `turn/start`. Override for a deployment with a model supported by its auth mode. |
 | `CODEX_SANDBOX` | `workspace-write` | Try first; flip to `danger-full-access` if Bubblewrap fails under the pod's securityContext. |
 | `CODEX_PATH` | `codex` | Override for the CLI binary (only useful in local dev). |
 | `WORKSPACE_DIR` | `/workspace` | `--cd` value. |
@@ -68,7 +68,7 @@ The acceptance criterion for the spike is: **a pod from this image boots, answer
 
 3. **Create or update an agent** to point at that image row (`agents.image_id`). Pod-spec infers the Codex runtime from the image ref via `isCodexRuntimeImage()` — anything matching `/runtime-codex/i` or `/agent-codex/i` triggers the `OPENAI_API_KEY` branch.
 
-4. **Trigger a session** for the agent. The api's job-watcher will build a pod-spec whose agent container has `OPENAI_API_KEY` injected; the entrypoint aliases it into `CODEX_API_KEY` and runs `codex exec --json` against `gpt-5.3-codex`.
+4. **Trigger a session** for the agent. The api's job-watcher will build a pod-spec whose agent container has the Codex login mounted; the entrypoint aliases API credentials when present and runs the app-server against `gpt-5-codex` by default.
 
 5. **Watch NATS** to confirm the event sequence:
 

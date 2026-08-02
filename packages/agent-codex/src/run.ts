@@ -47,7 +47,10 @@ const platformName = process.env.PLATFORM_NAME || "x1agent";
 const workspaceName = process.env.WORKSPACE_NAME || "";
 const workspaceSystemPrompt = process.env.WORKSPACE_SYSTEM_PROMPT || "";
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
-const codexModel = process.env.OPENAI_MODEL || "gpt-5.3-codex";
+// ChatGPT-login profiles do not accept every API model name. Keep the
+// default on the Codex model supported by both ChatGPT and API auth; the
+// API can still override this with OPENAI_MODEL for a dedicated deployment.
+const codexModel = process.env.OPENAI_MODEL || "gpt-5-codex";
 // Bubblewrap inside an unprivileged pod is the open question
 // (codex-spike-gap-analysis.md §6). The env knob lets the platform team
 // flip the default per pod without rebuilding the image. Defaults to

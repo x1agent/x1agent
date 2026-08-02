@@ -167,6 +167,28 @@ describe("normalizeCodexEvent", () => {
     }
   });
 
+  it("surfaces nested app-server error messages", () => {
+    const out = normalizeCodexEvent({
+      method: "error",
+      params: {
+        error: {
+          message: JSON.stringify({
+            error: {
+              message: "The selected model is not supported for this login.",
+            },
+          }),
+        },
+      },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: {
+        message: "The selected model is not supported for this login.",
+        recoverable: false,
+      },
+    });
+  });
+
   it("unwraps msg-envelope shape (App Server SDK style)", () => {
     const out = normalizeCodexEvent({
       msg: {

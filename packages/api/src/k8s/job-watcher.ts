@@ -126,7 +126,7 @@ export interface JobWatcherConfig {
   openaiApiKey?: string;
   /**
    * OpenAI model override for the Codex runtime. When unset the
-   * runtime defaults to gpt-5.3-codex inside the container.
+   * runtime defaults to gpt-5-codex inside the container.
    */
   openaiModel?: string;
   /**

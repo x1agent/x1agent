@@ -88,6 +88,25 @@ interface CodexEnvelope {
   [k: string]: unknown;
 }
 
+function errorMessage(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      return errorMessage(JSON.parse(trimmed));
+    } catch {
+      return trimmed;
+    }
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const candidate of [record.message, record.error, record.detail]) {
+    const message = errorMessage(candidate);
+    if (message) return message;
+  }
+  return undefined;
+}
+
 /**
  * Codex JSONL parsers in the wild use two slightly different envelopes:
  *
@@ -338,11 +357,9 @@ export function normalizeCodexEvent(
     case "turn.failed":
     case "error": {
       const msg =
-        typeof env.message === "string"
-          ? env.message
-          : typeof env.error === "string"
-            ? env.error
-            : "codex turn failed";
+        errorMessage(env.message) ??
+        errorMessage(env.error) ??
+        "codex turn failed";
       return {
         type: "agent.error",
         payload: { message: msg, recoverable: false },

@@ -607,7 +607,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     {runtimeType === "codex" ? (
                       <Input
                         id="agent-model"
-                        placeholder="gpt-5.3-codex"
+                        placeholder="gpt-5-codex"
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
                       />
