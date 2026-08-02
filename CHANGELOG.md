@@ -1,3 +1,23 @@
+# [1.43.0](https://github.com/x1agent/x1agent/compare/v1.42.0...v1.43.0) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** bring Codex MCP and upload handling to parity ([52329fc](https://github.com/x1agent/x1agent/commit/52329fc97cb1eaaa9ffb9ca83dd3d48e6b7d33fa))
+* allow dev API to update session history ([e332fd1](https://github.com/x1agent/x1agent/commit/e332fd1d08dabea209643593bf5db5358b365d2f))
+* discover Codex models from account ([4d1af61](https://github.com/x1agent/x1agent/commit/4d1af6127b1aeb62b08818e13aa9e02f453503fb))
+* keep Codex sessions interactive ([b68077a](https://github.com/x1agent/x1agent/commit/b68077a2bcf6ffc957f253da6be6f5e1d9393914))
+* **mcp-oauth:** avoid duplicate client authentication ([4b2165c](https://github.com/x1agent/x1agent/commit/4b2165cfd50fae288ee5771dc550aa5ae01159d4))
+* prefer Codex login profile over API key ([17968e7](https://github.com/x1agent/x1agent/commit/17968e74d0cf0b255911ac569242dd4a46674d8f))
+* support ChatGPT Codex model in sessions ([dca03cd](https://github.com/x1agent/x1agent/commit/dca03cd79add443ba0a9d81c34db8da4fa062cd5))
+* trust the in-cluster Kubernetes CA in dev API ([5df6f47](https://github.com/x1agent/x1agent/commit/5df6f4747ee7c7862ca186c4f43e03fe585b78f2))
+
+
+### Features
+
+* **agent:** add Codex app-server runtime ([51c0847](https://github.com/x1agent/x1agent/commit/51c0847bd2504a1cde6bec8964a86a2d1928bc50))
+* bridge Codex login into devspace sessions ([9db6ef3](https://github.com/x1agent/x1agent/commit/9db6ef32fff7feb9c929df582d239d4d057088e6))
+
 # [1.42.0](https://github.com/x1agent/x1agent/compare/v1.41.0...v1.42.0) (2026-06-19)
 
 
