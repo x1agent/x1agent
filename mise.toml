@@ -483,12 +483,14 @@ DOCKER_BUILDKIT=1 docker build \\
   -f packages/agent-claude/Dockerfile \\
   -t x1agent-agent:latest \\
   -t x1agent/runtime-core:v1 \\
+  -t x1-registry.x1agent.svc.cluster.local:5000/x1agent/runtime-core:v1 \\
   .
 echo "[images:session] building x1agent/runtime-codex:v1"
 DOCKER_BUILDKIT=1 docker build \\
   -f packages/agent-codex/Dockerfile \\
   -t x1agent/runtime-codex:v1 \\
   -t x1agent/runtime-codex:latest \\
+  -t x1-registry.x1agent.svc.cluster.local:5000/x1agent/runtime-codex:v1 \\
   .
 echo "[images:session] building x1agent-sidecar:latest"
 DOCKER_BUILDKIT=1 docker build \\
