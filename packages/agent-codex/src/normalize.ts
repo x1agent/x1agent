@@ -123,8 +123,14 @@ function flatten(raw: CodexEnvelope): CodexEnvelope {
   const params = raw["params"];
   if (typeof method === "string" && params && typeof params === "object") {
     const p = params as Record<string, unknown>;
-    if (method === "item/completed") return { ...raw, type: "item.completed", item: p.item as CodexEnvelope["item"] };
-    if (method === "turn/completed") return { ...raw, type: "turn.completed", ...p };
+    if (method === "item/completed")
+      return {
+        ...raw,
+        type: "item.completed",
+        item: p.item as CodexEnvelope["item"],
+      };
+    if (method === "turn/completed")
+      return { ...raw, type: "turn.completed", ...p };
     if (method === "turn/failed") return { ...raw, type: "turn.failed", ...p };
     if (method === "error") return { ...raw, type: "error", ...p };
   }
@@ -191,22 +197,66 @@ export function normalizeCodexEvent(
 
         case "commandExecution": {
           return [
-            { type: "agent.tool_call", payload: { tool_name: "bash", tool_use_id: itemId, input: { command: item.command ?? "" } } },
-            { type: "agent.tool_result", payload: { tool_use_id: itemId, content: item.aggregatedOutput ?? "", is_error: item.status === "failed" || (typeof item.exitCode === "number" && item.exitCode !== 0) } },
+            {
+              type: "agent.tool_call",
+              payload: {
+                tool_name: "bash",
+                tool_use_id: itemId,
+                input: { command: item.command ?? "" },
+              },
+            },
+            {
+              type: "agent.tool_result",
+              payload: {
+                tool_use_id: itemId,
+                content: item.aggregatedOutput ?? "",
+                is_error:
+                  item.status === "failed" ||
+                  (typeof item.exitCode === "number" && item.exitCode !== 0),
+              },
+            },
           ];
         }
 
         case "fileChange": {
           return [
-            { type: "agent.tool_call", payload: { tool_name: "edit", tool_use_id: itemId, input: { changes: item.changes ?? [] } } },
-            { type: "agent.tool_result", payload: { tool_use_id: itemId, content: item.changes ?? [], is_error: item.status === "failed" } },
+            {
+              type: "agent.tool_call",
+              payload: {
+                tool_name: "edit",
+                tool_use_id: itemId,
+                input: { changes: item.changes ?? [] },
+              },
+            },
+            {
+              type: "agent.tool_result",
+              payload: {
+                tool_use_id: itemId,
+                content: item.changes ?? [],
+                is_error: item.status === "failed",
+              },
+            },
           ];
         }
 
         case "mcpToolCall": {
           return [
-            { type: "agent.tool_call", payload: { tool_name: item.tool ?? "unknown_mcp_tool", tool_use_id: itemId, input: item.arguments ?? {} } },
-            { type: "agent.tool_result", payload: { tool_use_id: itemId, content: item.result ?? item.error ?? "", is_error: Boolean(item.error) || item.status === "failed" } },
+            {
+              type: "agent.tool_call",
+              payload: {
+                tool_name: item.tool ?? "unknown_mcp_tool",
+                tool_use_id: itemId,
+                input: item.arguments ?? {},
+              },
+            },
+            {
+              type: "agent.tool_result",
+              payload: {
+                tool_use_id: itemId,
+                content: item.result ?? item.error ?? "",
+                is_error: Boolean(item.error) || item.status === "failed",
+              },
+            },
           ];
         }
 
@@ -390,7 +440,10 @@ export function normalizeCodexNotification(
       ? { type: "agent.text", payload: { text: params.delta } }
       : null;
   }
-  if (method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta") {
+  if (
+    method === "item/reasoning/summaryTextDelta" ||
+    method === "item/reasoning/textDelta"
+  ) {
     return typeof params.delta === "string" && params.delta
       ? { type: "agent.thinking", payload: { text: params.delta } }
       : null;

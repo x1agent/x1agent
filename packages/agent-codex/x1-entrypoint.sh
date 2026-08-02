@@ -20,4 +20,4 @@ fi
 
 exec /x1/runtime/bin/node \
   /x1/runtime/lib/node_modules/tsx/dist/cli.mjs \
-  /x1/app/src/run.ts "$@"
+  /x1/app/packages/agent-codex/src/run.ts "$@"

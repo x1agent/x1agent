@@ -84,9 +84,9 @@ describe("normalizeCodexEvent", () => {
     );
     expect(events.length).toBe(2);
     expect(events[0]!.type).toBe("agent.tool_call");
-    expect(
-      (events[0]!.payload as { tool_name: string }).tool_name,
-    ).toBe("bash");
+    expect((events[0]!.payload as { tool_name: string }).tool_name).toBe(
+      "bash",
+    );
     expect(events[1]!.type).toBe("agent.tool_result");
     expect((events[1]!.payload as { is_error: boolean }).is_error).toBe(false);
   });

@@ -1,5 +1,3 @@
-// TODO(codex-spike): duplicated verbatim from packages/agent/src/wake-classifier.ts
-// for v0. Extract into agent-runtime-base in the spike follow-up.
 /**
  * X1A-103 — derive the `session.agent_thinking` payload from an
  * /inject body.
@@ -71,7 +69,10 @@ const VALID_SOURCES: ReadonlySet<WakeSource> = new Set([
  * orchestrator's `inject_message` MCP tool routed through the sidecar.
  */
 export function classifyWakeSource(fields: WakeEnvelopeFields): WakeSource {
-  if (fields.wake_source && VALID_SOURCES.has(fields.wake_source as WakeSource)) {
+  if (
+    fields.wake_source &&
+    VALID_SOURCES.has(fields.wake_source as WakeSource)
+  ) {
     return fields.wake_source as WakeSource;
   }
   const kind = fields.kind ?? "";
@@ -81,11 +82,7 @@ export function classifyWakeSource(fields: WakeEnvelopeFields): WakeSource {
   if (kind === "heartbeat") {
     return "scheduler";
   }
-  if (
-    kind === "state_change" ||
-    kind === "watchdog" ||
-    kind === "checkup"
-  ) {
+  if (kind === "state_change" || kind === "watchdog" || kind === "checkup") {
     return "platform";
   }
   if (kind === "message") {

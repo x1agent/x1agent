@@ -1,7 +1,8 @@
 /**
  * Codex agent container entrypoint — spike v0.
  *
- * Parallel to packages/agent/src/run.ts (the Claude SDK harness). Differences:
+ * Parallel to packages/agent-claude/src/run.ts. Shared platform plumbing lives
+ * in packages/agent-runtime; this file owns only the Codex driver behavior.
  *
  *   - Agent loop driver: drives one long-lived `codex app-server --stdio`
  *     subprocess over JSON-RPC, preserving thread state across turns.
@@ -31,13 +32,13 @@ import {
   renderCodexMcpConfig,
 } from "./mcp-config.js";
 import { prepareCodexTurnInput } from "./upload-inputs.js";
-import { IdleTimer } from "./idle-timer.js";
+import { IdleTimer } from "../../agent-runtime/src/idle-timer.js";
 import {
   buildAgentThinkingCancelledEvent,
   buildAgentThinkingEvent,
   type WakeEnvelopeFields,
-} from "./wake-classifier.js";
-import { createEventCorrelator } from "./event-correlator.js";
+} from "../../agent-runtime/src/wake-classifier.js";
+import { createEventCorrelator } from "../../agent-runtime/src/event-correlator.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -203,10 +204,15 @@ const tsxPath = resolveTsxBinary();
 function renderCodexConfig(): string {
   const stdioServers = buildPlatformMcpDefinitions({
     tsxPath,
-    sourceDir: here,
+    sourceDir: path.resolve(here, "../../agent-runtime/src"),
     sidecarUrl,
     resolvePath: path.resolve,
   });
+  const x1agentMcp = stdioServers.find((server) => server.name === "x1agent");
+  if (x1agentMcp) {
+    x1agentMcp.env.SESSION_MODE = sessionMode;
+    x1agentMcp.env.X1_INTERACTIVE_END_SESSION_POLICY = "reject";
+  }
   const remoteServers = parseRemoteMcpAttachments(
     process.env.MCP_REMOTE_ATTACHMENTS_JSON,
     (message) => console.warn(`[agent-codex] ${message}`),

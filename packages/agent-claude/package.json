@@ -1,5 +1,5 @@
 {
-  "name": "@x1agent/agent-codex",
+  "name": "@x1agent/agent-claude",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,9 +9,10 @@
     "dev": "tsx src/run.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "docker:build": "docker build -f packages/agent-codex/Dockerfile -t x1agent/runtime-codex ../.."
+    "docker:build": "docker build -f packages/agent-claude/Dockerfile -t x1agent/agent ../.."
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^4.0.0"
   },

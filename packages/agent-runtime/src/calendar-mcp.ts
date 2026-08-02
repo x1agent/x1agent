@@ -21,7 +21,10 @@ async function postToSidecar(path: string, payload: unknown) {
     try {
       body = await res.json();
     } catch {
-      body = { ok: false, error: { code: "non_json_reply", message: "non-JSON body" } };
+      body = {
+        ok: false,
+        error: { code: "non_json_reply", message: "non-JSON body" },
+      };
     }
     return { ok: res.ok, body };
   } catch (err) {
@@ -51,10 +54,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           calendar_id: {
             type: "string",
-            description: "Defaults to \"primary\". Use a calendar's id (often an email-like string) for non-primary.",
+            description:
+              'Defaults to "primary". Use a calendar\'s id (often an email-like string) for non-primary.',
           },
-          time_min: { type: "string", description: "ISO-8601 start time. Defaults to now." },
-          time_max: { type: "string", description: "ISO-8601 end time. Defaults to time_min + 7 days." },
+          time_min: {
+            type: "string",
+            description: "ISO-8601 start time. Defaults to now.",
+          },
+          time_max: {
+            type: "string",
+            description: "ISO-8601 end time. Defaults to time_min + 7 days.",
+          },
           q: { type: "string", description: "Free-text search query." },
           max_results: { type: "number", description: "Defaults to 20." },
         },
@@ -64,11 +74,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "create_calendar_event",
       description:
-        "Create a new Google Calendar event. Sends invites to attendees automatically. Times must be ISO-8601 with timezone offset (e.g. \"2026-05-08T15:00:00-04:00\"). Returns the new event id + web_view_link.",
+        'Create a new Google Calendar event. Sends invites to attendees automatically. Times must be ISO-8601 with timezone offset (e.g. "2026-05-08T15:00:00-04:00"). Returns the new event id + web_view_link.',
       inputSchema: {
         type: "object" as const,
         properties: {
-          calendar_id: { type: "string", description: "Defaults to \"primary\"." },
+          calendar_id: {
+            type: "string",
+            description: 'Defaults to "primary".',
+          },
           summary: { type: "string", description: "Event title." },
           description: { type: "string" },
           start: { type: "string", description: "ISO-8601 with TZ." },
@@ -91,7 +104,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          calendar_id: { type: "string", description: "Defaults to \"primary\"." },
+          calendar_id: {
+            type: "string",
+            description: 'Defaults to "primary".',
+          },
           event_id: { type: "string" },
           summary: { type: "string" },
           description: { type: "string" },
@@ -111,7 +127,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          calendar_id: { type: "string", description: "Defaults to \"primary\"." },
+          calendar_id: {
+            type: "string",
+            description: 'Defaults to "primary".',
+          },
           event_id: { type: "string" },
         },
         required: ["event_id"],

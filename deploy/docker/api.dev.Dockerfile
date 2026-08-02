@@ -26,7 +26,7 @@ COPY deploy/migrations/ ./deploy/migrations/
 # container-registry detail view can show the actual Dockerfile to
 # admins. Small text files — baking them in costs nothing.
 COPY deploy/images/ ./deploy/images/
-COPY packages/agent/Dockerfile ./deploy/images/runtime-core/Dockerfile
+COPY packages/agent-claude/Dockerfile ./deploy/images/runtime-core/Dockerfile
 
 # Devspace sync replaces packages/* at dev time; this COPY is just so the
 # image is runnable on its own outside devspace (useful for CI smoke tests).

@@ -9,7 +9,10 @@ const ID_A = "7f3c4b58-91da-4f87-9a31-1f0b9e2d2c11";
 const ID_B = "12345678-1234-1234-1234-1234567890ab";
 
 function makeFetch(
-  handler: (url: string, init: RequestInit | undefined) => Response | Promise<Response>,
+  handler: (
+    url: string,
+    init: RequestInit | undefined,
+  ) => Response | Promise<Response>,
 ): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -204,17 +207,14 @@ describe("resolveImageTokens — replacement & dedupe", () => {
       );
     });
     const rec = recordingWriters();
-    await resolveImageTokens(
-      `[image: ${ID_A}] and again [image: ${ID_A}]`,
-      {
-        sidecarUrl: "http://localhost:9090",
-        uploadsDir: "/tmp/test-uploads",
-        fetchImpl,
-        writeFileImpl: rec.writeFileImpl,
-        mkdirImpl: rec.mkdirImpl,
-        logImpl: () => {},
-      },
-    );
+    await resolveImageTokens(`[image: ${ID_A}] and again [image: ${ID_A}]`, {
+      sidecarUrl: "http://localhost:9090",
+      uploadsDir: "/tmp/test-uploads",
+      fetchImpl,
+      writeFileImpl: rec.writeFileImpl,
+      mkdirImpl: rec.mkdirImpl,
+      logImpl: () => {},
+    });
     expect(calls).toBe(1);
   });
 

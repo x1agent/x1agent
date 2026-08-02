@@ -116,8 +116,8 @@ images:
     image: x1agent-agent
     tags:
       - latest
-    dockerfile: ./packages/agent/Dockerfile
-    context: ./packages/agent
+    dockerfile: ./packages/agent-claude/Dockerfile
+    context: .
     rebuildStrategy: ignoreContextChanges
   sidecar:
     image: x1agent-sidecar

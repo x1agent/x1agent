@@ -50,11 +50,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN npm install -g @anthropic-ai/claude-code tsx
 
 WORKDIR /app
-COPY package.json ./
+COPY packages/agent-claude/package.json ./
 RUN npm install --omit=dev --ignore-scripts
 
-COPY src/ ./src/
-COPY tsconfig.json ./
+COPY packages/agent-claude/src/ ./packages/agent-claude/src/
+COPY packages/agent-runtime/src/ ./packages/agent-runtime/src/
 
 # ── Runtime stage ─────────────────────────────────────────
 FROM node:22-slim
@@ -69,17 +69,16 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/package.json ./
 
-COPY git-credential-x1.sh /usr/local/bin/git-credential-x1
+COPY packages/agent-runtime/assets/git-credential-x1.sh /usr/local/bin/git-credential-x1
 RUN chmod +x /usr/local/bin/git-credential-x1
 # gh CLI shim — intercepts /usr/bin/gh by sitting earlier on PATH.
 # Mints a fresh installation token from the sidecar on every invocation.
-COPY gh-x1.sh /usr/local/bin/gh
+COPY packages/agent-runtime/assets/gh-x1.sh /usr/local/bin/gh
 RUN chmod +x /usr/local/bin/gh
-COPY gitconfig /etc/gitconfig
+COPY packages/agent-runtime/assets/gitconfig /etc/gitconfig
 
 RUN mkdir -p /workspace && chmod 777 /workspace
 
@@ -100,7 +99,7 @@ RUN set -e \
 # Entrypoint script: run the Agent SDK launcher under the bundled
 # Node + tsx. Works regardless of whether the base image ships its
 # own Node — we ignore $PATH and use absolute paths.
-COPY x1-entrypoint.sh /x1/bin/entrypoint
+COPY packages/agent-claude/x1-entrypoint.sh /x1/bin/entrypoint
 RUN chmod +x /x1/bin/entrypoint
 
 # Every x1agent runtime image — this one plus every preset that

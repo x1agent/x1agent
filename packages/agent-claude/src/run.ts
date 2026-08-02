@@ -25,15 +25,15 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { normalizeMessage } from "./normalize.js";
-import { resolveImageTokens as resolveImageTokensImpl } from "./image-tokens.js";
+import { resolveImageTokens as resolveImageTokensImpl } from "../../agent-runtime/src/image-tokens.js";
 import { createInputChannel } from "./input-channel.js";
-import { IdleTimer } from "./idle-timer.js";
+import { IdleTimer } from "../../agent-runtime/src/idle-timer.js";
 import {
   buildAgentThinkingCancelledEvent,
   buildAgentThinkingEvent,
   type WakeEnvelopeFields,
-} from "./wake-classifier.js";
-import { createEventCorrelator } from "./event-correlator.js";
+} from "../../agent-runtime/src/wake-classifier.js";
+import { createEventCorrelator } from "../../agent-runtime/src/event-correlator.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -230,12 +230,13 @@ if (!sidecarReady) {
 // ── MCP servers ─────────────────────────────────────────
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const x1McpPath = path.resolve(here, "x1-mcp.ts");
-const filesMcpPath = path.resolve(here, "files-mcp.ts");
-const sheetsMcpPath = path.resolve(here, "sheets-mcp.ts");
-const docsMcpPath = path.resolve(here, "docs-mcp.ts");
-const calendarMcpPath = path.resolve(here, "calendar-mcp.ts");
-const emailMcpPath = path.resolve(here, "email-mcp.ts");
+const sharedRuntimeDir = path.resolve(here, "../../agent-runtime/src");
+const x1McpPath = path.resolve(sharedRuntimeDir, "x1-mcp.ts");
+const filesMcpPath = path.resolve(sharedRuntimeDir, "files-mcp.ts");
+const sheetsMcpPath = path.resolve(sharedRuntimeDir, "sheets-mcp.ts");
+const docsMcpPath = path.resolve(sharedRuntimeDir, "docs-mcp.ts");
+const calendarMcpPath = path.resolve(sharedRuntimeDir, "calendar-mcp.ts");
+const emailMcpPath = path.resolve(sharedRuntimeDir, "email-mcp.ts");
 
 // Resolve tsx so spawned MCP subprocesses can find it whether we're in
 // a container (tsx on PATH) or local dev (node_modules/.bin/tsx).
@@ -253,7 +254,11 @@ function resolveTsxBinary(): string {
 const tsxPath = resolveTsxBinary();
 console.log(`[agent] tsx binary: ${tsxPath}`);
 
-type StdioMcp = { command: string; args: string[]; env: Record<string, string> };
+type StdioMcp = {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
 type HttpMcp = { type: "http"; url: string };
 type RemoteAttachmentEnv = { name: string; url: string };
 

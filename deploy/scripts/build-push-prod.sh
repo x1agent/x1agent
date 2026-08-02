@@ -93,10 +93,7 @@ build_push      google-workspace deploy/docker/google-workspace.prod.Dockerfile
 build_push      messaging-slack  deploy/docker/messaging-slack.prod.Dockerfile
 build_push      mcp-oauth-proxy  deploy/docker/mcp-oauth-proxy.prod.Dockerfile
 
-# agent + sidecar — session pod images. Build context lives in the
-# package directory (each owns its own Dockerfile) rather than the
-# monorepo root, so they bypass the build_push helper which assumes
-# root context.
+# agent + sidecar — session pod images.
 build_push_session() {
   local name="$1" path="$2"
   local img="${AR}/${name}:${TAG}"
@@ -111,7 +108,7 @@ build_push_session() {
   docker push "$img"
   docker push "$img_latest"
 }
-build_push_session agent    packages/agent
+build_push agent            packages/agent-claude/Dockerfile
 build_push_session sidecar  packages/sidecar
 
 echo "[build-push] done"

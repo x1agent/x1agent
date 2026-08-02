@@ -84,7 +84,7 @@ mise run status:prod
 | `preview` | `deploy/docker/preview.prod.Dockerfile` | preview provider |
 | `graph-surrealdb` | `deploy/docker/graph-surrealdb.prod.Dockerfile` | graph provider |
 | `mcp-oauth-proxy` | `deploy/docker/mcp-oauth-proxy.prod.Dockerfile` | per-attached `remote_oauth` MCP |
-| `agent` | `packages/agent/Dockerfile` | session pods |
+| `agent` | `packages/agent-claude/Dockerfile` | default Claude session pods |
 | `sidecar` | `packages/sidecar/Dockerfile` | session pods (sidecar container) |
 
 The installer's `install:prod` (and the subsequent `deploy:prod`) wraps this

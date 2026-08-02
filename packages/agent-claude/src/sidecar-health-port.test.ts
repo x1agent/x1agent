@@ -9,10 +9,7 @@ import { join } from "node:path";
 // values together so a port change on either side trips this test.
 
 describe("sidecar health port alignment", () => {
-  const agentRun = readFileSync(
-    join(__dirname, "run.ts"),
-    "utf8",
-  );
+  const agentRun = readFileSync(join(__dirname, "run.ts"), "utf8");
   const sidecarMain = readFileSync(
     join(__dirname, "../../sidecar/src/main.rs"),
     "utf8",

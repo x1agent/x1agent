@@ -12,7 +12,7 @@ import { dirname, resolve } from "node:path";
  * functionally invisible on x1agent.com until the descriptions also
  * matched.
  *
- * Mirror these in `packages/agent-codex/src/x1-mcp.ts`.
+ * Both Claude and Codex load this single shared implementation.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,7 +26,9 @@ describe("read_share MCP tool description (agent runtime)", () => {
 
   it("does not retain the stale single-session scope wording", () => {
     expect(source).not.toContain("Slice A (PRD 0006) scope");
-    expect(source).not.toContain("200 only when the share belongs to THIS session");
+    expect(source).not.toContain(
+      "200 only when the share belongs to THIS session",
+    );
     expect(source).not.toContain(
       "Slice A only allows reading shares this session produced",
     );

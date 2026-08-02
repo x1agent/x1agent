@@ -47,7 +47,7 @@ COPY --chown=agent:agent packages/domains/ ./packages/domains/
 COPY --chown=agent:agent packages/infrastructure/ ./packages/infrastructure/
 COPY --chown=agent:agent deploy/migrations/ ./deploy/migrations/
 COPY --chown=agent:agent deploy/images/ ./deploy/images/
-COPY --chown=agent:agent packages/agent/Dockerfile ./deploy/images/runtime-core/Dockerfile
+COPY --chown=agent:agent packages/agent-claude/Dockerfile ./deploy/images/runtime-core/Dockerfile
 
 USER agent
 EXPOSE 30001

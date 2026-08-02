@@ -1,6 +1,6 @@
 # @x1agent/agent-codex
 
-Alternative agent runtime that drives [OpenAI Codex](https://platform.openai.com/docs/codex) instead of the Claude Agent SDK. Parallel to `packages/agent/` (the Claude runtime) and produces the `x1agent/runtime-codex` container image.
+Alternative agent runtime that drives [OpenAI Codex](https://platform.openai.com/docs/codex) instead of the Claude Agent SDK. Parallel to `packages/agent-claude/`, sharing platform plumbing from `packages/agent-runtime/`, and produces the `x1agent/runtime-codex` container image.
 
 **Status: testable integration.** The runtime uses the Codex app-server JSON-RPC protocol, so interactive follow-up turns work through `/inject`. Approval requests are declined because the x1agent pod is the sandbox boundary; OpenAI cost telemetry and sub-agent spawning remain future work.
 
@@ -55,8 +55,7 @@ The acceptance criterion for the spike is: **a pod from this image boots, answer
 1. **Build the image.** From the package root:
 
    ```bash
-   cd packages/agent-codex
-   docker build -t x1agent/runtime-codex:dev .
+   docker build -f packages/agent-codex/Dockerfile -t x1agent/runtime-codex:dev .
    ```
 
    In OrbStack the local Docker daemon already feeds the in-cluster registry, so no push is needed.
@@ -101,7 +100,6 @@ Common failure modes:
 
 ## Follow-up work
 
-- Extract `idle-timer.ts`, `input-channel.ts`, `image-tokens.ts`, `event-correlator.ts`, `wake-classifier.ts`, `x1-mcp.ts` into a shared `packages/agent-runtime-base/` (or `packages/agent-mcp-x1/` for the MCP) so both runtimes pull from one source. Marked with `TODO(codex-spike)` comments at the top of each duplicated file.
 - Land the `agents.runtime` schema migration and surface a runtime picker in the agent edit UI.
 - Add explicit `turn/steer` / `turn/interrupt` handling and surface approval events in the UI if x1agent later wants user-mediated approvals.
 - Add OpenAI pricing rows to the cost-rollup tables and emit `agent.usage` for Codex turns.

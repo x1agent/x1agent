@@ -435,9 +435,9 @@ docker buildx build \\
   -t x1agent/runtime-core:v1 \\
   -t "${REGISTRY_LOCAL}/x1agent/runtime-core:v1" \\
   -t "${REGISTRY_LOCAL}/x1agent/runtime-core:latest" \\
-  -f packages/agent/Dockerfile \\
+  -f packages/agent-claude/Dockerfile \\
   --load \\
-  packages/agent
+  .
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:v1"
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:latest"
 
@@ -466,7 +466,7 @@ echo "[images] done — images available at ${REGISTRY_LOCAL}/x1agent/*"
 # Session-pod images — the agent + sidecar that a K8s Job runs as a pair
 # per session. devspace's file-sync overlays code onto long-running pods
 # (api, app), but Jobs spawn fresh from sealed images, so changes under
-# packages/agent/ or packages/sidecar/ won't appear in new sessions until
+# packages/agent-claude/, packages/agent-runtime/, or packages/sidecar/ won't appear in new sessions until
 # the images are rebuilt. Run this after touching either package — new
 # sessions (or restarted existing sessions) pick up the rebuild.
 #
@@ -480,9 +480,9 @@ run = """
 set -euo pipefail
 echo "[images:session] building x1agent-agent:latest"
 DOCKER_BUILDKIT=1 docker build \\
-  -f packages/agent/Dockerfile \\
+  -f packages/agent-claude/Dockerfile \\
   -t x1agent-agent:latest \\
-  packages/agent
+  .
 echo "[images:session] building x1agent-sidecar:latest"
 DOCKER_BUILDKIT=1 docker build \\
   -f packages/sidecar/Dockerfile \\
