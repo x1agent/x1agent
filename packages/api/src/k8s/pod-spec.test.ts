@@ -11,6 +11,7 @@ function baseSpec(kind: AgentKind): SessionPodSpec {
     agentId: "019da000-0000-7000-8000-0000000000a1",
     agentSlug: "hirer-orchestrator",
     agentKind: kind,
+    runtimeType: "claude_code",
     workspaceSlug: "default",
     workspaceName: "Default",
     agentPrompt: "",
@@ -204,10 +205,11 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
   });
 
   describe("Codex runtime propagation", () => {
-    it("injects OpenAI credentials and model only for the Codex image", () => {
+    it("uses runtimeType rather than guessing the harness from the image name", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),
-        agentImage: "x1agent/runtime-codex:v1",
+        agentImage: "registry.example/acme/custom-agent:v1",
+        runtimeType: "codex",
         openaiApiKey: "sk-test",
         openaiModel: "gpt-5.3-codex",
         anthropicApiKey: "sk-ant-should-not-be-used",
@@ -229,6 +231,7 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),
         agentImage: "x1agent/runtime-codex:v1",
+        runtimeType: "codex",
         hostCodexHomeDir: "/home/test/.x1agent-dev/codex-home",
       });
       const pod = job.spec!.template.spec!;
@@ -259,6 +262,7 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
 
       const claudeJob = buildSessionJob({
         ...baseSpec("worker"),
+        agentImage: "registry.example/acme/not-really-codex:v1",
         hostCodexHomeDir: "/home/test/.x1agent-dev/codex-home",
       });
       expect(

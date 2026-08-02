@@ -25,7 +25,7 @@ import {
   normalizeCodexNotification,
   type NormalizedEvent,
 } from "./normalize.js";
-import { CodexAppServer } from "./app-server.js";
+import { CodexAppServer, CodexTurnError } from "./app-server.js";
 import {
   buildPlatformMcpDefinitions,
   parseRemoteMcpAttachments,
@@ -226,8 +226,9 @@ function renderCodexConfig(): string {
 }
 
 function writeCodexConfig(): string {
-  const home = process.env.HOME || os.homedir();
-  const dir = path.join(home, ".codex");
+  const dir =
+    process.env.CODEX_HOME ||
+    path.join(process.env.HOME || os.homedir(), ".codex");
   try {
     mkdirSync(dir, { recursive: true });
   } catch {
@@ -249,8 +250,9 @@ function writeCodexInstructions(text: string): string {
   // (the flag name has drifted across recent Codex releases). The
   // file is regenerated on every container start so it stays in
   // sync with the agent's configured system prompt.
-  const home = process.env.HOME || os.homedir();
-  const dir = path.join(home, ".codex");
+  const dir =
+    process.env.CODEX_HOME ||
+    path.join(process.env.HOME || os.homedir(), ".codex");
   try {
     mkdirSync(dir, { recursive: true });
   } catch {
@@ -329,6 +331,7 @@ console.log(
 
 let activeCodex: CodexAppServer | null = null;
 let codexThreadId: string | null = null;
+let turnQueue: Promise<void> = Promise.resolve();
 
 function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   if (!event) return;
@@ -368,54 +371,70 @@ async function runCodexTurn(
   turnPrompt: string,
   localImages: string[] = [],
 ): Promise<void> {
-  if (activeCodex) {
-    if (!(activeCodex instanceof CodexAppServer) || !codexThreadId) {
-      console.warn("[agent-codex] turn already in flight — ignoring overlap");
-      return;
-    }
-    await activeCodex.turn(codexThreadId, turnPrompt, localImages);
-    return;
-  }
   idleTimer.setBusy(true);
-  const server = new CodexAppServer({
-    binary: codexBin,
-    cwd: workspaceDir,
-    model: codexModel,
-    sandbox:
-      codexSandbox === "danger-full-access"
-        ? "danger-full-access"
-        : "workspace-write",
-    onEvent: ({ method, params }) => {
-      if (
-        method === "turn/completed" ||
-        method === "turn/failed" ||
-        method === "error"
-      ) {
-        flushPendingText();
-      }
-      emitCodexEvents(normalizeCodexNotification(method, params));
-    },
-    onServerRequest: (request) => {
-      if (request.id !== undefined)
-        server.respond(request.id, { decision: "decline" });
-    },
-    onStderr: (line) => console.error(`[codex] ${line}`),
-  });
-  activeCodex = server;
+  let server = activeCodex;
   try {
-    codexThreadId = await server.start();
-    console.log(`[agent-codex] selected model=${server.model}`);
+    if (!server || !codexThreadId) {
+      let created!: CodexAppServer;
+      created = new CodexAppServer({
+        binary: codexBin,
+        cwd: workspaceDir,
+        model: codexModel,
+        sandbox:
+          codexSandbox === "danger-full-access"
+            ? "danger-full-access"
+            : "workspace-write",
+        onEvent: ({ method, params }) => {
+          if (
+            method === "turn/completed" ||
+            method === "turn/failed" ||
+            method === "error"
+          ) {
+            flushPendingText();
+          }
+          emitCodexEvents(normalizeCodexNotification(method, params));
+        },
+        onServerRequest: (request) => {
+          if (request.id !== undefined)
+            created.respond(request.id, { decision: "decline" });
+        },
+        onStderr: (line) => console.error(`[codex] ${line}`),
+        onExit: (error) => {
+          console.error(`[agent-codex] ${error.message}`);
+          if (activeCodex === created) {
+            activeCodex = null;
+            codexThreadId = null;
+          }
+        },
+      });
+      server = created;
+      activeCodex = server;
+      codexThreadId = await server.start();
+      console.log(`[agent-codex] selected model=${server.model}`);
+    }
     await server.turn(codexThreadId, turnPrompt, localImages);
   } catch (error) {
-    emitToStream({
-      type: "agent.error",
-      payload: { message: (error as Error).message, recoverable: false },
-    });
-    server.stop();
-    activeCodex = null;
+    // Terminal turn failures are already emitted from their notification and
+    // do not poison the long-lived app-server. Transport/protocol failures do.
+    if (!(error instanceof CodexTurnError)) {
+      emitToStream({
+        type: "agent.error",
+        payload: { message: (error as Error).message, recoverable: false },
+      });
+      server?.stop();
+      activeCodex = null;
+      codexThreadId = null;
+    }
+    throw error;
   } finally {
     idleTimer.setBusy(false);
   }
+}
+
+function enqueueCodexTurn(text: string, localImages: string[] = []) {
+  const queued = turnQueue.then(() => runCodexTurn(text, localImages));
+  turnQueue = queued.catch(() => {});
+  return queued;
 }
 
 /**
@@ -578,13 +597,13 @@ const injectServer = http.createServer(async (req, res) => {
 
       // Send the message into the long-lived app-server thread. The
       // thread preserves Codex conversation state across browser turns.
-      void runCodexTurn(preparedInput.text, preparedInput.localImages).catch(
-        (error) => {
-          emitToStream({
-            type: "agent.error",
-            payload: { message: (error as Error).message, recoverable: false },
-          });
-        },
+      void enqueueCodexTurn(
+        preparedInput.text,
+        preparedInput.localImages,
+      ).catch((error) =>
+        console.error(
+          `[agent-codex] queued turn failed: ${(error as Error).message}`,
+        ),
       );
       console.log(
         `[agent-codex] /inject sent user message: ${parsed.text.slice(0, 100)}`,
@@ -699,7 +718,7 @@ resetIdleTimer();
 if (prompt) {
   eventBuffer.push({ type: "user.message", payload: { text: prompt } });
   const preparedInput = await prepareCodexTurnInput(prompt, { sidecarUrl });
-  await runCodexTurn(preparedInput.text, preparedInput.localImages);
+  await enqueueCodexTurn(preparedInput.text, preparedInput.localImages);
   if (sessionMode === "oneshot") {
     await shutdown(true, "oneshot complete");
   }
