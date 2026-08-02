@@ -1,3 +1,10 @@
+## [1.44.1](https://github.com/x1agent/x1agent/compare/v1.44.0...v1.44.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** harden Codex harness lifecycle ([b1de862](https://github.com/x1agent/x1agent/commit/b1de86218ce9c33216430bc3be1ab43c056e145c))
+
 # [1.44.0](https://github.com/x1agent/x1agent/compare/v1.43.0...v1.44.0) (2026-08-02)
 
 
