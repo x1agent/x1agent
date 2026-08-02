@@ -4,6 +4,60 @@ export type Role = "member" | "admin" | "owner";
 export const RUNTIME_TYPES = ["claude_code", "codex"] as const;
 export type RuntimeType = (typeof RUNTIME_TYPES)[number];
 
+export interface AgentSkillSourceDTO {
+  repository: string;
+  ref: string;
+  path: string;
+}
+
+export interface AgentDTO {
+  id: string;
+  workspace_id: string;
+  slug: string;
+  name: string;
+  runtime_type: RuntimeType;
+  kind: "worker" | "orchestrator" | "scheduled";
+  system_prompt: string;
+  heartbeat_md: string;
+  schedule: string | null;
+  is_active: boolean;
+  image_id: string | null;
+  model: string | null;
+  created_by: string | null;
+  scheduled_run_as_user_id: string | null;
+  idle_timeout_seconds: number | null;
+  visibility: "private" | "workspace" | "via_grants";
+  skill_sources: AgentSkillSourceDTO[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentListResponse {
+  agents: AgentDTO[];
+}
+
+export interface CreateAgentRequest {
+  slug: string;
+  name: string;
+  runtime_type: RuntimeType;
+  kind?: AgentDTO["kind"];
+  system_prompt?: string;
+  heartbeat_md?: string;
+  schedule?: string | null;
+  image_id?: string | null;
+  model?: string | null;
+  scheduled_run_as_user_id?: string | null;
+  idle_timeout_seconds?: number | null;
+  skill_sources?: AgentSkillSourceDTO[];
+}
+
+export type UpdateAgentRequest = Partial<
+  Omit<CreateAgentRequest, "slug"> & {
+    is_active: boolean;
+    visibility: AgentDTO["visibility"];
+  }
+>;
+
 export interface WorkspaceMembership {
   workspace_id: string;
   slug: string;

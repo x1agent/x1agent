@@ -1,12 +1,9 @@
 import { DomainError } from "@x1agent/kernel";
-import type {
-  UserId,
-  WorkspaceId,
-  WorkspaceSlug,
-} from "@x1agent/kernel";
+import type { UserId, WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import type { RuntimeType } from "./runtime.js";
 import type { AgentKind } from "./kind.js";
 import type { CronSchedule } from "./cron-schedule.js";
+import type { AgentSkillSource } from "./skill-source.js";
 
 declare const agentIdBrand: unique symbol;
 export type AgentId = string & { readonly [agentIdBrand]: true };
@@ -85,6 +82,8 @@ export interface Agent {
    * setting can't strand an agent pod forever.
    */
   idleTimeoutSeconds: number | null;
+  /** Public GitHub-hosted Agent Skills installed into every session. */
+  skillSources: AgentSkillSource[];
   createdAt: Date;
   updatedAt: Date;
   /**

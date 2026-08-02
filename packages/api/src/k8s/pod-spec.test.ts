@@ -202,6 +202,29 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       const env = agentEnv(baseSpec("worker"));
       expect(env.find((e) => e.name === "ANTHROPIC_MODEL")).toBeUndefined();
     });
+
+    it("passes provider-neutral skill sources to either runtime", () => {
+      const sources = [
+        {
+          repository: "https://github.com/acme/agent-skills",
+          ref: "v1.0.0",
+          path: "skills/review",
+        },
+      ];
+      for (const agentImage of [
+        "x1agent-agent:latest",
+        "x1agent/runtime-codex:v1",
+      ]) {
+        const env = agentEnv({
+          ...baseSpec("worker"),
+          agentImage,
+          skillSources: sources,
+        });
+        expect(
+          env.find((entry) => entry.name === "AGENT_SKILL_SOURCES_JSON")?.value,
+        ).toBe(JSON.stringify(sources));
+      }
+    });
   });
 
   describe("Codex runtime propagation", () => {

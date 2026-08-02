@@ -86,6 +86,7 @@ export interface SessionPodSpec {
   heartbeatMd: string;
   sessionMode: "interactive" | "oneshot";
   idleTimeoutMs: number;
+  skillSources?: Array<{ repository: string; ref: string; path: string }>;
   maxTurns: number;
   repos: LinkedRepoForPod[];
   collections: AttachedCollectionForPod[];
@@ -264,6 +265,10 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     { name: "WORKSPACE_SYSTEM_PROMPT", value: spec.systemPromptText },
     { name: "PLATFORM_NAME", value: "x1agent" },
     { name: "WORKSPACE_DIR", value: "/workspace" },
+    {
+      name: "AGENT_SKILL_SOURCES_JSON",
+      value: JSON.stringify(spec.skillSources ?? []),
+    },
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
     { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },

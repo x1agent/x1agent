@@ -514,6 +514,7 @@ async function launchSession(
         : agent.kind === "orchestrator"
           ? 7 * 24 * 60 * 60 * 1000
           : 60 * 60 * 1000,
+    skillSources: agent.skillSources,
     maxTurns: 200,
     repos,
     collections,

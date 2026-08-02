@@ -463,6 +463,12 @@ const conversation: Query = query({
     systemPrompt: systemPromptText,
     mcpServers,
     allowedTools,
+    // Configured skills live under ~/.claude/skills. Load only the user
+    // source: project settings would let an attached workspace repository
+    // activate arbitrary hooks/plugins while this process runs with
+    // bypassPermissions.
+    settingSources: ["user"],
+    skills: "all",
     permissionMode: "bypassPermissions",
     ...(process.env.CLAUDE_PATH
       ? { pathToClaudeCodeExecutable: process.env.CLAUDE_PATH }
