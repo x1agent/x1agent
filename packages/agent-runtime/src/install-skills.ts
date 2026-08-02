@@ -21,14 +21,33 @@ export interface SkillSource {
 
 type Run = (command: string, args: string[]) => Promise<void>;
 
-function run(command: string, args: string[]): Promise<void> {
+export const SKILL_FETCH_TIMEOUT_MS = 60_000;
+
+export function runCommand(
+  command: string,
+  args: string[],
+  timeoutMs = SKILL_FETCH_TIMEOUT_MS,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", reject);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+        return;
+      }
       if (code === 0) resolve();
       else reject(new Error(`${command} exited ${code}: ${stderr.trim()}`));
     });
@@ -148,7 +167,7 @@ export async function installSkillSources(
   try {
     for (const [index, source] of sources.entries()) {
       const checkout = path.join(tempRoot, `source-${index}`);
-      await cloneSource(source, checkout, options.exec ?? run);
+      await cloneSource(source, checkout, options.exec ?? runCommand);
       const relative = source.path?.trim().replace(/^\.\//, "") ?? "";
       const requestedReal = realpathSync(path.resolve(checkout, relative));
       const checkoutReal = realpathSync(checkout);

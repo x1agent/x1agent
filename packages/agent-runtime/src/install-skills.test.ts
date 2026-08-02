@@ -13,6 +13,7 @@ import {
   discoverSkillDirectories,
   installSkillSources,
   parseSkillSourcesJson,
+  runCommand,
 } from "./install-skills.js";
 
 const temporary: string[] = [];
@@ -67,5 +68,51 @@ describe("skill installation", () => {
     expect(() => parseSkillSourcesJson("{}")).toThrow(
       "AGENT_SKILL_SOURCES_JSON must be an array",
     );
+  });
+
+  test("bounds external commands with a timeout", async () => {
+    await expect(
+      runCommand(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], 25),
+    ).rejects.toThrow("timed out after 25ms");
+  });
+
+  test("rejects duplicate skill directory names", async () => {
+    const fixture = tempDir();
+    mkdirSync(path.join(fixture, "skills", "duplicate"), { recursive: true });
+    writeFileSync(
+      path.join(fixture, "skills", "duplicate", "SKILL.md"),
+      "duplicate",
+    );
+    const home = tempDir();
+    const exec = async (_command: string, args: string[]) => {
+      const destination = args.at(-1)!;
+      mkdirSync(destination, { recursive: true });
+      cpSync(fixture, destination, { recursive: true });
+    };
+    await expect(
+      installSkillSources(
+        [
+          { repository: "https://github.com/acme/one" },
+          { repository: "https://github.com/acme/two" },
+        ],
+        { homeDir: home, exec },
+      ),
+    ).rejects.toThrow("duplicate skill name");
+  });
+
+  test("rejects a source without SKILL.md", async () => {
+    const fixture = tempDir();
+    writeFileSync(path.join(fixture, "README.md"), "not a skill");
+    const exec = async (_command: string, args: string[]) => {
+      const destination = args.at(-1)!;
+      mkdirSync(destination, { recursive: true });
+      cpSync(fixture, destination, { recursive: true });
+    };
+    await expect(
+      installSkillSources(
+        [{ repository: "https://github.com/acme/not-a-skill" }],
+        { homeDir: tempDir(), exec },
+      ),
+    ).rejects.toThrow("no SKILL.md found");
   });
 });
