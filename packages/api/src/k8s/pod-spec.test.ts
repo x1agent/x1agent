@@ -1,5 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { buildSessionJob, type SessionPodSpec, type AgentKind } from "./pod-spec.js";
+import {
+  buildSessionJob,
+  type SessionPodSpec,
+  type AgentKind,
+} from "./pod-spec.js";
 
 function baseSpec(kind: AgentKind): SessionPodSpec {
   return {
@@ -84,7 +88,10 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
 
     it("requests 768Mi / 50m — observed peaks at ~650Mi, CPU idle at ~15m", () => {
       const agent = pod.containers!.find((c) => c.name === "agent")!;
-      expect(agent.resources!.requests).toEqual({ memory: "768Mi", cpu: "50m" });
+      expect(agent.resources!.requests).toEqual({
+        memory: "768Mi",
+        cpu: "50m",
+      });
       expect(agent.resources!.limits).toEqual({ memory: "2Gi", cpu: "1" });
     });
   });
@@ -170,7 +177,9 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
   });
 
   describe("ANTHROPIC_MODEL propagation (X1A-40)", () => {
-    function agentEnv(spec: SessionPodSpec): Array<{ name: string; value?: string }> {
+    function agentEnv(
+      spec: SessionPodSpec,
+    ): Array<{ name: string; value?: string }> {
       const job = buildSessionJob(spec);
       const agent = job.spec!.template.spec!.containers!.find(
         (c) => c.name === "agent",
@@ -179,7 +188,10 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
     }
 
     it("renders anthropicModel into the agent container's ANTHROPIC_MODEL env", () => {
-      const spec = { ...baseSpec("worker"), anthropicModel: "claude-opus-4-1@20250101" };
+      const spec = {
+        ...baseSpec("worker"),
+        anthropicModel: "claude-opus-4-1@20250101",
+      };
       const env = agentEnv(spec);
       const m = env.find((e) => e.name === "ANTHROPIC_MODEL");
       expect(m?.value).toBe("claude-opus-4-1@20250101");
@@ -213,7 +225,7 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       expect(env.ANTHROPIC_MODEL).toBeUndefined();
     });
 
-    it("mounts the dedicated Codex home without exposing it to Claude runtimes", () => {
+    it("mounts only Codex auth into a session-private home without exposing it to Claude", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),
         agentImage: "x1agent/runtime-codex:v1",
@@ -225,14 +237,25 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
         (agent.env ?? []).map((entry) => [entry.name, entry.value]),
       );
       expect(env.CODEX_HOME).toBe("/home/agent/.codex");
+      expect(env.CODEX_AUTH_SOURCE).toBe(
+        "/var/run/x1agent/codex-auth/auth.json",
+      );
       expect(
-        pod.volumes!.find((volume) => volume.name === "codex-home")?.hostPath
+        pod.volumes!.find((volume) => volume.name === "codex-auth")?.hostPath
           ?.path,
       ).toBe("/home/test/.x1agent-dev/codex-home");
       expect(
-        agent.volumeMounts!.find((mount) => mount.name === "codex-home")
+        agent.volumeMounts!.find((mount) => mount.name === "codex-auth")
           ?.mountPath,
-      ).toBe("/home/agent/.codex");
+      ).toBe("/var/run/x1agent/codex-auth/auth.json");
+      expect(
+        agent.volumeMounts!.find((mount) => mount.name === "codex-auth")
+          ?.subPath,
+      ).toBe("auth.json");
+      expect(
+        agent.volumeMounts!.find((mount) => mount.name === "codex-auth")
+          ?.readOnly,
+      ).toBe(true);
 
       const claudeJob = buildSessionJob({
         ...baseSpec("worker"),
@@ -240,8 +263,14 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       });
       expect(
         claudeJob.spec!.template.spec!.volumes!.find(
-          (volume) => volume.name === "codex-home",
+          (volume) => volume.name === "codex-auth",
         ),
+      ).toBeUndefined();
+      const claudeAgent = claudeJob.spec!.template.spec!.containers!.find(
+        (container) => container.name === "agent",
+      )!;
+      expect(
+        claudeAgent.env?.find((entry) => entry.name === "CODEX_AUTH_SOURCE"),
       ).toBeUndefined();
     });
   });
@@ -255,10 +284,7 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       return sidecar.env ?? [];
     }
 
-    function withEnv(
-      vars: Record<string, string | undefined>,
-      fn: () => void,
-    ) {
+    function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
       const saved: Record<string, string | undefined> = {};
       for (const k of Object.keys(vars)) saved[k] = process.env[k];
       try {
@@ -280,8 +306,12 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
         { USE_JETSTREAM_PUBLISH: undefined, USE_JETSTREAM_CONSUME: undefined },
         () => {
           const env = sidecarEnv();
-          expect(env.find((e) => e.name === "USE_JETSTREAM_PUBLISH")).toBeUndefined();
-          expect(env.find((e) => e.name === "USE_JETSTREAM_CONSUME")).toBeUndefined();
+          expect(
+            env.find((e) => e.name === "USE_JETSTREAM_PUBLISH"),
+          ).toBeUndefined();
+          expect(
+            env.find((e) => e.name === "USE_JETSTREAM_CONSUME"),
+          ).toBeUndefined();
         },
       );
     });
@@ -315,8 +345,12 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
         { USE_JETSTREAM_PUBLISH: "true", USE_JETSTREAM_CONSUME: "true" },
         () => {
           const env = sidecarEnv();
-          expect(env.find((e) => e.name === "USE_JETSTREAM_PUBLISH")?.value).toBe("true");
-          expect(env.find((e) => e.name === "USE_JETSTREAM_CONSUME")?.value).toBe("true");
+          expect(
+            env.find((e) => e.name === "USE_JETSTREAM_PUBLISH")?.value,
+          ).toBe("true");
+          expect(
+            env.find((e) => e.name === "USE_JETSTREAM_CONSUME")?.value,
+          ).toBe("true");
         },
       );
     });

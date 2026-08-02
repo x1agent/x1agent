@@ -24,6 +24,23 @@ export type AppServerOptions = {
   onStderr?: (line: string) => void;
 };
 
+export type CodexTurnInput =
+  | { type: "text"; text: string; text_elements: never[] }
+  | { type: "localImage"; path: string };
+
+export function buildTurnInputs(
+  text: string,
+  localImages: string[] = [],
+): CodexTurnInput[] {
+  return [
+    { type: "text", text, text_elements: [] },
+    ...localImages.map((imagePath) => ({
+      type: "localImage" as const,
+      path: imagePath,
+    })),
+  ];
+}
+
 /** Small JSON-RPC client for the versioned Codex app-server stdio protocol. */
 export class CodexAppServer {
   private readonly proc: ChildProcessWithoutNullStreams;
@@ -46,7 +63,8 @@ export class CodexAppServer {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        CODEX_API_KEY: process.env.CODEX_API_KEY || process.env.OPENAI_API_KEY || "",
+        CODEX_API_KEY:
+          process.env.CODEX_API_KEY || process.env.OPENAI_API_KEY || "",
       },
     });
     this.proc.stdout.setEncoding("utf8");
@@ -59,7 +77,9 @@ export class CodexAppServer {
     });
     this.proc.on("exit", (code, signal) => {
       this.closed = true;
-      const error = new Error(`codex app-server exited code=${code} signal=${signal ?? "none"}`);
+      const error = new Error(
+        `codex app-server exited code=${code} signal=${signal ?? "none"}`,
+      );
       for (const waiter of this.pending.values()) waiter.reject(error);
       this.pending.clear();
     });
@@ -76,28 +96,47 @@ export class CodexAppServer {
       try {
         message = JSON.parse(line) as JsonRpcMessage;
       } catch {
-        this.options.onStderr?.(`invalid app-server JSON: ${line.slice(0, 200)}`);
+        this.options.onStderr?.(
+          `invalid app-server JSON: ${line.slice(0, 200)}`,
+        );
         continue;
       }
-      if (message.id !== undefined && (message.result !== undefined || message.error)) {
+      if (
+        message.id !== undefined &&
+        (message.result !== undefined || message.error)
+      ) {
         const waiter = this.pending.get(Number(message.id));
         if (!waiter) continue;
         this.pending.delete(Number(message.id));
-        if (message.error) waiter.reject(new Error(message.error.message ?? "Codex JSON-RPC error"));
+        if (message.error)
+          waiter.reject(
+            new Error(message.error.message ?? "Codex JSON-RPC error"),
+          );
         else waiter.resolve(message.result);
       } else if (message.method) {
         if (message.id !== undefined) this.options.onServerRequest?.(message);
-        else this.options.onEvent({ method: message.method, params: message.params ?? {} });
+        else
+          this.options.onEvent({
+            method: message.method,
+            params: message.params ?? {},
+          });
       }
     }
   }
 
-  private request<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    if (this.closed) return Promise.reject(new Error("Codex app-server is closed"));
+  private request<T>(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<T> {
+    if (this.closed)
+      return Promise.reject(new Error("Codex app-server is closed"));
     const id = this.nextId++;
     const line = JSON.stringify({ id, method, params }) + "\n";
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      this.pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
       this.proc.stdin.write(line, (error) => {
         if (error) {
           this.pending.delete(id);
@@ -108,24 +147,34 @@ export class CodexAppServer {
   }
 
   private notify(method: string, params: Record<string, unknown> = {}) {
-    if (!this.closed) this.proc.stdin.write(JSON.stringify({ method, params }) + "\n");
+    if (!this.closed)
+      this.proc.stdin.write(JSON.stringify({ method, params }) + "\n");
   }
 
   async start(): Promise<string> {
     await this.request("initialize", {
-      clientInfo: { name: "x1agent", title: "x1agent Codex runtime", version: "0.0.0" },
+      clientInfo: {
+        name: "x1agent",
+        title: "x1agent Codex runtime",
+        version: "0.0.0",
+      },
       capabilities: null,
     });
     this.notify("initialized");
-    this.selectedModel = this.options.model || await this.discoverDefaultModel();
-    const result = await this.request<{ thread: { id: string } }>("thread/start", {
-      model: this.selectedModel,
-      cwd: this.options.cwd,
-      sandbox: this.options.sandbox,
-      approvalPolicy: "never",
-      ephemeral: true,
-      baseInstructions: "Follow the x1agent instructions in your Codex configuration.",
-    });
+    this.selectedModel =
+      this.options.model || (await this.discoverDefaultModel());
+    const result = await this.request<{ thread: { id: string } }>(
+      "thread/start",
+      {
+        model: this.selectedModel,
+        cwd: this.options.cwd,
+        sandbox: this.options.sandbox,
+        approvalPolicy: "never",
+        ephemeral: true,
+        baseInstructions:
+          "Follow the x1agent instructions in your Codex configuration.",
+      },
+    );
     return result.thread.id;
   }
 
@@ -148,18 +197,23 @@ export class CodexAppServer {
     return "gpt-5.6-sol";
   }
 
-  async turn(threadId: string, text: string): Promise<void> {
+  async turn(
+    threadId: string,
+    text: string,
+    localImages: string[] = [],
+  ): Promise<void> {
     await this.request("turn/start", {
       threadId,
       cwd: this.options.cwd,
       model: this.model,
-      input: [{ type: "text", text, text_elements: [] }],
+      input: buildTurnInputs(text, localImages),
       approvalPolicy: "never",
     });
   }
 
   respond(id: number | string, result: unknown) {
-    if (!this.closed) this.proc.stdin.write(JSON.stringify({ id, result }) + "\n");
+    if (!this.closed)
+      this.proc.stdin.write(JSON.stringify({ id, result }) + "\n");
   }
 
   stop() {

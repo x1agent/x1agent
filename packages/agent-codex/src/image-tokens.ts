@@ -32,6 +32,11 @@ export function extFromMime(mime: string): string {
     "image/webp": "webp",
     "image/svg+xml": "svg",
     "application/pdf": "pdf",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "md",
+    "text/csv": "csv",
+    "application/json": "json",
   };
   return map[base] ?? "bin";
 }
@@ -65,7 +70,8 @@ export async function resolveSingleUpload(
 ): Promise<string> {
   const dir = opts.uploadsDir ?? DEFAULT_UPLOADS_DIR;
   const fetchFn = opts.fetchImpl ?? fetch;
-  const writeFn = opts.writeFileImpl ?? ((p: string, b: Uint8Array) => writeFile(p, b));
+  const writeFn =
+    opts.writeFileImpl ?? ((p: string, b: Uint8Array) => writeFile(p, b));
   const mkdirFn =
     opts.mkdirImpl ??
     ((p: string, mkOpts?: { recursive?: boolean }) => mkdir(p, mkOpts));

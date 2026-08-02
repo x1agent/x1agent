@@ -8,7 +8,7 @@ Alternative agent runtime that drives [OpenAI Codex](https://platform.openai.com
 
 - Node 22 base, `@openai/codex` CLI installed globally.
 - The full `/x1` overlay (`/x1/bin/entrypoint`, `/x1/runtime/`, `/x1/app/`) duplicated from the runtime-claude image's pattern. Follow-up work extracts this into a single `runtime-core` source both images `COPY --from`.
-- One bundled MCP server: `x1-mcp.ts`, mounted as `[mcp_servers.x1agent]` in `~/.codex/config.toml` rendered at pod boot.
+- The same always-on MCP servers as the Claude runtime (`x1agent`, Files, Sheets, Docs, Calendar, and Email), plus attached remote-OAuth MCPs routed through localhost bearer-proxy siblings. They are rendered into the session-private `~/.codex/config.toml` at pod boot.
 - The standard pod shape (SSE on `:3100`, `/inject` on `:8788`, sidecar on `:9090`).
 
 ## How a turn runs
@@ -18,7 +18,8 @@ pod (container: x1agent/runtime-codex)
  └─ x1agent-runner (Node + tsx, packages/agent-codex/src/run.ts)
      ├─ subprocess: `codex app-server --stdio`
      │  └─ JSON-RPC JSONL → normalize.ts → {type, payload} events
-     ├─ stdio MCP: x1-mcp.ts (POSTs to sidecar :9090)
+     ├─ stdio MCPs: x1agent + provider tools (POST to sidecar :9090)
+     ├─ HTTP MCPs: attached remote tools (localhost OAuth proxies)
      ├─ HTTP :3100 (SSE — sidecar consumes)
      └─ HTTP :8788 (inject — starts a follow-up turn)
 ```
@@ -34,8 +35,8 @@ Environment variables consumed by `src/run.ts`:
 | Var | Default | Notes |
 |---|---|---|
 | `SESSION_ID` | (required) | Session UUID. |
-| `OPENAI_API_KEY` | (required) | Aliased to `CODEX_API_KEY` inside the entrypoint. |
-| `OPENAI_MODEL` | `gpt-5-codex` | Passed to `thread/start` and `turn/start`. Override for a deployment with a model supported by its auth mode. |
+| `OPENAI_API_KEY` | `""` | Aliased to `CODEX_API_KEY` inside the entrypoint. Optional when a Codex login profile is projected into the pod. |
+| `OPENAI_MODEL` | account default | Passed to `thread/start` and `turn/start` when set. |
 | `CODEX_SANDBOX` | `danger-full-access` | The session pod is the security boundary. Set `workspace-write` only when the pod can initialize Bubblewrap reliably. |
 | `CODEX_PATH` | `codex` | Override for the CLI binary (only useful in local dev). |
 | `WORKSPACE_DIR` | `/workspace` | `--cd` value. |
@@ -43,6 +44,7 @@ Environment variables consumed by `src/run.ts`:
 | `SIDECAR_HEALTH_URL` | `http://localhost:9091` | Polled on boot before any sidecar POST. |
 | `AGENT_PROMPT` | `""` | Seed prompt. Empty → harness waits for the first `/inject` turn. |
 | `IDLE_TIMEOUT_MS` | `900000` | Pod exits after this many ms with no activity. |
+| `MCP_REMOTE_ATTACHMENTS_JSON` | `""` | Session-resolved remote MCP names and localhost proxy URLs. Bearers never enter the agent container. |
 
 The image's `x1-entrypoint.sh` aliases `OPENAI_API_KEY` into `CODEX_API_KEY` so we don't need a separate env-var slot on every pod — the Codex CLI accepts either, and the platform already plumbs `OPENAI_API_KEY` through Terraform → GSM → ESO → api pod env.
 
@@ -93,7 +95,6 @@ Common failure modes:
 ## What this spike deliberately doesn't do
 
 - **No explicit turn steering/interrupt yet.** Follow-up turns work, but the harness does not yet expose separate `turn/steer` or `turn/interrupt` controls.
-- **No additional MCPs.** Only `x1-mcp.ts` is mounted. Files / Sheets / Docs / Calendar / Email / Zone-3 remote_oauth MCPs are out for v0.
 - **No `agent.usage` event.** Logged to stdout only; the api's cost-rollup needs OpenAI pricing rows before this can be wired safely.
 - **No `agents.runtime` column.** The runtime is inferred from `agents.image_id`. A schema migration adding an explicit enum is v1 work.
 - **No sub-agent spawning, approval flow, hot-restart, or compaction.**

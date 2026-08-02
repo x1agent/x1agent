@@ -20,8 +20,17 @@ import path from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { normalizeCodexNotification, type NormalizedEvent } from "./normalize.js";
+import {
+  normalizeCodexNotification,
+  type NormalizedEvent,
+} from "./normalize.js";
 import { CodexAppServer } from "./app-server.js";
+import {
+  buildPlatformMcpDefinitions,
+  parseRemoteMcpAttachments,
+  renderCodexMcpConfig,
+} from "./mcp-config.js";
+import { prepareCodexTurnInput } from "./upload-inputs.js";
 import { IdleTimer } from "./idle-timer.js";
 import {
   buildAgentThinkingCancelledEvent,
@@ -174,11 +183,9 @@ if (!sidecarReady) {
   );
 }
 
-// ── ~/.codex/config.toml — mount the x1agent MCP ────────
+// ── ~/.codex/config.toml — mount platform MCPs ──────────
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const x1McpPath = path.resolve(here, "x1-mcp.ts");
-
 function resolveTsxBinary(): string {
   const candidates = [
     path.resolve(here, "../../../node_modules/.bin/tsx"),
@@ -194,21 +201,22 @@ function resolveTsxBinary(): string {
 const tsxPath = resolveTsxBinary();
 
 function renderCodexConfig(): string {
-  // Codex reads ~/.codex/config.toml on every `codex exec` invocation.
-  // Mount the x1agent MCP as a stdio subprocess of Codex — exactly the
-  // same surface the Claude harness gives Claude. Sidecar URL is passed
-  // through env so the MCP knows where to POST events.
-  const sidecarEnv = sidecarUrl.replace(/"/g, '\\"');
-  const cmd = tsxPath.replace(/"/g, '\\"');
-  const arg = x1McpPath.replace(/"/g, '\\"');
-  return `# Auto-generated at pod boot by packages/agent-codex/src/run.ts.
-# Do not edit; the file is rewritten on every container start.
-
-[mcp_servers.x1agent]
-command = "${cmd}"
-args = ["${arg}"]
-env = { SIDECAR_URL = "${sidecarEnv}" }
-`;
+  const stdioServers = buildPlatformMcpDefinitions({
+    tsxPath,
+    sourceDir: here,
+    sidecarUrl,
+    resolvePath: path.resolve,
+  });
+  const remoteServers = parseRemoteMcpAttachments(
+    process.env.MCP_REMOTE_ATTACHMENTS_JSON,
+    (message) => console.warn(`[agent-codex] ${message}`),
+  );
+  for (const server of remoteServers) {
+    console.log(
+      `[agent-codex] zone-3 mcp ${server.name} → ${server.url} (bearer held by sibling proxy)`,
+    );
+  }
+  return renderCodexMcpConfig(stdioServers, remoteServers);
 }
 
 function writeCodexConfig(): string {
@@ -289,6 +297,14 @@ The user is watching this session in real time.
 
 Call emit_status at the start of each distinct phase. Be responsive — the
 user is watching live.${interactivePrompt}
+
+## Reading files the user uploaded
+
+Attached files are fetched through the sidecar before a turn and written under
+\`/workspace/.x1/uploads/\`. The message names the resolved path. Images are
+also attached to the Codex turn as native visual input. Read document paths
+from the workspace. If an upload is marked unavailable or errored, ask the user
+to attach it again; never guess its contents.
 `;
 
 // ── Start session ───────────────────────────────────────
@@ -330,7 +346,10 @@ function emitCodexEvents(event: NormalizedEvent | NormalizedEvent[] | null) {
   if (!event) return;
   const list = Array.isArray(event) ? event : [event];
   for (const e of list) {
-    if (e.type === "agent.text" && typeof (e.payload as { text?: unknown })?.text === "string") {
+    if (
+      e.type === "agent.text" &&
+      typeof (e.payload as { text?: unknown })?.text === "string"
+    ) {
       pendingText += (e.payload as { text: string }).text;
     } else {
       flushPendingText();
@@ -339,13 +358,16 @@ function emitCodexEvents(event: NormalizedEvent | NormalizedEvent[] | null) {
   }
 }
 
-async function runCodexTurn(turnPrompt: string): Promise<void> {
+async function runCodexTurn(
+  turnPrompt: string,
+  localImages: string[] = [],
+): Promise<void> {
   if (activeCodex) {
     if (!(activeCodex instanceof CodexAppServer) || !codexThreadId) {
       console.warn("[agent-codex] turn already in flight — ignoring overlap");
       return;
     }
-    await activeCodex.turn(codexThreadId, turnPrompt);
+    await activeCodex.turn(codexThreadId, turnPrompt, localImages);
     return;
   }
   idleTimer.setBusy(true);
@@ -353,15 +375,23 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
     binary: codexBin,
     cwd: workspaceDir,
     model: codexModel,
-    sandbox: codexSandbox === "danger-full-access" ? "danger-full-access" : "workspace-write",
+    sandbox:
+      codexSandbox === "danger-full-access"
+        ? "danger-full-access"
+        : "workspace-write",
     onEvent: ({ method, params }) => {
-      if (method === "turn/completed" || method === "turn/failed" || method === "error") {
+      if (
+        method === "turn/completed" ||
+        method === "turn/failed" ||
+        method === "error"
+      ) {
         flushPendingText();
       }
       emitCodexEvents(normalizeCodexNotification(method, params));
     },
     onServerRequest: (request) => {
-      if (request.id !== undefined) server.respond(request.id, { decision: "decline" });
+      if (request.id !== undefined)
+        server.respond(request.id, { decision: "decline" });
     },
     onStderr: (line) => console.error(`[codex] ${line}`),
   });
@@ -369,9 +399,12 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
   try {
     codexThreadId = await server.start();
     console.log(`[agent-codex] selected model=${server.model}`);
-    await server.turn(codexThreadId, turnPrompt);
+    await server.turn(codexThreadId, turnPrompt, localImages);
   } catch (error) {
-    emitToStream({ type: "agent.error", payload: { message: (error as Error).message, recoverable: false } });
+    emitToStream({
+      type: "agent.error",
+      payload: { message: (error as Error).message, recoverable: false },
+    });
     server.stop();
     activeCodex = null;
   } finally {
@@ -530,11 +563,23 @@ const injectServer = http.createServer(async (req, res) => {
         });
       }
 
+      // Resolve upload tokens through the same credential-proxy path as
+      // Claude. Successful raster uploads are additionally attached as
+      // native app-server localImage inputs so Codex receives the pixels.
+      const preparedInput = await prepareCodexTurnInput(parsed.text, {
+        sidecarUrl,
+      });
+
       // Send the message into the long-lived app-server thread. The
       // thread preserves Codex conversation state across browser turns.
-      void runCodexTurn(parsed.text).catch((error) => {
-        emitToStream({ type: "agent.error", payload: { message: (error as Error).message, recoverable: false } });
-      });
+      void runCodexTurn(preparedInput.text, preparedInput.localImages).catch(
+        (error) => {
+          emitToStream({
+            type: "agent.error",
+            payload: { message: (error as Error).message, recoverable: false },
+          });
+        },
+      );
       console.log(
         `[agent-codex] /inject sent user message: ${parsed.text.slice(0, 100)}`,
       );
@@ -647,7 +692,8 @@ resetIdleTimer();
 // through /inject, just like the Claude harness; only oneshot sessions exit.
 if (prompt) {
   eventBuffer.push({ type: "user.message", payload: { text: prompt } });
-  await runCodexTurn(prompt);
+  const preparedInput = await prepareCodexTurnInput(prompt, { sidecarUrl });
+  await runCodexTurn(preparedInput.text, preparedInput.localImages);
   if (sessionMode === "oneshot") {
     await shutdown(true, "oneshot complete");
   }
