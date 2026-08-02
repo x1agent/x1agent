@@ -94,6 +94,8 @@ export interface JobWatcherConfig {
   apiUrl: string;
   apiInternalToken: string;
   natsUrl: string;
+  /** Dev-only host path containing the dedicated Codex auth profile. */
+  hostCodexHomeDir?: string;
   anthropicApiKey?: string;
   /**
    * Anthropic credential source. "vertex" makes session pods call
@@ -516,6 +518,7 @@ async function launchSession(
     apiUrl: cfg.apiUrl,
     apiInternalToken: cfg.apiInternalToken,
     natsUrl: cfg.natsUrl,
+    hostCodexHomeDir: cfg.hostCodexHomeDir,
     agentImage: resolvedAgentImage,
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,

@@ -212,6 +212,38 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       expect(env.ANTHROPIC_API_KEY).toBeUndefined();
       expect(env.ANTHROPIC_MODEL).toBeUndefined();
     });
+
+    it("mounts the dedicated Codex home without exposing it to Claude runtimes", () => {
+      const job = buildSessionJob({
+        ...baseSpec("worker"),
+        agentImage: "x1agent/runtime-codex:v1",
+        hostCodexHomeDir: "/home/test/.x1agent-dev/codex-home",
+      });
+      const pod = job.spec!.template.spec!;
+      const agent = pod.containers!.find((c) => c.name === "agent")!;
+      const env = Object.fromEntries(
+        (agent.env ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(env.CODEX_HOME).toBe("/home/agent/.codex");
+      expect(
+        pod.volumes!.find((volume) => volume.name === "codex-home")?.hostPath
+          ?.path,
+      ).toBe("/home/test/.x1agent-dev/codex-home");
+      expect(
+        agent.volumeMounts!.find((mount) => mount.name === "codex-home")
+          ?.mountPath,
+      ).toBe("/home/agent/.codex");
+
+      const claudeJob = buildSessionJob({
+        ...baseSpec("worker"),
+        hostCodexHomeDir: "/home/test/.x1agent-dev/codex-home",
+      });
+      expect(
+        claudeJob.spec!.template.spec!.volumes!.find(
+          (volume) => volume.name === "codex-home",
+        ),
+      ).toBeUndefined();
+    });
   });
 
   describe("USE_JETSTREAM_* propagation", () => {

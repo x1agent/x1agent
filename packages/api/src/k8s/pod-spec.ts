@@ -93,6 +93,8 @@ export interface SessionPodSpec {
   apiInternalToken: string;
   /** Cluster-internal NATS URL. `nats://nats:4222` on dev. */
   natsUrl: string;
+  /** Dev-only host path containing the dedicated Codex auth profile. */
+  hostCodexHomeDir?: string;
   agentImage: string;
   sidecarImage: string;
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
@@ -307,6 +309,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
         : spec.anthropicApiKey
           ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
           : []),
+    ...(isCodex && spec.hostCodexHomeDir
+      ? [{ name: "CODEX_HOME", value: "/home/agent/.codex" }]
+      : []),
     // Codex model override. Mirrors the ANTHROPIC_MODEL knob below for
     // the Codex runtime path; the runtime reads OPENAI_MODEL at boot
     // and feeds it to `codex exec -m <model>`.
@@ -495,6 +500,17 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
           },
           volumes: [
             workspaceVolume,
+            ...(isCodex && spec.hostCodexHomeDir
+              ? [
+                  {
+                    name: "codex-home",
+                    hostPath: {
+                      path: spec.hostCodexHomeDir,
+                      type: "Directory",
+                    },
+                  },
+                ]
+              : []),
             // NATS mTLS material — only the sidecar mounts this. The
             // agent container has no NATS cert and no way to pick one
             // up, so any direct NATS connect from the agent container
@@ -564,6 +580,14 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               env: agentEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                ...(isCodex && spec.hostCodexHomeDir
+                  ? [
+                      {
+                        name: "codex-home",
+                        mountPath: "/home/agent/.codex",
+                      },
+                    ]
+                  : []),
                 ...(spec.sessionHistoryConfigMapName
                   ? [
                       {
