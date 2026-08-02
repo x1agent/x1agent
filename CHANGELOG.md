@@ -1,3 +1,15 @@
+# [1.44.0](https://github.com/x1agent/x1agent/compare/v1.43.0...v1.44.0) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** harden skill loading boundary ([6051929](https://github.com/x1agent/x1agent/commit/60519292c7c5aea76020d4ec1d27166e8546fd20))
+
+
+### Features
+
+* **agent:** install shared skills from GitHub ([d87d118](https://github.com/x1agent/x1agent/commit/d87d11821fb203ee486563a8ee771a748bf85463))
+
 # [1.43.0](https://github.com/x1agent/x1agent/compare/v1.42.0...v1.43.0) (2026-08-02)
 
 
