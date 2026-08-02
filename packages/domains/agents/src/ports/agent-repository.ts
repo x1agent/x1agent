@@ -1,12 +1,9 @@
-import type {
-  UserId,
-  WorkspaceId,
-  WorkspaceSlug,
-} from "@x1agent/kernel";
+import type { UserId, WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import type { Agent, AgentId } from "../domain/agent.js";
 import type { RuntimeType } from "../domain/runtime.js";
 import type { AgentKind } from "../domain/kind.js";
 import type { CronSchedule } from "../domain/cron-schedule.js";
+import type { AgentSkillSource } from "../domain/skill-source.js";
 
 export interface CreateAgentInput {
   workspaceId: WorkspaceId;
@@ -40,6 +37,7 @@ export interface CreateAgentInput {
    * default. Clamped to [30, 604800] at the api boundary.
    */
   idleTimeoutSeconds?: number | null;
+  skillSources?: AgentSkillSource[];
   createdBy: UserId | null;
 }
 
@@ -61,6 +59,7 @@ export interface UpdateAgentInput {
   scheduledRunAsUserId?: UserId | null;
   /** Same convention — null clears, undefined leaves untouched. */
   idleTimeoutSeconds?: number | null;
+  skillSources?: AgentSkillSource[];
 }
 
 export interface AgentRepository {

@@ -10,11 +10,7 @@ import type {
   UpdateAgentInput,
 } from "../ports/agent-repository.js";
 import type { AdminGuard } from "../ports/admin-guard.js";
-import {
-  AgentId,
-  AgentSlugTakenError,
-  type Agent,
-} from "../domain/agent.js";
+import { AgentId, AgentSlugTakenError, type Agent } from "../domain/agent.js";
 
 let counter = 0x20;
 function nextId(): string {
@@ -54,6 +50,7 @@ export class InMemoryAgentRepository implements AgentRepository {
           ? input.createdBy
           : input.scheduledRunAsUserId,
       idleTimeoutSeconds: input.idleTimeoutSeconds ?? null,
+      skillSources: input.skillSources ?? [],
       createdAt: now,
       updatedAt: now,
       lastSchedulerTickAt: null,
@@ -72,9 +69,7 @@ export class InMemoryAgentRepository implements AgentRepository {
     return null;
   }
   async listByWorkspace(workspaceId: WorkspaceId) {
-    return [...this.rows.values()].filter(
-      (a) => a.workspaceId === workspaceId,
-    );
+    return [...this.rows.values()].filter((a) => a.workspaceId === workspaceId);
   }
   async update(id: AgentId, patch: UpdateAgentInput) {
     const a = this.rows.get(id);
@@ -82,21 +77,32 @@ export class InMemoryAgentRepository implements AgentRepository {
     const updated: Agent = {
       ...a,
       ...(patch.name !== undefined && { name: patch.name }),
-      ...(patch.runtimeType !== undefined && { runtimeType: patch.runtimeType }),
+      ...(patch.runtimeType !== undefined && {
+        runtimeType: patch.runtimeType,
+      }),
       ...(patch.kind !== undefined && { kind: patch.kind }),
-      ...(patch.systemPrompt !== undefined && { systemPrompt: patch.systemPrompt }),
-      ...(patch.heartbeatMd !== undefined && { heartbeatMd: patch.heartbeatMd }),
+      ...(patch.systemPrompt !== undefined && {
+        systemPrompt: patch.systemPrompt,
+      }),
+      ...(patch.heartbeatMd !== undefined && {
+        heartbeatMd: patch.heartbeatMd,
+      }),
       ...(patch.schedule !== undefined && { schedule: patch.schedule }),
       ...(patch.isActive !== undefined && { isActive: patch.isActive }),
       ...(patch.imageId !== undefined && { imageId: patch.imageId }),
       ...(patch.model !== undefined && { model: patch.model }),
-      ...(patch.ownerUserId !== undefined && { ownerUserId: patch.ownerUserId }),
+      ...(patch.ownerUserId !== undefined && {
+        ownerUserId: patch.ownerUserId,
+      }),
       ...(patch.visibility !== undefined && { visibility: patch.visibility }),
       ...(patch.scheduledRunAsUserId !== undefined && {
         scheduledRunAsUserId: patch.scheduledRunAsUserId,
       }),
       ...(patch.idleTimeoutSeconds !== undefined && {
         idleTimeoutSeconds: patch.idleTimeoutSeconds,
+      }),
+      ...(patch.skillSources !== undefined && {
+        skillSources: patch.skillSources,
       }),
       updatedAt: new Date(),
     };

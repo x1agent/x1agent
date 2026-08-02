@@ -1,9 +1,5 @@
 import type postgres from "postgres";
-import {
-  UserId,
-  WorkspaceId,
-  WorkspaceSlug,
-} from "@x1agent/kernel";
+import { UserId, WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import type {
   AgentRepository,
   CreateAgentInput,
@@ -13,6 +9,7 @@ import { AgentId, type Agent } from "../../domain/agent.js";
 import { RuntimeType } from "../../domain/runtime.js";
 import { AgentKind } from "../../domain/kind.js";
 import { CronSchedule } from "../../domain/cron-schedule.js";
+import type { AgentSkillSource } from "../../domain/skill-source.js";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -34,6 +31,7 @@ interface Row {
   created_by: string | null;
   scheduled_run_as_user_id: string | null;
   idle_timeout_seconds: number | null;
+  skill_sources: AgentSkillSource[];
   created_at: Date | string;
   updated_at: Date | string;
   last_scheduler_tick_at: Date | string | null;
@@ -54,12 +52,14 @@ function toAgent(r: Row): Agent {
     imageId: r.image_id,
     model: r.model,
     ownerUserId: r.owner_user_id ? UserId(r.owner_user_id) : null,
-    visibility: (r.visibility as "private" | "workspace" | "via_grants") ?? "workspace",
+    visibility:
+      (r.visibility as "private" | "workspace" | "via_grants") ?? "workspace",
     createdBy: r.created_by ? UserId(r.created_by) : null,
     scheduledRunAsUserId: r.scheduled_run_as_user_id
       ? UserId(r.scheduled_run_as_user_id)
       : null,
     idleTimeoutSeconds: r.idle_timeout_seconds,
+    skillSources: r.skill_sources ?? [],
     createdAt: new Date(r.created_at),
     updatedAt: new Date(r.updated_at),
     lastSchedulerTickAt: r.last_scheduler_tick_at
@@ -72,7 +72,7 @@ const SELECT = `
   id, workspace_id, slug, name, runtime_type, kind, system_prompt,
   heartbeat_md, schedule, is_active, image_id, model,
   owner_user_id, visibility, created_by, scheduled_run_as_user_id,
-  idle_timeout_seconds,
+  idle_timeout_seconds, skill_sources,
   created_at, updated_at, last_scheduler_tick_at
 `;
 
@@ -93,7 +93,7 @@ export class PostgresAgentRepository implements AgentRepository {
         (workspace_id, slug, name, runtime_type, kind, system_prompt,
          heartbeat_md, schedule, image_id, model,
          owner_user_id, visibility, created_by, scheduled_run_as_user_id,
-         idle_timeout_seconds)
+         idle_timeout_seconds, skill_sources)
       VALUES
         (${input.workspaceId}, ${input.slug}, ${input.name},
          ${input.runtimeType}, ${input.kind ?? "worker"},
@@ -103,7 +103,8 @@ export class PostgresAgentRepository implements AgentRepository {
          ${input.visibility ?? "workspace"},
          ${input.createdBy},
          ${runAs},
-         ${input.idleTimeoutSeconds ?? null})
+         ${input.idleTimeoutSeconds ?? null},
+         ${this.sql.json((input.skillSources ?? []) as never)})
       RETURNING ${this.sql.unsafe(SELECT)}
     `;
     return toAgent(rows[0]!);
@@ -127,9 +128,7 @@ export class PostgresAgentRepository implements AgentRepository {
     return rows[0] ? toAgent(rows[0]) : null;
   }
 
-  async listByWorkspace(
-    workspaceId: WorkspaceId,
-  ): Promise<readonly Agent[]> {
+  async listByWorkspace(workspaceId: WorkspaceId): Promise<readonly Agent[]> {
     const rows = await this.sql<Row[]>`
       SELECT ${this.sql.unsafe(SELECT)} FROM agents
       WHERE workspace_id = ${workspaceId}
@@ -164,6 +163,7 @@ export class PostgresAgentRepository implements AgentRepository {
         visibility    = COALESCE(${patch.visibility ?? null}, visibility),
         scheduled_run_as_user_id = ${patch.scheduledRunAsUserId === undefined ? this.sql`scheduled_run_as_user_id` : patch.scheduledRunAsUserId},
         idle_timeout_seconds = ${patch.idleTimeoutSeconds === undefined ? this.sql`idle_timeout_seconds` : patch.idleTimeoutSeconds},
+        skill_sources = ${patch.skillSources === undefined ? this.sql`skill_sources` : this.sql.json(patch.skillSources as never)},
         last_scheduler_tick_at = ${scheduleIncluded ? this.sql`now()` : this.sql`last_scheduler_tick_at`},
         updated_at    = now()
       WHERE id = ${id}

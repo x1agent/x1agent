@@ -1,5 +1,6 @@
 // Domain
 export * from "./domain/agent.js";
+export * from "./domain/skill-source.js";
 export * from "./domain/cron-schedule.js";
 export * from "./domain/kind.js";
 export * from "./domain/runtime.js";

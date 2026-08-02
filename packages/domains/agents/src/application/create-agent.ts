@@ -1,8 +1,4 @@
-import type {
-  UserId,
-  WorkspaceId,
-  WorkspaceSlug,
-} from "@x1agent/kernel";
+import type { UserId, WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import type { AgentRepository } from "../ports/agent-repository.js";
 import type { AdminGuard } from "../ports/admin-guard.js";
 import type { WorkspaceMemberReader } from "../ports/workspace-member-reader.js";
@@ -10,6 +6,7 @@ import type { Agent } from "../domain/agent.js";
 import type { RuntimeType } from "../domain/runtime.js";
 import type { AgentKind } from "../domain/kind.js";
 import type { CronSchedule } from "../domain/cron-schedule.js";
+import type { AgentSkillSource } from "../domain/skill-source.js";
 import {
   AgentSlugTakenError,
   ScheduledRunAsUserNotInWorkspaceError,
@@ -52,6 +49,7 @@ export interface CreateAgentInput {
    * Clamping happens at the api boundary.
    */
   idleTimeoutSeconds?: number | null;
+  skillSources?: AgentSkillSource[];
 }
 
 export async function createAgent(
@@ -60,10 +58,7 @@ export async function createAgent(
 ): Promise<Agent> {
   await deps.adminGuard.assertAdmin(input.actor, input.workspaceId);
 
-  const existing = await deps.agents.findBySlug(
-    input.workspaceId,
-    input.slug,
-  );
+  const existing = await deps.agents.findBySlug(input.workspaceId, input.slug);
   if (existing) throw new AgentSlugTakenError(input.slug);
 
   // Default scheduled-run-as user = creator. Explicit null clears it.
@@ -94,6 +89,7 @@ export async function createAgent(
     model: input.model ?? null,
     scheduledRunAsUserId: runAs,
     idleTimeoutSeconds: input.idleTimeoutSeconds ?? null,
+    skillSources: input.skillSources ?? [],
     createdBy: input.actor,
   });
 }

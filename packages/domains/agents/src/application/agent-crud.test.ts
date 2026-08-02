@@ -2,19 +2,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { UserId, WorkspaceId, WorkspaceSlug } from "@x1agent/kernel";
 import { CronSchedule } from "../domain/cron-schedule.js";
 import { RuntimeType } from "../domain/runtime.js";
-import {
-  AgentNotFoundError,
-  AgentSlugTakenError,
-} from "../domain/agent.js";
+import { AgentNotFoundError, AgentSlugTakenError } from "../domain/agent.js";
 import { createAgent } from "./create-agent.js";
 import { updateAgent } from "./update-agent.js";
 import { deleteAgent } from "./delete-agent.js";
 import { listAgents } from "./list-agents.js";
-import {
-  AllowAllAdmin,
-  DenyAdmin,
-  InMemoryAgentRepository,
-} from "./fakes.js";
+import { AllowAllAdmin, DenyAdmin, InMemoryAgentRepository } from "./fakes.js";
 
 const uuid = (n: number) =>
   `00000000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -46,6 +39,7 @@ describe("createAgent", () => {
     expect(a.heartbeatMd).toBe("");
     expect(a.schedule).toBeNull();
     expect(a.isActive).toBe(true);
+    expect(a.skillSources).toEqual([]);
   });
 
   it("persists schedule when provided", async () => {
@@ -124,11 +118,19 @@ describe("updateAgent", () => {
         name: "Renamed",
         heartbeatMd: "## Todo\n- check things",
         schedule: CronSchedule("@daily"),
+        skillSources: [
+          {
+            repository: "https://github.com/acme/skills",
+            ref: "v1",
+            path: "skills/review",
+          },
+        ],
       },
     );
     expect(updated.name).toBe("Renamed");
     expect(updated.heartbeatMd).toContain("check things");
     expect(updated.schedule).toBe(CronSchedule("@daily"));
+    expect(updated.skillSources).toHaveLength(1);
   });
 
   it("errors on unknown id", async () => {
@@ -136,7 +138,9 @@ describe("updateAgent", () => {
       updateAgent(
         { agents, adminGuard: new AllowAllAdmin() },
         ACTOR,
-        "no-such-agent" as ReturnType<typeof import("../domain/agent.js").AgentId>,
+        "no-such-agent" as ReturnType<
+          typeof import("../domain/agent.js").AgentId
+        >,
         { name: "x" },
       ),
     ).rejects.toBeInstanceOf(AgentNotFoundError);
@@ -155,11 +159,7 @@ describe("deleteAgent", () => {
         runtimeType: RuntimeType("claude_code"),
       },
     );
-    await deleteAgent(
-      { agents, adminGuard: new AllowAllAdmin() },
-      ACTOR,
-      a.id,
-    );
+    await deleteAgent({ agents, adminGuard: new AllowAllAdmin() }, ACTOR, a.id);
     expect(await agents.findById(a.id)).toBeNull();
   });
 });
@@ -217,8 +217,6 @@ describe("listScheduled", () => {
       },
     );
     const rows = await agents.listScheduled();
-    expect(rows.map((r) => r.slug)).toEqual([
-      WorkspaceSlug("scheduled"),
-    ]);
+    expect(rows.map((r) => r.slug)).toEqual([WorkspaceSlug("scheduled")]);
   });
 });

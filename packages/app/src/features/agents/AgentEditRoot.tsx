@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RuntimeType } from "@x1agent/shared";
+import type { AgentSkillSourceDTO, RuntimeType } from "@x1agent/shared";
 import { slugify } from "@x1agent/kernel";
 import { apiFetch } from "../../lib/api";
 import { AppShell } from "../../shell/AppShell";
@@ -71,7 +71,7 @@ interface Props {
  * the detail page and can attach repos/collections/grants from there.
  */
 
-type TabKey = "general" | "prompts" | "connections" | "permissions";
+type TabKey = "general" | "prompts" | "skills" | "connections" | "permissions";
 
 const DEFAULT_TAB: TabKey = "general";
 
@@ -88,6 +88,7 @@ function isTabKey(value: string): value is TabKey {
   return (
     value === "general" ||
     value === "prompts" ||
+    value === "skills" ||
     value === "connections" ||
     value === "permissions"
   );
@@ -141,6 +142,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   >([]);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [heartbeatMd, setHeartbeatMd] = useState("");
+  const [skillSources, setSkillSources] = useState<AgentSkillSourceDTO[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [imageId, setImageId] = useState<string>("");
   const [model, setModel] = useState<string>("");
@@ -254,6 +256,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setSchedule(existing.schedule ?? "");
       setSystemPrompt(existing.system_prompt);
       setHeartbeatMd(existing.heartbeat_md);
+      setSkillSources(existing.skill_sources ?? []);
       setIsActive(existing.is_active);
       setImageId((existing as { image_id?: string | null }).image_id ?? "");
       setModel((existing as { model?: string | null }).model ?? "");
@@ -333,9 +336,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           model: model.trim() === "" ? null : model.trim(),
           schedule: schedule.trim() ? schedule.trim() : null,
           scheduled_run_as_user_id: scheduledRunAsUserId || null,
-          idle_timeout_seconds: idleTimeoutSeconds.trim() === ""
-            ? null
-            : Number(idleTimeoutSeconds),
+          idle_timeout_seconds:
+            idleTimeoutSeconds.trim() === ""
+              ? null
+              : Number(idleTimeoutSeconds),
+          skill_sources: skillSources,
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${slugInput.trim()}`;
       } else if (existing) {
@@ -350,9 +355,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           image_id: imageId === "" ? null : imageId,
           model: model.trim() === "" ? null : model.trim(),
           scheduled_run_as_user_id: scheduledRunAsUserId || null,
-          idle_timeout_seconds: idleTimeoutSeconds.trim() === ""
-            ? null
-            : Number(idleTimeoutSeconds),
+          idle_timeout_seconds:
+            idleTimeoutSeconds.trim() === ""
+              ? null
+              : Number(idleTimeoutSeconds),
+          skill_sources: skillSources,
         } as never);
         window.location.href = `/workspaces/${workspaceSlug}/agents/${existing.slug}`;
       }
@@ -380,7 +387,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   // edit the agent row itself. Repos / Collections / Permissions each
   // save independently via their own cards and don't go through this
   // form submit.
-  const showSaveBar = tab === "general" || tab === "prompts";
+  const showSaveBar =
+    tab === "general" || tab === "prompts" || tab === "skills";
 
   return (
     <AppShell breadcrumbs={breadcrumbs}>
@@ -390,6 +398,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
           <TabsList className="mb-4">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            <TabsTrigger value="skills">Skills</TabsTrigger>
             {!isCreate && (
               <>
                 <TabsTrigger value="connections">Connections</TabsTrigger>
@@ -469,9 +478,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       <Select
                         value={kind}
                         onValueChange={(v) =>
-                          setKind(
-                            v as "worker" | "orchestrator" | "scheduled",
-                          )
+                          setKind(v as "worker" | "orchestrator" | "scheduled")
                         }
                       >
                         <SelectTrigger id="agent-kind">
@@ -479,7 +486,9 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="worker">worker</SelectItem>
-                          <SelectItem value="orchestrator">orchestrator</SelectItem>
+                          <SelectItem value="orchestrator">
+                            orchestrator
+                          </SelectItem>
                           <SelectItem value="scheduled">scheduled</SelectItem>
                         </SelectContent>
                       </Select>
@@ -661,7 +670,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                         )}
                       </div>
                     )}
-                    {runtimeType !== "codex" && modelCatalog.length > 0 &&
+                    {runtimeType !== "codex" &&
+                      modelCatalog.length > 0 &&
                       model !== "" &&
                       !modelCatalog.some((m) => m.id === model) && (
                         <Input
@@ -724,10 +734,10 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     <p className="text-xs text-fg-faint">
                       The scheduler fires this agent's cron ticks as the
                       selected user — required for any agent with{" "}
-                      <code>remote_oauth</code> MCPs attached (Google
-                      Workspace, Linear, etc). Defaults to the agent's
-                      creator. Workspace admins can change this to a
-                      service account or another member.
+                      <code>remote_oauth</code> MCPs attached (Google Workspace,
+                      Linear, etc). Defaults to the agent's creator. Workspace
+                      admins can change this to a service account or another
+                      member.
                     </p>
                   </div>
                 </CardContent>
@@ -737,11 +747,14 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 <CardHeader>
                   <CardTitle>Idle timeout</CardTitle>
                   <CardDescription>
-                    How long the session pod waits for input before shutting itself down.
+                    How long the session pod waits for input before shutting
+                    itself down.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <Label htmlFor="agent-idle-timeout">Seconds (blank = default)</Label>
+                  <Label htmlFor="agent-idle-timeout">
+                    Seconds (blank = default)
+                  </Label>
                   <input
                     id="agent-idle-timeout"
                     type="number"
@@ -750,15 +763,20 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     step={30}
                     value={idleTimeoutSeconds}
                     onChange={(e) => setIdleTimeoutSeconds(e.target.value)}
-                    placeholder={kind === "orchestrator" ? "604800 (default: 7 days)" : "3600 (default: 1 hour)"}
+                    placeholder={
+                      kind === "orchestrator"
+                        ? "604800 (default: 7 days)"
+                        : "3600 (default: 1 hour)"
+                    }
                     className="w-full rounded border border-border bg-bg-input px-2 py-1.5 text-sm"
                   />
                   <p className="text-xs text-fg-faint">
-                    Range 30 s – 604800 s (7 days). Blank uses the platform default:{" "}
-                    <strong>1 hour</strong> for worker / scheduled agents,{" "}
-                    <strong>7 days</strong> for orchestrators. Bump it for interactive
-                    sessions that idle while you read or step away; lower it for cron
-                    agents that should die quickly after their work.
+                    Range 30 s – 604800 s (7 days). Blank uses the platform
+                    default: <strong>1 hour</strong> for worker / scheduled
+                    agents, <strong>7 days</strong> for orchestrators. Bump it
+                    for interactive sessions that idle while you read or step
+                    away; lower it for cron agents that should die quickly after
+                    their work.
                   </p>
                 </CardContent>
               </Card>
@@ -834,6 +852,116 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
               )}
             </TabsContent>
 
+            <TabsContent value="skills" className="mt-0 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Agent skills</CardTitle>
+                  <CardDescription>
+                    Install Agent Skills from public GitHub repositories into
+                    every session. A source can be a standalone SKILL.md or a
+                    Claude/Codex plugin containing a skills directory. Pin a tag
+                    or commit for reproducible sessions.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {skillSources.map((source, index) => (
+                    <div
+                      key={index}
+                      className="space-y-3 rounded-md border border-border-soft p-3"
+                    >
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`skill-repository-${index}`}>
+                          GitHub repository
+                        </Label>
+                        <Input
+                          id={`skill-repository-${index}`}
+                          type="url"
+                          required
+                          placeholder="https://github.com/owner/skills-plugin"
+                          value={source.repository}
+                          onChange={(event) =>
+                            setSkillSources((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index
+                                  ? { ...item, repository: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`skill-ref-${index}`}>Git ref</Label>
+                          <Input
+                            id={`skill-ref-${index}`}
+                            placeholder="v1.0.0 (default branch when blank)"
+                            value={source.ref}
+                            onChange={(event) =>
+                              setSkillSources((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, ref: event.target.value }
+                                    : item,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`skill-path-${index}`}>Path</Label>
+                          <Input
+                            id={`skill-path-${index}`}
+                            placeholder="skills/review (repository root when blank)"
+                            value={source.path}
+                            onChange={(event) =>
+                              setSkillSources((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, path: event.target.value }
+                                    : item,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setSkillSources((current) =>
+                            current.filter(
+                              (_, itemIndex) => itemIndex !== index,
+                            ),
+                          )
+                        }
+                      >
+                        Remove skill source
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setSkillSources((current) => [
+                        ...current,
+                        { repository: "", ref: "", path: "" },
+                      ])
+                    }
+                  >
+                    Add GitHub skill source
+                  </Button>
+                  <p className="text-xs text-fg-muted">
+                    Public GitHub repositories only. Skill scripts execute with
+                    the same permissions as the agent, so pin and review sources
+                    you trust.
+                  </p>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             {!isCreate && existing && (
               <>
                 {/*
@@ -888,8 +1016,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     agentId={existing.id}
                     agentName={existing.name}
                     visibility={
-                      (existing as { visibility?: "private" | "workspace" | "via_grants" })
-                        .visibility ?? "workspace"
+                      (
+                        existing as {
+                          visibility?: "private" | "workspace" | "via_grants";
+                        }
+                      ).visibility ?? "workspace"
                     }
                     canManage={!!canManage}
                     onVisibilityChanged={() => load(workspaceSlug)}
@@ -909,11 +1040,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
             {showSaveBar && (
               <div className="flex items-center gap-2">
                 <Button type="submit" disabled={submitting}>
-                  {submitting
-                    ? "Saving…"
-                    : isCreate
-                      ? "Create agent"
-                      : "Save"}
+                  {submitting ? "Saving…" : isCreate ? "Create agent" : "Save"}
                 </Button>
                 <Button type="button" variant="outline" asChild>
                   <a href={cancelHref}>Cancel</a>

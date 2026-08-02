@@ -463,6 +463,8 @@ const conversation: Query = query({
     systemPrompt: systemPromptText,
     mcpServers,
     allowedTools,
+    settingSources: ["user", "project"],
+    skills: "all",
     permissionMode: "bypassPermissions",
     ...(process.env.CLAUDE_PATH
       ? { pathToClaudeCodeExecutable: process.env.CLAUDE_PATH }
