@@ -1601,6 +1601,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "end_session": {
+      if (process.env.SESSION_MODE === "interactive") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Interactive sessions stay open between user messages. Do not end the session; wait for the next message.",
+            },
+          ],
+          isError: true,
+        };
+      }
       // POST to the agent's /shutdown so the parent process terminates
       // cleanly — one session.completed event, no 15-minute idle-timer
       // drift afterwards. Do not exit this subprocess; the agent's

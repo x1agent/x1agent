@@ -6,7 +6,8 @@
 
 // Shape-compatible with @anthropic-ai/claude-agent-sdk's SDKUserMessage for
 // the fields this channel produces. In v0 nothing in the Codex harness
-// actually consumes this iterator — :8788/inject is stubbed — but we keep
+// actually consumes this iterator — :8788/inject feeds the live app-server
+// thread — but we keep
 // the channel intact so the v1 App Server path can wire it without
 // reshaping the harness around it.
 export interface SDKUserMessage {

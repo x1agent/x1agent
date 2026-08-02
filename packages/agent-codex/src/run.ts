@@ -259,6 +259,21 @@ const workspacePromptSection = workspaceSystemPrompt
   : "";
 
 const agentKind = process.env.AGENT_KIND ?? "worker";
+const interactivePrompt =
+  sessionMode === "interactive"
+    ? `
+
+## Interactive Session
+
+This is an INTERACTIVE session. The user will send multiple messages over
+time. After responding to each message, stop and wait for the next user
+message. Do NOT call end_session, say goodbye, or end the conversation unless
+the user explicitly asks you to close the session.`
+    : `
+
+## One-Shot Session
+
+Complete the task and finish.`;
 
 const systemPromptText = `${workspacePromptSection}${identityLine}
 
@@ -273,7 +288,7 @@ The user is watching this session in real time.
 - end_session — declare the session complete.
 
 Call emit_status at the start of each distinct phase. Be responsive — the
-user is watching live.
+user is watching live.${interactivePrompt}
 `;
 
 // ── Start session ───────────────────────────────────────
@@ -299,6 +314,31 @@ function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   for (const e of list) emitToStream(e);
 }
 
+// Claude's SDK yields a message-sized text block. Codex app-server streams
+// one delta at a time, but the platform event contract/UI treats each
+// `agent.text` event as a message block. Buffer deltas until the next
+// non-text event or turn completion so a sentence does not render as one
+// card per token.
+let pendingText = "";
+function flushPendingText() {
+  if (!pendingText) return;
+  emitToStream({ type: "agent.text", payload: { text: pendingText } });
+  pendingText = "";
+}
+
+function emitCodexEvents(event: NormalizedEvent | NormalizedEvent[] | null) {
+  if (!event) return;
+  const list = Array.isArray(event) ? event : [event];
+  for (const e of list) {
+    if (e.type === "agent.text" && typeof (e.payload as { text?: unknown })?.text === "string") {
+      pendingText += (e.payload as { text: string }).text;
+    } else {
+      flushPendingText();
+      emitToStream(e);
+    }
+  }
+}
+
 async function runCodexTurn(turnPrompt: string): Promise<void> {
   if (activeCodex) {
     if (!(activeCodex instanceof CodexAppServer) || !codexThreadId) {
@@ -314,7 +354,12 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
     cwd: workspaceDir,
     model: codexModel,
     sandbox: codexSandbox === "danger-full-access" ? "danger-full-access" : "workspace-write",
-    onEvent: ({ method, params }) => emitNormalized(normalizeCodexNotification(method, params)),
+    onEvent: ({ method, params }) => {
+      if (method === "turn/completed" || method === "turn/failed" || method === "error") {
+        flushPendingText();
+      }
+      emitCodexEvents(normalizeCodexNotification(method, params));
+    },
     onServerRequest: (request) => {
       if (request.id !== undefined) server.respond(request.id, { decision: "decline" });
     },
@@ -597,11 +642,9 @@ async function shutdown(
 
 resetIdleTimer();
 
-// v0 driver: if a seed prompt is set (scheduler-triggered or the smoke
-// test populated AGENT_PROMPT), run one Codex turn against it. Then,
-// for oneshot mode, shut down; for interactive mode, park on the idle
-// timer waiting for /inject (which is a stub in v0, so the session
-// will eventually idle out — that's the documented v0 behaviour).
+// If a seed prompt is set (scheduler-triggered or supplied by the caller),
+// run one turn. Interactive sessions remain alive and accept follow-up turns
+// through /inject, just like the Claude harness; only oneshot sessions exit.
 if (prompt) {
   eventBuffer.push({ type: "user.message", payload: { text: prompt } });
   await runCodexTurn(prompt);
@@ -610,6 +653,6 @@ if (prompt) {
   }
 } else {
   console.log(
-    "[agent-codex] no AGENT_PROMPT seed; v0 parks on idle timer (interactive /inject is a stub)",
+    "[agent-codex] no AGENT_PROMPT seed; interactive session is waiting for /inject",
   );
 }
