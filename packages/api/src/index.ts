@@ -901,7 +901,12 @@ if (process.env.JOB_WATCHER !== "disabled") {
       // image is a Codex runtime build (see isCodexRuntimeImage in
       // pod-spec.ts). OPENAI_API_KEY is already wired through the
       // four-layer install pattern documented in CLAUDE.md.
-      openaiApiKey: process.env.OPENAI_API_KEY,
+      hostCodexHomeDir: process.env.HOST_CODEX_HOME_DIR || undefined,
+      // A host Codex profile is the login-based auth path. Do not forward
+      // an inherited platform API key into those session pods.
+      openaiApiKey: process.env.HOST_CODEX_HOME_DIR
+        ? undefined
+        : process.env.OPENAI_API_KEY,
       openaiModel: process.env.OPENAI_MODEL || undefined,
       sessionServiceAccount:
         process.env.SESSION_SERVICE_ACCOUNT || undefined,

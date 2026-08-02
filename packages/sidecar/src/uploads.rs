@@ -35,7 +35,7 @@
 //! Response shape (error):
 //!   { ok: false, error: { code, message } }
 //!
-//! The agent's `resolveImageTokens` in `packages/agent/src/run.ts`
+//! The shared `resolveImageTokens` in `packages/agent-runtime/src/image-tokens.ts`
 //! decodes `content_b64` and writes the bytes to
 //! `/workspace/.x1/uploads/<id>.<ext>` so the LLM's `Read` tool can
 //! see them as image content blocks.

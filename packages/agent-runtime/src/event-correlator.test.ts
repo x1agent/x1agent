@@ -66,9 +66,9 @@ describe("createEventCorrelator", () => {
     c.arm("evt-2");
     // user echo first; the indicator's event_id should still wait for
     // the agent's reply.
-    expect(c.maybeStamp({ type: "user.message", payload: { text: "hi" } })).toBe(
-      false,
-    );
+    expect(
+      c.maybeStamp({ type: "user.message", payload: { text: "hi" } }),
+    ).toBe(false);
     expect(c.pending()).toBe("evt-2");
     // Then the agent answers — that gets stamped.
     const reply = { type: "agent.text", payload: { text: "yo" } };

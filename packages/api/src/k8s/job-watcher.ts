@@ -94,6 +94,8 @@ export interface JobWatcherConfig {
   apiUrl: string;
   apiInternalToken: string;
   natsUrl: string;
+  /** Dev-only host path containing the dedicated Codex auth profile. */
+  hostCodexHomeDir?: string;
   anthropicApiKey?: string;
   /**
    * Anthropic credential source. "vertex" makes session pods call
@@ -124,7 +126,7 @@ export interface JobWatcherConfig {
   openaiApiKey?: string;
   /**
    * OpenAI model override for the Codex runtime. When unset the
-   * runtime defaults to gpt-5.3-codex inside the container.
+   * runtime defaults to gpt-5-codex inside the container.
    */
   openaiModel?: string;
   /**
@@ -516,6 +518,7 @@ async function launchSession(
     apiUrl: cfg.apiUrl,
     apiInternalToken: cfg.apiInternalToken,
     natsUrl: cfg.natsUrl,
+    hostCodexHomeDir: cfg.hostCodexHomeDir,
     agentImage: resolvedAgentImage,
     sidecarImage: cfg.sidecarImage,
     imagePullPolicy: cfg.imagePullPolicy,
@@ -528,7 +531,10 @@ async function launchSession(
     // The Anthropic plumbing above stays the active path for every
     // Claude-runtime agent.
     openaiApiKey: cfg.openaiApiKey,
-    openaiModel: cfg.openaiModel,
+    openaiModel:
+      agent.runtimeType === "codex"
+        ? selectSessionModel(session, agent, cfg.openaiModel)
+        : cfg.openaiModel,
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,
     serviceAccountName: cfg.sessionServiceAccount,

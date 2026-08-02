@@ -1,38 +1,44 @@
 /**
  * Codex agent container entrypoint — spike v0.
  *
- * Parallel to packages/agent/src/run.ts (the Claude SDK harness). Differences:
+ * Parallel to packages/agent-claude/src/run.ts. Shared platform plumbing lives
+ * in packages/agent-runtime; this file owns only the Codex driver behavior.
  *
- *   - Agent loop driver: spawns `codex exec --json` as a subprocess per turn
- *     rather than driving the Claude Agent SDK in-process. v0 is one-shot per
- *     turn; the App Server JSON-RPC path that supports interactive
- *     turn-injection lands in v1.
- *   - Event source: parses Codex JSONL from the subprocess's stdout and
- *     translates each event to platform wire shapes via normalize.ts.
- *   - Inject endpoint (:8788/inject) is a STUB. POSTs are accepted with 202
- *     and logged; no follow-up turn happens because v0 ships without the
- *     App Server. The sidecar's existing inject path stays valid for v1.
+ *   - Agent loop driver: drives one long-lived `codex app-server --stdio`
+ *     subprocess over JSON-RPC, preserving thread state across turns.
+ *   - Event source: parses app-server JSONL notifications and translates
+ *     them to platform wire shapes via normalize.ts.
+ *   - Inject endpoint (:8788/inject) starts a real follow-up turn on the
+ *     same Codex thread.
  *
  * The SSE :3100 contract, idle-timer, shutdown sequence, X1A-103
  * wake-classification, and sidecar /event POST are all identical to the
  * Claude harness — same downstream consumers (sidecar stream.rs → NATS →
  * api subscriber → browser), no changes required there.
  */
-import { spawn, type ChildProcess } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { normalizeCodexEvent, type NormalizedEvent } from "./normalize.js";
-import { createInputChannel } from "./input-channel.js";
-import { IdleTimer } from "./idle-timer.js";
+import {
+  normalizeCodexNotification,
+  type NormalizedEvent,
+} from "./normalize.js";
+import { CodexAppServer } from "./app-server.js";
+import {
+  buildPlatformMcpDefinitions,
+  parseRemoteMcpAttachments,
+  renderCodexMcpConfig,
+} from "./mcp-config.js";
+import { prepareCodexTurnInput } from "./upload-inputs.js";
+import { IdleTimer } from "../../agent-runtime/src/idle-timer.js";
 import {
   buildAgentThinkingCancelledEvent,
   buildAgentThinkingEvent,
   type WakeEnvelopeFields,
-} from "./wake-classifier.js";
-import { createEventCorrelator } from "./event-correlator.js";
+} from "../../agent-runtime/src/wake-classifier.js";
+import { createEventCorrelator } from "../../agent-runtime/src/event-correlator.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -51,14 +57,20 @@ const platformName = process.env.PLATFORM_NAME || "x1agent";
 const workspaceName = process.env.WORKSPACE_NAME || "";
 const workspaceSystemPrompt = process.env.WORKSPACE_SYSTEM_PROMPT || "";
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
-const codexModel = process.env.OPENAI_MODEL || "gpt-5.3-codex";
+// The app-server discovers the account's default model when this is blank.
+// OPENAI_MODEL remains an explicit per-agent/deployment override.
+const codexModel = process.env.OPENAI_MODEL?.trim() || "";
 // Bubblewrap inside an unprivileged pod is the open question
 // (codex-spike-gap-analysis.md §6). The env knob lets the platform team
 // flip the default per pod without rebuilding the image. Defaults to
 // "workspace-write" (try the sandboxed path first); flip to
 // "danger-full-access" via env if the pod's securityContext rejects
 // the Bubblewrap setup. The pod is already the security boundary.
-const codexSandbox = process.env.CODEX_SANDBOX || "workspace-write";
+// The session pod is already the isolation boundary. Unprivileged k3s pods
+// cannot reliably initialize Codex's workspace-write bubblewrap profile, so
+// use the pod-scoped full-access mode by default; operators can still opt
+// back into workspace-write with CODEX_SANDBOX.
+const codexSandbox = process.env.CODEX_SANDBOX || "danger-full-access";
 const codexBin = process.env.CODEX_PATH || "codex";
 
 if (!sessionId) {
@@ -163,14 +175,6 @@ streamServer.listen(3100, "0.0.0.0", () => {
   console.log("[agent-codex] SSE stream listening on :3100");
 });
 
-// ── Input channel (parked in v0) ────────────────────────
-
-// Reserved for the v1 App Server path. v0 spawns a fresh `codex exec`
-// per prompt and ignores subsequent injects; we still construct the
-// channel so the stub /inject endpoint can push onto something
-// addressable for debugging.
-const inputChannel = createInputChannel();
-
 // ── Wait for the sidecar ────────────────────────────────
 
 const sidecarReady = await waitForSidecar();
@@ -180,11 +184,9 @@ if (!sidecarReady) {
   );
 }
 
-// ── ~/.codex/config.toml — mount the x1agent MCP ────────
+// ── ~/.codex/config.toml — mount platform MCPs ──────────
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const x1McpPath = path.resolve(here, "x1-mcp.ts");
-
 function resolveTsxBinary(): string {
   const candidates = [
     path.resolve(here, "../../../node_modules/.bin/tsx"),
@@ -200,21 +202,27 @@ function resolveTsxBinary(): string {
 const tsxPath = resolveTsxBinary();
 
 function renderCodexConfig(): string {
-  // Codex reads ~/.codex/config.toml on every `codex exec` invocation.
-  // Mount the x1agent MCP as a stdio subprocess of Codex — exactly the
-  // same surface the Claude harness gives Claude. Sidecar URL is passed
-  // through env so the MCP knows where to POST events.
-  const sidecarEnv = sidecarUrl.replace(/"/g, '\\"');
-  const cmd = tsxPath.replace(/"/g, '\\"');
-  const arg = x1McpPath.replace(/"/g, '\\"');
-  return `# Auto-generated at pod boot by packages/agent-codex/src/run.ts.
-# Do not edit; the file is rewritten on every container start.
-
-[mcp_servers.x1agent]
-command = "${cmd}"
-args = ["${arg}"]
-env = { SIDECAR_URL = "${sidecarEnv}" }
-`;
+  const stdioServers = buildPlatformMcpDefinitions({
+    tsxPath,
+    sourceDir: path.resolve(here, "../../agent-runtime/src"),
+    sidecarUrl,
+    resolvePath: path.resolve,
+  });
+  const x1agentMcp = stdioServers.find((server) => server.name === "x1agent");
+  if (x1agentMcp) {
+    x1agentMcp.env.SESSION_MODE = sessionMode;
+    x1agentMcp.env.X1_INTERACTIVE_END_SESSION_POLICY = "reject";
+  }
+  const remoteServers = parseRemoteMcpAttachments(
+    process.env.MCP_REMOTE_ATTACHMENTS_JSON,
+    (message) => console.warn(`[agent-codex] ${message}`),
+  );
+  for (const server of remoteServers) {
+    console.log(
+      `[agent-codex] zone-3 mcp ${server.name} → ${server.url} (bearer held by sibling proxy)`,
+    );
+  }
+  return renderCodexMcpConfig(stdioServers, remoteServers);
 }
 
 function writeCodexConfig(): string {
@@ -265,6 +273,21 @@ const workspacePromptSection = workspaceSystemPrompt
   : "";
 
 const agentKind = process.env.AGENT_KIND ?? "worker";
+const interactivePrompt =
+  sessionMode === "interactive"
+    ? `
+
+## Interactive Session
+
+This is an INTERACTIVE session. The user will send multiple messages over
+time. After responding to each message, stop and wait for the next user
+message. Do NOT call end_session, say goodbye, or end the conversation unless
+the user explicitly asks you to close the session.`
+    : `
+
+## One-Shot Session
+
+Complete the task and finish.`;
 
 const systemPromptText = `${workspacePromptSection}${identityLine}
 
@@ -279,7 +302,15 @@ The user is watching this session in real time.
 - end_session — declare the session complete.
 
 Call emit_status at the start of each distinct phase. Be responsive — the
-user is watching live.
+user is watching live.${interactivePrompt}
+
+## Reading files the user uploaded
+
+Attached files are fetched through the sidecar before a turn and written under
+\`/workspace/.x1/uploads/\`. The message names the resolved path. Images are
+also attached to the Codex turn as native visual input. Read document paths
+from the workspace. If an upload is marked unavailable or errored, ask the user
+to attach it again; never guess its contents.
 `;
 
 // ── Start session ───────────────────────────────────────
@@ -291,12 +322,13 @@ await postToSidecar("session.started", {
   session_id: sessionId,
 });
 console.log(
-  `[agent-codex] starting ${sessionMode} session ${sessionId} (model=${codexModel}, sandbox=${codexSandbox})`,
+  `[agent-codex] starting ${sessionMode} session ${sessionId} (model=${codexModel || "account-default"}, sandbox=${codexSandbox})`,
 );
 
 // ── Codex subprocess driver ─────────────────────────────
 
-let activeCodex: ChildProcess | null = null;
+let activeCodex: CodexAppServer | null = null;
+let codexThreadId: string | null = null;
 
 function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   if (!event) return;
@@ -304,18 +336,94 @@ function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   for (const e of list) emitToStream(e);
 }
 
+// Claude's SDK yields a message-sized text block. Codex app-server streams
+// one delta at a time, but the platform event contract/UI treats each
+// `agent.text` event as a message block. Buffer deltas until the next
+// non-text event or turn completion so a sentence does not render as one
+// card per token.
+let pendingText = "";
+function flushPendingText() {
+  if (!pendingText) return;
+  emitToStream({ type: "agent.text", payload: { text: pendingText } });
+  pendingText = "";
+}
+
+function emitCodexEvents(event: NormalizedEvent | NormalizedEvent[] | null) {
+  if (!event) return;
+  const list = Array.isArray(event) ? event : [event];
+  for (const e of list) {
+    if (
+      e.type === "agent.text" &&
+      typeof (e.payload as { text?: unknown })?.text === "string"
+    ) {
+      pendingText += (e.payload as { text: string }).text;
+    } else {
+      flushPendingText();
+      emitToStream(e);
+    }
+  }
+}
+
+async function runCodexTurn(
+  turnPrompt: string,
+  localImages: string[] = [],
+): Promise<void> {
+  if (activeCodex) {
+    if (!(activeCodex instanceof CodexAppServer) || !codexThreadId) {
+      console.warn("[agent-codex] turn already in flight — ignoring overlap");
+      return;
+    }
+    await activeCodex.turn(codexThreadId, turnPrompt, localImages);
+    return;
+  }
+  idleTimer.setBusy(true);
+  const server = new CodexAppServer({
+    binary: codexBin,
+    cwd: workspaceDir,
+    model: codexModel,
+    sandbox:
+      codexSandbox === "danger-full-access"
+        ? "danger-full-access"
+        : "workspace-write",
+    onEvent: ({ method, params }) => {
+      if (
+        method === "turn/completed" ||
+        method === "turn/failed" ||
+        method === "error"
+      ) {
+        flushPendingText();
+      }
+      emitCodexEvents(normalizeCodexNotification(method, params));
+    },
+    onServerRequest: (request) => {
+      if (request.id !== undefined)
+        server.respond(request.id, { decision: "decline" });
+    },
+    onStderr: (line) => console.error(`[codex] ${line}`),
+  });
+  activeCodex = server;
+  try {
+    codexThreadId = await server.start();
+    console.log(`[agent-codex] selected model=${server.model}`);
+    await server.turn(codexThreadId, turnPrompt, localImages);
+  } catch (error) {
+    emitToStream({
+      type: "agent.error",
+      payload: { message: (error as Error).message, recoverable: false },
+    });
+    server.stop();
+    activeCodex = null;
+  } finally {
+    idleTimer.setBusy(false);
+  }
+}
+
 /**
  * Spawn `codex exec --json` for a single prompt. Pipes JSONL stdout
  * through the normaliser. Resolves when the subprocess exits.
  */
-async function runCodexTurn(turnPrompt: string): Promise<void> {
-  if (activeCodex) {
-    console.warn(
-      "[agent-codex] turn already in flight — ignoring overlap (v0 is one-shot per turn)",
-    );
-    return;
-  }
-  idleTimer.setBusy(true);
+/* Retained as a source reference while the app-server driver is exercised.
+async function runCodexTurnLegacy(turnPrompt: string): Promise<void> {
   const args = [
     "exec",
     "--json",
@@ -401,8 +509,9 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
     });
   });
 }
+*/
 
-// ── Inject endpoint on :8788 (STUB in v0) ──────────────
+// ── Inject endpoint on :8788 ───────────────────────────
 
 const injectServer = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -460,18 +569,28 @@ const injectServer = http.createServer(async (req, res) => {
         });
       }
 
-      // v0: park the message on the channel so future turns can drain
-      // it but DO NOT spawn a follow-up `codex exec`. Interactive
-      // turn-injection is a v1 feature (gated on the App Server
-      // JSON-RPC path). The 202 makes that contract explicit to the
-      // sidecar; ordinary HTTP `/inject` consumers don't distinguish
-      // 200 vs 202, so the wake delivery is unchanged.
-      inputChannel.push(parsed.text, parsed.request_id || undefined);
+      // Resolve upload tokens through the same credential-proxy path as
+      // Claude. Successful raster uploads are additionally attached as
+      // native app-server localImage inputs so Codex receives the pixels.
+      const preparedInput = await prepareCodexTurnInput(parsed.text, {
+        sidecarUrl,
+      });
+
+      // Send the message into the long-lived app-server thread. The
+      // thread preserves Codex conversation state across browser turns.
+      void runCodexTurn(preparedInput.text, preparedInput.localImages).catch(
+        (error) => {
+          emitToStream({
+            type: "agent.error",
+            payload: { message: (error as Error).message, recoverable: false },
+          });
+        },
+      );
       console.log(
-        `[agent-codex] /inject (stub) queued user message: ${parsed.text.slice(0, 100)}`,
+        `[agent-codex] /inject sent user message: ${parsed.text.slice(0, 100)}`,
       );
       res.writeHead(202);
-      res.end("accepted — v0 stub, no follow-up turn");
+      res.end("accepted");
     } catch (err) {
       res.writeHead(500);
       res.end((err as Error).message);
@@ -510,7 +629,7 @@ const injectServer = http.createServer(async (req, res) => {
 });
 
 injectServer.listen(8788, "0.0.0.0", () => {
-  console.log("[agent-codex] inject endpoint listening on :8788 (v0 stub)");
+  console.log("[agent-codex] inject endpoint listening on :8788");
 });
 
 // ── Idle timeout ────────────────────────────────────────
@@ -542,7 +661,7 @@ async function shutdown(
   idleTimer.dispose();
   if (activeCodex) {
     try {
-      activeCodex.kill("SIGTERM");
+      activeCodex.stop();
     } catch {
       // process may have already exited.
     }
@@ -574,19 +693,18 @@ async function shutdown(
 
 resetIdleTimer();
 
-// v0 driver: if a seed prompt is set (scheduler-triggered or the smoke
-// test populated AGENT_PROMPT), run one Codex turn against it. Then,
-// for oneshot mode, shut down; for interactive mode, park on the idle
-// timer waiting for /inject (which is a stub in v0, so the session
-// will eventually idle out — that's the documented v0 behaviour).
+// If a seed prompt is set (scheduler-triggered or supplied by the caller),
+// run one turn. Interactive sessions remain alive and accept follow-up turns
+// through /inject, just like the Claude harness; only oneshot sessions exit.
 if (prompt) {
   eventBuffer.push({ type: "user.message", payload: { text: prompt } });
-  await runCodexTurn(prompt);
+  const preparedInput = await prepareCodexTurnInput(prompt, { sidecarUrl });
+  await runCodexTurn(preparedInput.text, preparedInput.localImages);
   if (sessionMode === "oneshot") {
     await shutdown(true, "oneshot complete");
   }
 } else {
   console.log(
-    "[agent-codex] no AGENT_PROMPT seed; v0 parks on idle timer (interactive /inject is a stub)",
+    "[agent-codex] no AGENT_PROMPT seed; interactive session is waiting for /inject",
   );
 }

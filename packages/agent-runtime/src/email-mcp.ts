@@ -21,7 +21,10 @@ async function postToSidecar(path: string, payload: unknown) {
     try {
       body = await res.json();
     } catch {
-      body = { ok: false, error: { code: "non_json_reply", message: "non-JSON body" } };
+      body = {
+        ok: false,
+        error: { code: "non_json_reply", message: "non-JSON body" },
+      };
     }
     return { ok: res.ok, body };
   } catch (err) {
@@ -45,13 +48,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "list_email_threads",
       description:
-        "List Gmail threads, optionally filtered by Gmail's search query (q=). Examples: \"is:unread from:foo@example.com\", \"subject:invoice newer_than:7d\", \"label:starred\". Returns thread ids + snippet previews.",
+        'List Gmail threads, optionally filtered by Gmail\'s search query (q=). Examples: "is:unread from:foo@example.com", "subject:invoice newer_than:7d", "label:starred". Returns thread ids + snippet previews.',
       inputSchema: {
         type: "object" as const,
         properties: {
           q: { type: "string", description: "Gmail search query." },
           max_results: { type: "number", description: "Defaults to 20." },
-          page_token: { type: "string", description: "Optional pagination token from a previous call." },
+          page_token: {
+            type: "string",
+            description: "Optional pagination token from a previous call.",
+          },
         },
         additionalProperties: false,
       },
@@ -78,7 +84,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           to: { type: "string", description: "Recipient email address." },
           subject: { type: "string" },
-          body: { type: "string", description: "Message body. Set content_type=\"text/html\" if you want HTML." },
+          body: {
+            type: "string",
+            description:
+              'Message body. Set content_type="text/html" if you want HTML.',
+          },
           cc: { type: "array", items: { type: "string" } },
           bcc: { type: "array", items: { type: "string" } },
           content_type: {
@@ -88,7 +98,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           reply_to_thread_id: {
             type: "string",
-            description: "Optional Gmail thread id; sends this as a reply on that thread.",
+            description:
+              "Optional Gmail thread id; sends this as a reply on that thread.",
           },
         },
         required: ["to", "subject", "body"],

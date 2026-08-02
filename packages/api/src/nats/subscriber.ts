@@ -83,7 +83,7 @@ const PUBLIC_EVENT_TYPES = new Set([
  * persisting them would just clutter the timeline replay.
  *
  * Keep this list in sync with `TRANSIENT_EVENT_TYPES` in
- * packages/agent/src/wake-classifier.ts. It's duplicated rather than
+ * packages/agent-runtime/src/wake-classifier.ts. It's duplicated rather than
  * imported because pulling the agent package into the api would drag
  * the whole SDK runtime tree with it.
  */
@@ -346,7 +346,7 @@ export async function startSessionEventSubscriber(
       }
 
       // Token usage capture. The agent emits one `agent.usage` event
-      // per SDK turn (see packages/agent/src/normalize.ts). We persist
+      // per SDK turn (see packages/agent-claude/src/normalize.ts). We persist
       // a denormalized row keyed on (session_id, event_seq) so dashboards
       // can answer "tokens by workspace × agent × day" without touching
       // session_events. Idempotent on dedup index — NATS replays no-op.
@@ -427,7 +427,11 @@ export async function startSessionEventSubscriber(
       ) {
         try {
           const session = await opts.sessions.findById(sessionId);
-          if (session && session.status !== "complete" && session.status !== "failed") {
+          if (
+            session &&
+            session.status !== "complete" &&
+            session.status !== "failed"
+          ) {
             const payload = (parsed.payload ?? {}) as {
               result?: unknown;
               error?: string;

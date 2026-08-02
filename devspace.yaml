@@ -11,6 +11,9 @@ name: x1agent
 # devspace vars → pod env; prod uses External Secrets Operator.
 
 vars:
+  HOST_CODEX_HOME_DIR:
+    source: env
+    default: ""
   JWT_SECRET:
     source: env
   GOOGLE_OAUTH_CLIENT_ID:
@@ -113,8 +116,8 @@ images:
     image: x1agent-agent
     tags:
       - latest
-    dockerfile: ./packages/agent/Dockerfile
-    context: ./packages/agent
+    dockerfile: ./packages/agent-claude/Dockerfile
+    context: .
     rebuildStrategy: ignoreContextChanges
   sidecar:
     image: x1agent-sidecar
@@ -323,6 +326,8 @@ dev:
         value: ${ANTHROPIC_API_KEY}
       - name: OPENAI_API_KEY
         value: ${OPENAI_API_KEY}
+      - name: HOST_CODEX_HOME_DIR
+        value: ${HOST_CODEX_HOME_DIR}
       - name: WORKSPACE_SECRETS_MASTER_KEY
         value: ${WORKSPACE_SECRETS_MASTER_KEY}
       - name: NATS_URL
@@ -341,6 +346,9 @@ dev:
       # Dev-only knob that makes it accept OrbStack's self-signed cert.
       - name: NODE_TLS_REJECT_UNAUTHORIZED
         value: "0"
+      # Trust the projected in-cluster API-server CA on OrbStack and k3s.
+      - name: NODE_EXTRA_CA_CERTS
+        value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
       - name: K8S_NAMESPACE
         value: x1agent
       - name: IMAGE_PULL_POLICY

@@ -21,7 +21,10 @@ async function postToSidecar(path: string, payload: unknown) {
     try {
       body = await res.json();
     } catch {
-      body = { ok: false, error: { code: "non_json_reply", message: "non-JSON body" } };
+      body = {
+        ok: false,
+        error: { code: "non_json_reply", message: "non-JSON body" },
+      };
     }
     return { ok: res.ok, body };
   } catch (err) {
@@ -84,7 +87,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           replace: { type: "string", description: "Replacement text." },
           match_case: {
             type: "boolean",
-            description: "Defaults to true. Set false for case-insensitive matching.",
+            description:
+              "Defaults to true. Set false for case-insensitive matching.",
           },
         },
         required: ["document_id", "find", "replace"],
@@ -99,7 +103,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object" as const,
         properties: {
           document_id: { type: "string" },
-          text: { type: "string", description: "Paragraph text. May include newlines for multi-paragraph appends." },
+          text: {
+            type: "string",
+            description:
+              "Paragraph text. May include newlines for multi-paragraph appends.",
+          },
         },
         required: ["document_id", "text"],
         additionalProperties: false,

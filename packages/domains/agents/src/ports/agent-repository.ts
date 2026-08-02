@@ -19,7 +19,7 @@ export interface CreateAgentInput {
   heartbeatMd: string;
   schedule: CronSchedule | null;
   imageId?: string | null;
-  /** Per-agent override for ANTHROPIC_MODEL. Null = use deployment default. */
+  /** Per-agent runtime model override. Null = use deployment default. */
   model?: string | null;
   /**
    * Owner. Defaults to createdBy at the adapter layer when omitted.

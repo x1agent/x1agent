@@ -36,7 +36,13 @@ async function postToSidecar(
       body = await res.json();
     } catch {
       // non-JSON reply; surface as raw text on the body
-      body = { ok: false, error: { code: "non_json_reply", message: "sidecar returned non-JSON body" } };
+      body = {
+        ok: false,
+        error: {
+          code: "non_json_reply",
+          message: "sidecar returned non-JSON body",
+        },
+      };
     }
     return { ok: res.ok, body, status: res.status };
   } catch (err) {
@@ -123,7 +129,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: { type: "string", description: "The new file's display name." },
           parent_folder_id: {
             type: "string",
-            description: "Optional Drive folder id to create the file inside. Omit for My Drive root.",
+            description:
+              "Optional Drive folder id to create the file inside. Omit for My Drive root.",
           },
           content_base64: {
             type: "string",
@@ -131,7 +138,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           mime_type: {
             type: "string",
-            description: "Optional MIME type (e.g. text/plain, text/markdown). Defaults to application/octet-stream.",
+            description:
+              "Optional MIME type (e.g. text/plain, text/markdown). Defaults to application/octet-stream.",
           },
         },
         required: ["name", "content_base64"],
@@ -152,7 +160,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           mime_type: {
             type: "string",
-            description: "Optional new MIME type. Omit to keep the file's current type.",
+            description:
+              "Optional new MIME type. Omit to keep the file's current type.",
           },
         },
         required: ["file_id", "content_base64"],
@@ -170,7 +179,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: { type: "string", description: "Optional new name." },
           parent_folder_id: {
             type: "string",
-            description: "Optional new parent folder id. Replaces existing parent.",
+            description:
+              "Optional new parent folder id. Replaces existing parent.",
           },
         },
         required: ["file_id"],
@@ -179,7 +189,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "create_folder",
-      description: "Create a new folder in Google Drive. Returns the new folder's id and web_view_link.",
+      description:
+        "Create a new folder in Google Drive. Returns the new folder's id and web_view_link.",
       inputSchema: {
         type: "object" as const,
         properties: {

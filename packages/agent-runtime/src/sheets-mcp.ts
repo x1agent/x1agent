@@ -24,7 +24,10 @@ async function postToSidecar(path: string, payload: unknown) {
     try {
       body = await res.json();
     } catch {
-      body = { ok: false, error: { code: "non_json_reply", message: "non-JSON body" } };
+      body = {
+        ok: false,
+        error: { code: "non_json_reply", message: "non-JSON body" },
+      };
     }
     return { ok: res.ok, body };
   } catch (err) {
@@ -48,14 +51,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "read_sheet_range",
       description:
-        "Read a range of cells from a Google Sheets spreadsheet. Range uses A1 notation like \"Sheet1!A1:C10\" or \"Tab2!A:A\" for a whole column. Returns a 2D array of cell values (strings/numbers/booleans). Empty cells are missing from the array; trailing empty cells are not padded.",
+        'Read a range of cells from a Google Sheets spreadsheet. Range uses A1 notation like "Sheet1!A1:C10" or "Tab2!A:A" for a whole column. Returns a 2D array of cell values (strings/numbers/booleans). Empty cells are missing from the array; trailing empty cells are not padded.',
       inputSchema: {
         type: "object" as const,
         properties: {
           spreadsheet_id: { type: "string" },
           range: {
             type: "string",
-            description: "A1 notation. Examples: \"Sheet1!A1:C10\", \"Sheet2!B:B\".",
+            description:
+              'A1 notation. Examples: "Sheet1!A1:C10", "Sheet2!B:B".',
           },
         },
         required: ["spreadsheet_id", "range"],
@@ -70,7 +74,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object" as const,
         properties: {
           spreadsheet_id: { type: "string" },
-          range: { type: "string", description: "A1 notation of the target range." },
+          range: {
+            type: "string",
+            description: "A1 notation of the target range.",
+          },
           values: {
             type: "array",
             description:
@@ -91,7 +98,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           spreadsheet_id: { type: "string" },
           sheet_name: {
             type: "string",
-            description: "Tab name only — no range. e.g. \"Sheet1\".",
+            description: 'Tab name only — no range. e.g. "Sheet1".',
           },
           values: {
             type: "array",
@@ -113,11 +120,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           sheet_titles: {
             type: "array",
             items: { type: "string" },
-            description: "Optional initial tab names. Defaults to a single \"Sheet1\".",
+            description:
+              'Optional initial tab names. Defaults to a single "Sheet1".',
           },
           parent_folder_id: {
             type: "string",
-            description: "Optional Drive folder id to create the spreadsheet inside.",
+            description:
+              "Optional Drive folder id to create the spreadsheet inside.",
           },
         },
         required: ["title"],

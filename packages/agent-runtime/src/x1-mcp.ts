@@ -1,14 +1,8 @@
-// TODO(codex-spike): duplicated verbatim from packages/agent/src/x1-mcp.ts for v0.
-// The file is identical to the Claude runtime's copy — both runtimes mount the
-// same set of platform tools. Extract into packages/agent-mcp-x1/ (its own
-// package both runtime images depend on) in the spike follow-up; the spike
-// keeps it in-place so the Codex Dockerfile's COPY context stays simple.
 /**
  * Internal MCP server — the built-in tools every x1agent session exposes
- * to the agent (Codex here, Claude in the sibling runtime). When the
- * agent calls one of these tools, the handler POSTs an event to the
- * sidecar on localhost:9090, which publishes it to NATS for the session
- * viewer in the browser.
+ * to Claude. When Claude calls one of these tools, the handler POSTs an
+ * event to the sidecar on localhost:9090, which publishes it to NATS
+ * for the session viewer in the browser.
  *
  * Tools:
  *   emit_status        — announce a phase of work
@@ -38,9 +32,7 @@ async function postToSidecar(type: string, payload: unknown) {
       body: JSON.stringify({ type, payload }),
     });
   } catch (err) {
-    console.error(
-      `[x1-mcp] sidecar POST failed: ${(err as Error).message}`,
-    );
+    console.error(`[x1-mcp] sidecar POST failed: ${(err as Error).message}`);
   }
 }
 
@@ -88,14 +80,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           artifact_type: {
             type: "string",
-            enum: [
-              "code",
-              "analysis",
-              "summary",
-              "document",
-              "diff",
-              "other",
-            ],
+            enum: ["code", "analysis", "summary", "document", "diff", "other"],
           },
           title: { type: "string" },
           content: { type: "string" },
@@ -304,11 +289,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           data: { type: "object" },
           confidence: {
             type: "number",
-            description: "0..1 self-reported confidence in the fact. Default 1.",
+            description:
+              "0..1 self-reported confidence in the fact. Default 1.",
           },
           source: {
             type: "string",
-            description: "Free-form origin of the fact — URL, doc id, 'manual'.",
+            description:
+              "Free-form origin of the fact — URL, doc id, 'manual'.",
           },
           derived_from: {
             type: "array",
@@ -411,8 +398,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           channel: {
             type: "string",
-            description:
-              "Channel id or alias (#ops, @alice, Cxxxx for Slack)",
+            description: "Channel id or alias (#ops, @alice, Cxxxx for Slack)",
           },
           text: { type: "string" },
           thread_id: {
@@ -491,8 +477,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           limit: {
             type: "number",
-            description:
-              "Max number of events (default 500, cap 5000).",
+            description: "Max number of events (default 500, cap 5000).",
           },
         },
         required: ["child_session_id"],
@@ -514,7 +499,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "spawn_session",
       description:
-        "Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child's progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.\n\nOptionally pass `model` to override the Claude model the spawned session runs under — useful as a cost lever (`\"sonnet\"` for cheap routine work, `\"opus\"` for migrations / auth / tenant-isolation / cross-domain refactors). The platform admin curates the enabled-models allowlist at /admin/anthropic-models; passing a model that isn't enabled returns 403 model_not_enabled. Omitting `model` falls back to the child agent's configured `model`, then the deployment-wide ANTHROPIC_MODEL default.",
+        'Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child\'s progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.\n\nOptionally pass `model` to override the Claude model the spawned session runs under — useful as a cost lever (`"sonnet"` for cheap routine work, `"opus"` for migrations / auth / tenant-isolation / cross-domain refactors). The platform admin curates the enabled-models allowlist at /admin/anthropic-models; passing a model that isn\'t enabled returns 403 model_not_enabled. Omitting `model` falls back to the child agent\'s configured `model`, then the deployment-wide ANTHROPIC_MODEL default.',
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -850,8 +835,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Mirror of the share_comment plumbing: until the sidecar Rust
       // side lands the /read_share route, this tool returns a clean
       // sidecar_route_missing error so callers can detect the gap.
-      const shareId =
-        typeof a?.share_id === "string" ? a.share_id : "";
+      const shareId = typeof a?.share_id === "string" ? a.share_id : "";
       const path = typeof a?.path === "string" ? a.path : undefined;
       if (!shareId) {
         return {
@@ -884,7 +868,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               // not JSON — fall through to missing-route handling
             }
           }
-          if (parsed.error === "share_not_found" || parsed.error === "file_not_found") {
+          if (
+            parsed.error === "share_not_found" ||
+            parsed.error === "file_not_found"
+          ) {
             return {
               content: [
                 {
@@ -1601,6 +1588,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "end_session": {
+      if (
+        process.env.X1_INTERACTIVE_END_SESSION_POLICY === "reject" &&
+        process.env.SESSION_MODE === "interactive"
+      ) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Interactive sessions stay open between user messages. Do not end the session; wait for the next message.",
+            },
+          ],
+          isError: true,
+        };
+      }
       // POST to the agent's /shutdown so the parent process terminates
       // cleanly — one session.completed event, no 15-minute idle-timer
       // drift afterwards. Do not exit this subprocess; the agent's

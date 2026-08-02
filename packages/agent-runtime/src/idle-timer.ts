@@ -23,7 +23,11 @@ export class IdleTimer {
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private busyFlag = false;
 
-  constructor(timeoutMs: number, enabled: boolean, callbacks: IdleTimerCallbacks) {
+  constructor(
+    timeoutMs: number,
+    enabled: boolean,
+    callbacks: IdleTimerCallbacks,
+  ) {
     this.timeoutMs = timeoutMs;
     this.enabledFlag = enabled;
     this.callbacks = callbacks;

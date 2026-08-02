@@ -29,9 +29,12 @@ export function normalizeMessage(
     }
 
     case "assistant": {
-      const blocks = (message as {
-        message?: { content?: Array<Record<string, unknown>> };
-      }).message?.content ?? [];
+      const blocks =
+        (
+          message as {
+            message?: { content?: Array<Record<string, unknown>> };
+          }
+        ).message?.content ?? [];
       const events: NormalizedEvent[] = [];
       for (const block of blocks) {
         if (block.type === "text") {
@@ -97,8 +100,7 @@ export function normalizeMessage(
           model: r.model ?? "unknown",
           input_tokens: r.usage.input_tokens ?? 0,
           output_tokens: r.usage.output_tokens ?? 0,
-          cache_creation_input_tokens:
-            r.usage.cache_creation_input_tokens ?? 0,
+          cache_creation_input_tokens: r.usage.cache_creation_input_tokens ?? 0,
           cache_read_input_tokens: r.usage.cache_read_input_tokens ?? 0,
           stop_reason: r.stop_reason,
           duration_ms: r.duration_ms,

@@ -38,6 +38,10 @@ describe("RuntimeType", () => {
     expect(RuntimeType("claude_code")).toBe("claude_code");
   });
 
+  it("accepts codex", () => {
+    expect(RuntimeType("codex")).toBe("codex");
+  });
+
   it("rejects unknown runtimes", () => {
     expect(() => RuntimeType("lobotomized_claude")).toThrow(ValidationError);
   });

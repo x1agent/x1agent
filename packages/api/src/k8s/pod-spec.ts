@@ -93,6 +93,8 @@ export interface SessionPodSpec {
   apiInternalToken: string;
   /** Cluster-internal NATS URL. `nats://nats:4222` on dev. */
   natsUrl: string;
+  /** Dev-only host path containing a dedicated Codex auth.json profile. */
+  hostCodexHomeDir?: string;
   agentImage: string;
   sidecarImage: string;
   imagePullPolicy?: "IfNotPresent" | "Always" | "Never";
@@ -110,7 +112,7 @@ export interface SessionPodSpec {
   openaiApiKey?: string;
   /**
    * Override for the OpenAI model the Codex runtime selects per turn.
-   * Defaults to `gpt-5.3-codex` inside the runtime when unset.
+   * Defaults to `gpt-5-codex` inside the runtime when unset.
    */
   openaiModel?: string;
   /**
@@ -307,6 +309,15 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
         : spec.anthropicApiKey
           ? [{ name: "ANTHROPIC_API_KEY", value: spec.anthropicApiKey }]
           : []),
+    ...(isCodex ? [{ name: "CODEX_HOME", value: "/home/agent/.codex" }] : []),
+    ...(isCodex && spec.hostCodexHomeDir
+      ? [
+          {
+            name: "CODEX_AUTH_SOURCE",
+            value: "/var/run/x1agent/codex-auth/auth.json",
+          },
+        ]
+      : []),
     // Codex model override. Mirrors the ANTHROPIC_MODEL knob below for
     // the Codex runtime path; the runtime reads OPENAI_MODEL at boot
     // and feeds it to `codex exec -m <model>`.
@@ -404,7 +415,12 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // sidecar's behalf). Propagated from the api process so a chart
     // values change rolls every new pod over without touching this.
     ...(process.env.GCS_ARTIFACTS_BUCKET
-      ? [{ name: "GCS_ARTIFACTS_BUCKET", value: process.env.GCS_ARTIFACTS_BUCKET }]
+      ? [
+          {
+            name: "GCS_ARTIFACTS_BUCKET",
+            value: process.env.GCS_ARTIFACTS_BUCKET,
+          },
+        ]
       : []),
     // Sentry — propagate from the api process so every spawned sidecar
     // can report panics + tracing::error! events to the same project
@@ -495,6 +511,17 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
           },
           volumes: [
             workspaceVolume,
+            ...(isCodex && spec.hostCodexHomeDir
+              ? [
+                  {
+                    name: "codex-auth",
+                    hostPath: {
+                      path: spec.hostCodexHomeDir,
+                      type: "Directory",
+                    },
+                  },
+                ]
+              : []),
             // NATS mTLS material — only the sidecar mounts this. The
             // agent container has no NATS cert and no way to pick one
             // up, so any direct NATS connect from the agent container
@@ -564,6 +591,16 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               env: agentEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                ...(isCodex && spec.hostCodexHomeDir
+                  ? [
+                      {
+                        name: "codex-auth",
+                        mountPath: "/var/run/x1agent/codex-auth/auth.json",
+                        subPath: "auth.json",
+                        readOnly: true,
+                      },
+                    ]
+                  : []),
                 ...(spec.sessionHistoryConfigMapName
                   ? [
                       {
@@ -632,9 +669,10 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
             // own env (mounted via valueFrom.secretKeyRef from a
             // per-MCP K8s Secret minted by the job-watcher). Agent
             // talks to localhost:<port>; agent never sees the bearer.
-            ...((spec.remoteOAuthAttachments ?? []).map((att) => ({
+            ...(spec.remoteOAuthAttachments ?? []).map((att) => ({
               name: `mcp-${att.catalogName}`.slice(0, 63),
-              image: spec.mcpOAuthProxyImage ?? "x1agent-mcp-oauth-proxy:latest",
+              image:
+                spec.mcpOAuthProxyImage ?? "x1agent-mcp-oauth-proxy:latest",
               imagePullPolicy,
               securityContext: {
                 runAsUser: 1000,
@@ -668,7 +706,7 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
                 initialDelaySeconds: 1,
                 periodSeconds: 5,
               },
-            }))),
+            })),
           ],
         },
       },

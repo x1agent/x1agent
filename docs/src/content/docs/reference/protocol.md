@@ -45,7 +45,7 @@ There is **no** `x1.session.{id}.proxy.*` or `x1.session.{id}.lifecycle.*` famil
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `session.started` | `{ agent_id, session_id, ... }` | Posted once by the agent on boot. See `packages/agent/src/run.ts:367`. |
+| `session.started` | `{ agent_id, session_id, ... }` | Posted once by the agent on boot. See the runtime driver under `packages/agent-claude` or `packages/agent-codex`. |
 | `session.completed` | `{ ... }` | Posted once at clean shutdown. The session summary is computed by the api summarizer and stored in `sessions.summary` — it is **not** carried in the event payload. |
 | `session.failed` | `{ error_message? }` | Posted on failure paths. |
 

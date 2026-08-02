@@ -120,15 +120,15 @@ describe("buildAgentThinkingEvent", () => {
     expect(
       buildAgentThinkingEvent("s", { kind: "state_change" }).wake_source,
     ).toBe("platform");
-    expect(
-      buildAgentThinkingEvent("s", { kind: "watchdog" }).wake_source,
-    ).toBe("platform");
-    expect(
-      buildAgentThinkingEvent("s", { kind: "checkup" }).wake_source,
-    ).toBe("platform");
-    expect(
-      buildAgentThinkingEvent("s", { kind: "message" }).wake_source,
-    ).toBe("child_message");
+    expect(buildAgentThinkingEvent("s", { kind: "watchdog" }).wake_source).toBe(
+      "platform",
+    );
+    expect(buildAgentThinkingEvent("s", { kind: "checkup" }).wake_source).toBe(
+      "platform",
+    );
+    expect(buildAgentThinkingEvent("s", { kind: "message" }).wake_source).toBe(
+      "child_message",
+    );
   });
 });
 

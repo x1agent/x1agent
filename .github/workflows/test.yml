@@ -29,7 +29,9 @@ jobs:
           set -e
           for pkg in \
               kernel \
-              agent \
+              agent-runtime \
+              agent-claude \
+              agent-codex \
               domains/auth \
               domains/workspaces \
               domains/invitations \

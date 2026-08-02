@@ -1,5 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { normalizeCodexEvent, type NormalizedEvent } from "./normalize.js";
+import {
+  normalizeCodexEvent,
+  normalizeCodexNotification,
+  type NormalizedEvent,
+} from "./normalize.js";
 
 function asArray(
   e: NormalizedEvent | NormalizedEvent[] | null,
@@ -80,9 +84,9 @@ describe("normalizeCodexEvent", () => {
     );
     expect(events.length).toBe(2);
     expect(events[0]!.type).toBe("agent.tool_call");
-    expect(
-      (events[0]!.payload as { tool_name: string }).tool_name,
-    ).toBe("bash");
+    expect((events[0]!.payload as { tool_name: string }).tool_name).toBe(
+      "bash",
+    );
     expect(events[1]!.type).toBe("agent.tool_result");
     expect((events[1]!.payload as { is_error: boolean }).is_error).toBe(false);
   });
@@ -163,6 +167,51 @@ describe("normalizeCodexEvent", () => {
     }
   });
 
+  it("surfaces nested app-server error messages", () => {
+    const out = normalizeCodexEvent({
+      method: "error",
+      params: {
+        error: {
+          message: JSON.stringify({
+            error: {
+              message: "The selected model is not supported for this login.",
+            },
+          }),
+        },
+      },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: {
+        message: "The selected model is not supported for this login.",
+        recoverable: false,
+      },
+    });
+  });
+
+  it("maps turn/failed notifications and nested turn errors", () => {
+    const out = normalizeCodexNotification("turn/failed", {
+      turn: { error: { message: "turn failed for a concrete reason" } },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: {
+        message: "turn failed for a concrete reason",
+        recoverable: false,
+      },
+    });
+  });
+
+  it("surfaces an error nested in turn/completed", () => {
+    const out = normalizeCodexNotification("turn/completed", {
+      turn: { status: "failed", error: { message: "turn completion failed" } },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: { message: "turn completion failed", recoverable: false },
+    });
+  });
+
   it("unwraps msg-envelope shape (App Server SDK style)", () => {
     const out = normalizeCodexEvent({
       msg: {
@@ -221,5 +270,44 @@ describe("normalizeCodexEvent", () => {
     expect(
       (toolCall?.payload as { tool_name: string } | undefined)?.tool_name,
     ).toBe("mcp__x1agent__emit_status");
+  });
+});
+
+describe("normalizeCodexNotification (Codex app-server v2)", () => {
+  it("maps streamed assistant deltas without waiting for item completion", () => {
+    expect(
+      normalizeCodexNotification("item/agentMessage/delta", { delta: "hello" }),
+    ).toEqual({ type: "agent.text", payload: { text: "hello" } });
+  });
+
+  it("maps current camelCase command and MCP items", () => {
+    const command = normalizeCodexNotification("item/completed", {
+      item: {
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "pwd",
+        aggregatedOutput: "/workspace",
+        exitCode: 0,
+        status: "completed",
+      },
+    });
+    expect(asArray(command).map((event) => event.type)).toEqual([
+      "agent.tool_call",
+      "agent.tool_result",
+    ]);
+
+    const mcp = normalizeCodexNotification("item/completed", {
+      item: {
+        type: "mcpToolCall",
+        id: "mcp-1",
+        tool: "emit_status",
+        arguments: { status: "working" },
+        result: { ok: true },
+        status: "completed",
+      },
+    });
+    expect((asArray(mcp)[0]!.payload as { tool_name: string }).tool_name).toBe(
+      "emit_status",
+    );
   });
 });

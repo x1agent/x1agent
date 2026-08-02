@@ -34,7 +34,7 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
-    verbs: ["create", "get", "list", "patch", "delete"]
+    verbs: ["create", "get", "list", "patch", "update", "delete"]
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["create", "get", "list", "patch", "delete"]
@@ -113,6 +113,10 @@ spec:
               value: x1agent
             - name: NODE_ENV
               value: development
+            # The in-cluster API server uses a projected self-signed CA.
+            # Let the Node Kubernetes client trust it on OrbStack and k3s.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: NATS_URL
               value: nats://nats:4222
             - name: NATS_CA_FILE
