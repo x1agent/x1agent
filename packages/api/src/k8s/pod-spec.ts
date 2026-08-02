@@ -66,6 +66,8 @@ export interface SessionPodSpec {
    * volume type (emptyDir vs PVC). See AgentKind above.
    */
   agentKind: AgentKind;
+  /** Explicit harness selector from agents.runtime_type. */
+  runtimeType: "claude_code" | "codex";
   workspaceSlug: string;
   workspaceName: string;
   /**
@@ -215,27 +217,12 @@ export interface SessionPodSpec {
 }
 
 /**
- * Heuristic runtime selector for the Codex harness spike (codex-spike-
- * gap-analysis.md §6 open question 4). There is no `agents.runtime`
- * column yet — for v0 we infer the runtime from the image ref the
- * agent's catalog entry points at. Matches images whose ref or tag
- * contains "runtime-codex" or "agent-codex" so both the spike's
- * `runtime-codex:dev` and a productionised `x1agent/agent-codex:vN`
- * tag light up. A real `agents.runtime` enum + schema migration
- * lands as a v1 follow-up.
- */
-function isCodexRuntimeImage(image: string | undefined): boolean {
-  if (!image) return false;
-  return /(?:runtime|agent)-codex/i.test(image);
-}
-
-/**
  * Build the V1Job manifest for a session pod. Keeps the generation pure
  * so the watcher's DB + K8s code is testable; no K8s client references
  * here.
  */
 export function buildSessionJob(spec: SessionPodSpec): V1Job {
-  const isCodex = isCodexRuntimeImage(spec.agentImage);
+  const isCodex = spec.runtimeType === "codex";
   const jobName = sessionJobName(spec.sessionId);
   const imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
   const labels = {
@@ -285,8 +272,8 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
     { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },
-    // Provider-credentials branch. The runtime selector
-    // (isCodexRuntimeImage) decides whether to emit OPENAI_API_KEY
+    // Provider-credentials branch. The explicit agent runtime decides
+    // whether to emit OPENAI_API_KEY
     // for the Codex spike runtime or fall through to the existing
     // Anthropic env contract (Vertex Workload Identity or
     // ANTHROPIC_API_KEY). The Codex branch deliberately mirrors the

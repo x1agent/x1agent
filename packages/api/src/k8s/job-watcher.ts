@@ -472,6 +472,7 @@ async function launchSession(
     agentId: agent.id,
     agentSlug: agent.slug,
     agentKind: agent.kind,
+    runtimeType: agent.runtimeType,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     // The user whose stored OAuth tokens this session acts as.
@@ -528,8 +529,7 @@ async function launchSession(
     anthropicProvider: cfg.anthropicProvider,
     // X1A-40 precedence — see selectSessionModel below.
     anthropicModel: selectSessionModel(session, agent, cfg.anthropicModel),
-    // Codex runtime spike — pod-spec emits these only when the
-    // resolved agent image is the Codex runtime (isCodexRuntimeImage).
+    // Codex runtime — pod-spec emits these only when runtimeType is codex.
     // The Anthropic plumbing above stays the active path for every
     // Claude-runtime agent.
     openaiApiKey: cfg.openaiApiKey,

@@ -22,11 +22,19 @@ export type AppServerOptions = {
   onEvent: (event: AppServerEvent) => void;
   onServerRequest?: (request: JsonRpcMessage) => void;
   onStderr?: (line: string) => void;
+  onExit?: (error: Error) => void;
+  /** Bound JSON-RPC calls so a wedged subprocess cannot hang the session. */
+  requestTimeoutMs?: number;
+  /** Maximum time from turn/start acceptance to the terminal notification. */
+  turnTimeoutMs?: number;
 };
 
 export type CodexTurnInput =
   | { type: "text"; text: string; text_elements: never[] }
   | { type: "localImage"; path: string };
+
+/** A terminal model/tool failure; the app-server connection remains usable. */
+export class CodexTurnError extends Error {}
 
 export function buildTurnInputs(
   text: string,
@@ -52,6 +60,13 @@ export class CodexAppServer {
   private buffer = "";
   private closed = false;
   private selectedModel = "";
+  private activeTurn:
+    | {
+        resolve: () => void;
+        reject: (error: Error) => void;
+        timeout: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
 
   get model(): string {
     return this.selectedModel || this.options.model || "account-default";
@@ -75,14 +90,30 @@ export class CodexAppServer {
         if (line.trim()) options.onStderr?.(line);
       }
     });
+    this.proc.on("error", (error) => this.close(error));
     this.proc.on("exit", (code, signal) => {
-      this.closed = true;
-      const error = new Error(
-        `codex app-server exited code=${code} signal=${signal ?? "none"}`,
+      this.close(
+        new Error(
+          `codex app-server exited code=${code} signal=${signal ?? "none"}`,
+        ),
       );
-      for (const waiter of this.pending.values()) waiter.reject(error);
-      this.pending.clear();
     });
+  }
+
+  private close(error: Error) {
+    if (this.closed) return;
+    this.closed = true;
+    for (const waiter of this.pending.values()) waiter.reject(error);
+    this.pending.clear();
+    this.activeTurn?.reject(error);
+    if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
+    this.activeTurn = undefined;
+    this.options.onExit?.(error);
+  }
+
+  private clearActiveTurn() {
+    if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
+    this.activeTurn = undefined;
   }
 
   private read(chunk: string) {
@@ -114,6 +145,27 @@ export class CodexAppServer {
           );
         else waiter.resolve(message.result);
       } else if (message.method) {
+        if (message.method === "turn/completed") {
+          const turn = message.params?.turn as
+            { error?: { message?: string }; status?: string } | undefined;
+          if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
+          if (turn?.status === "failed" || turn?.error) {
+            this.activeTurn?.reject(
+              new CodexTurnError(turn.error?.message ?? "Codex turn failed"),
+            );
+          } else {
+            this.activeTurn?.resolve();
+          }
+          this.activeTurn = undefined;
+        } else if (message.method === "turn/failed") {
+          const turn = message.params?.turn as
+            { error?: { message?: string }; status?: string } | undefined;
+          if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
+          this.activeTurn?.reject(
+            new CodexTurnError(turn?.error?.message ?? "Codex turn failed"),
+          );
+          this.activeTurn = undefined;
+        }
         if (message.id !== undefined) this.options.onServerRequest?.(message);
         else
           this.options.onEvent({
@@ -133,13 +185,24 @@ export class CodexAppServer {
     const id = this.nextId++;
     const line = JSON.stringify({ id, method, params }) + "\n";
     return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Codex app-server ${method} timed out`));
+      }, this.options.requestTimeoutMs ?? 30_000);
       this.pending.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
       });
       this.proc.stdin.write(line, (error) => {
         if (error) {
           this.pending.delete(id);
+          clearTimeout(timeout);
           reject(error);
         }
       });
@@ -202,13 +265,30 @@ export class CodexAppServer {
     text: string,
     localImages: string[] = [],
   ): Promise<void> {
-    await this.request("turn/start", {
-      threadId,
-      cwd: this.options.cwd,
-      model: this.model,
-      input: buildTurnInputs(text, localImages),
-      approvalPolicy: "never",
+    if (this.activeTurn) throw new Error("Codex turn already in flight");
+    const completed = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => {
+          this.activeTurn = undefined;
+          reject(new Error("Codex turn timed out waiting for completion"));
+        },
+        this.options.turnTimeoutMs ?? 60 * 60_000,
+      );
+      this.activeTurn = { resolve, reject, timeout };
     });
+    try {
+      await this.request("turn/start", {
+        threadId,
+        cwd: this.options.cwd,
+        model: this.model,
+        input: buildTurnInputs(text, localImages),
+        approvalPolicy: "never",
+      });
+      await completed;
+    } catch (error) {
+      this.clearActiveTurn();
+      throw error;
+    }
   }
 
   respond(id: number | string, result: unknown) {
@@ -218,7 +298,7 @@ export class CodexAppServer {
 
   stop() {
     if (this.closed) return;
-    this.closed = true;
     this.proc.kill("SIGTERM");
+    this.close(new Error("Codex app-server stopped"));
   }
 }
