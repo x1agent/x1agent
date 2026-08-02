@@ -17,9 +17,14 @@ import type { SafeFetch, SafeFetchResponse } from "./ssrf-safe-fetch.js";
  * id is dead, re-register" signals; recognise them and bubble a typed
  * error the caller can use to wipe the row + redirect to /start.
  */
-function stubFetcher(handler: (url: string) => Response | Promise<Response>): SafeFetch {
-  return async (url): Promise<SafeFetchResponse> => {
-    const res = await handler(url);
+function stubFetcher(
+  handler: (
+    url: string,
+    init: Parameters<SafeFetch>[1],
+  ) => Response | Promise<Response>,
+): SafeFetch {
+  return async (url, init): Promise<SafeFetchResponse> => {
+    const res = await handler(url, init);
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => {
       headers[k.toLowerCase()] = v;
@@ -59,6 +64,25 @@ function inputs() {
 }
 
 describe("exchangeCodeForTokens — stale-client-registration self-heal signal", () => {
+  it("uses only HTTP Basic for client_secret_basic token exchange", async () => {
+    let requestInit: Parameters<SafeFetch>[1] | undefined;
+    const fetcher = stubFetcher((_url, init) => {
+      requestInit = init;
+      return new Response(
+        JSON.stringify({ access_token: "access-token", token_type: "Bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    await exchangeCodeForTokens(inputs(), { fetcher });
+
+    expect(requestInit?.headers?.Authorization).toMatch(/^Basic /);
+    const body = new URLSearchParams(requestInit?.body);
+    expect(body.has("client_id")).toBe(false);
+    expect(body.has("client_secret")).toBe(false);
+    expect(body.get("grant_type")).toBe("authorization_code");
+  });
+
   it("throws StaleClientRegistrationError on 401 invalid_client", async () => {
     const fetcher = stubFetcher(() =>
       new Response(
