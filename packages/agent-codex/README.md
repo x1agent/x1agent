@@ -36,7 +36,7 @@ Environment variables consumed by `src/run.ts`:
 | `SESSION_ID` | (required) | Session UUID. |
 | `OPENAI_API_KEY` | (required) | Aliased to `CODEX_API_KEY` inside the entrypoint. |
 | `OPENAI_MODEL` | `gpt-5-codex` | Passed to `thread/start` and `turn/start`. Override for a deployment with a model supported by its auth mode. |
-| `CODEX_SANDBOX` | `workspace-write` | Try first; flip to `danger-full-access` if Bubblewrap fails under the pod's securityContext. |
+| `CODEX_SANDBOX` | `danger-full-access` | The session pod is the security boundary. Set `workspace-write` only when the pod can initialize Bubblewrap reliably. |
 | `CODEX_PATH` | `codex` | Override for the CLI binary (only useful in local dev). |
 | `WORKSPACE_DIR` | `/workspace` | `--cd` value. |
 | `SIDECAR_URL` | `http://localhost:9090` | Where x1-mcp POSTs tool events. |

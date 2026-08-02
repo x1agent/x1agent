@@ -16,7 +16,8 @@ export type AppServerEvent = {
 export type AppServerOptions = {
   binary: string;
   cwd: string;
-  model: string;
+  /** Optional explicit model. When omitted, use the account's app-server default. */
+  model?: string;
   sandbox: "workspace-write" | "danger-full-access";
   onEvent: (event: AppServerEvent) => void;
   onServerRequest?: (request: JsonRpcMessage) => void;
@@ -33,6 +34,11 @@ export class CodexAppServer {
   private nextId = 1;
   private buffer = "";
   private closed = false;
+  private selectedModel = "";
+
+  get model(): string {
+    return this.selectedModel || this.options.model || "account-default";
+  }
 
   constructor(private readonly options: AppServerOptions) {
     this.proc = spawn(options.binary, ["app-server", "--stdio"], {
@@ -111,8 +117,9 @@ export class CodexAppServer {
       capabilities: null,
     });
     this.notify("initialized");
+    this.selectedModel = this.options.model || await this.discoverDefaultModel();
     const result = await this.request<{ thread: { id: string } }>("thread/start", {
-      model: this.options.model,
+      model: this.selectedModel,
       cwd: this.options.cwd,
       sandbox: this.options.sandbox,
       approvalPolicy: "never",
@@ -122,11 +129,30 @@ export class CodexAppServer {
     return result.thread.id;
   }
 
+  private async discoverDefaultModel(): Promise<string> {
+    // The available model catalog is account-scoped. This is important for
+    // ChatGPT login profiles, whose model ids differ from API-key defaults.
+    try {
+      const result = await this.request<{
+        data?: Array<{ id?: string; model?: string; isDefault?: boolean }>;
+      }>("model/list", {});
+      const models = result.data ?? [];
+      const selected = models.find((m) => m.isDefault) ?? models[0];
+      const model = selected?.id || selected?.model;
+      if (model) return model;
+    } catch (error) {
+      this.options.onStderr?.(
+        `model/list unavailable; using fallback gpt-5.6-sol: ${(error as Error).message}`,
+      );
+    }
+    return "gpt-5.6-sol";
+  }
+
   async turn(threadId: string, text: string): Promise<void> {
     await this.request("turn/start", {
       threadId,
       cwd: this.options.cwd,
-      model: this.options.model,
+      model: this.model,
       input: [{ type: "text", text, text_elements: [] }],
       approvalPolicy: "never",
     });

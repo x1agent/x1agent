@@ -47,17 +47,20 @@ const platformName = process.env.PLATFORM_NAME || "x1agent";
 const workspaceName = process.env.WORKSPACE_NAME || "";
 const workspaceSystemPrompt = process.env.WORKSPACE_SYSTEM_PROMPT || "";
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
-// ChatGPT-login profiles do not accept every API model name. Keep the
-// default on the Codex model supported by both ChatGPT and API auth; the
-// API can still override this with OPENAI_MODEL for a dedicated deployment.
-const codexModel = process.env.OPENAI_MODEL || "gpt-5-codex";
+// The app-server discovers the account's default model when this is blank.
+// OPENAI_MODEL remains an explicit per-agent/deployment override.
+const codexModel = process.env.OPENAI_MODEL?.trim() || "";
 // Bubblewrap inside an unprivileged pod is the open question
 // (codex-spike-gap-analysis.md §6). The env knob lets the platform team
 // flip the default per pod without rebuilding the image. Defaults to
 // "workspace-write" (try the sandboxed path first); flip to
 // "danger-full-access" via env if the pod's securityContext rejects
 // the Bubblewrap setup. The pod is already the security boundary.
-const codexSandbox = process.env.CODEX_SANDBOX || "workspace-write";
+// The session pod is already the isolation boundary. Unprivileged k3s pods
+// cannot reliably initialize Codex's workspace-write bubblewrap profile, so
+// use the pod-scoped full-access mode by default; operators can still opt
+// back into workspace-write with CODEX_SANDBOX.
+const codexSandbox = process.env.CODEX_SANDBOX || "danger-full-access";
 const codexBin = process.env.CODEX_PATH || "codex";
 
 if (!sessionId) {
@@ -282,7 +285,7 @@ await postToSidecar("session.started", {
   session_id: sessionId,
 });
 console.log(
-  `[agent-codex] starting ${sessionMode} session ${sessionId} (model=${codexModel}, sandbox=${codexSandbox})`,
+  `[agent-codex] starting ${sessionMode} session ${sessionId} (model=${codexModel || "account-default"}, sandbox=${codexSandbox})`,
 );
 
 // ── Codex subprocess driver ─────────────────────────────
@@ -320,6 +323,7 @@ async function runCodexTurn(turnPrompt: string): Promise<void> {
   activeCodex = server;
   try {
     codexThreadId = await server.start();
+    console.log(`[agent-codex] selected model=${server.model}`);
     await server.turn(codexThreadId, turnPrompt);
   } catch (error) {
     emitToStream({ type: "agent.error", payload: { message: (error as Error).message, recoverable: false } });

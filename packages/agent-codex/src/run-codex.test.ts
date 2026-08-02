@@ -189,6 +189,29 @@ describe("normalizeCodexEvent", () => {
     });
   });
 
+  it("maps turn/failed notifications and nested turn errors", () => {
+    const out = normalizeCodexNotification("turn/failed", {
+      turn: { error: { message: "turn failed for a concrete reason" } },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: {
+        message: "turn failed for a concrete reason",
+        recoverable: false,
+      },
+    });
+  });
+
+  it("surfaces an error nested in turn/completed", () => {
+    const out = normalizeCodexNotification("turn/completed", {
+      turn: { status: "failed", error: { message: "turn completion failed" } },
+    });
+    expect(out).toEqual({
+      type: "agent.error",
+      payload: { message: "turn completion failed", recoverable: false },
+    });
+  });
+
   it("unwraps msg-envelope shape (App Server SDK style)", () => {
     const out = normalizeCodexEvent({
       msg: {

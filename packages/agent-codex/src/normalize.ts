@@ -84,6 +84,7 @@ interface CodexEnvelope {
   };
   model?: string;
   error?: unknown;
+  turn?: unknown;
   message?: string;
   [k: string]: unknown;
 }
@@ -124,6 +125,7 @@ function flatten(raw: CodexEnvelope): CodexEnvelope {
     const p = params as Record<string, unknown>;
     if (method === "item/completed") return { ...raw, type: "item.completed", item: p.item as CodexEnvelope["item"] };
     if (method === "turn/completed") return { ...raw, type: "turn.completed", ...p };
+    if (method === "turn/failed") return { ...raw, type: "turn.failed", ...p };
     if (method === "error") return { ...raw, type: "error", ...p };
   }
   if (raw.msg && typeof raw.msg === "object" && raw.msg.type) {
@@ -342,12 +344,19 @@ export function normalizeCodexEvent(
 
     case "turn.completed":
     case "task_complete": {
+      const failure = errorMessage(env.error) ?? errorMessage(env.turn);
+      if (failure) {
+        return {
+          type: "agent.error",
+          payload: { message: failure, recoverable: false },
+        };
+      }
       // v0: log usage rather than emit agent.usage. The api's cost
       // recorder only has Anthropic pricing rows today; emitting an
       // agent.usage with `model: "gpt-5.3-codex"` would crash the
       // rollup. Logging keeps it visible in pod stdout for the spike.
       const u = env.usage ?? {};
-      const model = env.model ?? "gpt-5.3-codex";
+      const model = env.model ?? "account-default";
       log(
         `[codex] turn.completed model=${model} input=${u.input_tokens ?? 0} output=${u.output_tokens ?? 0} cached=${u.cached_input_tokens ?? 0}`,
       );
@@ -359,6 +368,7 @@ export function normalizeCodexEvent(
       const msg =
         errorMessage(env.message) ??
         errorMessage(env.error) ??
+        errorMessage(env.turn) ??
         "codex turn failed";
       return {
         type: "agent.error",
@@ -385,7 +395,12 @@ export function normalizeCodexNotification(
       ? { type: "agent.thinking", payload: { text: params.delta } }
       : null;
   }
-  if (method === "item/completed" || method === "turn/completed" || method === "error") {
+  if (
+    method === "item/completed" ||
+    method === "turn/completed" ||
+    method === "turn/failed" ||
+    method === "error"
+  ) {
     return normalizeCodexEvent({ method, params });
   }
   if (method === "thread/started") {
