@@ -13,6 +13,7 @@ import {
   ScheduledRunAsUserNotInWorkspaceError,
   type Agent,
 } from "../../domain/agent.js";
+import { parseAgentSkillSources } from "../../domain/skill-source.js";
 import { CronSchedule } from "../../domain/cron-schedule.js";
 import { RuntimeType } from "../../domain/runtime.js";
 import { AgentKind } from "../../domain/kind.js";
@@ -38,14 +39,10 @@ export interface AgentRoutesConfig {
    * Resolver: slug → workspace id. Mirrors the invitations routes — keeps
    * agents independent of the workspaces adapter.
    */
-  resolveWorkspace: (
-    slug: WorkspaceSlug,
-  ) => Promise<WorkspaceId | null>;
+  resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   /** Injected by composition — reads session from the ctx. */
   requireAuth: MiddlewareHandler;
-  getActor: (
-    c: Context,
-  ) => { userId: UserId; email: Email } | null;
+  getActor: (c: Context) => { userId: UserId; email: Email } | null;
   /**
    * Returns the set of admin-enabled Claude model ids, or null when
    * the deployment isn't curating (resolver not wired). When set, the
@@ -72,6 +69,7 @@ function serialize(a: Agent) {
     created_by: a.createdBy,
     scheduled_run_as_user_id: a.scheduledRunAsUserId,
     idle_timeout_seconds: a.idleTimeoutSeconds,
+    skill_sources: a.skillSources,
     visibility: a.visibility,
     created_at: a.createdAt.toISOString(),
     updated_at: a.updatedAt.toISOString(),
@@ -85,7 +83,11 @@ function errStatus(err: unknown): number {
   if (err instanceof AgentSlugTakenError) return 409;
   if (err instanceof ScheduledRunAsUserNotInWorkspaceError) return 400;
   if (err instanceof DomainError) {
-    if (err.code === "admin_denied" || err.code === "not_a_member" || err.code === "insufficient_role")
+    if (
+      err.code === "admin_denied" ||
+      err.code === "not_a_member" ||
+      err.code === "insufficient_role"
+    )
       return 403;
     return 400;
   }
@@ -140,7 +142,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
     const wsId = await resolveWs(c.req.param("slug")!);
     if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
 
-    const body = await c.req.json().catch(() => ({})) as {
+    const body = (await c.req.json().catch(() => ({}))) as {
       slug?: string;
       name?: string;
       runtime_type?: string;
@@ -152,6 +154,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       model?: string | null;
       scheduled_run_as_user_id?: string | null;
       idle_timeout_seconds?: number | string | null;
+      skill_sources?: unknown;
     };
     if (!body.slug || !body.name || !body.runtime_type) {
       return c.json({ error: "missing_fields" }, 400);
@@ -191,6 +194,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
             body.idle_timeout_seconds === undefined
               ? undefined
               : clampIdleTimeoutSeconds(body.idle_timeout_seconds),
+          skillSources: parseAgentSkillSources(body.skill_sources),
         },
       );
       return c.json({ agent: serialize(a) }, 201);
@@ -222,9 +226,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
     // null/empty is always allowed — that means "use deployment default".
     if (body.model !== undefined && body.model !== null && body.model !== "") {
       const modelStr = String(body.model);
-      const enabled = cfg.enabledModels
-        ? await cfg.enabledModels()
-        : null;
+      const enabled = cfg.enabledModels ? await cfg.enabledModels() : null;
       if (enabled && !enabled.has(modelStr)) {
         return c.json(
           {
@@ -254,9 +256,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         }),
         ...(body.schedule !== undefined && {
           schedule:
-            body.schedule === null
-              ? null
-              : CronSchedule(String(body.schedule)),
+            body.schedule === null ? null : CronSchedule(String(body.schedule)),
         }),
         ...(body.is_active !== undefined && {
           isActive: Boolean(body.is_active),
@@ -281,16 +281,19 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
               : UserId(String(body.scheduled_run_as_user_id)),
         }),
         ...(body.idle_timeout_seconds !== undefined && {
-          idleTimeoutSeconds: clampIdleTimeoutSeconds(body.idle_timeout_seconds),
+          idleTimeoutSeconds: clampIdleTimeoutSeconds(
+            body.idle_timeout_seconds,
+          ),
+        }),
+        ...(body.skill_sources !== undefined && {
+          skillSources: parseAgentSkillSources(body.skill_sources),
         }),
         ...(body.visibility === "private" ||
         body.visibility === "workspace" ||
         body.visibility === "via_grants"
           ? {
               visibility: body.visibility as
-                | "private"
-                | "workspace"
-                | "via_grants",
+                "private" | "workspace" | "via_grants",
             }
           : {}),
       };

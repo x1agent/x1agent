@@ -18,6 +18,10 @@ if [ -n "${CODEX_AUTH_SOURCE:-}" ] && [ -f "$CODEX_AUTH_SOURCE" ]; then
   chmod 600 "${CODEX_HOME:-/home/agent/.codex}/auth.json"
 fi
 
+/x1/runtime/bin/node \
+  /x1/runtime/lib/node_modules/tsx/dist/cli.mjs \
+  /x1/app/packages/agent-runtime/src/install-skills.ts || exit $?
+
 exec /x1/runtime/bin/node \
   /x1/runtime/lib/node_modules/tsx/dist/cli.mjs \
   /x1/app/packages/agent-codex/src/run.ts "$@"

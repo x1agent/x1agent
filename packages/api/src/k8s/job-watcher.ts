@@ -1,17 +1,8 @@
 import * as k8s from "@kubernetes/client-node";
 import type postgres from "postgres";
-import type {
-  AgentRepository,
-  AgentId,
-} from "@x1agent/domain-agents";
-import type {
-  SessionId,
-  SessionRepository,
-} from "@x1agent/domain-sessions";
-import type {
-  AgentRepoStore,
-  InstallationId,
-} from "@x1agent/domain-github";
+import type { AgentRepository, AgentId } from "@x1agent/domain-agents";
+import type { SessionId, SessionRepository } from "@x1agent/domain-sessions";
+import type { AgentRepoStore, InstallationId } from "@x1agent/domain-github";
 import type { UserRepository } from "@x1agent/domain-auth";
 import { UserId } from "@x1agent/kernel";
 import type { SessionEventRepository } from "@x1agent/domain-sessions";
@@ -173,17 +164,21 @@ export interface JobWatcherConfig {
    * matches existing "no shared resources" behavior. See
    * docs/security/agent-env.md for the threat model.
    */
-  agentEnvBindings?: import("@x1agent/domain-agent-env").BindingRepository | null;
-  workspaceSecrets?: import("@x1agent/domain-workspace-secrets").SecretService | null;
+  agentEnvBindings?:
+    import("@x1agent/domain-agent-env").BindingRepository | null;
+  workspaceSecrets?:
+    import("@x1agent/domain-workspace-secrets").SecretService | null;
   /**
    * Zone-3 OAuth runtime: resolves per-user access tokens for any
    * remote_oauth MCP attachments at session-create. Halts session
    * creation with a structured error when a token is missing/expired
    * (UI shows "Connect <Provider> to continue").
    */
-  mcpAttachments?: import("@x1agent/domain-mcp-catalog").AttachmentRepository | null;
+  mcpAttachments?:
+    import("@x1agent/domain-mcp-catalog").AttachmentRepository | null;
   mcpCatalog?: import("@x1agent/domain-mcp-catalog").CatalogRepository | null;
-  userTokenService?: import("@x1agent/domain-mcp-catalog").UserTokenService | null;
+  userTokenService?:
+    import("@x1agent/domain-mcp-catalog").UserTokenService | null;
   /**
    * Image ref for the OAuth proxy sibling container. One per attached
    * remote_oauth MCP. Helm chart sets this; pod-spec emits the
@@ -218,7 +213,9 @@ export interface JobWatcherHandle {
  */
 export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
   const intervalMs = cfg.intervalMs ?? 5000;
-  const onError = cfg.onError ?? ((e) => console.warn("[jobs] tick failed:", (e as Error).message));
+  const onError =
+    cfg.onError ??
+    ((e) => console.warn("[jobs] tick failed:", (e as Error).message));
 
   const kc = new k8s.KubeConfig();
   try {
@@ -257,10 +254,11 @@ export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
         LIMIT 20
       `;
       for (const row of pending) {
-        await launchSession(cfg, batchApi, kc, row.id as SessionId).catch((err) =>
-          console.warn(
-            `[jobs] launch session ${row.id} failed: ${(err as Error).message}`,
-          ),
+        await launchSession(cfg, batchApi, kc, row.id as SessionId).catch(
+          (err) =>
+            console.warn(
+              `[jobs] launch session ${row.id} failed: ${(err as Error).message}`,
+            ),
         );
       }
       await reconcileRunning(cfg, batchApi).catch((err) =>
@@ -274,7 +272,9 @@ export function startJobWatcher(cfg: JobWatcherConfig): JobWatcherHandle {
   };
 
   const handle = setInterval(() => void tick(), intervalMs);
-  if (typeof (handle as unknown as { unref?: () => void }).unref === "function") {
+  if (
+    typeof (handle as unknown as { unref?: () => void }).unref === "function"
+  ) {
     (handle as unknown as { unref: () => void }).unref();
   }
   void tick();
@@ -415,7 +415,8 @@ async function launchSession(
   // without that MCP's tools); the outer catch here only fires on
   // infrastructure failures (K8s API errors, catalog lookup blowing
   // up, etc.) — those still fail the session loudly.
-  let remoteOAuthAttachments: import("./pod-spec.js").RemoteOAuthAttachmentForPod[] = [];
+  let remoteOAuthAttachments: import("./pod-spec.js").RemoteOAuthAttachmentForPod[] =
+    [];
   try {
     remoteOAuthAttachments = await mintRemoteOAuthBearers(
       cfg,
@@ -512,6 +513,7 @@ async function launchSession(
         : agent.kind === "orchestrator"
           ? 7 * 24 * 60 * 60 * 1000
           : 60 * 60 * 1000,
+    skillSources: agent.skillSources,
     maxTurns: 200,
     repos,
     collections,
@@ -582,8 +584,9 @@ async function launchSession(
     } catch (err) {
       const code = (err as { code?: number }).code;
       if (code !== 409) {
-        const message = (err as { body?: { message?: string } }).body?.message
-          ?? (err as Error).message;
+        const message =
+          (err as { body?: { message?: string } }).body?.message ??
+          (err as Error).message;
         console.warn(
           `[jobs] PVC create for session ${session.id} failed: ${message}`,
         );
@@ -601,7 +604,8 @@ async function launchSession(
     await batchApi.createNamespacedJob({ namespace: cfg.namespace, body: job });
   } catch (err) {
     const status = (err as { code?: number; body?: { message?: string } }).code;
-    const message = (err as { body?: { message?: string } }).body?.message ??
+    const message =
+      (err as { body?: { message?: string } }).body?.message ??
       (err as Error).message;
     if (status === 409) {
       // Job already exists from a previous attempt; treat as running.
@@ -674,9 +678,7 @@ async function reconcileRunning(
     // subscriber missed during a reconnect) may have a
     // session.completed event without the matching status flip. Honor
     // the event as the truth.
-    const priorTerminal = await cfg.sql<
-      { type: string; payload: unknown }[]
-    >`
+    const priorTerminal = await cfg.sql<{ type: string; payload: unknown }[]>`
       SELECT type, payload FROM session_events
       WHERE session_id = ${row.id}
         AND type IN ('session.completed', 'session.failed')
@@ -734,7 +736,11 @@ async function markTerminal(
   // Re-check status first — the NATS subscriber may have already
   // flipped it to complete/failed milliseconds before we did.
   const session = await cfg.sessions.findById(sessionId as SessionId);
-  if (!session || session.status === "complete" || session.status === "failed") {
+  if (
+    !session ||
+    session.status === "complete" ||
+    session.status === "failed"
+  ) {
     return;
   }
   const terminalStatus = success ? "complete" : "failed";
@@ -756,7 +762,12 @@ async function markTerminal(
   // docs/architecture/orchestration.md § Server-driven wakes.
   if (cfg.wakePublisher) {
     try {
-      await cfg.wakePublisher(session, terminalStatus, completedAt, errorMessage);
+      await cfg.wakePublisher(
+        session,
+        terminalStatus,
+        completedAt,
+        errorMessage,
+      );
     } catch (err) {
       console.warn(
         `[jobs] state_change wake failed for session ${sessionId}: ${(err as Error).message}`,
@@ -829,11 +840,7 @@ async function mintSessionCredentials(
           );
         }
       }
-      if (
-        resource.kind === "redis" &&
-        cfg.redisMinter &&
-        cfg.redisBranches
-      ) {
+      if (resource.kind === "redis" && cfg.redisMinter && cfg.redisBranches) {
         try {
           const cred = await mintRedisBranchCredential(
             cfg.redisMinter,
@@ -1001,10 +1008,7 @@ async function mintRemoteOAuthBearers(
     upstreamUrl: string;
   }> = [];
   for (const att of all) {
-    const entry = await cfg.mcpCatalog.getById(
-      workspaceId,
-      att.catalogEntryId,
-    );
+    const entry = await cfg.mcpCatalog.getById(workspaceId, att.catalogEntryId);
     if (!entry || entry.kind !== "remote_oauth" || !entry.url) continue;
     remote.push({
       catalogEntryId: att.catalogEntryId,
@@ -1047,7 +1051,10 @@ async function mintRemoteOAuthBearers(
     const port = BASE_PORT + portCursor;
     portCursor++;
     const secretName =
-      `x1-mcp-bearer-${shortId(session.id as unknown as string)}-${r.catalogName}`.slice(0, 63);
+      `x1-mcp-bearer-${shortId(session.id as unknown as string)}-${r.catalogName}`.slice(
+        0,
+        63,
+      );
     const secretBody: k8s.V1Secret = {
       metadata: {
         name: secretName,
@@ -1109,12 +1116,12 @@ async function maybeBuildResumeHistoryConfigMap(
     return (await cfg.sessions.findById(id)) ?? null;
   };
   const chain = await walkResumeChain(
-    await (async () => {
+    (await (async () => {
       const original = await cfg.sessions.findById(
         session.resumedFromSessionId!,
       );
       return original;
-    })() as SessionEntity,
+    })()) as SessionEntity,
     loader,
   );
   if (chain.length === 0) return null;
