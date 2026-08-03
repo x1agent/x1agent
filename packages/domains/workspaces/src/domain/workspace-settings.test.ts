@@ -44,7 +44,10 @@ describe("parseWorkspaceSettings", () => {
       oauthMcpsOnOrchestrators: "on_attended",
       futureKey: "anything",
     });
-    expect(out).toEqual({ oauthMcpsOnOrchestrators: "on_attended" });
+    expect(out).toEqual({
+      administrativeMcpEnabled: false,
+      oauthMcpsOnOrchestrators: "on_attended",
+    });
   });
 });
 
@@ -57,6 +60,16 @@ describe("parseWorkspaceSettingsPatch", () => {
     expect(parseWorkspaceSettingsPatch({ oauthMcpsOnOrchestrators: "on" })).toEqual({
       oauthMcpsOnOrchestrators: "on",
     });
+  });
+
+  test("administrative MCP opt-in → echoed", () => {
+    expect(parseWorkspaceSettingsPatch({ administrativeMcpEnabled: true })).toEqual({
+      administrativeMcpEnabled: true,
+    });
+  });
+
+  test("wrong-typed administrative MCP opt-in → dropped", () => {
+    expect(parseWorkspaceSettingsPatch({ administrativeMcpEnabled: "true" })).toEqual({});
   });
 
   test("invalid mode string → dropped", () => {

@@ -71,6 +71,13 @@ export class InMemoryAgentRepository implements AgentRepository {
   async listByWorkspace(workspaceId: WorkspaceId) {
     return [...this.rows.values()].filter((a) => a.workspaceId === workspaceId);
   }
+  async listAccessibleByWorkspace(workspaceId: WorkspaceId, userId: UserId) {
+    return [...this.rows.values()].filter(
+      (a) =>
+        a.workspaceId === workspaceId &&
+        (a.ownerUserId === userId || a.visibility === "workspace"),
+    );
+  }
   async update(id: AgentId, patch: UpdateAgentInput) {
     const a = this.rows.get(id);
     if (!a) throw new Error("not found");

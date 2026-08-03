@@ -137,6 +137,45 @@ export class PostgresAgentRepository implements AgentRepository {
     return rows.map(toAgent);
   }
 
+  async listAccessibleByWorkspace(
+    workspaceId: WorkspaceId,
+    userId: UserId,
+  ): Promise<readonly Agent[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT DISTINCT ${this.sql.unsafe(SELECT)} FROM agents
+      JOIN workspace_members member
+        ON member.workspace_id = agents.workspace_id
+       AND member.user_id = ${userId}
+      LEFT JOIN agent_grants grant
+        ON grant.agent_id = agents.id
+       AND (
+         (grant.subject_kind = 'user' AND grant.subject_id = ${userId})
+         OR (grant.subject_kind = 'workspace')
+         OR grant.subject_kind = 'public'
+         OR (
+           grant.subject_kind = 'group'
+           AND EXISTS (
+             SELECT 1 FROM group_members
+             WHERE group_members.group_id = grant.subject_id
+               AND group_members.user_id = ${userId}
+           )
+         )
+       )
+      WHERE agents.workspace_id = ${workspaceId}
+        AND (
+          member.role IN ('admin', 'owner')
+          OR agents.owner_user_id = ${userId}
+          OR agents.visibility = 'workspace'
+          OR (
+            agents.visibility = 'via_grants'
+            AND grant.verb IN ('view', 'invoke', 'collaborate', 'edit')
+          )
+        )
+      ORDER BY agents.created_at DESC
+    `;
+    return rows.map(toAgent);
+  }
+
   async update(id: AgentId, patch: UpdateAgentInput): Promise<Agent> {
     // When the schedule field is part of this patch (set to a value or
     // explicitly cleared), reset last_scheduler_tick_at to now(). This

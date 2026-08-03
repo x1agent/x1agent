@@ -20,6 +20,12 @@ graph + vector + collection tools (`graph_query`, `graph_write`,
 [Tool catalog](/reference/protocol#x1agent-mcp-tools) for the full
 list and signatures. Beyond it, agents can be attached to **external MCP servers** -- any process that speaks the Model Context Protocol -- to gain tools for third-party systems (Linear, Slack, Notion, a custom in-house API, anything).
 
+The remote **administrative X1Agent MCP** is a separate, forthcoming
+OAuth-protected server for a human's MCP client to administer enabled
+workspaces. It is not the in-session `x1agent` server documented here.
+Administrative MCP access is disabled by default per workspace and at the
+installation level.
+
 This doc covers three concerns:
 
 1. Agent-level attachment -- which MCPs a given agent can use.

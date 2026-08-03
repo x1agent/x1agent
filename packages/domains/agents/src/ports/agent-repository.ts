@@ -74,6 +74,16 @@ export interface AgentRepository {
 
   listByWorkspace(workspaceId: WorkspaceId): Promise<readonly Agent[]>;
 
+  /**
+   * Agents visible to a current workspace member. Keeping this predicate in
+   * the repository prevents callers from leaking private agents while doing
+   * a fetch-all + filter in application code.
+   */
+  listAccessibleByWorkspace(
+    workspaceId: WorkspaceId,
+    userId: UserId,
+  ): Promise<readonly Agent[]>;
+
   update(id: AgentId, patch: UpdateAgentInput): Promise<Agent>;
 
   delete(id: AgentId): Promise<void>;

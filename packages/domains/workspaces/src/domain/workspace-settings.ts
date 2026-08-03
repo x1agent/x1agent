@@ -45,6 +45,8 @@ const OAUTH_MCPS_ON_ORCHESTRATORS_SET: ReadonlySet<string> = new Set(
 );
 
 export interface WorkspaceSettings {
+  /** Opt-in for the remote administrative MCP. */
+  administrativeMcpEnabled: boolean;
   /**
    * Whether `remote_oauth` MCPs may be attached to orchestrator (and
    * scheduled) agents, and how the runtime should treat unattended
@@ -54,6 +56,7 @@ export interface WorkspaceSettings {
 }
 
 export const WORKSPACE_SETTINGS_DEFAULTS: Readonly<WorkspaceSettings> = {
+  administrativeMcpEnabled: false,
   oauthMcpsOnOrchestrators: "off",
 };
 
@@ -71,6 +74,10 @@ export function parseWorkspaceSettings(
   >;
   const mode = obj.oauthMcpsOnOrchestrators;
   return {
+    administrativeMcpEnabled:
+      typeof obj.administrativeMcpEnabled === "boolean"
+        ? obj.administrativeMcpEnabled
+        : WORKSPACE_SETTINGS_DEFAULTS.administrativeMcpEnabled,
     oauthMcpsOnOrchestrators:
       typeof mode === "string" && OAUTH_MCPS_ON_ORCHESTRATORS_SET.has(mode)
         ? (mode as OauthMcpsOnOrchestratorsMode)
@@ -91,6 +98,12 @@ export function parseWorkspaceSettingsPatch(
     unknown
   >;
   const out: Partial<WorkspaceSettings> = {};
+  if (
+    "administrativeMcpEnabled" in obj &&
+    typeof obj.administrativeMcpEnabled === "boolean"
+  ) {
+    out.administrativeMcpEnabled = obj.administrativeMcpEnabled;
+  }
   if (
     "oauthMcpsOnOrchestrators" in obj &&
     typeof obj.oauthMcpsOnOrchestrators === "string" &&
