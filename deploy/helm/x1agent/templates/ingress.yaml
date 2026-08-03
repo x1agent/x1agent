@@ -1,7 +1,7 @@
 # Ingress for app + api on the install's base domain.
 #
 # Stack:
-#   - ingress-nginx as the Ingress controller (operator helm-installs it
+#   - Traefik as the Ingress controller (operator helm-installs it
 #     before this chart). Same controller as local OrbStack dev, so
 #     manifests are portable across environments.
 #   - cert-manager for TLS via Let's Encrypt + DNS-01 challenge against
@@ -18,16 +18,12 @@ metadata:
   labels: {{- include "x1agent.labels" . | nindent 4 }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     # The api now serves a long-lived authenticated WebSocket at
     # /api/ws (the replacement for the public NATS exposure that was
-    # removed 2026-05-13). ingress-nginx upgrades a connection to WS
-    # automatically when the backend speaks it, but the default read /
-    # send timeouts (60s) drop quiet sockets — the agent's presence
-    # ping is every 20s so 1h is comfortably above that.
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Traefik serves TLS on websecure and redirects web globally. It
+    # upgrades WebSockets automatically; the installer sets its secure
+    # entrypoint's idle timeout to one hour for quiet authenticated sockets.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   tls:
@@ -81,11 +77,19 @@ spec:
 # hostname; greenfield installs like a fresh tenant on lattice.atomic.health
 # flip it on.
 #
-# The redirect lives entirely in nginx via the configuration-snippet
-# annotation — no backend service needed, but ingress-nginx requires
-# `defaultBackend` (or a path/backend pair) before it accepts the rule.
-# We point at the app Service as a no-op backend; the snippet returns
-# before the proxy_pass ever fires.
+# Traefik applies the RedirectRegex middleware declared immediately
+# below. The app Service is a required no-op backend for this Ingress.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: x1agent-apex-redirect
+  labels: {{- include "x1agent.labels" . | nindent 4 }}
+spec:
+  redirectRegex:
+    regex: ^https?://[^/]+/.*
+    replacement: https://{{ include "x1agent.appHost" . }}/
+    permanent: true
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -93,12 +97,8 @@ metadata:
   labels: {{- include "x1agent.labels" . | nindent 4 }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer | quote }}
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    # ingress-nginx 1.9+ validates this annotation as a plain URL — no
-    # nginx variables. Static target lands every apex path at app's
-    # root; path preservation isn't worth the validator escape hatches.
-    nginx.ingress.kubernetes.io/permanent-redirect: "https://{{ include "x1agent.appHost" . }}/"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-x1agent-apex-redirect@kubernetescrd" .Release.Namespace | quote }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   tls:

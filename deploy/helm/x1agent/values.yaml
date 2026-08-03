@@ -165,10 +165,10 @@ app:
 # ============================================================================
 
 ingress:
-  # Operator helm-installs ingress-nginx into the cluster (one-time);
+  # Operator helm-installs Traefik into the cluster (one-time);
   # this chart's Ingress resources reference it via ingressClassName.
   # Same controller as local OrbStack dev — no GKE-specific magic.
-  className: nginx
+  className: traefik
 
   # Apex redirect — when enabled, an additional Ingress catches the bare
   # baseDomain (e.g. `lattice.atomic.health`) and 301-redirects all paths

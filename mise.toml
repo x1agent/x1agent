@@ -106,7 +106,7 @@ run = "cd packages/cli && bun run src/index.ts deployments"
 #
 #   mise run configure:prod   # one-time, prompts for cloud + secrets
 #   mise run install:prod     # everything else: terraform, operator helm
-#                               charts (ESO + cert-manager + ingress-nginx),
+#                               charts (ESO + cert-manager + Traefik),
 #                               WI annotations, GSM secret population,
 #                               image build + push, helm install x1agent,
 #                               wait for cert

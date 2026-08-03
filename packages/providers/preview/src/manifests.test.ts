@@ -249,11 +249,11 @@ describe("buildIngress", () => {
     expect(i.spec?.tls?.[0]?.secretName).toBe("x1agent-wildcard");
   });
 
-  it("uses the nginx ingress class and forces HTTPS", () => {
-    expect(i.spec?.ingressClassName).toBe("nginx");
+  it("uses the Traefik ingress class and HTTPS entrypoint", () => {
+    expect(i.spec?.ingressClassName).toBe("traefik");
     expect(
-      i.metadata?.annotations?.["nginx.ingress.kubernetes.io/ssl-redirect"],
-    ).toBe("true");
+      i.metadata?.annotations?.["traefik.ingress.kubernetes.io/router.entrypoints"],
+    ).toBe("websecure");
   });
 
   it("does NOT add a cert-manager annotation when no aliases are set", () => {

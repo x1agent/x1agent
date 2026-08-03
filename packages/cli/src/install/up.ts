@@ -25,7 +25,7 @@ import { printActiveTargetHeader } from "../active-target.ts";
  * One-shot installer. Runs every phase needed to take a cluster from
  * empty to "x1agent serving https://app.<basedomain>" — terraform,
  * cluster credentials, operator helm charts (ESO + cert-manager +
- * ingress-nginx), Workload Identity annotations, GSM secret population,
+ * Traefik), Workload Identity annotations, GSM secret population,
  * image build + push, chart install, status wait.
  *
  * Idempotent: every phase short-circuits when the work it does is
@@ -40,7 +40,7 @@ const RELEASE = "x1agent";
 const NAMESPACE = "x1agent";
 const ESO_NS = "external-secrets";
 const CERTMGR_NS = "cert-manager";
-const NGINX_NS = "ingress-nginx";
+const TRAEFIK_NS = "traefik";
 
 export async function runInstallUp(
   opts: { autoConfirm?: boolean } = {},
@@ -76,7 +76,7 @@ export async function runInstallUp(
       `Will run, in order:\n` +
       `  1. terraform apply (cluster + IAM + GSM placeholders + AR + DNS + IP)\n` +
       `  2. fetch cluster credentials\n` +
-      `  3. helm install: external-secrets, cert-manager, ingress-nginx\n` +
+      `  3. helm install: external-secrets, cert-manager, traefik\n` +
       `  4. annotate ESO + cert-manager K8s SAs for Workload Identity\n` +
       `  5. terraform apply (full — ClusterSecretStore now CRDs exist)\n` +
       `  6. push secret values from ${envPath} → Google Secret Manager\n` +
@@ -274,17 +274,25 @@ async function phaseOperatorCharts(): Promise<boolean> {
       extraArgs: ["--set", "installCRDs=true"],
     },
     {
-      name: "ingress-nginx",
-      chart: "ingress-nginx/ingress-nginx",
-      repo: "https://kubernetes.github.io/ingress-nginx",
-      ns: NGINX_NS,
+      name: "traefik",
+      chart: "traefik/traefik",
+      repo: "https://traefik.github.io/charts",
+      ns: TRAEFIK_NS,
       // Claim the static IP terraform reserved. externalTrafficPolicy=Local
       // preserves source-IP for the api's audit logs.
       extraArgs: [
         "--set",
-        "controller.service.loadBalancerIP=" + (await readIngressIp()),
+        "service.spec.loadBalancerIP=" + (await readIngressIp()),
         "--set",
-        "controller.service.externalTrafficPolicy=Local",
+        "service.spec.externalTrafficPolicy=Local",
+        "--set",
+        "ports.web.redirections.entryPoint.to=websecure",
+        "--set",
+        "ports.web.redirections.entryPoint.scheme=https",
+        "--set",
+        "ports.web.redirections.entryPoint.permanent=true",
+        "--set",
+        "ports.websecure.transport.respondingTimeouts.idleTimeout=3600s",
       ],
     },
   ];

@@ -93,7 +93,7 @@ The installer fills `repository` + `tag` for each image at render time from
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `ingress.className` | `nginx` | The chart's Ingress resources reference this class. The operator helm-installs ingress-nginx separately (one-time). |
+| `ingress.className` | `traefik` | The chart's Ingress resources reference this class. The operator Helm-installs Traefik separately (one-time). |
 
 ## externalSecrets — GSM via External Secrets Operator
 
