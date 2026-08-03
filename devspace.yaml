@@ -558,5 +558,5 @@ dev:
 pipelines:
   dev: |-
     run_dependencies --all
-    create_deployments --all
-    start_dev --all
+    create_deployments --all --except preview
+    start_dev api app

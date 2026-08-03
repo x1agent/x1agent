@@ -37,7 +37,7 @@ if ! kc get crd certificates.cert-manager.io >/dev/null 2>&1; then
   # to a cluster, so they don't take it at all.
   helm repo add jetstack https://charts.jetstack.io --force-update >/dev/null
   helm repo update >/dev/null
-  helm --kube-context=orbstack upgrade --install cert-manager jetstack/cert-manager \
+  helm --kube-context="$EXPECTED_CONTEXT" upgrade --install cert-manager jetstack/cert-manager \
     --namespace "$CM_NS" --create-namespace \
     --version "$CM_VERSION" \
     --set installCRDs=true \
@@ -77,7 +77,9 @@ kc -n "$NAMESPACE" get secret "$CA_SECRET" -o jsonpath='{.data.tls\.crt}' \
 WANT_FP="$(openssl x509 -in "$TMP_CA" -noout -fingerprint -sha256 \
   | tr -d ':' | sed 's/^.*=//' | tr 'A-Z' 'a-z')"
 
-if security find-certificate -a -c "x1agent local dev CA" -Z "$KEYCHAIN" 2>/dev/null \
+if ! command -v security >/dev/null 2>&1; then
+  echo "[cert-manager] Linux host detected; skipping macOS keychain trust step"
+elif security find-certificate -a -c "x1agent local dev CA" -Z "$KEYCHAIN" 2>/dev/null \
      | awk '/SHA-256 hash:/{print tolower($3)}' \
      | grep -qx "$WANT_FP"; then
   echo "[cert-manager] root CA already trusted in $KEYCHAIN"
