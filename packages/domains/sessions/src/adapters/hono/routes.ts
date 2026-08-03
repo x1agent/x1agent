@@ -11,6 +11,7 @@ import {
 import {
   AgentId,
   AgentNotFoundError,
+  RuntimeType,
   type AgentRepository,
 } from "@x1agent/domain-agents";
 import type { SessionRepository } from "../../ports/session-repository.js";
@@ -90,6 +91,8 @@ export interface SessionRoutesConfig {
    * this from the job-watcher. X1A-70.
    */
   jobs?: import("../../application/cancel-session.js").JobTerminator;
+  /** Optional admin-curated Claude model allowlist for user launches. */
+  enabledModels?: () => Promise<Set<string> | null>;
 }
 
 function serialize(s: Session) {
@@ -112,7 +115,21 @@ function serialize(s: Session) {
     summary_updated_at: s.summaryUpdatedAt
       ? s.summaryUpdatedAt.toISOString()
       : null,
+    runtime_override: s.runtimeOverride ?? null,
   };
+}
+
+function parseRuntimeOverride(body: unknown) {
+  if (!body || typeof body !== "object") return null;
+  const value = (body as { runtime_type?: unknown }).runtime_type;
+  if (value === undefined || value === null || value === "") return null;
+  return RuntimeType(String(value));
+}
+
+function parseModelOverride(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const value = (body as { model?: unknown }).model;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function serializeEvent(e: SessionEvent) {
@@ -204,6 +221,19 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
     const agent = await assertAgentInWorkspace(wsId, c.req.param("agentId")!);
     if (!agent) return c.json({ error: "agent_not_found" }, 404);
     try {
+      const body = await c.req.json().catch(() => ({}));
+      const runtimeOverride = parseRuntimeOverride(body);
+      const effectiveRuntime = runtimeOverride ?? agent.runtimeType;
+      const modelOverride = parseModelOverride(body);
+      if (modelOverride && effectiveRuntime !== "codex" && cfg.enabledModels) {
+        const enabled = await cfg.enabledModels();
+        if (enabled && !enabled.has(modelOverride)) {
+          return c.json(
+            { error: "model_not_enabled", message: "The requested Claude model is not enabled for this deployment." },
+            403,
+          );
+        }
+      }
       const s = await triggerSession(
         {
           agents: cfg.agents,
@@ -211,7 +241,12 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
           adminGuard: cfg.adminGuard,
           clock,
         },
-        { actor: actor.userId, agentId: agent.id },
+        {
+          actor: actor.userId,
+          agentId: agent.id,
+          runtimeOverride,
+          modelOverride,
+        },
       );
       return c.json({ session: serialize(s) }, 201);
     } catch (err) {

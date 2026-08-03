@@ -162,7 +162,11 @@ export function AgentDetailRoot({ workspaceSlug, agentSlug }: Props) {
           )}
         </div>
 
-        <SpawnSessionCard workspaceSlug={workspaceSlug} agentId={agent.id} />
+        <SpawnSessionCard
+          workspaceSlug={workspaceSlug}
+          agentId={agent.id}
+          configuredRuntime={agent.runtime_type}
+        />
 
         {/* X1A-37 — agent cost across every session in window.
             Admin-only on the server side; rendered for everyone but

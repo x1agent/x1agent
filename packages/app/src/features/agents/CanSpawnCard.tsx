@@ -26,6 +26,7 @@ import {
 } from "../../components/ui/table";
 import { useAgentsStore } from "../../stores/agentsStore";
 import { useGrantsStore } from "../../stores/grantsStore";
+import type { RuntimeType } from "@x1agent/shared";
 
 interface Props {
   workspaceSlug: string;
@@ -59,6 +60,8 @@ export function CanSpawnCard({
   } = useGrantsStore();
 
   const [selectedChild, setSelectedChild] = useState<string>("");
+  const [runtimePermission, setRuntimePermission] = useState<"default" | RuntimeType | "both">("default");
+  const [modelPermission, setModelPermission] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -106,11 +109,31 @@ export function CanSpawnCard({
       await createGrant(workspaceSlug, {
         agent_subject_id: parentAgentId,
         grant_type: "spawn",
-        details: { child_agent_id: selectedChild },
+        details: {
+          child_agent_id: selectedChild,
+          ...(runtimePermission !== "default"
+            ? {
+                allowed_runtime_types:
+                  runtimePermission === "both"
+                    ? ["claude_code", "codex"]
+                    : [runtimePermission],
+              }
+            : {}),
+          ...(modelPermission.trim()
+            ? {
+                allowed_models: modelPermission
+                  .split(",")
+                  .map((m) => m.trim())
+                  .filter(Boolean),
+              }
+            : {}),
+        },
         scope: "persistent",
         reason: `granted by admin on agent edit screen`,
       });
       setSelectedChild("");
+      setRuntimePermission("default");
+      setModelPermission("");
     } catch (err) {
       setSubmitError((err as Error).message);
     } finally {
@@ -160,6 +183,25 @@ export function CanSpawnCard({
             >
               {submitting ? "Granting…" : "Grant"}
             </Button>
+            <Select
+              value={runtimePermission}
+              onValueChange={(v) => setRuntimePermission(v as typeof runtimePermission)}
+            >
+              <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">Child default runtime</SelectItem>
+                <SelectItem value="claude_code">Claude only</SelectItem>
+                <SelectItem value="codex">Codex only</SelectItem>
+                <SelectItem value="both">Claude + Codex</SelectItem>
+              </SelectContent>
+            </Select>
+            <input
+              aria-label="Allowed models"
+              value={modelPermission}
+              onChange={(e) => setModelPermission(e.target.value)}
+              placeholder="Models (comma-separated, optional)"
+              className="w-[250px] rounded-md border border-border-soft bg-transparent px-2 py-1.5 text-xs"
+            />
             {submitError && (
               <span className="text-xs text-red-400">{submitError}</span>
             )}

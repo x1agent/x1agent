@@ -72,5 +72,8 @@ export async function resumeSession(
     parentAgentId: null,
     resumedFromSessionId: original.id,
     triggeredAt: deps.clock.now(),
+    // Preserve the runtime used by the conversation being resumed. A
+    // resume is a new pod, but it should not silently switch runtimes.
+    runtimeOverride: original.runtimeOverride ?? null,
   });
 }

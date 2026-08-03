@@ -732,6 +732,7 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
     clock: systemClock,
     jobs: jobTerminator,
+    enabledModels: async () => listEnabledOverrides(env.sql),
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);

@@ -1,7 +1,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { DomainError, systemClock } from "@x1agent/kernel";
 import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
-import { AgentId, type AgentRepository } from "@x1agent/domain-agents";
+import { AgentId, RuntimeType, type AgentRepository } from "@x1agent/domain-agents";
 import type {
   AgentCostWindow,
   JobTerminator,
@@ -395,6 +395,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       parent_session_id?: string;
       child_agent_id?: string;
       model?: string | null;
+      runtime_type?: string | null;
     };
     if (!body.parent_session_id || !body.child_agent_id) {
       return c.json(
@@ -403,6 +404,13 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       );
     }
 
+    const childAgent = await cfg.agents.findById(AgentId(body.child_agent_id));
+    if (!childAgent) return c.json({ error: "child_agent_not_found" }, 404);
+    const requestedRuntime =
+      body.runtime_type === undefined || body.runtime_type === null || body.runtime_type === ""
+        ? childAgent.runtimeType
+        : RuntimeType(String(body.runtime_type));
+
     // X1A-40: optional per-spawn Claude model override. Short names
     // ("sonnet" / "opus" / "haiku") resolve against the admin-curated
     // enabled set; full ids (e.g. "claude-sonnet-4-5@20250929") pass
@@ -410,7 +418,12 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     // re-check the spawn path is a side-channel around the platform
     // admin's model gate.
     let modelOverride: string | null = null;
+    const runtimeOverride =
+      body.runtime_type === undefined || body.runtime_type === null || body.runtime_type === ""
+        ? null
+        : RuntimeType(String(body.runtime_type));
     if (
+      requestedRuntime !== "codex" &&
       body.model !== undefined &&
       body.model !== null &&
       typeof body.model === "string" &&
@@ -433,9 +446,23 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
       modelOverride = resolved;
     }
+    if (
+      requestedRuntime === "codex" &&
+      typeof body.model === "string" &&
+      body.model.trim() !== ""
+    ) {
+      // Codex model discovery/pricing is runtime-owned; until its catalog
+      // adapter is wired, preserve the explicit model id and let the Codex
+      // harness validate it at launch.
+      modelOverride = body.model.trim();
+    }
 
     const permission = {
-      canSpawn: async (parentAgentId: ReturnType<typeof AgentId>, childAgentId: ReturnType<typeof AgentId>) => {
+      canSpawn: async (
+        parentAgentId: ReturnType<typeof AgentId>,
+        childAgentId: ReturnType<typeof AgentId>,
+        request?: { runtimeType: string; model: string | undefined },
+      ) => {
         // The parent agent's workspace owns the grants — we need to look
         // it up once before checking. Cheap: agents are cached by the
         // repo.
@@ -450,7 +477,21 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
             matches: (d) => d["child_agent_id"] === childAgentId,
           },
         );
-        return grant !== null;
+        if (!grant) return false;
+        const details = grant.details;
+        const allowedRuntimes = details.allowed_runtime_types;
+        if (Array.isArray(allowedRuntimes)) {
+          if (!request || !allowedRuntimes.includes(request.runtimeType)) return false;
+        } else if (request && request.runtimeType !== childAgent.runtimeType) {
+          // Legacy grants remain safe: they permit the child's configured
+          // runtime, but not a newly requested runtime.
+          return false;
+        }
+        const allowedModels = details.allowed_models;
+        if (Array.isArray(allowedModels) && request?.model) {
+          if (!allowedModels.includes(request.model)) return false;
+        }
+        return true;
       },
     };
 
@@ -466,6 +507,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           parentSessionId: body.parent_session_id as never,
           childAgentId: AgentId(body.child_agent_id),
           modelOverride,
+          runtimeOverride,
         },
       );
       return c.json(

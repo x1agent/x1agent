@@ -75,6 +75,29 @@ describe("spawn details validator", () => {
     } as never);
   });
 
+  it("accepts runtime and model allowlists", () => {
+    expect(
+      validateSpawnDetails({
+        child_agent_id: goodUuid,
+        allowed_runtime_types: ["claude_code", "codex"],
+        allowed_models: ["gpt-5-codex", "claude-sonnet-4-5@20250929"],
+      }),
+    ).toMatchObject({
+      child_agent_id: goodUuid,
+      allowed_runtime_types: ["claude_code", "codex"],
+      allowed_models: ["gpt-5-codex", "claude-sonnet-4-5@20250929"],
+    });
+  });
+
+  it("rejects unsupported runtime allowlists", () => {
+    expect(() =>
+      validateSpawnDetails({
+        child_agent_id: goodUuid,
+        allowed_runtime_types: ["opencode"],
+      }),
+    ).toThrow(InvalidGrantShapeError);
+  });
+
   it("rejects non-object", () => {
     expect(() => validateSpawnDetails(null)).toThrow(InvalidGrantShapeError);
     expect(() => validateSpawnDetails("str")).toThrow(InvalidGrantShapeError);

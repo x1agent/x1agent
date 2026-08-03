@@ -14,6 +14,7 @@ import {
 } from "../../domain/session.js";
 import { SessionStatus } from "../../domain/status.js";
 import { TriggerSource } from "../../domain/trigger.js";
+import { RuntimeType } from "@x1agent/domain-agents";
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -34,6 +35,7 @@ interface Row {
   summary_updated_at: Date | string | null;
   summary_event_seq: number | string | null;
   model_override: string | null;
+  runtime_override: string | null;
 }
 
 function toSession(r: Row): Session {
@@ -63,6 +65,7 @@ function toSession(r: Row): Session {
         ? null
         : Number(r.summary_event_seq),
     modelOverride: r.model_override,
+    runtimeOverride: r.runtime_override ? RuntimeType(r.runtime_override) : null,
   };
 }
 
@@ -71,7 +74,7 @@ const SELECT = `
   parent_session_id, parent_agent_id, resumed_from,
   triggered_at, status, completed_at, error_message, created_at,
   summary, summary_updated_at, summary_event_seq,
-  model_override
+  model_override, runtime_override
 `;
 
 function isUniqueViolation(err: unknown): boolean {
@@ -92,14 +95,14 @@ export class PostgresSessionRepository implements SessionRepository {
         INSERT INTO sessions
           (agent_id, triggered_by, triggered_by_user_id,
            parent_session_id, parent_agent_id, resumed_from,
-           triggered_at, model_override)
+           triggered_at, model_override, runtime_override)
         VALUES
           (${input.agentId}, ${input.triggeredBy},
            ${input.triggeredByUserId},
            ${input.parentSessionId}, ${input.parentAgentId},
            ${input.resumedFromSessionId},
            ${input.triggeredAt},
-           ${input.modelOverride ?? null})
+           ${input.modelOverride ?? null}, ${input.runtimeOverride ?? null})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;
       return toSession(rows[0]!);

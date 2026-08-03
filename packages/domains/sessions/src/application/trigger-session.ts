@@ -1,6 +1,6 @@
 import type { Clock, UserId } from "@x1agent/kernel";
 import type { Agent, AgentId, AgentRepository } from "@x1agent/domain-agents";
-import { AgentNotFoundError, isOrchestratorKind } from "@x1agent/domain-agents";
+import { AgentNotFoundError, isOrchestratorKind, RuntimeType } from "@x1agent/domain-agents";
 import type { SessionRepository } from "../ports/session-repository.js";
 import type { AdminGuard } from "../ports/admin-guard.js";
 import type { Session } from "../domain/session.js";
@@ -15,6 +15,8 @@ export interface TriggerSessionDeps {
 export interface TriggerSessionInput {
   actor: UserId;
   agentId: AgentId;
+  runtimeOverride?: RuntimeType | null;
+  modelOverride?: string | null;
 }
 
 /**
@@ -51,6 +53,8 @@ export async function triggerSession(
     parentAgentId: null,
     resumedFromSessionId: null,
     triggeredAt: deps.clock.now(),
+    runtimeOverride: input.runtimeOverride ?? null,
+    modelOverride: input.modelOverride ?? null,
   });
 }
 

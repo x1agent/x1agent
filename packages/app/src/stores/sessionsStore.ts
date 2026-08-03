@@ -4,6 +4,7 @@ import type {
   SessionListResponse,
   SessionResponse,
 } from "@x1agent/shared";
+import type { RuntimeType } from "@x1agent/shared";
 import { apiFetch } from "../lib/api";
 
 interface SessionsState {
@@ -16,6 +17,8 @@ interface SessionsState {
   trigger(
     workspaceSlug: string,
     agentId: string,
+    runtimeType?: RuntimeType | null,
+    model?: string | null,
   ): Promise<SessionDTO>;
   cancel(
     workspaceSlug: string,
@@ -64,10 +67,16 @@ export const useSessionsStore = create<SessionsState>((set) => ({
     }
   },
 
-  async trigger(workspaceSlug, agentId) {
+  async trigger(workspaceSlug, agentId, runtimeType, model) {
     const res = await apiFetch<SessionResponse>(
       listUrl(workspaceSlug, agentId),
-      { method: "POST" },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(runtimeType ? { runtime_type: runtimeType } : {}),
+          ...(model?.trim() ? { model: model.trim() } : {}),
+        }),
+      },
     );
     set((s) => ({
       byAgent: {

@@ -3,6 +3,7 @@ import type { AgentId } from "@x1agent/domain-agents";
 import type { Session, SessionId } from "../domain/session.js";
 import type { SessionStatus } from "../domain/status.js";
 import type { TriggerSource } from "../domain/trigger.js";
+import type { RuntimeType } from "@x1agent/shared";
 
 export interface CreateSessionInput {
   agentId: AgentId;
@@ -27,6 +28,7 @@ export interface CreateSessionInput {
    * and finally the deployment-wide ANTHROPIC_MODEL env.
    */
   modelOverride?: string | null;
+  runtimeOverride?: RuntimeType | null;
 }
 
 export interface UpdateSessionStatusInput {

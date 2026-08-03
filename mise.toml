@@ -7,18 +7,18 @@ bun = "latest"
 # Both files are optional; mise silently skips missing ones.
 _.file = [".env", ".env.local"]
 
-# Scope kubectl/devspace/helm to OrbStack for everything run through mise
-# (or in a mise-activated shell inside this directory). Prevents accidental
-# deploys to a real cluster.
+# Scope kubectl/devspace/helm to the host-local development cluster for everything run through mise
+# (or in a mise-activated shell inside this directory). Production tasks below
+# explicitly clear KUBECONFIG and use their deployment-specific kubeconfig.
 #
 # Two-lane model:
-#   • DEV lane (dev:*)        — KUBECONFIG = OrbStack file (this default).
+#   • DEV lane (dev:*)        — KUBECONFIG = host-local k3s file (this default).
 #   • PROD lane (*:prod, etc.) — every prod task overrides this with
 #     `env = { KUBECONFIG = "" }` so the CLI writes its own
 #     deployment-specific kubeconfig instead of polluting the OrbStack
 #     file with `gcloud container clusters get-credentials`.
 # Each prod task below reasserts the override; do not remove it.
-KUBECONFIG = "{{env.HOME}}/.orbstack/k8s/config.yml"
+KUBECONFIG = "/etc/rancher/k3s/k3s.yaml"
 
 # Where the app finds the api in dev. The app runs in the cluster
 # (see deploy/k8s/dev/app.yaml); this value is the ingress-exposed

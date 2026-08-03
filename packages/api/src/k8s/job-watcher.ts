@@ -305,6 +305,7 @@ async function launchSession(
     });
     return;
   }
+  const runtimeType = session.runtimeOverride ?? agent.runtimeType;
 
   // Resolve workspace slug for the sidecar.
   const ws = await cfg.sql<{ slug: string; name: string }[]>`
@@ -472,7 +473,7 @@ async function launchSession(
     agentId: agent.id,
     agentSlug: agent.slug,
     agentKind: agent.kind,
-    runtimeType: agent.runtimeType,
+    runtimeType,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     // The user whose stored OAuth tokens this session acts as.
@@ -534,7 +535,7 @@ async function launchSession(
     // Claude-runtime agent.
     openaiApiKey: cfg.openaiApiKey,
     openaiModel:
-      agent.runtimeType === "codex"
+      runtimeType === "codex"
         ? selectSessionModel(session, agent, cfg.openaiModel)
         : cfg.openaiModel,
     vertexRegion: cfg.vertexRegion,

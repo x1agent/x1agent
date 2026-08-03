@@ -15,6 +15,7 @@
   "dependencies": {
     "@x1agent/domain-agents": "workspace:*",
     "@x1agent/domain-sessions": "workspace:*",
+    "@x1agent/shared": "workspace:*",
     "@x1agent/kernel": "workspace:*",
     "hono": "^4.6.0",
     "postgres": "^3.4.4"

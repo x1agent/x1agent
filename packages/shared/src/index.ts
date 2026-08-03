@@ -58,6 +58,14 @@ export type UpdateAgentRequest = Partial<
   }
 >;
 
+export interface RuntimeModelDTO {
+  runtime_type: RuntimeType;
+  id: string;
+  label: string;
+  input_usd_per_million: number | null;
+  output_usd_per_million: number | null;
+  source: string | null;
+}
 export interface WorkspaceMembership {
   workspace_id: string;
   slug: string;
@@ -170,6 +178,7 @@ export interface SessionDTO {
   summary: string | null;
   /** When `summary` was last (re)generated. Null while summary is null. */
   summary_updated_at: string | null;
+  runtime_override?: RuntimeType | null;
 }
 
 export interface SessionListResponse {

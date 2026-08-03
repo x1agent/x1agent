@@ -3,6 +3,7 @@ import type postgres from "postgres";
 import { readCapabilitiesFromEnv } from "./capabilities.js";
 import { listAnthropicModels } from "./anthropic-models.js";
 import { listEnabledOverrides } from "./admin-routes.js";
+import { RuntimeType } from "@x1agent/domain-agents";
 
 /**
  * GET /api/capabilities — snapshot of which provider domains are
@@ -54,6 +55,52 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
       // model in the curated list when ANTHROPIC_MODEL env is unset.
       default: pickDefaultModel(models),
       models,
+    });
+  });
+  app.get("/models", async (c) => {
+    const runtime = RuntimeType(c.req.query("runtime_type") ?? "claude_code");
+    if (runtime === "claude_code") {
+      const catalog = await listAnthropicModels();
+      const enabled = cfg.sql ? await listEnabledOverrides(cfg.sql) : null;
+      const models = enabled ? catalog.filter((m) => enabled.has(m.id)) : catalog;
+      return c.json({
+        runtime_type: runtime,
+        default: pickDefaultModel(models),
+        models: models.map((m) => ({
+          runtime_type: runtime,
+          id: m.id,
+          label: m.label,
+          input_usd_per_million: null,
+          output_usd_per_million: null,
+          source: m.source,
+        })),
+      });
+    }
+    if (!cfg.sql) return c.json({ runtime_type: runtime, default: null, models: [] });
+    const rows = await cfg.sql<{
+      model_id: string;
+      display_name: string;
+      input_usd_per_million: string | number | null;
+      output_usd_per_million: string | number | null;
+      source: string | null;
+    }[]>`
+      SELECT model_id, display_name, input_usd_per_million,
+             output_usd_per_million, source
+      FROM runtime_models
+      WHERE runtime_type = ${runtime} AND enabled = TRUE
+      ORDER BY display_name ASC
+    `;
+    return c.json({
+      runtime_type: runtime,
+      default: rows[0]?.model_id ?? null,
+      models: rows.map((m) => ({
+        runtime_type: runtime,
+        id: m.model_id,
+        label: m.display_name,
+        input_usd_per_million: m.input_usd_per_million === null ? null : Number(m.input_usd_per_million),
+        output_usd_per_million: m.output_usd_per_million === null ? null : Number(m.output_usd_per_million),
+        source: m.source,
+      })),
     });
   });
   return app;
