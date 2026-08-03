@@ -1,3 +1,10 @@
+# [1.45.0](https://github.com/x1agent/x1agent/compare/v1.44.1...v1.45.0) (2026-08-03)
+
+
+### Features
+
+* allow per-session runtime and model selection ([afb0502](https://github.com/x1agent/x1agent/commit/afb0502a18609a238436cc01f64e678049eb5e36))
+
 ## [1.44.1](https://github.com/x1agent/x1agent/compare/v1.44.0...v1.44.1) (2026-08-02)
 
 
