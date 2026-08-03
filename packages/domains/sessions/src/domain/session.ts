@@ -1,6 +1,7 @@
 import { DomainError } from "@x1agent/kernel";
 import type { UserId } from "@x1agent/kernel";
 import type { AgentId } from "@x1agent/domain-agents";
+import type { RuntimeType } from "@x1agent/shared";
 import type { SessionStatus } from "./status.js";
 import type { TriggerSource } from "./trigger.js";
 
@@ -65,6 +66,8 @@ export interface Session {
    * be trusted to hold a model the platform admin has enabled.
    */
   modelOverride: string | null;
+  /** Runtime selected for this session; null means the agent default. */
+  runtimeOverride?: RuntimeType | null;
 }
 
 export class SessionNotFoundError extends DomainError {

@@ -9,7 +9,9 @@ import {
 import { useAgentsStore } from "../../stores/agentsStore";
 import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
+import { apiFetch } from "../../lib/api";
 import { ComposerShell } from "./ComposerShell";
+import type { RuntimeModelDTO, RuntimeType } from "@x1agent/shared";
 
 interface Props {
   workspaceSlug: string;
@@ -28,6 +30,9 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
   const queuePendingPrompt = usePendingPromptStore((s) => s.set);
 
   const [agentId, setAgentId] = useState<string>("");
+  const [runtimeType, setRuntimeType] = useState<RuntimeType | null>(null);
+  const [model, setModel] = useState("");
+  const [runtimeModels, setRuntimeModels] = useState<RuntimeModelDTO[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,12 +50,30 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
     }
   }, [agentId, agents]);
 
+  const selectedRuntime = runtimeType ?? (activeAgent as { runtime_type?: RuntimeType } | undefined)?.runtime_type ?? "claude_code";
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch<{ models: RuntimeModelDTO[] }>(
+      `/api/capabilities/models?runtime_type=${selectedRuntime}`,
+    )
+      .then((res) => {
+        if (!cancelled) setRuntimeModels(res.models);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRuntime]);
+
   const onSubmit = async () => {
     if (!agentId || busy) return;
     setError(null);
     setBusy(true);
     try {
-      const session = await trigger(workspaceSlug, agentId);
+      const session = await trigger(workspaceSlug, agentId, runtimeType, model);
       queuePendingPrompt(session.id, prompt);
       window.location.href = `/workspaces/${workspaceSlug}/sessions/${session.id}`;
     } catch (err) {
@@ -62,6 +85,7 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
   const canSend = !!agentId && !busy && prompt.trim().length > 0;
 
   const leftSlot = (
+    <div className="flex items-center gap-1">
     <DropdownMenu>
       <DropdownMenuTrigger
         type="button"
@@ -87,6 +111,40 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        type="button"
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-fg-muted hover:text-fg hover:bg-bg-muted/60 transition"
+      >
+        <span className="truncate max-w-[120px]">
+          {selectedRuntime === "codex" ? "Codex" : "Claude"}
+        </span>
+        <ChevronDown size={14} className="opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[180px]">
+        <DropdownMenuItem onSelect={() => setRuntimeType(null)}>
+          Agent default
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setRuntimeType("claude_code")}>
+          Claude Code
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setRuntimeType("codex")}>
+          Codex
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+    <input
+      aria-label="Model override"
+      value={model}
+      onChange={(e) => setModel(e.target.value)}
+      placeholder="Default model"
+      list="session-runtime-models"
+      className="w-32 rounded-md bg-transparent px-2 py-1 text-[13px] text-fg-muted outline-none placeholder:text-fg-faint focus:bg-bg-muted/60"
+    />
+    <datalist id="session-runtime-models">
+      {runtimeModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+    </datalist>
+    </div>
   );
 
   return (

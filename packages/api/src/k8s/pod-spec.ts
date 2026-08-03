@@ -1,4 +1,5 @@
 import type { V1Job } from "@kubernetes/client-node";
+import type { RuntimeType } from "@x1agent/shared";
 
 /**
  * Agent kind — mirrors `agents.kind` in the DB. Pod-spec branches on
@@ -67,7 +68,7 @@ export interface SessionPodSpec {
    */
   agentKind: AgentKind;
   /** Explicit harness selector from agents.runtime_type. */
-  runtimeType: "claude_code" | "codex";
+  runtimeType: RuntimeType;
   workspaceSlug: string;
   workspaceName: string;
   /**
@@ -269,6 +270,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
       name: "AGENT_SKILL_SOURCES_JSON",
       value: JSON.stringify(spec.skillSources ?? []),
     },
+    ...(spec.runtimeType
+      ? [{ name: "X1_RUNTIME", value: spec.runtimeType }]
+      : []),
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
     { name: "DEBUG_CLAUDE_AGENT_SDK", value: "true" },

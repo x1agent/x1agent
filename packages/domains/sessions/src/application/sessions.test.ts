@@ -84,6 +84,15 @@ describe("triggerSession", () => {
     expect(s.triggeredAt.toISOString()).toBe("2026-04-18T12:00:00.000Z");
   });
 
+  it("persists a per-session runtime override", async () => {
+    const a = await makeAgent();
+    const s = await triggerSession(
+      { agents, sessions, adminGuard: new AllowAllAdmin(), clock },
+      { actor: ACTOR, agentId: a.id, runtimeOverride: RuntimeType("codex") },
+    );
+    expect(s.runtimeOverride).toBe("codex");
+  });
+
   it("requires workspace membership (but not admin)", async () => {
     const a = await makeAgent();
     // DenyAdmin rejects both assertAdmin and assertMember — proxy for

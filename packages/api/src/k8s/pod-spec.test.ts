@@ -228,7 +228,25 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
   });
 
   describe("Codex runtime propagation", () => {
-    it("uses runtimeType rather than guessing the harness from the image name", () => {
+    it("uses the explicit runtime even when the image name is Claude-oriented", () => {
+      const job = buildSessionJob({
+        ...baseSpec("worker"),
+        runtimeType: "codex",
+        agentImage: "registry/ws/default/python:latest",
+        openaiApiKey: "sk-test",
+      });
+      const agent = job.spec!.template.spec!.containers!.find(
+        (c) => c.name === "agent",
+      )!;
+      const env = Object.fromEntries(
+        (agent.env ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(env.X1_RUNTIME).toBe("codex");
+      expect(env.OPENAI_API_KEY).toBe("sk-test");
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    });
+
+    it("injects OpenAI credentials and model only for the Codex image", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),
         agentImage: "registry.example/acme/custom-agent:v1",

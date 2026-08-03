@@ -6,6 +6,7 @@ import {
   type AgentId,
   type AgentRepository,
 } from "@x1agent/domain-agents";
+import type { RuntimeType } from "@x1agent/shared";
 import type { SessionRepository } from "../ports/session-repository.js";
 import { SessionId, SessionNotFoundError, type Session } from "../domain/session.js";
 
@@ -41,7 +42,11 @@ export interface SpawnCheck {
    * covers the child agent. The application layer is agnostic to the
    * grant-repo type; composition wires a findActiveGrant-backed impl.
    */
-  canSpawn(parentAgentId: AgentId, childAgentId: AgentId): Promise<boolean>;
+  canSpawn(
+    parentAgentId: AgentId,
+    childAgentId: AgentId,
+    request?: { runtimeType: RuntimeType; model: string | undefined },
+  ): Promise<boolean>;
 }
 
 export interface SpawnChildSessionDeps {
@@ -61,6 +66,8 @@ export interface SpawnChildSessionCommand {
    * allowlist; here we just persist whatever it hands us.
    */
   modelOverride?: string | null;
+  /** Optional runtime override for this child session. */
+  runtimeOverride?: RuntimeType | null;
 }
 
 /**
@@ -95,6 +102,10 @@ export async function spawnChildSession(
   const allowed = await deps.permission.canSpawn(
     parentAgent.id,
     childAgent.id,
+    {
+      runtimeType: cmd.runtimeOverride ?? childAgent.runtimeType,
+      model: cmd.modelOverride ?? childAgent.model ?? undefined,
+    },
   );
   if (!allowed)
     throw new PermissionRequiredError(parentAgent.id, childAgent.id);
@@ -134,6 +145,7 @@ export async function spawnChildSession(
     resumedFromSessionId: null,
     triggeredAt: deps.clock.now(),
     modelOverride: cmd.modelOverride ?? null,
+    runtimeOverride: cmd.runtimeOverride ?? null,
   });
 }
 

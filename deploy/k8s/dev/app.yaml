@@ -48,9 +48,9 @@ spec:
             - containerPort: 4322
           env:
             - name: PUBLIC_API_URL
-              value: https://api.local.x1agent.dev
+              value: https://x1agent-api.dev360.dev
             - name: PUBLIC_URL
-              value: https://app.local.x1agent.dev
+              value: https://x1agent.dev360.dev
             - name: NODE_ENV
               value: development
             - name: HOST

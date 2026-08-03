@@ -413,6 +413,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                 <SpawnSessionCard
                   workspaceSlug={workspaceSlug}
                   agentId={existing.id}
+                  configuredRuntime={existing.runtime_type}
                 />
               )}
 

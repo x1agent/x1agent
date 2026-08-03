@@ -47,13 +47,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code tsx
+RUN npm install -g @anthropic-ai/claude-code @openai/codex tsx
 
 WORKDIR /app
 COPY packages/agent-claude/package.json ./
 RUN npm install --omit=dev --ignore-scripts
 
 COPY packages/agent-claude/src/ ./packages/agent-claude/src/
+COPY packages/agent-codex/src/ ./packages/agent-codex/src/
 COPY packages/agent-runtime/src/ ./packages/agent-runtime/src/
 
 # ── Runtime stage ─────────────────────────────────────────
@@ -99,7 +100,7 @@ RUN set -e \
 # Entrypoint script: run the Agent SDK launcher under the bundled
 # Node + tsx. Works regardless of whether the base image ships its
 # own Node — we ignore $PATH and use absolute paths.
-COPY packages/agent-claude/x1-entrypoint.sh /x1/bin/entrypoint
+COPY packages/agent-runtime/x1-entrypoint.sh /x1/bin/entrypoint
 RUN chmod +x /x1/bin/entrypoint
 
 # Every x1agent runtime image — this one plus every preset that
