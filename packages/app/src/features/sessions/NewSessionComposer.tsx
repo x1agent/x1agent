@@ -11,6 +11,7 @@ import { usePendingPromptStore } from "../../stores/pendingPromptStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import { apiFetch } from "../../lib/api";
 import { ComposerShell } from "./ComposerShell";
+import { pickPreferredRuntimeModel } from "./runtime-model-default";
 import type { RuntimeModelDTO, RuntimeType } from "@x1agent/shared";
 
 interface Props {
@@ -58,11 +59,16 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
   useEffect(() => {
     let cancelled = false;
     setModel("");
-    void apiFetch<{ models: RuntimeModelDTO[] }>(
+    void apiFetch<{ models: RuntimeModelDTO[]; default: string | null }>(
       `/api/capabilities/models?runtime_type=${selectedRuntime}`,
     )
       .then((res) => {
-        if (!cancelled) setRuntimeModels(res.models);
+        if (!cancelled) {
+          setRuntimeModels(res.models);
+          setModel(
+            pickPreferredRuntimeModel(selectedRuntime, res.models, res.default),
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setRuntimeModels([]);

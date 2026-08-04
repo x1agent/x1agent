@@ -51,6 +51,7 @@ import { AgentEnvBindingsCard } from "./AgentEnvBindingsCard";
 import { AgentSlackBotCard } from "./AgentSlackBotCard";
 import { ScheduleBuilder } from "../../components/schedule/ScheduleBuilder";
 import { SpawnSessionCard } from "../sessions/SpawnSessionCard";
+import { pickPreferredRuntimeModel } from "../sessions/runtime-model-default";
 import { useConfirm } from "../../components/use-confirm";
 
 interface Props {
@@ -186,6 +187,11 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
         if (!cancelled) {
           setModelCatalog(r.models);
           setDefaultModel(r.default);
+          if (isCreate) {
+            setModel(
+              pickPreferredRuntimeModel(runtimeType, r.models, r.default),
+            );
+          }
         }
       })
       .catch(() => {
@@ -197,7 +203,7 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [runtimeType]);
+  }, [isCreate, runtimeType]);
 
   useEffect(() => {
     load(workspaceSlug);
