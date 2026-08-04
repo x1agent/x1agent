@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createAdminMcpRoutes } from "./routes.js";
 import type {
   AdminMcpOAuthStore,
+  OAuthAuthorizationRequest,
   OAuthClient,
   OAuthPrincipal,
   OAuthTokenSet,
@@ -15,6 +16,7 @@ const challenge = createHash("sha256").update(verifier).digest("base64url");
 
 class FakeOAuth implements AdminMcpOAuthStore {
   clients = new Map<string, OAuthClient>();
+  authorizationRequests = new Map<string, OAuthAuthorizationRequest>();
   code: Parameters<AdminMcpOAuthStore["authorize"]>[0] | null = null;
 
   async registerClient(input: {
@@ -31,6 +33,17 @@ class FakeOAuth implements AdminMcpOAuthStore {
   }
   async findClient(clientId: string) {
     return this.clients.get(clientId) ?? null;
+  }
+  async createAuthorizationRequest(input: OAuthAuthorizationRequest) {
+    const token = `consent-${this.authorizationRequests.size + 1}`;
+    this.authorizationRequests.set(token, input);
+    return token;
+  }
+  async consumeAuthorizationRequest(input: { token: string; userId: string }) {
+    const request = this.authorizationRequests.get(input.token);
+    if (!request || request.userId !== input.userId) return null;
+    this.authorizationRequests.delete(input.token);
+    return request;
   }
   async authorize(input: Parameters<AdminMcpOAuthStore["authorize"]>[0]) {
     this.code = input;
@@ -150,6 +163,12 @@ function authParams(clientId: string) {
   });
 }
 
+function consentToken(html: string): string {
+  const value = html.match(/name="consent_token" value="([^"]+)"/)?.[1];
+  if (!value) throw new Error("consent token not found");
+  return value;
+}
+
 describe("public administrative MCP OAuth and transport", () => {
   test("challenges an unauthenticated MCP request with RFC 9728 metadata", async () => {
     const { server } = fixture();
@@ -203,16 +222,20 @@ describe("public administrative MCP OAuth and transport", () => {
     const consent = await server.request(`/oauth/authorize?${params}`, {
       headers: cookie,
     });
-    expect(await consent.text()).toContain("Authorize");
+    const consentHtml = await consent.text();
+    expect(consentHtml).toContain("Authorize");
 
-    params.set("decision", "approve");
     const approved = await server.request("/oauth/authorize", {
       method: "POST",
       headers: {
         ...cookie,
+        Origin: authorizationServerUrl,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: params.toString(),
+      body: new URLSearchParams({
+        consent_token: consentToken(consentHtml),
+        decision: "approve",
+      }),
     });
     expect(approved.status).toBe(302);
     const callback = new URL(approved.headers.get("location")!);
@@ -238,6 +261,103 @@ describe("public administrative MCP OAuth and transport", () => {
       token_type: "Bearer",
       scope: "x1.workspaces.read",
     });
+  });
+
+  test("rejects forged or replayed consent approval posts", async () => {
+    const { server, cookie } = fixture(true);
+    const client = await register(server);
+    const consent = await server.request(
+      `/oauth/authorize?${authParams(client.client_id)}`,
+      { headers: cookie },
+    );
+    const token = consentToken(await consent.text());
+    const body = new URLSearchParams({
+      consent_token: token,
+      decision: "approve",
+    });
+
+    const forged = await server.request("/oauth/authorize", {
+      method: "POST",
+      headers: {
+        ...cookie,
+        Origin: "https://evil.preview.example.test",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    expect(forged.status).toBe(403);
+
+    const approved = await server.request("/oauth/authorize", {
+      method: "POST",
+      headers: {
+        ...cookie,
+        Origin: authorizationServerUrl,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    expect(approved.status).toBe(302);
+
+    const replayed = await server.request("/oauth/authorize", {
+      method: "POST",
+      headers: {
+        ...cookie,
+        Origin: authorizationServerUrl,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    expect(replayed.status).toBe(400);
+  });
+
+  test("bounds and rate-limits dynamic client registration", async () => {
+    const { server } = fixture();
+    const tooLarge = await server.request("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        padding: "x".repeat(17 * 1024),
+        redirect_uris: ["http://127.0.0.1:49200/callback"],
+      }),
+    });
+    expect(tooLarge.status).toBe(413);
+
+    const oversized = await server.request("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "x".repeat(201),
+        redirect_uris: ["http://127.0.0.1:49200/callback"],
+      }),
+    });
+    expect(oversized.status).toBe(400);
+
+    const { server: limitedServer } = fixture();
+    let final: Response | null = null;
+    for (let i = 0; i < 20; i += 1) {
+      final = await limitedServer.request("/oauth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.9",
+        },
+        body: JSON.stringify({
+          redirect_uris: [`http://127.0.0.1:${49_300 + i}/callback`],
+        }),
+      });
+    }
+    expect(final?.status).toBe(201);
+    const limited = await limitedServer.request("/oauth/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "203.0.113.9",
+      },
+      body: JSON.stringify({
+        redirect_uris: ["http://127.0.0.1:49999/callback"],
+      }),
+    });
+    expect(limited.status).toBe(429);
   });
 
   test("serves real workspace tools through authenticated streamable HTTP", async () => {

@@ -29,12 +29,27 @@ export interface OAuthPrincipal {
   expiresAt: number;
 }
 
+export interface OAuthAuthorizationRequest {
+  clientId: string;
+  userId: string;
+  redirectUri: string;
+  resource: string;
+  scope: string;
+  codeChallenge: string;
+  state: string | null;
+}
+
 export interface AdminMcpOAuthStore {
   registerClient(input: {
     clientName: string | null;
     redirectUris: string[];
   }): Promise<OAuthClient>;
   findClient(clientId: string): Promise<OAuthClient | null>;
+  createAuthorizationRequest(input: OAuthAuthorizationRequest): Promise<string>;
+  consumeAuthorizationRequest(input: {
+    token: string;
+    userId: string;
+  }): Promise<OAuthAuthorizationRequest | null>;
   authorize(input: {
     clientId: string;
     userId: string;
@@ -66,6 +81,8 @@ export interface AdminMcpOAuthStore {
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
+const AUTHORIZATION_REQUEST_TTL_SECONDS = 10 * 60;
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -113,6 +130,18 @@ interface CodeRow {
   used_at: Date | string | null;
 }
 
+interface AuthorizationRequestRow {
+  client_id: string;
+  user_id: string;
+  redirect_uri: string;
+  resource: string;
+  scope: string;
+  code_challenge: string;
+  state: string | null;
+  expires_at: Date | string;
+  used_at: Date | string | null;
+}
+
 interface TokenRow {
   token_kind: "access" | "refresh";
   family_id: string;
@@ -133,6 +162,8 @@ interface PrincipalRow {
 }
 
 export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
+  private nextCleanupAt = 0;
+
   constructor(private readonly sql: Sql) {}
 
   async registerClient(input: {
@@ -145,6 +176,7 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
       VALUES (${clientId}, ${input.clientName}, ${input.redirectUris})
       RETURNING client_id, client_name, redirect_uris
     `;
+    this.scheduleCleanup();
     return this.toClient(rows[0]!);
   }
 
@@ -155,6 +187,79 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
       WHERE client_id = ${clientId}
     `;
     return rows[0] ? this.toClient(rows[0]) : null;
+  }
+
+  async createAuthorizationRequest(
+    input: OAuthAuthorizationRequest,
+  ): Promise<string> {
+    const token = opaqueToken("x1ar");
+    await this.sql.begin(async (tx) => {
+      const clients = await tx<{ client_id: string }[]>`
+        UPDATE admin_mcp_oauth_clients
+        SET last_used_at = now()
+        WHERE client_id = ${input.clientId}
+        RETURNING client_id
+      `;
+      if (!clients[0]) throw new Error("OAuth client no longer exists");
+      // Keep only the newest pending transaction per user/client pair. This
+      // bounds repeated authorization-page loads without weakening one-time
+      // consumption; an older open tab simply has to refresh.
+      await tx`
+        DELETE FROM admin_mcp_oauth_authorization_requests
+        WHERE user_id = ${input.userId}
+          AND client_id = ${input.clientId}
+          AND used_at IS NULL
+      `;
+      await tx`
+        INSERT INTO admin_mcp_oauth_authorization_requests
+          (token_hash, client_id, user_id, redirect_uri, resource, scope,
+           code_challenge, state, expires_at)
+        VALUES
+          (${digest(token)}, ${input.clientId}, ${input.userId}, ${input.redirectUri},
+           ${input.resource}, ${input.scope}, ${input.codeChallenge}, ${input.state},
+           now() + (${AUTHORIZATION_REQUEST_TTL_SECONDS} * interval '1 second'))
+      `;
+    });
+    this.scheduleCleanup();
+    return token;
+  }
+
+  async consumeAuthorizationRequest(input: {
+    token: string;
+    userId: string;
+  }): Promise<OAuthAuthorizationRequest | null> {
+    return (await this.sql.begin(async (tx) => {
+      const rows = await tx<AuthorizationRequestRow[]>`
+        SELECT client_id, user_id, redirect_uri, resource, scope,
+               code_challenge, state, expires_at, used_at
+        FROM admin_mcp_oauth_authorization_requests
+        WHERE token_hash = ${digest(input.token)}
+        FOR UPDATE
+      `;
+      const row = rows[0];
+      if (
+        !row ||
+        row.user_id !== input.userId ||
+        row.used_at ||
+        new Date(row.expires_at).getTime() <= Date.now()
+      ) {
+        return null;
+      }
+      await tx`
+        UPDATE admin_mcp_oauth_authorization_requests
+        SET used_at = now()
+        WHERE token_hash = ${digest(input.token)}
+      `;
+      return {
+        clientId: row.client_id,
+        userId: row.user_id,
+        redirectUri: row.redirect_uri,
+        resource: row.resource,
+        scope: row.scope,
+        codeChallenge: row.code_challenge,
+        state: row.state,
+      };
+    })) as OAuthAuthorizationRequest | null;
   }
 
   async authorize(input: {
@@ -192,6 +297,7 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
         WHERE client_id = ${input.clientId}
       `;
     });
+    this.scheduleCleanup();
     return code;
   }
 
@@ -202,6 +308,7 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
     resource: string;
     codeVerifier: string;
   }): Promise<OAuthTokenSet | null> {
+    this.scheduleCleanup();
     if (!/^[A-Za-z0-9._~-]{43,128}$/.test(input.codeVerifier)) return null;
     return (await this.sql.begin(async (tx) => {
       const rows = await tx<CodeRow[]>`
@@ -247,6 +354,7 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
     resource?: string;
     scope?: string;
   }): Promise<OAuthTokenSet | null> {
+    this.scheduleCleanup();
     return (await this.sql.begin(async (tx) => {
       const tokenHash = digest(input.refreshToken);
       const rows = await tx<TokenRow[]>`
@@ -340,6 +448,7 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
   }
 
   async revoke(token: string): Promise<void> {
+    this.scheduleCleanup();
     await this.sql`
       UPDATE admin_mcp_oauth_tokens
       SET revoked_at = COALESCE(revoked_at, now())
@@ -348,6 +457,84 @@ export class PostgresAdminMcpOAuthStore implements AdminMcpOAuthStore {
         WHERE token_hash = ${digest(token)}
       )
     `;
+  }
+
+  private scheduleCleanup(): void {
+    void this.cleanupIfDue().catch((error) => {
+      console.warn("[admin-mcp] OAuth artifact cleanup failed", error);
+    });
+  }
+
+  /** Opportunistic bounded GC, scheduled by OAuth mutation paths. */
+  private async cleanupIfDue(): Promise<void> {
+    const now = Date.now();
+    if (now < this.nextCleanupAt) return;
+    this.nextCleanupAt = now + CLEANUP_INTERVAL_MS;
+    try {
+      await this.sql.begin(async (tx) => {
+        await tx`
+          WITH doomed AS (
+            SELECT token_hash FROM admin_mcp_oauth_authorization_requests
+            WHERE expires_at < now() - interval '1 day'
+               OR used_at < now() - interval '1 day'
+            ORDER BY expires_at ASC LIMIT 500
+          )
+          DELETE FROM admin_mcp_oauth_authorization_requests r
+          USING doomed d WHERE r.token_hash = d.token_hash
+        `;
+        await tx`
+          WITH doomed AS (
+            SELECT code_hash FROM admin_mcp_oauth_codes
+            WHERE expires_at < now() - interval '1 day'
+               OR used_at < now() - interval '1 day'
+            ORDER BY expires_at ASC LIMIT 500
+          )
+          DELETE FROM admin_mcp_oauth_codes c
+          USING doomed d WHERE c.code_hash = d.code_hash
+        `;
+        await tx`
+          WITH doomed AS (
+            SELECT family_id
+            FROM admin_mcp_oauth_tokens
+            GROUP BY family_id
+            HAVING bool_and(expires_at < now() OR revoked_at IS NOT NULL)
+               AND max(created_at) < now() - interval '7 days'
+            ORDER BY max(created_at) ASC LIMIT 200
+          )
+          DELETE FROM admin_mcp_oauth_tokens t
+          USING doomed d WHERE t.family_id = d.family_id
+        `;
+        await tx`
+          WITH doomed AS (
+            SELECT client_id FROM admin_mcp_oauth_clients c
+            WHERE last_used_at IS NULL
+              AND created_at < now() - interval '1 day'
+              AND NOT EXISTS (
+                SELECT 1 FROM admin_mcp_oauth_authorization_requests r
+                WHERE r.client_id = c.client_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM admin_mcp_oauth_codes a
+                WHERE a.client_id = c.client_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM admin_mcp_oauth_tokens t
+                WHERE t.client_id = c.client_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM admin_mcp_oauth_consents s
+                WHERE s.client_id = c.client_id
+              )
+            ORDER BY created_at ASC LIMIT 100
+          )
+          DELETE FROM admin_mcp_oauth_clients c
+          USING doomed d WHERE c.client_id = d.client_id
+        `;
+      });
+    } catch (error) {
+      this.nextCleanupAt = 0;
+      throw error;
+    }
   }
 
   private toClient(row: ClientRow): OAuthClient {

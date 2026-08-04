@@ -54,33 +54,14 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
     return toWorkspace(rows[0]!);
   }
 
-  async updateSettings(
-    id: WorkspaceId,
-    patch: Partial<WorkspaceSettings>,
-  ) {
-    // Read-merge-write so the merge happens in TypeScript and the
-    // patch lands in postgres as a single, fully-formed jsonb object.
-    //
-    // The previous `settings || ${JSON.stringify(patch)}::jsonb`
-    // approach ran afoul of postgres-js's parameter encoding: the
-    // stringified JSON came through the wire as a JSON *string* (not
-    // an object), so the `||` operator concatenated into a jsonb
-    // ARRAY instead of merging. Resulting rows looked like
-    // `[{}, "{...}", "{...}"]` and the parser fell back to defaults
-    // on read — i.e. user clicks Save, UI shows "Saved", then snaps
-    // back to the default.
-    //
-    // Two round-trips here is fine; this method is admin-only and
-    // runs at human-toggle frequency. Atomic write of the post-merge
-    // object also avoids the subtlety of having two callers race
-    // through partial merges on different keys.
-    const current = await this.findById(id);
-    if (!current) return null;
-    const merged: WorkspaceSettings = { ...current.settings, ...patch };
+  async updateSettings(id: WorkspaceId, patch: Partial<WorkspaceSettings>) {
+    // Merge the typed JSON object in one UPDATE. Using sql.json(patch), rather
+    // than JSON.stringify(patch), preserves the jsonb object type and makes
+    // concurrent patches to different keys atomic instead of last-write-wins.
     const rows = await this.sql<Row[]>`
       UPDATE workspaces
-      SET settings = ${this.sql.json(
-        merged as unknown as Parameters<typeof this.sql.json>[0],
+      SET settings = COALESCE(settings, '{}'::jsonb) || ${this.sql.json(
+        patch as unknown as Parameters<typeof this.sql.json>[0],
       )}
       WHERE id = ${id}
       RETURNING id, slug, name, created_at, settings

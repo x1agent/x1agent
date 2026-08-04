@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -15,6 +16,9 @@ import type {
 import type { AdminMcpWorkspaceReader } from "./workspace-reader.js";
 
 const WORKSPACES_READ_SCOPE = "x1.workspaces.read";
+const DCR_BODY_LIMIT_BYTES = 16 * 1024;
+const DCR_WINDOW_MS = 5 * 60 * 1000;
+const DCR_MAX_PER_WINDOW = 20;
 
 export interface AdminMcpRoutesConfig {
   /** Public MCP resource URL, e.g. https://x1agent.example.com/mcp. */
@@ -144,18 +148,25 @@ async function parseAuthorizationRequest(
     .join(" ");
   const codeChallenge = values.get("code_challenge");
   const challengeMethod = values.get("code_challenge_method");
+  const state = values.get("state");
   const client = clientId ? await cfg.oauth.findClient(clientId) : null;
 
   if (
     responseType !== "code" ||
     !client ||
+    (clientId?.length ?? 0) > 256 ||
     !redirectUri ||
+    redirectUri.length > 2048 ||
     !client.redirectUris.includes(redirectUri) ||
+    !resource ||
+    resource.length > 2048 ||
     resource !== cfg.resourceUrl ||
+    requestedScope.length > 512 ||
     scope !== WORKSPACES_READ_SCOPE ||
     !codeChallenge ||
     !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge) ||
-    challengeMethod !== "S256"
+    challengeMethod !== "S256" ||
+    (state !== null && state.length > 1024)
   ) {
     return null;
   }
@@ -165,21 +176,12 @@ async function parseAuthorizationRequest(
     resource,
     scope,
     codeChallenge,
-    state: values.get("state"),
+    state,
   };
 }
 
-function authorizationFields(request: AuthorizationRequest): string {
-  return [
-    hidden("response_type", "code"),
-    hidden("client_id", request.client.clientId),
-    hidden("redirect_uri", request.redirectUri),
-    hidden("resource", request.resource),
-    hidden("scope", request.scope),
-    hidden("code_challenge", request.codeChallenge),
-    hidden("code_challenge_method", "S256"),
-    hidden("state", request.state),
-  ].join("");
+function authorizationFields(consentToken: string): string {
+  return hidden("consent_token", consentToken);
 }
 
 function toolResult(value: Record<string, unknown>) {
@@ -274,6 +276,17 @@ function createMcpServer(
 export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
   const app = new Hono();
   const resourceMetadataUrl = `${cfg.authorizationServerUrl}/.well-known/oauth-protected-resource/mcp`;
+  const authorizationOrigin = new URL(cfg.authorizationServerUrl).origin;
+  let registrationWindow = { startedAt: 0, count: 0 };
+  const registrationAllowed = (): boolean => {
+    const now = Date.now();
+    if (now - registrationWindow.startedAt >= DCR_WINDOW_MS) {
+      registrationWindow = { startedAt: now, count: 1 };
+      return true;
+    }
+    registrationWindow.count += 1;
+    return registrationWindow.count <= DCR_MAX_PER_WINDOW;
+  };
 
   const unauthorized = (c: Context, error?: string) => {
     noStore(c);
@@ -313,55 +326,100 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
     });
   });
 
-  app.post("/oauth/register", async (c) => {
-    noStore(c);
-    if (!cfg.enabled) {
-      return oauthError(
-        c,
-        "temporarily_unavailable",
-        "X1Agent administrative MCP is disabled",
-        503,
+  app.post(
+    "/oauth/register",
+    bodyLimit({
+      maxSize: DCR_BODY_LIMIT_BYTES,
+      onError: (c) =>
+        oauthError(
+          c,
+          "invalid_client_metadata",
+          "Client registration body is too large",
+          413,
+        ),
+    }),
+    async (c) => {
+      noStore(c);
+      if (!cfg.enabled) {
+        return oauthError(
+          c,
+          "temporarily_unavailable",
+          "X1Agent administrative MCP is disabled",
+          503,
+        );
+      }
+      if (!registrationAllowed()) {
+        c.header("Retry-After", String(Math.ceil(DCR_WINDOW_MS / 1000)));
+        return oauthError(
+          c,
+          "slow_down",
+          "Too many client registration attempts",
+          429,
+        );
+      }
+      const rawBody = await c.req.text();
+      const parsed: unknown = (() => {
+        try {
+          return JSON.parse(rawBody);
+        } catch {
+          return null;
+        }
+      })();
+      const body =
+        typeof parsed === "object" && parsed !== null
+          ? (parsed as Record<string, unknown>)
+          : {};
+      const rawUris = body.redirect_uris;
+      if (
+        !Array.isArray(rawUris) ||
+        rawUris.length === 0 ||
+        rawUris.length > 10 ||
+        rawUris.some(
+          (uri) =>
+            typeof uri !== "string" ||
+            uri.length > 2048 ||
+            !isAllowedRedirectUri(uri),
+        )
+      ) {
+        return oauthError(
+          c,
+          "invalid_client_metadata",
+          "redirect_uris must contain valid HTTPS or loopback callback URLs",
+        );
+      }
+      const redirectUris = [...new Set(rawUris as string[])];
+      if (
+        typeof body.client_name === "string" &&
+        body.client_name.length > 200
+      ) {
+        return oauthError(
+          c,
+          "invalid_client_metadata",
+          "client_name must be at most 200 characters",
+        );
+      }
+      const clientName =
+        typeof body.client_name === "string"
+          ? body.client_name.trim() || null
+          : null;
+      const client = await cfg.oauth.registerClient({
+        clientName,
+        redirectUris,
+      });
+      return c.json(
+        {
+          client_id: client.clientId,
+          client_name: client.clientName,
+          redirect_uris: client.redirectUris,
+          token_endpoint_auth_method: "none",
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          scope: WORKSPACES_READ_SCOPE,
+        },
+        201,
       );
-    }
-    const parsed: unknown = await c.req.json().catch(() => null);
-    const body =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, unknown>)
-        : {};
-    const rawUris = body.redirect_uris;
-    if (
-      !Array.isArray(rawUris) ||
-      rawUris.length === 0 ||
-      rawUris.length > 10 ||
-      rawUris.some(
-        (uri) => typeof uri !== "string" || !isAllowedRedirectUri(uri),
-      )
-    ) {
-      return oauthError(
-        c,
-        "invalid_client_metadata",
-        "redirect_uris must contain valid HTTPS or loopback callback URLs",
-      );
-    }
-    const redirectUris = [...new Set(rawUris as string[])];
-    const clientName =
-      typeof body.client_name === "string"
-        ? body.client_name.trim().slice(0, 200) || null
-        : null;
-    const client = await cfg.oauth.registerClient({ clientName, redirectUris });
-    return c.json(
-      {
-        client_id: client.clientId,
-        client_name: client.clientName,
-        redirect_uris: client.redirectUris,
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        scope: WORKSPACES_READ_SCOPE,
-      },
-      201,
-    );
-  });
+    },
+  );
 
   app.get("/oauth/authorize", async (c) => {
     noStore(c);
@@ -389,9 +447,19 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
       );
     }
 
+    const consentToken = await cfg.oauth.createAuthorizationRequest({
+      clientId: request.client.clientId,
+      userId: String(session.userId),
+      redirectUri: request.redirectUri,
+      resource: request.resource,
+      scope: request.scope,
+      codeChallenge: request.codeChallenge,
+      state: request.state,
+    });
+
     return page(
       "X1Agent MCP authorization",
-      `<p>Signed in as ${escapeHtml(String(session.email))}.</p><p>${escapeHtml(request.client.clientName ?? "This MCP client")} requested <code>${WORKSPACES_READ_SCOPE}</code>.</p><p>This permits read-only access to workspaces where you are still a member and an administrator has enabled MCP access.</p><form method="post" action="/oauth/authorize">${authorizationFields(request)}<button class="approve" name="decision" value="approve" type="submit">Authorize</button><button class="deny" name="decision" value="deny" type="submit">Deny</button></form>`,
+      `<p>Signed in as ${escapeHtml(String(session.email))}.</p><p>${escapeHtml(request.client.clientName ?? "This MCP client")} requested <code>${WORKSPACES_READ_SCOPE}</code>.</p><p>This permits read-only access to workspaces where you are still a member and an administrator has enabled MCP access.</p><form method="post" action="/oauth/authorize">${authorizationFields(consentToken)}<button class="approve" name="decision" value="approve" type="submit">Authorize</button><button class="deny" name="decision" value="deny" type="submit">Deny</button></form>`,
     );
   });
 
@@ -404,22 +472,17 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
         "X1Agent administrative MCP is disabled",
         503,
       );
-    const form = await c.req.raw.formData().catch(() => null);
-    if (!form)
-      return oauthError(c, "invalid_request", "Invalid authorization form");
-    const values = {
-      get: (name: string) => {
-        const value = form.get(name);
-        return typeof value === "string" ? value : null;
-      },
-    };
-    const request = await parseAuthorizationRequest(values, cfg);
-    if (!request)
+    if (c.req.header("Origin") !== authorizationOrigin) {
       return oauthError(
         c,
         "invalid_request",
-        "Invalid OAuth authorization request",
+        "Authorization approval must originate from X1Agent",
+        403,
       );
+    }
+    const form = await c.req.raw.formData().catch(() => null);
+    if (!form)
+      return oauthError(c, "invalid_request", "Invalid authorization form");
     const session = readSession(c, cfg.tokenizer);
     if (!session)
       return oauthError(
@@ -428,8 +491,23 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
         "Your X1Agent browser session expired",
         401,
       );
+    const consentToken = form.get("consent_token");
+    const request =
+      typeof consentToken === "string"
+        ? await cfg.oauth.consumeAuthorizationRequest({
+            token: consentToken,
+            userId: String(session.userId),
+          })
+        : null;
+    if (!request) {
+      return oauthError(
+        c,
+        "invalid_request",
+        "Authorization request is invalid, expired, or already used",
+      );
+    }
 
-    if (values.get("decision") !== "approve") {
+    if (form.get("decision") !== "approve") {
       return c.redirect(
         appendOAuthResult(request.redirectUri, {
           error: "access_denied",
@@ -438,8 +516,8 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
       );
     }
     const code = await cfg.oauth.authorize({
-      clientId: request.client.clientId,
-      userId: String(session.userId),
+      clientId: request.clientId,
+      userId: request.userId,
       redirectUri: request.redirectUri,
       resource: request.resource,
       scope: request.scope,

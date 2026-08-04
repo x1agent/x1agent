@@ -68,7 +68,7 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
   const adminMcpEnabled = ws?.settings.adminMcpEnabled ?? false;
 
   async function onPick(value: OauthMcpsOnOrchestratorsMode) {
-    if (!canManage || pending) return;
+    if (!canManage || pending || mcpPending) return;
     if (value === current) return;
     setError(null);
     setPending(value);
@@ -83,7 +83,7 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
   }
 
   async function toggleAdminMcp() {
-    if (!canManage || mcpPending) return;
+    if (!canManage || pending || mcpPending) return;
     setError(null);
     setMcpPending(true);
     try {
@@ -159,7 +159,7 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
           </div>
           <Button
             variant={adminMcpEnabled ? "outline" : "default"}
-            disabled={!canManage || mcpPending}
+            disabled={!canManage || pending !== null || mcpPending}
             onClick={() => void toggleAdminMcp()}
           >
             {mcpPending
@@ -184,7 +184,7 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
         <CardContent className="space-y-3">
           {MODE_OPTIONS.map((opt) => {
             const checked = current === opt.value;
-            const disabled = !canManage || (!!pending && pending !== opt.value);
+            const disabled = !canManage || pending !== null || mcpPending;
             return (
               <label
                 key={opt.value}

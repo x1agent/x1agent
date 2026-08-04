@@ -39,6 +39,52 @@ describe("PostgresAdminMcpOAuthStore", () => {
       redirectUri,
     ]);
 
+    const consentToken = await store.createAuthorizationRequest({
+      clientId: client.clientId,
+      userId,
+      redirectUri,
+      resource,
+      scope: "x1.workspaces.read",
+      codeChallenge: challenge,
+      state: "codex-state",
+    });
+    const replacementConsentToken = await store.createAuthorizationRequest({
+      clientId: client.clientId,
+      userId,
+      redirectUri,
+      resource,
+      scope: "x1.workspaces.read",
+      codeChallenge: challenge,
+      state: "codex-state",
+    });
+    expect(
+      await store.consumeAuthorizationRequest({ token: consentToken, userId }),
+    ).toBeNull();
+    expect(
+      await store.consumeAuthorizationRequest({
+        token: replacementConsentToken,
+        userId: "00000000-0000-0000-0000-000000000000",
+      }),
+    ).toBeNull();
+    expect(
+      await store.consumeAuthorizationRequest({
+        token: replacementConsentToken,
+        userId,
+      }),
+    ).toMatchObject({
+      clientId: client.clientId,
+      userId,
+      redirectUri,
+      resource,
+      state: "codex-state",
+    });
+    expect(
+      await store.consumeAuthorizationRequest({
+        token: replacementConsentToken,
+        userId,
+      }),
+    ).toBeNull();
+
     // A bad verifier spends the one-time code and cannot be retried.
     const badCode = await store.authorize({
       clientId: client.clientId,
