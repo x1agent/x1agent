@@ -57,10 +57,18 @@ type Sql = postgres.Sql<Record<string, unknown>>;
  */
 export function selectSessionModel(
   session: { modelOverride: string | null },
-  agent: { model: string | null },
+  agent: { model: string | null; runtimeType?: RuntimeType },
   fallback: string | undefined,
+  effectiveRuntime?: RuntimeType,
 ): string | undefined {
-  return session.modelOverride ?? agent.model ?? fallback;
+  if (session.modelOverride) return session.modelOverride;
+  if (
+    effectiveRuntime &&
+    agent.runtimeType &&
+    effectiveRuntime !== agent.runtimeType
+  )
+    return fallback;
+  return agent.model ?? fallback;
 }
 
 /**
@@ -76,10 +84,23 @@ export function selectSessionImage(
   pinnedImageRef: string | null | undefined,
   runtimeImageRef: string | null | undefined,
   deploymentFallback: string,
+  options: {
+    pinnedImageName?: string | null;
+    pinnedImageIsPlatformPreset?: boolean;
+    effectiveRuntime?: RuntimeType;
+  } = {},
 ): string {
   const pinned = pinnedImageRef?.trim();
-  if (pinned) return pinned;
   const runtime = runtimeImageRef?.trim();
+  // runtime-codex has a provider-specific entrypoint. If an older Codex
+  // agent pinned that platform preset and is now launched as Claude, select
+  // runtime-core instead. Workspace images derive from runtime-core's generic
+  // X1_RUNTIME entrypoint and remain pinned to preserve their toolchains.
+  const incompatiblePlatformPin =
+    options.pinnedImageIsPlatformPreset === true &&
+    options.pinnedImageName === "runtime-codex" &&
+    options.effectiveRuntime === "claude_code";
+  if (pinned && !incompatiblePlatformPin) return pinned;
   return runtime || deploymentFallback;
 }
 
@@ -187,9 +208,11 @@ export interface JobWatcherConfig {
    * docs/security/agent-env.md for the threat model.
    */
   agentEnvBindings?:
-    import("@x1agent/domain-agent-env").BindingRepository | null;
+    | import("@x1agent/domain-agent-env").BindingRepository
+    | null;
   workspaceSecrets?:
-    import("@x1agent/domain-workspace-secrets").SecretService | null;
+    | import("@x1agent/domain-workspace-secrets").SecretService
+    | null;
   /**
    * Zone-3 OAuth runtime: resolves per-user access tokens for any
    * remote_oauth MCP attachments at session-create. Halts session
@@ -197,10 +220,12 @@ export interface JobWatcherConfig {
    * (UI shows "Connect <Provider> to continue").
    */
   mcpAttachments?:
-    import("@x1agent/domain-mcp-catalog").AttachmentRepository | null;
+    | import("@x1agent/domain-mcp-catalog").AttachmentRepository
+    | null;
   mcpCatalog?: import("@x1agent/domain-mcp-catalog").CatalogRepository | null;
   userTokenService?:
-    import("@x1agent/domain-mcp-catalog").UserTokenService | null;
+    | import("@x1agent/domain-mcp-catalog").UserTokenService
+    | null;
   /**
    * Image ref for the OAuth proxy sibling container. One per attached
    * remote_oauth MCP. Helm chart sets this; pod-spec emits the
@@ -328,6 +353,24 @@ async function launchSession(
     return;
   }
   const runtimeType = session.runtimeOverride ?? agent.runtimeType;
+  let discoverRuntimeModels = true;
+  try {
+    const freshness = await cfg.sql<{ fresh: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM runtime_models
+        WHERE runtime_type = ${runtimeType}
+          AND is_default = TRUE
+          AND discovered_at > NOW() - INTERVAL '24 hours'
+      ) AS fresh
+    `;
+    discoverRuntimeModels = !freshness[0]?.fresh;
+  } catch (error) {
+    // Older installations may launch a session before migration 068 has
+    // applied. Discovery is safe and lets the catalog self-heal later.
+    console.warn(
+      `[jobs] model catalog freshness check failed for ${runtimeType}: ${(error as Error).message}`,
+    );
+  }
 
   // Resolve workspace slug for the sidecar.
   const ws = await cfg.sql<{ slug: string; name: string }[]>`
@@ -341,7 +384,12 @@ async function launchSession(
   const runtimeImageName =
     runtimeType === "codex" ? "runtime-codex" : "runtime-core";
   const imageRows = await cfg.sql<
-    { pinned_ref: string | null; runtime_ref: string | null }[]
+    {
+      pinned_ref: string | null;
+      pinned_name: string | null;
+      pinned_is_platform: boolean;
+      runtime_ref: string | null;
+    }[]
   >`
     SELECT
       (
@@ -350,6 +398,18 @@ async function launchSession(
         JOIN agent_images i ON i.id = a.image_id
         WHERE a.id = ${agent.id}
       ) AS pinned_ref,
+      (
+        SELECT i.name
+        FROM agents a
+        JOIN agent_images i ON i.id = a.image_id
+        WHERE a.id = ${agent.id}
+      ) AS pinned_name,
+      EXISTS (
+        SELECT 1
+        FROM agents a
+        JOIN agent_images i ON i.id = a.image_id
+        WHERE a.id = ${agent.id} AND i.workspace_id IS NULL
+      ) AS pinned_is_platform,
       (
         SELECT i.built_ref
         FROM agent_images i
@@ -366,6 +426,11 @@ async function launchSession(
     imageRows[0]?.pinned_ref,
     imageRows[0]?.runtime_ref,
     cfg.agentImage,
+    {
+      pinnedImageName: imageRows[0]?.pinned_name,
+      pinnedImageIsPlatformPreset: imageRows[0]?.pinned_is_platform === true,
+      effectiveRuntime: runtimeType,
+    },
   );
   if (ws.length === 0) {
     await cfg.sessions.updateStatus(sessionId, {
@@ -512,6 +577,7 @@ async function launchSession(
     agentSlug: agent.slug,
     agentKind: agent.kind,
     runtimeType,
+    discoverRuntimeModels,
     workspaceSlug: ws[0]!.slug,
     workspaceName: ws[0]!.name,
     // The user whose stored OAuth tokens this session acts as.
@@ -568,14 +634,19 @@ async function launchSession(
     anthropicApiKey: cfg.anthropicApiKey,
     anthropicProvider: cfg.anthropicProvider,
     // X1A-40 precedence — see selectSessionModel below.
-    anthropicModel: selectSessionModel(session, agent, cfg.anthropicModel),
+    anthropicModel: selectSessionModel(
+      session,
+      agent,
+      cfg.anthropicModel,
+      runtimeType,
+    ),
     // Codex runtime — pod-spec emits these only when runtimeType is codex.
     // The Anthropic plumbing above stays the active path for every
     // Claude-runtime agent.
     openaiApiKey: cfg.openaiApiKey,
     openaiModel:
       runtimeType === "codex"
-        ? selectSessionModel(session, agent, cfg.openaiModel)
+        ? selectSessionModel(session, agent, cfg.openaiModel, runtimeType)
         : cfg.openaiModel,
     vertexRegion: cfg.vertexRegion,
     vertexProjectId: cfg.vertexProjectId,

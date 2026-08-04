@@ -180,6 +180,7 @@ import {
   createAdminAnthropicModelsRoutes,
   listEnabledOverrides,
 } from "../capabilities/admin-routes.js";
+import { listEnabledRuntimeModels } from "../capabilities/routes.js";
 import { createAdminWorkspacesRoutes } from "../admin/workspaces-routes.js";
 import { createPlatformSecretsRoutes } from "../admin/platform-secrets/routes.js";
 import {
@@ -310,7 +311,10 @@ export interface Composition {
    * workspace tier and explicit `collaborate` grants. Exposed on the
    * Composition so api/index.ts can wire it into the WS bridge.
    */
-  agentCollaborateResolver: (actor: UserId, agentId: string) => Promise<boolean>;
+  agentCollaborateResolver: (
+    actor: UserId,
+    agentId: string,
+  ) => Promise<boolean>;
   /** Doc-commenting persistence — exposed so the comment-wake subscriber
    * can re-verify NATS-supplied routing fields against the DB before
    * publishing a wake. Without this, an authenticated bus client could
@@ -335,7 +339,9 @@ export interface Composition {
    */
   uploadRoutes: Hono;
   /** Periodic cleanup tick for the uploads subsystem. */
-  tickUploadsCleanup: () => Promise<import("@x1agent/domain-uploads").CleanupResult>;
+  tickUploadsCleanup: () => Promise<
+    import("@x1agent/domain-uploads").CleanupResult
+  >;
   /**
    * K8s Job terminator shared by the human-Pause path and the silent-
    * worker reaper (X1A-28). Undefined when the api isn't running in-
@@ -598,8 +604,7 @@ export function compose(env: CompositionEnv): Composition {
 
   const workspaceInvitationRoutes =
     createWorkspaceInvitationRoutes(invitationConfig);
-  const publicInvitationRoutes =
-    createPublicInvitationRoutes(invitationConfig);
+  const publicInvitationRoutes = createPublicInvitationRoutes(invitationConfig);
 
   const resolveWorkspace = async (slug: ReturnType<typeof WorkspaceSlug>) => {
     const w = await workspaces.findBySlug(slug);
@@ -680,7 +685,8 @@ export function compose(env: CompositionEnv): Composition {
     // admin-enabled set. Empty set rejects every model — users fall
     // back to the deployment-wide ANTHROPIC_MODEL default until an
     // admin curates at /admin/anthropic-models.
-    enabledModels: async () => listEnabledOverrides(env.sql),
+    enabledModels: async (runtime: "claude_code" | "codex" = "claude_code") =>
+      listEnabledRuntimeModels(env.sql, runtime),
   });
 
   // Per-agent grant routes — list/grant/revoke `view`, `invoke`,
@@ -732,7 +738,8 @@ export function compose(env: CompositionEnv): Composition {
     getActor,
     clock: systemClock,
     jobs: jobTerminator,
-    enabledModels: async () => listEnabledOverrides(env.sql),
+    enabledModels: async (runtime: "claude_code" | "codex" = "claude_code") =>
+      listEnabledRuntimeModels(env.sql, runtime),
   };
   const sessionRoutes = createSessionRoutes(sessionsConfig);
   const workspaceSessionRoutes = createWorkspaceSessionRoutes(sessionsConfig);
@@ -784,10 +791,7 @@ export function compose(env: CompositionEnv): Composition {
         email: user.email,
         name: user.name,
         memberships: freshMemberships,
-        isPlatformAdmin: isEmailPlatformAdmin(
-          user.email,
-          env.platformAdmins,
-        ),
+        isPlatformAdmin: isEmailPlatformAdmin(user.email, env.platformAdmins),
       };
       const token = tokenizer.sign(newSession);
       const maxAge = 60 * 60 * 24;
@@ -810,7 +814,11 @@ export function compose(env: CompositionEnv): Composition {
     // explicit here — WorkspaceAdminGuard's assertAdmin only checks the
     // membership-role, so platform admins (who may not be workspace
     // members) need a separate path.
-    requireWorkspaceAdminOrPlatformAdmin: async (workspaceId, userId, email) => {
+    requireWorkspaceAdminOrPlatformAdmin: async (
+      workspaceId,
+      userId,
+      email,
+    ) => {
       if (env.platformAdmins.includes(email as never)) return;
       await new WorkspaceAdminGuard(memberships).assertAdmin(
         userId as never,
@@ -1016,7 +1024,8 @@ export function compose(env: CompositionEnv): Composition {
     // agents.model. The /sessions/spawn route uses this to reject
     // per-spawn model overrides that aren't admin-enabled — otherwise
     // the orchestrator could side-channel around /admin/anthropic-models.
-    enabledModels: async () => listEnabledOverrides(env.sql),
+    enabledModels: async (runtime: "claude_code" | "codex" = "claude_code") =>
+      listEnabledRuntimeModels(env.sql, runtime),
     // X1A-96 — agent fetches its own upload bytes through the internal
     // route. Both the repository and the storage adapter are wired
     // so the route can look the row up + stream the bytes.
@@ -1215,28 +1224,49 @@ export function compose(env: CompositionEnv): Composition {
   const resolveAgentScope = async (
     c: import("hono").Context,
   ): Promise<
-    | { kind: "ok"; membership: { slug: string; workspaceId: string; role: string }; agent: NonNullable<Awaited<ReturnType<typeof agents.findById>>>; session: Session }
+    | {
+        kind: "ok";
+        membership: { slug: string; workspaceId: string; role: string };
+        agent: NonNullable<Awaited<ReturnType<typeof agents.findById>>>;
+        session: Session;
+      }
     | { kind: "error"; response: Response }
   > => {
     const session = c.get("session") as Session | undefined;
     if (!session?.email)
-      return { kind: "error", response: c.json({ error: "unauthenticated" }, 401) };
+      return {
+        kind: "error",
+        response: c.json({ error: "unauthenticated" }, 401),
+      };
     const slug = c.req.param("slug");
     const agentId = c.req.param("agentId");
     if (!slug)
-      return { kind: "error", response: c.json({ error: "missing workspace slug" }, 400) };
+      return {
+        kind: "error",
+        response: c.json({ error: "missing workspace slug" }, 400),
+      };
     if (!agentId)
-      return { kind: "error", response: c.json({ error: "missing agent id" }, 400) };
+      return {
+        kind: "error",
+        response: c.json({ error: "missing agent id" }, 400),
+      };
     const m = session.memberships.find((x) => x.slug === slug);
-    if (!m) return { kind: "error", response: c.json({ error: "forbidden" }, 403) };
+    if (!m)
+      return { kind: "error", response: c.json({ error: "forbidden" }, 403) };
     const agent = await agents.findById(agentId as never);
     if (!agent || (agent.workspaceId as unknown as string) !== m.workspaceId) {
-      return { kind: "error", response: c.json({ error: "agent not found" }, 404) };
+      return {
+        kind: "error",
+        response: c.json({ error: "agent not found" }, 404),
+      };
     }
     return { kind: "ok", membership: m, agent, session };
   };
 
-  const requireAgentRead: import("hono").MiddlewareHandler = async (c, next) => {
+  const requireAgentRead: import("hono").MiddlewareHandler = async (
+    c,
+    next,
+  ) => {
     const scope = await resolveAgentScope(c);
     if (scope.kind === "error") return scope.response;
     c.set("workspaceId", scope.membership.workspaceId);
@@ -1244,7 +1274,10 @@ export function compose(env: CompositionEnv): Composition {
     await next();
   };
 
-  const requireAgentWrite: import("hono").MiddlewareHandler = async (c, next) => {
+  const requireAgentWrite: import("hono").MiddlewareHandler = async (
+    c,
+    next,
+  ) => {
     // Role-gate against membership BEFORE the agent lookup so that a
     // non-admin caller can't distinguish "real agent in my workspace
     // but I lack the role" (would be 403) from "agent id doesn't
@@ -1335,7 +1368,11 @@ export function compose(env: CompositionEnv): Composition {
       | {
           email: string;
           userId: string | null;
-          memberships: readonly { slug: string; workspaceId: string; role: string }[];
+          memberships: readonly {
+            slug: string;
+            workspaceId: string;
+            role: string;
+          }[];
         }
       | undefined;
     if (!session?.email) return c.json({ error: "unauthenticated" }, 401);
@@ -1385,7 +1422,9 @@ export function compose(env: CompositionEnv): Composition {
         workspaceId,
         // Cast through unknown to satisfy SecretName brand without
         // re-validating: BindingService already validated the name.
-        secretName as unknown as Parameters<typeof workspaceSecretsRepo.getBlob>[1],
+        secretName as unknown as Parameters<
+          typeof workspaceSecretsRepo.getBlob
+        >[1],
       );
       return blob !== null;
     },
@@ -1407,7 +1446,9 @@ export function compose(env: CompositionEnv): Composition {
     async (workspaceId, secretName) => {
       const blob = await workspaceSecretsRepo.getBlob(
         workspaceId,
-        secretName as unknown as Parameters<typeof workspaceSecretsRepo.getBlob>[1],
+        secretName as unknown as Parameters<
+          typeof workspaceSecretsRepo.getBlob
+        >[1],
       );
       return blob !== null;
     },
@@ -1485,7 +1526,8 @@ export function compose(env: CompositionEnv): Composition {
 
   const installers: Partial<Record<SharedResourceKind, KindInstaller>> = {};
   const uninstallers: Partial<Record<SharedResourceKind, KindUninstaller>> = {};
-  const branchResetters: Partial<Record<SharedResourceKind, BranchResetter>> = {};
+  const branchResetters: Partial<Record<SharedResourceKind, BranchResetter>> =
+    {};
 
   if (postgresProvisioner) {
     installers.postgres = async (req): Promise<SharedResource> =>
@@ -1497,8 +1539,7 @@ export function compose(env: CompositionEnv): Composition {
         installedBy: req.installedBy,
       });
     uninstallers.postgres = async (resource) => {
-      const branches =
-        await postgresBranches.listActiveByResource(resource.id);
+      const branches = await postgresBranches.listActiveByResource(resource.id);
       if (postgresMinter) {
         for (const b of branches) {
           await postgresMinter

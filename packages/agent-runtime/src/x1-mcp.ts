@@ -456,7 +456,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "list_spawnable_agents",
       description:
-        "List the child agents this session is allowed to spawn. Returns [{id, slug, name}]. Empty list means the agent has no spawn grants — ask the user to grant one on the agent edit screen.",
+        "List the child agents this session is allowed to spawn plus the exact harness-discovered model ids for each runtime. Returns {spawnable: [{id, slug, name, runtime_type, configured_model}], models: {claude_code: string[], codex: string[]}}. Never invent or guess a model id: use an exact id from models, or omit model to inherit the harness default. Empty spawnable means the agent has no spawn grants — ask the user to grant one on the agent edit screen.",
       inputSchema: {
         type: "object" as const,
         properties: {},
@@ -499,7 +499,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "spawn_session",
       description:
-        'Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child\'s progress via read_child_output (coming soon) or simply continue with other work — the child runs in its own pod.\n\nOptionally pass `runtime_type` ("claude_code" or "codex") to override the child agent\'s runtime for this session. Omit it to use the child agent\'s configured runtime. You may also pass `model` to override the selected runtime\'s model.',
+        'Start a new session of a child agent. Pass the child_agent_id returned by list_spawnable_agents. Returns {session_id, status}. After spawning, you can watch the child\'s progress via read_child_output or continue with other work.\n\nOptionally pass `runtime_type` ("claude_code" or "codex") to override the child agent\'s runtime. Omit it to use the configured runtime. For `model`, use only an exact id returned by list_spawnable_agents.models for that runtime; never guess. Omit model to inherit the child/harness default.',
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -510,7 +510,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           model: {
             type: "string",
             description:
-              'Optional model override for the selected runtime. Omit to inherit the child agent\'s configured model.',
+              "Optional model override for the selected runtime. Omit to inherit the child agent's configured model.",
           },
           runtime_type: {
             type: "string",

@@ -34,6 +34,11 @@ import {
   type WakeEnvelopeFields,
 } from "../../agent-runtime/src/wake-classifier.js";
 import { createEventCorrelator } from "../../agent-runtime/src/event-correlator.js";
+import {
+  createProviderFailureGuard,
+  isTerminalProviderError,
+  type ProviderFailureDecision,
+} from "../../agent-runtime/src/provider-failures.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -58,6 +63,11 @@ const idleTimeoutMs = Number.parseInt(
 const platformName = process.env.PLATFORM_NAME || "x1agent";
 const workspaceName = process.env.WORKSPACE_NAME || "";
 const workspaceSystemPrompt = process.env.WORKSPACE_SYSTEM_PROMPT || "";
+const discoverRuntimeModels = process.env.DISCOVER_RUNTIME_MODELS === "true";
+const maxConsecutiveProviderFailures = Number.parseInt(
+  process.env.MAX_CONSECUTIVE_PROVIDER_FAILURES || "3",
+  10,
+);
 
 if (!sessionId) {
   console.error("[agent] SESSION_ID is required");
@@ -113,6 +123,9 @@ const listeners = new Set<(event: unknown) => void>();
  * unit-testable without a running agent process.
  */
 const correlator = createEventCorrelator();
+const providerFailures = createProviderFailureGuard(
+  maxConsecutiveProviderFailures,
+);
 
 function emitToStream(event: { type: string; payload: unknown }) {
   correlator.maybeStamp(event);
@@ -476,6 +489,28 @@ const conversation: Query = query({
   },
 });
 
+let discoveredClaudeModels: Array<{
+  id: string;
+  label: string;
+  resolved_model: string | null;
+}> = [];
+if (discoverRuntimeModels) {
+  try {
+    const models = await conversation.supportedModels();
+    discoveredClaudeModels = models.map((model) => ({
+      id: model.value,
+      label: model.displayName || model.value,
+      resolved_model: model.resolvedModel ?? null,
+    }));
+  } catch (error) {
+    // Catalog discovery is advisory; a turn using the harness default can
+    // still succeed. The 24h stale marker makes a later session retry it.
+    console.warn(
+      `[agent] model catalog discovery failed: ${(error as Error).message}`,
+    );
+  }
+}
+
 // ── Inject endpoint on :8788 ───────────────────────────
 
 /**
@@ -696,78 +731,175 @@ async function shutdown(
   process.exit(isSuccess ? 0 : 1);
 }
 
+async function terminateForProviderFailure(
+  decision: ProviderFailureDecision,
+): Promise<void> {
+  if (shuttingDown) return;
+  const prefix =
+    decision.reason === "terminal_provider_error"
+      ? "Provider authentication or configuration failed"
+      : `Provider failed ${decision.consecutiveFailures} consecutive turns`;
+  const error = `${prefix}: ${decision.message}`;
+  emitToStream({
+    type: "agent.error",
+    payload: { message: error, recoverable: false },
+  });
+  await shutdown(false, undefined, error);
+}
+
 // ── Main loop ───────────────────────────────────────────
 
 resetIdleTimer();
 
-for await (const message of conversation) {
-  resetIdleTimer();
+try {
+  for await (const message of conversation) {
+    resetIdleTimer();
 
-  // Turns hold the idle timer warm during long tool executions. A
-  // result message flips busy back off.
-  if (message.type === "assistant") {
-    idleTimer.setBusy(true);
-  }
+    if (
+      discoverRuntimeModels &&
+      discoveredClaudeModels.length > 0 &&
+      message.type === "system" &&
+      (message as { subtype?: string }).subtype === "init"
+    ) {
+      const selectedModel = (message as { model?: unknown }).model;
+      const selected =
+        typeof selectedModel === "string" && selectedModel.trim()
+          ? selectedModel.trim()
+          : null;
+      const catalog =
+        selected &&
+        !discoveredClaudeModels.some(
+          (model) => model.id === selected || model.resolved_model === selected,
+        )
+          ? [
+              ...discoveredClaudeModels,
+              { id: selected, label: selected, resolved_model: selected },
+            ]
+          : discoveredClaudeModels;
+      emitToStream({
+        type: "runtime.models",
+        payload: {
+          runtime_type: "claude_code",
+          default: selected,
+          models: catalog,
+        },
+      });
+    }
 
-  const normalized = normalizeMessage(message);
-  if (normalized) {
-    const events = Array.isArray(normalized) ? normalized : [normalized];
-    for (const event of events) {
-      emitToStream(event);
-
-      // AskUserQuestion → surface as input_request so the UI can render
-      // the question and collect an answer.
-      if (
-        event.type === "agent.tool_call" &&
-        (event.payload as { tool_name?: string } | null)?.tool_name ===
-          "AskUserQuestion"
-      ) {
-        const payload = event.payload as {
-          input?: {
-            question?: string;
-            questions?: Array<{
-              header?: string;
-              options?: Array<string | { label?: string; value?: string }>;
-            }>;
-            options?: Array<string | { label?: string; value?: string }>;
-          };
-          tool_use_id?: string;
-        };
-        const firstQ = payload.input?.questions?.[0];
-        const opts = firstQ?.options ?? payload.input?.options;
-        emitToStream({
-          type: "agent.input_request",
-          payload: {
-            question:
-              firstQ?.header ||
-              payload.input?.question ||
-              "The agent has a question for you",
-            options: opts?.map((o) =>
-              typeof o === "string" ? o : (o.label ?? o.value ?? String(o)),
-            ),
-            request_id: payload.tool_use_id,
-          },
-        });
+    // Claude Code reports provider retries before the final result. Auth and
+    // account failures cannot heal inside this pod, so do not burn through
+    // the CLI's retry loop before ending the session.
+    if (
+      message.type === "system" &&
+      (message as { subtype?: string }).subtype === "api_retry"
+    ) {
+      const retry = message as {
+        error_status?: number | null;
+        error?: string;
+      };
+      const retryError = {
+        status: retry.error_status,
+        error: retry.error,
+      };
+      // Internal retries belong to one provider turn. Only an explicit
+      // account/auth/configuration error bypasses the retry loop; transient
+      // attempts are counted once when the final result fails below.
+      if (isTerminalProviderError(retryError)) {
+        const decision = providerFailures.recordFailure(retryError);
+        await terminateForProviderFailure(decision);
       }
     }
-  }
 
-  if (message.type === "result") {
-    idleTimer.setBusy(false);
-
-    if (sessionMode === "oneshot") {
-      const subtype = (message as { subtype?: string }).subtype;
-      const isSuccess = subtype === "success";
-      await shutdown(
-        isSuccess,
-        isSuccess ? (message as { result?: unknown }).result : undefined,
-        !isSuccess ? String(message) : undefined,
-      );
-      break;
+    // Turns hold the idle timer warm during long tool executions. A
+    // result message flips busy back off.
+    if (message.type === "assistant") {
+      idleTimer.setBusy(true);
     }
 
-    // Interactive: the SDK pulls the next message from inputChannel,
-    // which fills when the sidecar POSTs /inject.
-    console.log("[agent] turn complete — waiting for next user message");
+    const normalized = normalizeMessage(message);
+    if (normalized) {
+      const events = Array.isArray(normalized) ? normalized : [normalized];
+      for (const event of events) {
+        emitToStream(event);
+
+        // AskUserQuestion → surface as input_request so the UI can render
+        // the question and collect an answer.
+        if (
+          event.type === "agent.tool_call" &&
+          (event.payload as { tool_name?: string } | null)?.tool_name ===
+            "AskUserQuestion"
+        ) {
+          const payload = event.payload as {
+            input?: {
+              question?: string;
+              questions?: Array<{
+                header?: string;
+                options?: Array<string | { label?: string; value?: string }>;
+              }>;
+              options?: Array<string | { label?: string; value?: string }>;
+            };
+            tool_use_id?: string;
+          };
+          const firstQ = payload.input?.questions?.[0];
+          const opts = firstQ?.options ?? payload.input?.options;
+          emitToStream({
+            type: "agent.input_request",
+            payload: {
+              question:
+                firstQ?.header ||
+                payload.input?.question ||
+                "The agent has a question for you",
+              options: opts?.map((o) =>
+                typeof o === "string" ? o : (o.label ?? o.value ?? String(o)),
+              ),
+              request_id: payload.tool_use_id,
+            },
+          });
+        }
+      }
+    }
+
+    if (message.type === "result") {
+      idleTimer.setBusy(false);
+      const result = message as {
+        subtype?: string;
+        errors?: string[];
+        result?: unknown;
+      };
+      const isSuccess = result.subtype === "success";
+      if (isSuccess) {
+        providerFailures.recordSuccess();
+      } else {
+        const detail =
+          result.errors?.filter(Boolean).join("; ") ||
+          result.subtype ||
+          "Claude provider turn failed";
+        const decision = providerFailures.recordFailure(detail);
+        emitToStream({
+          type: "agent.error",
+          payload: {
+            message: decision.message,
+            recoverable: !decision.terminate,
+          },
+        });
+        if (decision.terminate) await terminateForProviderFailure(decision);
+      }
+
+      if (sessionMode === "oneshot") {
+        await shutdown(
+          isSuccess,
+          isSuccess ? result.result : undefined,
+          !isSuccess ? result.errors?.join("; ") || result.subtype : undefined,
+        );
+        break;
+      }
+
+      // Interactive: the SDK pulls the next message from inputChannel,
+      // which fills when the sidecar POSTs /inject.
+      console.log("[agent] turn complete — waiting for next user message");
+    }
   }
+} catch (error) {
+  const decision = providerFailures.recordFailure(error);
+  await terminateForProviderFailure({ ...decision, terminate: true });
 }

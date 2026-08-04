@@ -15,6 +15,7 @@ import { systemClock } from "@x1agent/kernel";
 import { recordTokenUsageMetric } from "@x1agent/observability";
 import { natsConnectOpts } from "../composition/nats-provider-gateway.js";
 import { publishStateChangeWake } from "../orchestration/wake-publisher.js";
+import type postgres from "postgres";
 
 /**
  * Subscribe to `x1.session.*.events`, parse the envelope published by
@@ -40,6 +41,8 @@ export interface StartSubscriberOptions {
    * orchestrator parents, not worker parents.
    */
   agents: AgentRepository;
+  /** Runtime model catalogs are refreshed through harness-owned events. */
+  sql?: postgres.Sql<Record<string, unknown>>;
   /**
    * Per-turn token usage capture. Written on `agent.usage` events.
    * Optional so older deployments that haven't migrated 021 yet can
@@ -266,6 +269,25 @@ export async function startSessionEventSubscriber(
         continue;
       }
       const sessionId = SessionId(subjectSessionId);
+
+      if (parsed.type === "runtime.models") {
+        if (opts.sql) {
+          try {
+            await refreshRuntimeModelCatalog(
+              opts.sql,
+              opts.sessions,
+              sessionId,
+              parsed.payload,
+            );
+          } catch (error) {
+            console.warn(
+              `[nats] runtime model catalog refresh failed for ${sessionId}: ${(error as Error).message}`,
+            );
+          }
+        }
+        // Operational metadata, not part of the user's conversation.
+        continue;
+      }
 
       // X1A-103: transient events flow over `.events` for browser
       // fan-out but are deliberately NOT persisted. Skip BEFORE the
@@ -494,4 +516,125 @@ export async function startSessionEventSubscriber(
       await nc.drain();
     },
   };
+}
+
+async function refreshRuntimeModelCatalog(
+  sql: postgres.Sql<Record<string, unknown>>,
+  sessions: SessionRepository,
+  sessionId: SessionId,
+  payload: unknown,
+): Promise<void> {
+  if (!payload || typeof payload !== "object") return;
+  const value = payload as {
+    runtime_type?: unknown;
+    models?: unknown;
+    default?: unknown;
+  };
+  if (value.runtime_type !== "claude_code" && value.runtime_type !== "codex")
+    return;
+  if (!Array.isArray(value.models) || value.models.length === 0) return;
+
+  // Bind the report to the runtime the API launched. A compromised harness
+  // cannot overwrite the other runtime's catalog merely by changing payload.
+  const session = await sessions.findById(sessionId);
+  if (!session) return;
+  const runtimeRows = await sql<
+    { runtime_type: string; trusted_platform_image: boolean }[]
+  >`
+    SELECT
+      COALESCE(s.runtime_override, a.runtime_type) AS runtime_type,
+      (
+        a.image_id IS NULL OR EXISTS (
+          SELECT 1 FROM agent_images image
+          WHERE image.id = a.image_id
+            AND image.workspace_id IS NULL
+            AND image.name = CASE
+              WHEN COALESCE(s.runtime_override, a.runtime_type) = 'codex'
+                THEN 'runtime-codex'
+              ELSE 'runtime-core'
+            END
+        )
+      ) AS trusted_platform_image
+    FROM sessions s JOIN agents a ON a.id = s.agent_id
+    WHERE s.id = ${sessionId}
+  `;
+  if (
+    runtimeRows[0]?.runtime_type !== value.runtime_type ||
+    runtimeRows[0]?.trusted_platform_image !== true
+  )
+    return;
+
+  const models = value.models.slice(0, 500).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const row = entry as {
+      id?: unknown;
+      label?: unknown;
+      resolved_model?: unknown;
+    };
+    if (typeof row.id !== "string" || !row.id.trim()) return [];
+    const id = row.id.trim().slice(0, 255);
+    const label =
+      typeof row.label === "string" && row.label.trim()
+        ? row.label.trim().slice(0, 255)
+        : id;
+    const resolvedModel =
+      typeof row.resolved_model === "string" && row.resolved_model.trim()
+        ? row.resolved_model.trim().slice(0, 255)
+        : null;
+    return [{ id, label, resolvedModel }];
+  });
+  if (models.length === 0) return;
+  const defaultModel =
+    typeof value.default === "string" &&
+    models.some(
+      (model) =>
+        model.id === value.default || model.resolvedModel === value.default,
+    )
+      ? value.default
+      : null;
+
+  await sql.begin(async (tx) => {
+    // Only the first trusted bootstrap report after expiry may mutate the
+    // deployment-wide catalog. Discovery is emitted before the harness runs a
+    // model turn; later agent-authored attempts on the same localhost sidecar
+    // are ignored until the next TTL window. The advisory lock closes the race
+    // between two sessions that both launched while the cache was stale.
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${"runtime-models:" + value.runtime_type}))`;
+    const fresh = await tx<{ fresh: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM runtime_models
+        WHERE runtime_type = ${value.runtime_type}
+          AND is_default = TRUE
+          AND discovered_at > NOW() - INTERVAL '24 hours'
+      ) AS fresh
+    `;
+    if (fresh[0]?.fresh) return;
+
+    await tx`
+      UPDATE runtime_models
+      SET enabled = FALSE, is_default = FALSE, updated_at = NOW()
+      WHERE runtime_type = ${value.runtime_type}
+    `;
+    for (const model of models) {
+      await tx`
+        INSERT INTO runtime_models
+          (runtime_type, model_id, display_name, resolved_model_id,
+           enabled, is_default, source,
+           discovered_at, updated_at)
+        VALUES
+          (${value.runtime_type}, ${model.id}, ${model.label},
+           ${model.resolvedModel}, TRUE,
+           ${model.id === defaultModel || model.resolvedModel === defaultModel},
+           'harness', NOW(), NOW())
+        ON CONFLICT (runtime_type, model_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          resolved_model_id = EXCLUDED.resolved_model_id,
+          enabled = TRUE,
+          is_default = EXCLUDED.is_default,
+          source = 'harness',
+          discovered_at = NOW(),
+          updated_at = NOW()
+      `;
+    }
+  });
 }

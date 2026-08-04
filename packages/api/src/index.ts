@@ -725,6 +725,7 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
       events: sessionEvents,
       sessions: composedSessions,
       agents: composedAgents,
+      sql: composedSql,
       tokenUsage: composedTokenUsage,
       summarizer: buildSessionSummarizer(composedSql),
       summaryConfig: readSummaryConfigFromEnv(),
@@ -901,8 +902,7 @@ if (process.env.JOB_WATCHER !== "disabled") {
       apiUrl: process.env.CLUSTER_API_URL || "http://api:30001",
       apiInternalToken: process.env.API_INTERNAL_TOKEN || "",
       natsUrl: process.env.NATS_URL || "nats://nats:4222",
-      hostClaudeConfigDir:
-        process.env.HOST_CLAUDE_CONFIG_DIR || undefined,
+      hostClaudeConfigDir: process.env.HOST_CLAUDE_CONFIG_DIR || undefined,
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       // Vertex path: the api Deployment's env (set by the Helm chart
       // when anthropic.provider == vertex) drives every session pod

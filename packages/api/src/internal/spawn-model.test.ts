@@ -42,9 +42,11 @@ interface Fixture {
   parentSessionId: string;
 }
 
-async function setup(opts: {
-  enabledModels?: () => Promise<Set<string> | null>;
-} = {}): Promise<Fixture> {
+async function setup(
+  opts: {
+    enabledModels?: () => Promise<Set<string> | null>;
+  } = {},
+): Promise<Fixture> {
   const agents = new InMemoryAgentRepository();
   const sessions = new InMemorySessionRepository();
   const events = new InMemorySessionEventRepository();
@@ -150,50 +152,32 @@ describe("resolveSpawnModel", () => {
     "claude-3-5-haiku@20240620",
   ]);
 
-  it("resolves a short sonnet name to the newest GA id in the enabled set", () => {
-    expect(resolveSpawnModel("sonnet", enabled)).toBe(
-      "claude-sonnet-4-5@20250929",
-    );
+  it("does not guess a version from a model-family nickname", () => {
+    expect(resolveSpawnModel("sonnet", enabled)).toBeNull();
+    expect(resolveSpawnModel("OPUS", enabled)).toBeNull();
+    expect(resolveSpawnModel("haiku", enabled)).toBeNull();
   });
 
-  it("is case-insensitive on short names", () => {
-    expect(resolveSpawnModel("OPUS", enabled)).toBe(
+  it("passes a full id through when it's in the enabled set", () => {
+    expect(resolveSpawnModel("claude-opus-4-1@20250101", enabled)).toBe(
       "claude-opus-4-1@20250101",
     );
   });
 
-  it("resolves haiku", () => {
-    expect(resolveSpawnModel("haiku", enabled)).toBe(
-      "claude-3-5-haiku@20240620",
-    );
-  });
-
-  it("passes a full id through when it's in the enabled set", () => {
-    expect(
-      resolveSpawnModel("claude-opus-4-1@20250101", enabled),
-    ).toBe("claude-opus-4-1@20250101");
-  });
-
   it("returns null for a full id that isn't enabled", () => {
-    expect(
-      resolveSpawnModel("claude-opus-4-9@20991231", enabled),
-    ).toBeNull();
+    expect(resolveSpawnModel("claude-opus-4-9@20991231", enabled)).toBeNull();
   });
 
   it("returns null for a short name with no matching enabled id", () => {
-    expect(resolveSpawnModel("sonnet", new Set(["claude-3-5-haiku@x"]))).toBeNull();
+    expect(
+      resolveSpawnModel("sonnet", new Set(["claude-3-5-haiku@x"])),
+    ).toBeNull();
   });
 
-  it("prefers GA ids over @default aliases", () => {
-    const ga = new Set(["claude-sonnet-4-5@20250929", "claude-sonnet-4-5@default"]);
-    expect(resolveSpawnModel("sonnet", ga)).toBe(
-      "claude-sonnet-4-5@20250929",
-    );
-  });
-
-  it("falls back to @default when only an alias is enabled", () => {
-    const only = new Set(["claude-sonnet-4-6@default"]);
-    expect(resolveSpawnModel("sonnet", only)).toBe(
+  it("accepts a harness-returned alias only when it is exact", () => {
+    const aliases = new Set(["sonnet", "claude-sonnet-4-6@default"]);
+    expect(resolveSpawnModel("sonnet", aliases)).toBe("sonnet");
+    expect(resolveSpawnModel("claude-sonnet-4-6@default", aliases)).toBe(
       "claude-sonnet-4-6@default",
     );
   });
@@ -211,13 +195,13 @@ describe("resolveSpawnModel", () => {
 });
 
 describe("POST /sessions/spawn — model override (X1A-40)", () => {
-  it("writes the resolved full id onto the session for model: 'sonnet'", async () => {
+  it("writes an exact harness-catalog id onto the session", async () => {
     const f = await setup({
       enabledModels: async () =>
         new Set(["claude-sonnet-4-5@20250929", "claude-opus-4-1@20250101"]),
     });
 
-    const res = await spawn(f, { model: "sonnet" });
+    const res = await spawn(f, { model: "claude-sonnet-4-5@20250929" });
 
     expect(res.status).toBe(201);
     const sessionId = (res.body as { session: { id: string } }).session.id;
@@ -227,8 +211,7 @@ describe("POST /sessions/spawn — model override (X1A-40)", () => {
 
   it("returns 403 model_not_enabled for a model not in the allowlist", async () => {
     const f = await setup({
-      enabledModels: async () =>
-        new Set(["claude-sonnet-4-5@20250929"]),
+      enabledModels: async () => new Set(["claude-sonnet-4-5@20250929"]),
     });
 
     const res = await spawn(f, { model: "not-real" });
@@ -239,8 +222,7 @@ describe("POST /sessions/spawn — model override (X1A-40)", () => {
 
   it("leaves session.modelOverride null when the caller omits model", async () => {
     const f = await setup({
-      enabledModels: async () =>
-        new Set(["claude-sonnet-4-5@20250929"]),
+      enabledModels: async () => new Set(["claude-sonnet-4-5@20250929"]),
     });
 
     const res = await spawn(f, {});
@@ -253,8 +235,7 @@ describe("POST /sessions/spawn — model override (X1A-40)", () => {
 
   it("treats empty string the same as omission (no override, no 403)", async () => {
     const f = await setup({
-      enabledModels: async () =>
-        new Set(["claude-sonnet-4-5@20250929"]),
+      enabledModels: async () => new Set(["claude-sonnet-4-5@20250929"]),
     });
 
     const res = await spawn(f, { model: "" });

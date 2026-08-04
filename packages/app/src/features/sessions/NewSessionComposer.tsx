@@ -50,10 +50,14 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
     }
   }, [agentId, agents]);
 
-  const selectedRuntime = runtimeType ?? (activeAgent as { runtime_type?: RuntimeType } | undefined)?.runtime_type ?? "claude_code";
+  const selectedRuntime =
+    runtimeType ??
+    (activeAgent as { runtime_type?: RuntimeType } | undefined)?.runtime_type ??
+    "claude_code";
 
   useEffect(() => {
     let cancelled = false;
+    setModel("");
     void apiFetch<{ models: RuntimeModelDTO[] }>(
       `/api/capabilities/models?runtime_type=${selectedRuntime}`,
     )
@@ -86,64 +90,66 @@ export function NewSessionComposer({ workspaceSlug, placeholder }: Props) {
 
   const leftSlot = (
     <div className="flex items-center gap-1">
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        type="button"
-        disabled={agents.length === 0}
-        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-fg-muted hover:text-fg hover:bg-bg-muted/60 disabled:opacity-50 disabled:hover:bg-transparent transition"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        <span className="truncate max-w-[200px]">
-          {activeAgent?.name ??
-            (agents.length === 0 ? "No active agents" : "Pick agent")}
-        </span>
-        <ChevronDown size={14} className="opacity-60" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[220px]">
-        {agents.map((a) => (
-          <DropdownMenuItem
-            key={a.id}
-            onSelect={() => setAgentId(a.id)}
-            className="text-sm"
-          >
-            {a.name}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          type="button"
+          disabled={agents.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-fg-muted hover:text-fg hover:bg-bg-muted/60 disabled:opacity-50 disabled:hover:bg-transparent transition"
+        >
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="truncate max-w-[200px]">
+            {activeAgent?.name ??
+              (agents.length === 0 ? "No active agents" : "Pick agent")}
+          </span>
+          <ChevronDown size={14} className="opacity-60" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[220px]">
+          {agents.map((a) => (
+            <DropdownMenuItem
+              key={a.id}
+              onSelect={() => setAgentId(a.id)}
+              className="text-sm"
+            >
+              {a.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-fg-muted hover:text-fg hover:bg-bg-muted/60 transition"
+        >
+          <span className="truncate max-w-[120px]">
+            {selectedRuntime === "codex" ? "Codex" : "Claude"}
+          </span>
+          <ChevronDown size={14} className="opacity-60" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[180px]">
+          <DropdownMenuItem onSelect={() => setRuntimeType(null)}>
+            Agent default
           </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        type="button"
-        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-fg-muted hover:text-fg hover:bg-bg-muted/60 transition"
+          <DropdownMenuItem onSelect={() => setRuntimeType("claude_code")}>
+            Claude Code
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setRuntimeType("codex")}>
+            Codex
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <select
+        aria-label="Model override"
+        value={model}
+        onChange={(e) => setModel(e.target.value)}
+        className="w-32 rounded-md bg-transparent px-2 py-1 text-[13px] text-fg-muted outline-none placeholder:text-fg-faint focus:bg-bg-muted/60"
       >
-        <span className="truncate max-w-[120px]">
-          {selectedRuntime === "codex" ? "Codex" : "Claude"}
-        </span>
-        <ChevronDown size={14} className="opacity-60" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[180px]">
-        <DropdownMenuItem onSelect={() => setRuntimeType(null)}>
-          Agent default
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => setRuntimeType("claude_code")}>
-          Claude Code
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => setRuntimeType("codex")}>
-          Codex
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-    <input
-      aria-label="Model override"
-      value={model}
-      onChange={(e) => setModel(e.target.value)}
-      placeholder="Default model"
-      list="session-runtime-models"
-      className="w-32 rounded-md bg-transparent px-2 py-1 text-[13px] text-fg-muted outline-none placeholder:text-fg-faint focus:bg-bg-muted/60"
-    />
-    <datalist id="session-runtime-models">
-      {runtimeModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-    </datalist>
+        <option value="">Harness default</option>
+        {runtimeModels.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 

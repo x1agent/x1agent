@@ -1,7 +1,11 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { DomainError, systemClock } from "@x1agent/kernel";
 import type { GitHubAppClient, InstallationId } from "@x1agent/domain-github";
-import { AgentId, RuntimeType, type AgentRepository } from "@x1agent/domain-agents";
+import {
+  AgentId,
+  RuntimeType,
+  type AgentRepository,
+} from "@x1agent/domain-agents";
 import type {
   AgentCostWindow,
   JobTerminator,
@@ -34,10 +38,7 @@ import { StringCodec, JSONCodec } from "nats";
 import type { KubeConfig } from "@kubernetes/client-node";
 import { pullFromChild } from "../k8s/pull-from-child.js";
 import { randomUUID } from "node:crypto";
-import type {
-  UploadRepository,
-  UploadStorage,
-} from "@x1agent/domain-uploads";
+import type { UploadRepository, UploadStorage } from "@x1agent/domain-uploads";
 import { UploadId } from "@x1agent/domain-uploads";
 
 /**
@@ -83,7 +84,7 @@ export interface InternalRoutesConfig {
    *
    * X1A-40: same gate the agent-write path enforces on `agents.model`.
    */
-  enabledModels?: () => Promise<Set<string> | null>;
+  enabledModels?: (runtime?: RuntimeType) => Promise<Set<string> | null>;
   /**
    * X1A-96 → agent-side fetch. When set, exposes
    * `GET /api/internal/uploads/:id/raw` which streams the upload's
@@ -147,10 +148,10 @@ export interface InternalRoutesConfig {
    */
   userOAuthTokens?: {
     store: import("@x1agent/domain-auth").UserOAuthTokenStore;
-    encrypt: (plaintext: string) => import("@x1agent/domain-auth").EncryptedToken;
-    decrypt: (
-      blob: import("@x1agent/domain-auth").EncryptedToken,
-    ) => string;
+    encrypt: (
+      plaintext: string,
+    ) => import("@x1agent/domain-auth").EncryptedToken;
+    decrypt: (blob: import("@x1agent/domain-auth").EncryptedToken) => string;
     refreshers: Record<
       string,
       {
@@ -175,14 +176,9 @@ export interface InternalRoutesConfig {
  * Resolve a per-spawn `model` request against the admin-enabled
  * allowlist (X1A-40).
  *
- * Accepts two shapes:
- *   1. A short name — "sonnet" / "opus" / "haiku" (case-insensitive).
- *      We pick the first enabled model id whose base name (the part
- *      before any "@" version tag) matches, preferring GA over
- *      "@default" preview aliases.
- *   2. A full model id — "claude-sonnet-4-5@20250929" or whatever
- *      the upstream catalog returned. We accept it iff it appears
- *      verbatim in the enabled set.
+ * Accepts only an exact id returned by the selected harness catalog. Runtime
+ * aliases are fine when the harness itself returned that alias; the platform
+ * never guesses which version a short family name means.
  *
  * Returns null on any of: short name with no match, full id not in
  * the set, an enabled set that's the empty set (admin curated to
@@ -201,21 +197,6 @@ export function resolveSpawnModel(
     // need an allowlist mock. Production composition wires
     // listEnabledOverrides; this branch should not run there.
     return trimmed;
-  }
-  const lower = trimmed.toLowerCase();
-  const isShortName = /^(sonnet|opus|haiku)$/.test(lower);
-  if (isShortName) {
-    // Prefer a GA id (date-versioned) over an "@default" alias.
-    const candidates = Array.from(enabled).filter((id) => {
-      const base = id.split("@")[0]?.toLowerCase() ?? "";
-      return base.includes(lower);
-    });
-    if (candidates.length === 0) return null;
-    const ga = candidates.filter((id) => !id.endsWith("@default"));
-    const pool = ga.length > 0 ? ga : candidates;
-    // Newest first by string sort on the version tag (yyyymmdd).
-    pool.sort((a, b) => b.localeCompare(a));
-    return pool[0] ?? null;
   }
   return enabled.has(trimmed) ? trimmed : null;
 }
@@ -288,9 +269,7 @@ const GOOGLE_SCOPE_IMPLICATIONS: Record<string, readonly string[]> = {
     "https://www.googleapis.com/auth/gmail.modify",
     "https://mail.google.com/",
   ],
-  "https://www.googleapis.com/auth/gmail.modify": [
-    "https://mail.google.com/",
-  ],
+  "https://www.googleapis.com/auth/gmail.modify": ["https://mail.google.com/"],
 };
 
 /**
@@ -325,7 +304,9 @@ async function resolveShareDefaultFilename(
   shareId: string,
 ): Promise<string | null> {
   if (!cfg.sql) return null;
-  const rows = await cfg.sql<{ entry_point: string | null; path: string | null }[]>`
+  const rows = await cfg.sql<
+    { entry_point: string | null; path: string | null }[]
+  >`
     SELECT
       (payload->>'entry_point') AS entry_point,
       (payload->>'path')        AS path
@@ -367,10 +348,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       payload?: unknown;
       timestamp?: string;
     };
-    if (
-      typeof body.seq !== "number" ||
-      typeof body.type !== "string"
-    ) {
+    if (typeof body.seq !== "number" || typeof body.type !== "string") {
       return c.json({ error: "missing_fields" }, 400);
     }
     const row = await appendSessionEvent(
@@ -399,7 +377,10 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     };
     if (!body.parent_session_id || !body.child_agent_id) {
       return c.json(
-        { error: "missing_fields", need: ["parent_session_id", "child_agent_id"] },
+        {
+          error: "missing_fields",
+          need: ["parent_session_id", "child_agent_id"],
+        },
         400,
       );
     }
@@ -407,7 +388,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     const childAgent = await cfg.agents.findById(AgentId(body.child_agent_id));
     if (!childAgent) return c.json({ error: "child_agent_not_found" }, 404);
     const requestedRuntime =
-      body.runtime_type === undefined || body.runtime_type === null || body.runtime_type === ""
+      body.runtime_type === undefined ||
+      body.runtime_type === null ||
+      body.runtime_type === ""
         ? childAgent.runtimeType
         : RuntimeType(String(body.runtime_type));
 
@@ -419,7 +402,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     // admin's model gate.
     let modelOverride: string | null = null;
     const runtimeOverride =
-      body.runtime_type === undefined || body.runtime_type === null || body.runtime_type === ""
+      body.runtime_type === undefined ||
+      body.runtime_type === null ||
+      body.runtime_type === ""
         ? null
         : RuntimeType(String(body.runtime_type));
     if (
@@ -430,7 +415,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       body.model.trim() !== ""
     ) {
       const enabled = cfg.enabledModels
-        ? await cfg.enabledModels()
+        ? await cfg.enabledModels(requestedRuntime)
         : null;
       const resolved = resolveSpawnModel(body.model, enabled);
       if (!resolved) {
@@ -451,10 +436,21 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       typeof body.model === "string" &&
       body.model.trim() !== ""
     ) {
-      // Codex model discovery/pricing is runtime-owned; until its catalog
-      // adapter is wired, preserve the explicit model id and let the Codex
-      // harness validate it at launch.
-      modelOverride = body.model.trim();
+      const enabled = cfg.enabledModels
+        ? await cfg.enabledModels(requestedRuntime)
+        : null;
+      modelOverride = resolveSpawnModel(body.model, enabled);
+      if (!modelOverride) {
+        return c.json(
+          {
+            error: "model_not_enabled",
+            message:
+              "The requested model is not present in the Codex harness catalog. Call list_spawnable_agents and use an exact returned id, or omit model.",
+            requested: body.model,
+          },
+          403,
+        );
+      }
     }
 
     const permission = {
@@ -481,7 +477,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         const details = grant.details;
         const allowedRuntimes = details.allowed_runtime_types;
         if (Array.isArray(allowedRuntimes)) {
-          if (!request || !allowedRuntimes.includes(request.runtimeType)) return false;
+          if (!request || !allowedRuntimes.includes(request.runtimeType))
+            return false;
         } else if (request && request.runtimeType !== childAgent.runtimeType) {
           // Legacy grants remain safe: they permit the child's configured
           // runtime, but not a newly requested runtime.
@@ -527,16 +524,12 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     } catch (err) {
       if (err instanceof DomainError) {
         const status =
-          err.code === "session_not_found" ||
-          err.code === "agent_not_found"
+          err.code === "session_not_found" || err.code === "agent_not_found"
             ? 404
             : err.code === "permission_required"
               ? 403
               : 400;
-        return c.json(
-          { error: err.code, message: err.message },
-          status as 400,
-        );
+        return c.json({ error: err.code, message: err.message }, status as 400);
       }
       // Unknown error — bubble to app.onError → Sentry.
       throw err;
@@ -608,9 +601,24 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     );
     const spawnable = children
       .filter((a): a is NonNullable<typeof a> => a !== null)
-      .map((a) => ({ id: a.id, slug: a.slug, name: a.name }));
+      .map((a) => ({
+        id: a.id,
+        slug: a.slug,
+        name: a.name,
+        runtime_type: a.runtimeType,
+        configured_model: a.model,
+      }));
 
-    return c.json({ spawnable });
+    const models = {
+      claude_code: cfg.enabledModels
+        ? Array.from((await cfg.enabledModels("claude_code")) ?? []).sort()
+        : [],
+      codex: cfg.enabledModels
+        ? Array.from((await cfg.enabledModels("codex")) ?? []).sort()
+        : [],
+    };
+
+    return c.json({ spawnable, models });
   });
 
   // Receive share files from the sidecar. Local-dev-only — in
@@ -668,10 +676,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
           !callerAgent ||
           ownerAgent.workspaceId !== callerAgent.workspaceId
         ) {
-          return c.json(
-            { error: "share_id_owned_by_other_workspace" },
-            403,
-          );
+          return c.json({ error: "share_id_owned_by_other_workspace" }, 403);
         }
       }
     }
@@ -734,10 +739,12 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       if (cfg.sql) {
         // Owner workspace is derived through agents — `sessions` itself
         // has no workspace_id column; workspace is pinned via the agent.
-        const rows = await cfg.sql<{
-          owner_workspace_id: string;
-          caller_workspace_id: string;
-        }[]>`
+        const rows = await cfg.sql<
+          {
+            owner_workspace_id: string;
+            caller_workspace_id: string;
+          }[]
+        >`
           WITH owner AS (
             SELECT s.id AS session_id, a.workspace_id
             FROM session_events se
@@ -849,10 +856,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
       if (err instanceof DomainError) {
         const status = err.code === "session_not_found" ? 404 : 400;
-        return c.json(
-          { error: err.code, message: err.message },
-          status as 400,
-        );
+        return c.json({ error: err.code, message: err.message }, status as 400);
       }
       throw err;
     }
@@ -972,7 +976,10 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
   // orchestrator-pulls direction sidesteps that entirely.
   app.post("/sessions/:childId/pull-for-parent", async (c) => {
     if (!cfg.kubeConfig || !cfg.namespace) {
-      return c.json({ error: "pull_unavailable", message: "k8s client not wired" }, 503);
+      return c.json(
+        { error: "pull_unavailable", message: "k8s client not wired" },
+        503,
+      );
     }
     const childId = c.req.param("childId")! as SessionId;
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -980,7 +987,10 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       paths?: string[];
     };
     if (!body.parent_session_id || typeof body.parent_session_id !== "string") {
-      return c.json({ error: "missing_fields", need: ["parent_session_id"] }, 400);
+      return c.json(
+        { error: "missing_fields", need: ["parent_session_id"] },
+        400,
+      );
     }
 
     const child = await cfg.sessions.findById(childId);
@@ -988,7 +998,9 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (child.parentSessionId !== body.parent_session_id) {
       return c.json({ error: "not_your_child" }, 403);
     }
-    const parent = await cfg.sessions.findById(body.parent_session_id as SessionId);
+    const parent = await cfg.sessions.findById(
+      body.parent_session_id as SessionId,
+    );
     if (!parent || parent.status === "complete" || parent.status === "failed") {
       return c.json({ error: "parent_not_live" }, 410);
     }
@@ -1009,17 +1021,17 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     } catch (err) {
       const code = (err as { code?: string }).code ?? "pull_failed";
       const status =
-        code === "child_workspace_unavailable" ? 410
-          : code === "workspace_too_large" ? 413
-          : code === "parent_pod_missing" ? 404
-          : 502;
+        code === "child_workspace_unavailable"
+          ? 410
+          : code === "workspace_too_large"
+            ? 413
+            : code === "parent_pod_missing"
+              ? 404
+              : 502;
       console.warn(
         `[pull-for-parent] failed code=${code} parent=${body.parent_session_id.slice(0, 8)} child=${childId.slice(0, 8)} elapsed=${Date.now() - startedAt}ms: ${(err as Error).message}`,
       );
-      return c.json(
-        { error: code, message: (err as Error).message },
-        status,
-      );
+      return c.json({ error: code, message: (err as Error).message }, status);
     }
   });
 
@@ -1056,12 +1068,15 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     if (!parentAgent || parentAgent.kind !== "orchestrator") {
       // Workers don't get platform wakes. Accept but no-op — the
       // child's call succeeded, just nothing to route.
-      return c.json({ ok: true, delivered: false, reason: "parent_not_orchestrator" });
+      return c.json({
+        ok: true,
+        delivered: false,
+        reason: "parent_not_orchestrator",
+      });
     }
     const childAgent = await cfg.agents.findById(child.agentId as never);
-    const { publishMessageWake } = await import(
-      "../orchestration/wake-publisher.js"
-    );
+    const { publishMessageWake } =
+      await import("../orchestration/wake-publisher.js");
     try {
       await publishMessageWake(cfg.natsConnection, parent.id, {
         childSessionId: child.id,
@@ -1240,9 +1255,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
     const earlySlug = slugMatch?.[2];
     if (cfg.previewEnvironments && earlySlug) {
       try {
-        const { upsertPreviewEnvironment } = await import(
-          "@x1agent/domain-preview-environments"
-        );
+        const { upsertPreviewEnvironment } =
+          await import("@x1agent/domain-preview-environments");
         await upsertPreviewEnvironment(
           { repository: cfg.previewEnvironments },
           {
@@ -1339,7 +1353,13 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
         { timeout: 20 * 60 * 1000 },
       );
       const result = jc.decode(reply.data) as
-        | { ok: true; url: string; slug: string; image: string; job_name: string }
+        | {
+            ok: true;
+            url: string;
+            slug: string;
+            image: string;
+            job_name: string;
+          }
         | { ok: false; code: string; message: string };
 
       // Side-effect: upsert the durable preview environment row so the
@@ -1349,9 +1369,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       // persisted" shape and get a UI list once they upgrade.
       if (cfg.previewEnvironments) {
         try {
-          const { upsertPreviewEnvironment } = await import(
-            "@x1agent/domain-preview-environments"
-          );
+          const { upsertPreviewEnvironment } =
+            await import("@x1agent/domain-preview-environments");
           if (result.ok) {
             await upsertPreviewEnvironment(
               { repository: cfg.previewEnvironments },
@@ -1374,9 +1393,11 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
             // fall back to the earlySlug we grabbed before the NATS
             // request so the in-progress row doesn't sit at
             // status=provisioning forever after an invalid_preview_spec.
-            const failed = result as
-              & { ok: false; code: string; message: string }
-              & { slug?: string };
+            const failed = result as {
+              ok: false;
+              code: string;
+              message: string;
+            } & { slug?: string };
             const slug = failed.slug ?? earlySlug;
             if (slug) {
               await upsertPreviewEnvironment(
@@ -1406,8 +1427,7 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       }
 
       if (!result.ok) {
-        const status =
-          result.code === "invalid_preview_spec" ? 400 : 502;
+        const status = result.code === "invalid_preview_spec" ? 400 : 502;
         return c.json(result, status);
       }
       return c.json(result);
@@ -1418,9 +1438,8 @@ export function createInternalRoutes(cfg: InternalRoutesConfig): Hono {
       // failed so the operator sees what happened and can re-deploy.
       if (cfg.previewEnvironments && earlySlug) {
         try {
-          const { upsertPreviewEnvironment } = await import(
-            "@x1agent/domain-preview-environments"
-          );
+          const { upsertPreviewEnvironment } =
+            await import("@x1agent/domain-preview-environments");
           await upsertPreviewEnvironment(
             { repository: cfg.previewEnvironments },
             {

@@ -111,7 +111,6 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   const status = useAuthStore((s) => s.status);
   const memberships = useAuthStore((s) => s.memberships);
   const fetchMe = useAuthStore((s) => s.fetchMe);
-  const isPlatformAdmin = useAuthStore((s) => s.isPlatformAdmin);
   const currentUser = useAuthStore((s) => s.user);
   const bySlug = useAgentsStore((s) => s.bySlug);
   const load = useAgentsStore((s) => s.load);
@@ -149,9 +148,8 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   // Per-agent idle timeout in seconds. Empty string = use platform
   // default (1 h workers / scheduled, 7 d orchestrators).
   const [idleTimeoutSeconds, setIdleTimeoutSeconds] = useState<string>("");
-  // Model catalog comes from /api/capabilities/anthropic/models so the
-  // frontend doesn't hardcode model ids. Empty list = upstream
-  // unreachable; UI falls back to a free-text input.
+  // Model ids come from the selected harness and are cached by the API.
+  // The UI never accepts a free-form id from a different runtime.
   const [modelCatalog, setModelCatalog] = useState<
     { id: string; label: string }[]
   >([]);
@@ -176,18 +174,30 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
   useEffect(() => {
     if (status === "idle") fetchMe();
     fetchCapabilities();
+  }, [status, fetchMe, fetchCapabilities]);
+
+  useEffect(() => {
+    let cancelled = false;
     void apiFetch<{
       models: { id: string; label: string }[];
       default: string | null;
-    }>("/api/capabilities/anthropic/models")
+    }>(`/api/capabilities/models?runtime_type=${runtimeType}`)
       .then((r) => {
-        setModelCatalog(r.models);
-        setDefaultModel(r.default);
+        if (!cancelled) {
+          setModelCatalog(r.models);
+          setDefaultModel(r.default);
+        }
       })
       .catch(() => {
-        // Upstream Vertex/Anthropic unreachable — fall back to free-text.
+        if (!cancelled) {
+          setModelCatalog([]);
+          setDefaultModel(null);
+        }
       });
-  }, [status, fetchMe, fetchCapabilities]);
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeType]);
 
   useEffect(() => {
     load(workspaceSlug);
@@ -269,18 +279,6 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
       setIdleTimeoutSeconds(its == null ? "" : String(its));
     }
   }, [existing]);
-
-  // Codex requires its dedicated runtime image. Once the platform preset
-  // catalog arrives, select that image automatically for a new Codex agent
-  // unless the operator has already chosen an image explicitly.
-  useEffect(() => {
-    if (isCreate && runtimeType === "codex" && imageId === "") {
-      const codexImage = images.find(
-        (image) => image.is_preset && image.name === "runtime-codex",
-      );
-      if (codexImage) setImageId(codexImage.id);
-    }
-  }, [imageId, images, isCreate, runtimeType]);
 
   if (status === "anonymous" && typeof window !== "undefined") {
     window.location.href = "/";
@@ -461,7 +459,20 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                       <Label htmlFor="agent-runtime">Runtime</Label>
                       <Select
                         value={runtimeType}
-                        onValueChange={(v) => setRuntimeType(v as RuntimeType)}
+                        onValueChange={(v) => {
+                          setRuntimeType(v as RuntimeType);
+                          setModel("");
+                          const selectedImage = images.find(
+                            (image) => image.id === imageId,
+                          );
+                          if (
+                            selectedImage?.is_preset &&
+                            (selectedImage.name === "runtime-core" ||
+                              selectedImage.name === "runtime-codex")
+                          ) {
+                            setImageId("");
+                          }
+                        }}
                       >
                         <SelectTrigger id="agent-runtime">
                           <SelectValue />
@@ -614,78 +625,48 @@ export function AgentEditRoot({ workspaceSlug, agentSlug }: Props) {
                     <Label htmlFor="agent-model">
                       {runtimeType === "codex" ? "Codex model" : "Claude model"}
                     </Label>
-                    {runtimeType === "codex" ? (
-                      <Input
-                        id="agent-model"
-                        placeholder="gpt-5-codex"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                      />
-                    ) : modelCatalog.length > 0 ? (
-                      <Select
-                        value={
-                          model === ""
-                            ? "__default__"
-                            : modelCatalog.some((m) => m.id === model)
-                              ? model
-                              : "__custom__"
-                        }
-                        onValueChange={(v) => {
-                          if (v === "__default__") setModel("");
-                          else if (v === "__custom__") setModel(model || " ");
-                          else setModel(v);
-                        }}
-                      >
-                        <SelectTrigger id="agent-model">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__default__">
-                            Deployment default
-                            {defaultModel ? ` (${defaultModel})` : ""}
-                          </SelectItem>
-                          {modelCatalog.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.label}
+                    <Select
+                      value={
+                        model === ""
+                          ? "__default__"
+                          : modelCatalog.some(
+                                (candidate) => candidate.id === model,
+                              )
+                            ? model
+                            : "__unavailable__"
+                      }
+                      onValueChange={(value) =>
+                        setModel(value === "__default__" ? "" : value)
+                      }
+                    >
+                      <SelectTrigger id="agent-model">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">
+                          Harness default
+                          {defaultModel ? ` (${defaultModel})` : ""}
+                        </SelectItem>
+                        {model !== "" &&
+                          !modelCatalog.some(
+                            (candidate) => candidate.id === model,
+                          ) && (
+                            <SelectItem value="__unavailable__" disabled>
+                              Unavailable: {model}
                             </SelectItem>
-                          ))}
-                          <SelectItem value="__custom__">Custom…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <div className="rounded-md border border-amber-900/50 bg-amber-950/30 p-3 text-xs text-amber-200 light:border-amber-300 light:bg-amber-50 light:text-amber-900">
-                        No Claude models enabled in this deployment.{" "}
-                        {isPlatformAdmin ? (
-                          <>
-                            Curate the list at{" "}
-                            <a
-                              href="/admin/anthropic-models"
-                              className="underline"
-                            >
-                              /admin/anthropic-models
-                            </a>
-                            .
-                          </>
-                        ) : (
-                          <>Ask a platform admin to enable one.</>
-                        )}
-                      </div>
-                    )}
-                    {runtimeType !== "codex" &&
-                      modelCatalog.length > 0 &&
-                      model !== "" &&
-                      !modelCatalog.some((m) => m.id === model) && (
-                        <Input
-                          placeholder="claude-sonnet-4-5@20250929"
-                          value={model.trim()}
-                          onChange={(e) => setModel(e.target.value)}
-                          className="mt-2"
-                        />
-                      )}
+                          )}
+                        {modelCatalog.map((candidate) => (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            {candidate.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <p className="text-xs text-fg-faint">
-                      {runtimeType === "codex"
-                        ? "Codex uses the OpenAI model name entered here. Leave it blank to use the deployment default."
-                        : "The list shows only models a platform admin has enabled at /admin/anthropic-models. The full Agent Platform (formerly Vertex AI) catalog is intentionally not exposed — it lists models that aren't actually servable in the deployment's region."}
+                      Models are reported by the{" "}
+                      {runtimeType === "codex" ? "Codex" : "Claude Code"}{" "}
+                      harness and cached for 24 hours. Leave this on Harness
+                      default unless you need an exact discovered model.
                     </p>
                   </div>
                 </CardContent>

@@ -24,6 +24,11 @@ describe("Codex app-server lifecycle", () => {
       onEvent: () => {},
     });
     const threadId = await server.start();
+    expect(server.model).toBe("fake");
+    expect(server.models).toEqual([
+      { id: "fake", label: "Fake Default", isDefault: true },
+      { id: "fake-fast", label: "Fake Fast", isDefault: false },
+    ]);
     let completed = false;
     const first = server.turn(threadId, "first").then(() => {
       completed = true;

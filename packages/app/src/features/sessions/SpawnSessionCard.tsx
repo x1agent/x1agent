@@ -46,6 +46,7 @@ export function SpawnSessionCard({
 
   useEffect(() => {
     let cancelled = false;
+    setModel("");
     void apiFetch<{ models: RuntimeModelDTO[] }>(
       `/api/capabilities/models?runtime_type=${selectedRuntime}`,
     )
@@ -96,7 +97,8 @@ export function SpawnSessionCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-[180px]">
           <DropdownMenuItem onSelect={() => setRuntimeType(null)}>
-            Agent default ({configuredRuntime === "codex" ? "Codex" : "Claude Code"})
+            Agent default (
+            {configuredRuntime === "codex" ? "Codex" : "Claude Code"})
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setRuntimeType("claude_code")}>
             Claude Code
@@ -106,19 +108,19 @@ export function SpawnSessionCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <input
+      <select
         aria-label="Model override"
         value={model}
         onChange={(e) => setModel(e.target.value)}
-        placeholder="Default model"
-        list="agent-session-runtime-models"
         className="w-32 rounded-md bg-transparent px-2 py-1 text-[13px] text-fg-muted outline-none placeholder:text-fg-faint focus:bg-bg-muted/60"
-      />
-      <datalist id="agent-session-runtime-models">
+      >
+        <option value="">Harness default</option>
         {runtimeModels.map((m) => (
-          <option key={m.id} value={m.id}>{m.label}</option>
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
         ))}
-      </datalist>
+      </select>
     </div>
   );
 

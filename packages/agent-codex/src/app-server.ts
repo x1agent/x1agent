@@ -27,7 +27,15 @@ export type AppServerOptions = {
   requestTimeoutMs?: number;
   /** Maximum time from turn/start acceptance to the terminal notification. */
   turnTimeoutMs?: number;
+  /** Refresh the account-scoped model catalog even when a model is pinned. */
+  discoverModels?: boolean;
 };
+
+export interface CodexModelInfo {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
 
 export type CodexTurnInput =
   | { type: "text"; text: string; text_elements: never[] }
@@ -60,6 +68,7 @@ export class CodexAppServer {
   private buffer = "";
   private closed = false;
   private selectedModel = "";
+  private discoveredModels: CodexModelInfo[] = [];
   private activeTurn:
     | {
         resolve: () => void;
@@ -70,6 +79,10 @@ export class CodexAppServer {
 
   get model(): string {
     return this.selectedModel || this.options.model || "account-default";
+  }
+
+  get models(): readonly CodexModelInfo[] {
+    return this.discoveredModels;
   }
 
   constructor(private readonly options: AppServerOptions) {
@@ -147,7 +160,8 @@ export class CodexAppServer {
       } else if (message.method) {
         if (message.method === "turn/completed") {
           const turn = message.params?.turn as
-            { error?: { message?: string }; status?: string } | undefined;
+            | { error?: { message?: string }; status?: string }
+            | undefined;
           if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
           if (turn?.status === "failed" || turn?.error) {
             this.activeTurn?.reject(
@@ -159,7 +173,8 @@ export class CodexAppServer {
           this.activeTurn = undefined;
         } else if (message.method === "turn/failed") {
           const turn = message.params?.turn as
-            { error?: { message?: string }; status?: string } | undefined;
+            | { error?: { message?: string }; status?: string }
+            | undefined;
           if (this.activeTurn) clearTimeout(this.activeTurn.timeout);
           this.activeTurn?.reject(
             new CodexTurnError(turn?.error?.message ?? "Codex turn failed"),
@@ -224,8 +239,14 @@ export class CodexAppServer {
       capabilities: null,
     });
     this.notify("initialized");
+    if (!this.options.model || this.options.discoverModels) {
+      await this.discoverModels();
+    }
     this.selectedModel =
-      this.options.model || (await this.discoverDefaultModel());
+      this.options.model ||
+      this.discoveredModels.find((model) => model.isDefault)?.id ||
+      this.discoveredModels[0]?.id ||
+      "gpt-5.6-sol";
     const result = await this.request<{ thread: { id: string } }>(
       "thread/start",
       {
@@ -241,23 +262,37 @@ export class CodexAppServer {
     return result.thread.id;
   }
 
-  private async discoverDefaultModel(): Promise<string> {
+  private async discoverModels(): Promise<void> {
     // The available model catalog is account-scoped. This is important for
     // ChatGPT login profiles, whose model ids differ from API-key defaults.
     try {
       const result = await this.request<{
-        data?: Array<{ id?: string; model?: string; isDefault?: boolean }>;
+        data?: Array<{
+          id?: string;
+          model?: string;
+          displayName?: string;
+          display_name?: string;
+          name?: string;
+          isDefault?: boolean;
+          is_default?: boolean;
+        }>;
       }>("model/list", {});
-      const models = result.data ?? [];
-      const selected = models.find((m) => m.isDefault) ?? models[0];
-      const model = selected?.id || selected?.model;
-      if (model) return model;
+      this.discoveredModels = (result.data ?? []).flatMap((model) => {
+        const id = model.id || model.model;
+        if (!id) return [];
+        return [
+          {
+            id,
+            label: model.displayName || model.display_name || model.name || id,
+            isDefault: model.isDefault === true || model.is_default === true,
+          },
+        ];
+      });
     } catch (error) {
       this.options.onStderr?.(
         `model/list unavailable; using fallback gpt-5.6-sol: ${(error as Error).message}`,
       );
     }
-    return "gpt-5.6-sol";
   }
 
   async turn(

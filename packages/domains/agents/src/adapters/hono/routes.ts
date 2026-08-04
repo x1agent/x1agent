@@ -49,7 +49,7 @@ export interface AgentRoutesConfig {
    * write path rejects model values that aren't in it — prevents
    * raw-API bypass of the dropdown's strict allowlist.
    */
-  enabledModels?: () => Promise<Set<string> | null>;
+  enabledModels?: (runtime?: RuntimeType) => Promise<Set<string> | null>;
 }
 
 function serialize(a: Agent) {
@@ -159,6 +159,19 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
     if (!body.slug || !body.name || !body.runtime_type) {
       return c.json({ error: "missing_fields" }, 400);
     }
+    const runtimeType = RuntimeType(body.runtime_type);
+    if (body.model && cfg.enabledModels) {
+      const enabled = await cfg.enabledModels(runtimeType);
+      if (enabled && !enabled.has(body.model)) {
+        return c.json(
+          {
+            error: "model_not_enabled",
+            message: `This model is not available in the ${runtimeType} harness catalog.`,
+          },
+          400,
+        );
+      }
+    }
     try {
       const a = await createAgent(
         {
@@ -171,7 +184,7 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
           workspaceId: wsId,
           slug: WorkspaceSlug(body.slug),
           name: body.name,
-          runtimeType: RuntimeType(body.runtime_type),
+          runtimeType,
           kind: body.kind ? AgentKind(body.kind) : undefined,
           systemPrompt: body.system_prompt,
           heartbeatMd: body.heartbeat_md,
@@ -221,18 +234,34 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
       string,
       unknown
     >;
+    const wsId = await resolveWs(c.req.param("slug")!);
+    if (!wsId) return c.json({ error: "workspace_not_found" }, 404);
+    const existing = await cfg.agents.findById(
+      AgentId(c.req.param("agentId")!),
+    );
+    if (!existing || existing.workspaceId !== wsId)
+      return c.json({ error: "agent_not_found" }, 404);
+    try {
+      await cfg.adminGuard.assertAdmin(actor.userId, wsId);
+    } catch (err) {
+      return c.json(errBody(err), errStatus(err) as 400);
+    }
 
     // Reject per-agent model overrides not in the admin-curated list.
     // null/empty is always allowed — that means "use deployment default".
     if (body.model !== undefined && body.model !== null && body.model !== "") {
       const modelStr = String(body.model);
-      const enabled = cfg.enabledModels ? await cfg.enabledModels() : null;
+      const effectiveRuntime = body.runtime_type
+        ? RuntimeType(String(body.runtime_type))
+        : existing.runtimeType;
+      const enabled = cfg.enabledModels
+        ? await cfg.enabledModels(effectiveRuntime)
+        : null;
       if (enabled && !enabled.has(modelStr)) {
         return c.json(
           {
             error: "model_not_enabled",
-            message:
-              "This Claude model is not enabled for the deployment. Ask a platform admin to enable it at /admin/anthropic-models.",
+            message: `This model is not available in the ${effectiveRuntime} harness catalog.`,
           },
           400,
         );
@@ -245,6 +274,11 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         ...(body.runtime_type !== undefined && {
           runtimeType: RuntimeType(String(body.runtime_type)),
         }),
+        // A model id belongs to one harness. If a raw API caller switches the
+        // runtime without sending a replacement, clear the old runtime's id.
+        ...(body.runtime_type !== undefined && body.model === undefined
+          ? { model: null }
+          : {}),
         ...(body.kind !== undefined && {
           kind: AgentKind(String(body.kind)),
         }),
@@ -293,7 +327,9 @@ export function createAgentRoutes(cfg: AgentRoutesConfig): Hono {
         body.visibility === "via_grants"
           ? {
               visibility: body.visibility as
-                "private" | "workspace" | "via_grants",
+                | "private"
+                | "workspace"
+                | "via_grants",
             }
           : {}),
       };

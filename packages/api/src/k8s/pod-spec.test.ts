@@ -228,6 +228,19 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
   });
 
   describe("Codex runtime propagation", () => {
+    it("asks the selected harness to refresh a stale model catalog", () => {
+      const spec = baseSpec("worker");
+      spec.discoverRuntimeModels = true;
+      const job = buildSessionJob(spec);
+      const agent = job.spec!.template.spec!.containers!.find(
+        (container) => container.name === "agent",
+      )!;
+      expect(agent.env).toContainEqual({
+        name: "DISCOVER_RUNTIME_MODELS",
+        value: "true",
+      });
+    });
+
     it("uses the explicit runtime even when the image name is Claude-oriented", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),

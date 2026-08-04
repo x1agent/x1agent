@@ -38,15 +38,11 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
   // by ANTHROPIC_PROVIDER; the frontend never hardcodes a list.
   app.get("/anthropic/models", async (c) => {
     const catalog = await listAnthropicModels();
-    const enabled = cfg.sql
-      ? await listEnabledOverrides(cfg.sql)
-      : null;
+    const enabled = cfg.sql ? await listEnabledOverrides(cfg.sql) : null;
     // Strict filter: dropdown shows only what an admin enabled. When
     // the override table is unavailable (no sql configured — tests),
     // pass the catalog through.
-    const models = enabled
-      ? catalog.filter((m) => enabled.has(m.id))
-      : catalog;
+    const models = enabled ? catalog.filter((m) => enabled.has(m.id)) : catalog;
     c.header("Cache-Control", "private, max-age=60");
     return c.json({
       provider: process.env.ANTHROPIC_PROVIDER ?? "api_key",
@@ -59,51 +55,75 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
   });
   app.get("/models", async (c) => {
     const runtime = RuntimeType(c.req.query("runtime_type") ?? "claude_code");
-    if (runtime === "claude_code") {
-      const catalog = await listAnthropicModels();
-      const enabled = cfg.sql ? await listEnabledOverrides(cfg.sql) : null;
-      const models = enabled ? catalog.filter((m) => enabled.has(m.id)) : catalog;
-      return c.json({
-        runtime_type: runtime,
-        default: pickDefaultModel(models),
-        models: models.map((m) => ({
-          runtime_type: runtime,
-          id: m.id,
-          label: m.label,
-          input_usd_per_million: null,
-          output_usd_per_million: null,
-          source: m.source,
-        })),
-      });
-    }
-    if (!cfg.sql) return c.json({ runtime_type: runtime, default: null, models: [] });
-    const rows = await cfg.sql<{
-      model_id: string;
-      display_name: string;
-      input_usd_per_million: string | number | null;
-      output_usd_per_million: string | number | null;
-      source: string | null;
-    }[]>`
+    if (!cfg.sql)
+      return c.json({ runtime_type: runtime, default: null, models: [] });
+    const rows = await cfg.sql<
+      {
+        model_id: string;
+        display_name: string;
+        input_usd_per_million: string | number | null;
+        output_usd_per_million: string | number | null;
+        source: string | null;
+        is_default: boolean;
+      }[]
+    >`
       SELECT model_id, display_name, input_usd_per_million,
-             output_usd_per_million, source
+             output_usd_per_million, source, is_default
       FROM runtime_models
       WHERE runtime_type = ${runtime} AND enabled = TRUE
-      ORDER BY display_name ASC
+        AND (
+          ${runtime} <> 'claude_code' OR EXISTS (
+            SELECT 1 FROM anthropic_model_overrides policy
+            WHERE policy.enabled = TRUE
+              AND (
+                policy.model_id = runtime_models.model_id OR
+                policy.model_id = runtime_models.resolved_model_id
+              )
+          )
+        )
+      ORDER BY is_default DESC, display_name ASC
     `;
     return c.json({
       runtime_type: runtime,
-      default: rows[0]?.model_id ?? null,
+      default: rows.find((model) => model.is_default)?.model_id ?? null,
       models: rows.map((m) => ({
         runtime_type: runtime,
         id: m.model_id,
         label: m.display_name,
-        input_usd_per_million: m.input_usd_per_million === null ? null : Number(m.input_usd_per_million),
-        output_usd_per_million: m.output_usd_per_million === null ? null : Number(m.output_usd_per_million),
+        input_usd_per_million:
+          m.input_usd_per_million === null
+            ? null
+            : Number(m.input_usd_per_million),
+        output_usd_per_million:
+          m.output_usd_per_million === null
+            ? null
+            : Number(m.output_usd_per_million),
         source: m.source,
       })),
     });
   });
   return app;
+}
+
+export async function listEnabledRuntimeModels(
+  sql: postgres.Sql<Record<string, unknown>>,
+  runtime: "claude_code" | "codex",
+): Promise<Set<string>> {
+  const rows = await sql<{ model_id: string }[]>`
+    SELECT catalog.model_id FROM runtime_models catalog
+    WHERE catalog.runtime_type = ${runtime} AND catalog.enabled = TRUE
+      AND (
+        ${runtime} <> 'claude_code' OR EXISTS (
+          SELECT 1 FROM anthropic_model_overrides policy
+          WHERE policy.enabled = TRUE
+            AND (
+              policy.model_id = catalog.model_id OR
+              policy.model_id = catalog.resolved_model_id
+            )
+        )
+      )
+  `;
+  return new Set(rows.map((row) => row.model_id));
 }
 
 function pickDefaultModel(

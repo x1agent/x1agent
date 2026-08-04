@@ -69,6 +69,8 @@ export interface SessionPodSpec {
   agentKind: AgentKind;
   /** Explicit harness selector from agents.runtime_type. */
   runtimeType: RuntimeType;
+  /** Ask the selected harness to refresh its cached model catalog. */
+  discoverRuntimeModels?: boolean;
   workspaceSlug: string;
   workspaceName: string;
   /**
@@ -265,6 +267,9 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     },
     ...(spec.runtimeType
       ? [{ name: "X1_RUNTIME", value: spec.runtimeType }]
+      : []),
+    ...(spec.discoverRuntimeModels
+      ? [{ name: "DISCOVER_RUNTIME_MODELS", value: "true" }]
       : []),
     ...(!isCodex && spec.hostClaudeConfigDir
       ? [

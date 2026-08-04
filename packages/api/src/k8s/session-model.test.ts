@@ -43,12 +43,30 @@ describe("selectSessionModel — precedence (X1A-40)", () => {
 
   it("returns undefined when the whole chain is null/undefined — SDK picks its built-in default", () => {
     expect(
+      selectSessionModel({ modelOverride: null }, { model: null }, undefined),
+    ).toBeUndefined();
+  });
+
+  it("does not carry a Claude agent model into a Codex override", () => {
+    expect(
       selectSessionModel(
         { modelOverride: null },
-        { model: null },
+        { model: "sonnet", runtimeType: "claude_code" },
         undefined,
+        "codex",
       ),
     ).toBeUndefined();
+  });
+
+  it("does not carry a Codex agent model into a Claude override", () => {
+    expect(
+      selectSessionModel(
+        { modelOverride: null },
+        { model: "gpt-5.6-sol", runtimeType: "codex" },
+        "sonnet",
+        "claude_code",
+      ),
+    ).toBe("sonnet");
   });
 });
 
@@ -83,9 +101,39 @@ describe("selectSessionImage — effective runtime image", () => {
     ).toBe("registry.example/dev360/getdiffr:v7");
   });
 
-  it("falls back to AGENT_IMAGE when the catalog row is missing or empty", () => {
+  it("replaces an incompatible platform Codex pin for a Claude override", () => {
     expect(
-      selectSessionImage("", " ", "x1agent-agent:latest"),
-    ).toBe("x1agent-agent:latest");
+      selectSessionImage(
+        "docker.io/x1agent/runtime-codex:v1",
+        "docker.io/x1agent/runtime-core:v1",
+        "x1agent-agent:latest",
+        {
+          pinnedImageName: "runtime-codex",
+          pinnedImageIsPlatformPreset: true,
+          effectiveRuntime: "claude_code",
+        },
+      ),
+    ).toBe("docker.io/x1agent/runtime-core:v1");
+  });
+
+  it("preserves a workspace toolchain image across runtime overrides", () => {
+    expect(
+      selectSessionImage(
+        "registry.example/dev360/getdiffr:v7",
+        "docker.io/x1agent/runtime-codex:v1",
+        "x1agent-agent:latest",
+        {
+          pinnedImageName: "getdiffr",
+          pinnedImageIsPlatformPreset: false,
+          effectiveRuntime: "codex",
+        },
+      ),
+    ).toBe("registry.example/dev360/getdiffr:v7");
+  });
+
+  it("falls back to AGENT_IMAGE when the catalog row is missing or empty", () => {
+    expect(selectSessionImage("", " ", "x1agent-agent:latest")).toBe(
+      "x1agent-agent:latest",
+    );
   });
 });

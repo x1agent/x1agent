@@ -77,9 +77,7 @@ export interface SessionRoutesConfig {
    * slug → workspace id, mirroring the agents + invitations routes. Used
    * only to reject cross-workspace agent ids in the URL.
    */
-  resolveWorkspace: (
-    slug: WorkspaceSlug,
-  ) => Promise<WorkspaceId | null>;
+  resolveWorkspace: (slug: WorkspaceSlug) => Promise<WorkspaceId | null>;
   requireAuth: MiddlewareHandler;
   getActor: (c: Context) => { userId: UserId; email: Email } | null;
   clock?: Clock;
@@ -91,8 +89,8 @@ export interface SessionRoutesConfig {
    * this from the job-watcher. X1A-70.
    */
   jobs?: import("../../application/cancel-session.js").JobTerminator;
-  /** Optional admin-curated Claude model allowlist for user launches. */
-  enabledModels?: () => Promise<Set<string> | null>;
+  /** Harness-discovered model allowlist for the effective runtime. */
+  enabledModels?: (runtime?: RuntimeType) => Promise<Set<string> | null>;
 }
 
 function serialize(s: Session) {
@@ -202,7 +200,11 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
     try {
       const limit = Number(c.req.query("limit") ?? 50);
       const rows = await listSessions(
-        { agents: cfg.agents, sessions: cfg.sessions, adminGuard: cfg.adminGuard },
+        {
+          agents: cfg.agents,
+          sessions: cfg.sessions,
+          adminGuard: cfg.adminGuard,
+        },
         actor.userId,
         agent.id,
         limit,
@@ -225,11 +227,14 @@ export function createSessionRoutes(cfg: SessionRoutesConfig): Hono {
       const runtimeOverride = parseRuntimeOverride(body);
       const effectiveRuntime = runtimeOverride ?? agent.runtimeType;
       const modelOverride = parseModelOverride(body);
-      if (modelOverride && effectiveRuntime !== "codex" && cfg.enabledModels) {
-        const enabled = await cfg.enabledModels();
+      if (modelOverride && cfg.enabledModels) {
+        const enabled = await cfg.enabledModels(effectiveRuntime);
         if (enabled && !enabled.has(modelOverride)) {
           return c.json(
-            { error: "model_not_enabled", message: "The requested Claude model is not enabled for this deployment." },
+            {
+              error: "model_not_enabled",
+              message: `The requested model is not available in the ${effectiveRuntime} harness catalog.`,
+            },
             403,
           );
         }
@@ -388,7 +393,9 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     // Enrich each row with the agent slug + name so the UI table can
     // render "which agent ran this" without a second fetch.
     const agentIds = Array.from(new Set(sessions.map((s) => s.agentId)));
-    const agents = await Promise.all(agentIds.map((id) => cfg.agents.findById(id)));
+    const agents = await Promise.all(
+      agentIds.map((id) => cfg.agents.findById(id)),
+    );
     const byId = new Map(
       agents
         .filter((a): a is NonNullable<typeof a> => a !== null)
@@ -419,10 +426,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       return c.json({ error: "invalid_json" }, 400);
     }
     if (!Array.isArray(body.session_ids) || body.session_ids.length === 0) {
-      return c.json(
-        { error: "session_ids_required" },
-        400,
-      );
+      return c.json({ error: "session_ids_required" }, 400);
     }
     if (body.session_ids.length > 200) {
       return c.json({ error: "too_many", limit: 200 }, 400);
@@ -553,9 +557,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
     }
 
     const childRows = await cfg.sessions.listChildren(scope.session.id);
-    const childAgentIds = Array.from(
-      new Set(childRows.map((r) => r.agentId)),
-    );
+    const childAgentIds = Array.from(new Set(childRows.map((r) => r.agentId)));
     const childAgents = await Promise.all(
       childAgentIds.map((id) => cfg.agents.findById(id)),
     );
@@ -605,9 +607,7 @@ export function createWorkspaceSessionRoutes(cfg: SessionRoutesConfig): Hono {
       return c.json({ error: scope.error }, 404);
     }
     const childRows = await cfg.sessions.listChildren(scope.session.id);
-    const childAgentIds = Array.from(
-      new Set(childRows.map((r) => r.agentId)),
-    );
+    const childAgentIds = Array.from(new Set(childRows.map((r) => r.agentId)));
     const childAgents = await Promise.all(
       childAgentIds.map((id) => cfg.agents.findById(id)),
     );

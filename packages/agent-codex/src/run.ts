@@ -39,6 +39,11 @@ import {
   type WakeEnvelopeFields,
 } from "../../agent-runtime/src/wake-classifier.js";
 import { createEventCorrelator } from "../../agent-runtime/src/event-correlator.js";
+import {
+  createProviderFailureGuard,
+  isTerminalProviderError,
+  type ProviderFailureDecision,
+} from "../../agent-runtime/src/provider-failures.js";
 
 // ── Config ───────────────────────────────────────────────
 
@@ -72,6 +77,11 @@ const codexModel = process.env.OPENAI_MODEL?.trim() || "";
 // back into workspace-write with CODEX_SANDBOX.
 const codexSandbox = process.env.CODEX_SANDBOX || "danger-full-access";
 const codexBin = process.env.CODEX_PATH || "codex";
+const discoverRuntimeModels = process.env.DISCOVER_RUNTIME_MODELS === "true";
+const maxConsecutiveProviderFailures = Number.parseInt(
+  process.env.MAX_CONSECUTIVE_PROVIDER_FAILURES || "3",
+  10,
+);
 
 if (!sessionId) {
   console.error("[agent-codex] SESSION_ID is required");
@@ -332,6 +342,9 @@ console.log(
 let activeCodex: CodexAppServer | null = null;
 let codexThreadId: string | null = null;
 let turnQueue: Promise<void> = Promise.resolve();
+const providerFailures = createProviderFailureGuard(
+  maxConsecutiveProviderFailures,
+);
 
 function emitNormalized(event: NormalizedEvent | NormalizedEvent[] | null) {
   if (!event) return;
@@ -384,6 +397,7 @@ async function runCodexTurn(
           codexSandbox === "danger-full-access"
             ? "danger-full-access"
             : "workspace-write",
+        discoverModels: discoverRuntimeModels,
         onEvent: ({ method, params }) => {
           if (
             method === "turn/completed" ||
@@ -398,7 +412,15 @@ async function runCodexTurn(
           if (request.id !== undefined)
             created.respond(request.id, { decision: "decline" });
         },
-        onStderr: (line) => console.error(`[codex] ${line}`),
+        onStderr: (line) => {
+          console.error(`[codex] ${line}`);
+          // The app-server retries some HTTP failures internally. Stop that
+          // loop as soon as it tells us the account is not authenticated.
+          if (isTerminalProviderError(line)) {
+            const decision = providerFailures.recordFailure(line);
+            void terminateForProviderFailure(decision);
+          }
+        },
         onExit: (error) => {
           console.error(`[agent-codex] ${error.message}`);
           if (activeCodex === created) {
@@ -411,8 +433,22 @@ async function runCodexTurn(
       activeCodex = server;
       codexThreadId = await server.start();
       console.log(`[agent-codex] selected model=${server.model}`);
+      if (discoverRuntimeModels && server.models.length > 0) {
+        emitToStream({
+          type: "runtime.models",
+          payload: {
+            runtime_type: "codex",
+            default: server.model,
+            models: server.models.map((model) => ({
+              id: model.id,
+              label: model.label,
+            })),
+          },
+        });
+      }
     }
     await server.turn(codexThreadId, turnPrompt, localImages);
+    providerFailures.recordSuccess();
   } catch (error) {
     // Terminal turn failures are already emitted from their notification and
     // do not poison the long-lived app-server. Transport/protocol failures do.
@@ -425,6 +461,8 @@ async function runCodexTurn(
       activeCodex = null;
       codexThreadId = null;
     }
+    const decision = providerFailures.recordFailure(error);
+    if (decision.terminate) await terminateForProviderFailure(decision);
     throw error;
   } finally {
     idleTimer.setBusy(false);
@@ -708,6 +746,22 @@ async function shutdown(
   process.exit(isSuccess ? 0 : 1);
 }
 
+async function terminateForProviderFailure(
+  decision: ProviderFailureDecision,
+): Promise<void> {
+  if (shuttingDown) return;
+  const prefix =
+    decision.reason === "terminal_provider_error"
+      ? "Provider authentication or configuration failed"
+      : `Provider failed ${decision.consecutiveFailures} consecutive turns`;
+  const error = `${prefix}: ${decision.message}`;
+  emitToStream({
+    type: "agent.error",
+    payload: { message: error, recoverable: false },
+  });
+  await shutdown(false, undefined, error);
+}
+
 // ── Main ────────────────────────────────────────────────
 
 resetIdleTimer();
@@ -718,7 +772,15 @@ resetIdleTimer();
 if (prompt) {
   eventBuffer.push({ type: "user.message", payload: { text: prompt } });
   const preparedInput = await prepareCodexTurnInput(prompt, { sidecarUrl });
-  await enqueueCodexTurn(preparedInput.text, preparedInput.localImages);
+  try {
+    await enqueueCodexTurn(preparedInput.text, preparedInput.localImages);
+  } catch (error) {
+    // runCodexTurn owns consecutive-failure accounting. A one-shot cannot
+    // wait for a future turn, but an interactive seeded session can.
+    if (!shuttingDown && sessionMode === "oneshot") {
+      await shutdown(false, undefined, (error as Error).message);
+    }
+  }
   if (sessionMode === "oneshot") {
     await shutdown(true, "oneshot complete");
   }

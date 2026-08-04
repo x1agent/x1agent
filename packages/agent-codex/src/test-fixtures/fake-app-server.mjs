@@ -11,7 +11,12 @@ for await (const line of input) {
     process.stdout.write(
       JSON.stringify({
         id: message.id,
-        result: { data: [{ id: "fake", isDefault: true }] },
+        result: {
+          data: [
+            { id: "fake", displayName: "Fake Default", isDefault: true },
+            { id: "fake-fast", displayName: "Fake Fast", isDefault: false },
+          ],
+        },
       }) + "\n",
     );
   } else if (message.method === "thread/start") {
