@@ -1,3 +1,10 @@
+# [1.46.0](https://github.com/x1agent/x1agent/compare/v1.45.0...v1.46.0) (2026-08-04)
+
+
+### Features
+
+* **admin-mcp:** add OAuth workspace access ([#167](https://github.com/x1agent/x1agent/issues/167)) ([d82092b](https://github.com/x1agent/x1agent/commit/d82092b9eca47eacb56669bd7b524913f34ab8cd))
+
 # [1.45.0](https://github.com/x1agent/x1agent/compare/v1.44.1...v1.45.0) (2026-08-03)
 
 
