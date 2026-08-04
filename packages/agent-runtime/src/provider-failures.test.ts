@@ -16,6 +16,22 @@ describe("provider failure handling", () => {
     expect(isTerminalProviderError("Please run codex login")).toBe(true);
   });
 
+  it("treats invalid or inaccessible model selections as immediately terminal", () => {
+    const errors = [
+      "model_not_found",
+      "invalid model name: claude-future",
+      "The model `gpt-future` does not exist or you do not have access to it.",
+      "Selected model is unavailable for this account",
+      "You do not have access to the requested model",
+    ];
+    for (const error of errors) {
+      const decision = createProviderFailureGuard(3).recordFailure(error);
+      expect(decision.terminate).toBe(true);
+      expect(decision.reason).toBe("terminal_provider_error");
+      expect(decision.consecutiveFailures).toBe(1);
+    }
+  });
+
   it("allows transient failures until the consecutive limit", () => {
     const guard = createProviderFailureGuard(3);
     expect(guard.recordFailure("connection reset").terminate).toBe(false);

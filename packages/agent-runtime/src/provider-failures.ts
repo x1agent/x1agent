@@ -10,6 +10,10 @@ const TERMINAL_PROVIDER_ERROR_PATTERNS = [
   /credentials? (?:are |is )?(?:missing|expired|invalid|not found)/i,
   /billing[_ -]?error/i,
   /model[_ -]?not[_ -]?found/i,
+  /\b(?:invalid|unknown|unsupported|unavailable) model\b/i,
+  /\bmodel\b.{0,80}\b(?:does not exist|not found|not available|unsupported|unavailable)\b/i,
+  /\b(?:does not exist|not found|not available|unsupported|unavailable)\b.{0,80}\bmodel\b/i,
+  /do not have access to.{0,80}\bmodel\b/i,
   /selected model is not supported/i,
   /error_max_(?:turns|budget_usd|structured_output_retries)/i,
 ];
