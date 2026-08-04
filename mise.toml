@@ -156,6 +156,11 @@ env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:status"
 
 [tasks."install:prod:destroy"]
+description = "helm uninstall x1agent from the active deployment (type-to-confirm; deletes in-cluster Postgres data)"
+env = { KUBECONFIG = "" }
+run = "cd packages/cli && bun run src/index.ts install:destroy"
+
+[tasks."install:prod:destroy-cluster"]
 description = "Delete only the active deployment's GKE cluster and node pools (type-to-confirm)"
 env = { KUBECONFIG = "" }
 run = "deploy/scripts/destroy-prod-cluster.sh"
@@ -471,7 +476,7 @@ docker buildx build \\
   -t "${REGISTRY_LOCAL}/x1agent/runtime-codex:latest" \\
   -f packages/agent-codex/Dockerfile \\
   --load \\
-  packages/agent-codex
+  .
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-codex:v1"
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-codex:latest"
 

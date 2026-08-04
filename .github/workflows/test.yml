@@ -55,12 +55,12 @@ jobs:
             echo "=== $pkg ==="
             (cd packages/$pkg && bun test)
           done
-      - name: Helm chart guards (no anonymous NATS super-user mapping)
+      - name: Deployment and Helm chart guards
         run: |
           # Pure-source regex guards over the chart templates — no
           # helm binary required. See deploy/helm/x1agent/tests/ for
           # the rationale.
-          bun test deploy/helm/x1agent/tests
+          bun test deploy/helm/x1agent/tests deploy/scripts/tests
       - name: Typecheck api (production source — excludes tests)
         # `bun test` doesn't typecheck. Without this step abstract-class
         # subclasses missing the `code` field, dropped re-exports, and
