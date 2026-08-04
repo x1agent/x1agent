@@ -11,6 +11,9 @@ name: x1agent
 # devspace vars → pod env; prod uses External Secrets Operator.
 
 vars:
+  HOST_CLAUDE_CONFIG_DIR:
+    source: env
+    default: ""
   HOST_CODEX_HOME_DIR:
     source: env
     default: ""
@@ -331,6 +334,8 @@ dev:
         value: ${ANTHROPIC_API_KEY}
       - name: OPENAI_API_KEY
         value: ${OPENAI_API_KEY}
+      - name: HOST_CLAUDE_CONFIG_DIR
+        value: ${HOST_CLAUDE_CONFIG_DIR}
       - name: HOST_CODEX_HOME_DIR
         value: ${HOST_CODEX_HOME_DIR}
       - name: WORKSPACE_SECRETS_MASTER_KEY

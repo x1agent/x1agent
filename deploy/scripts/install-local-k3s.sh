@@ -13,6 +13,7 @@ ENABLE_SURREALDB="${X1AGENT_ENABLE_SURREALDB:-false}"
 ENV_FILE="${X1AGENT_ENV_FILE:-${ROOT_DIR}/.env.local}"
 LOCAL_DIR="${X1AGENT_LOCAL_DIR:-${ROOT_DIR}/.local/k3s}"
 CODEX_PROFILE_DIR="${HOST_CODEX_HOME_DIR:-${HOME}/.x1agent-dev/codex-home}"
+CLAUDE_CONFIG_DIR="${HOST_CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
 
 die() { echo "[install:local:k3s] ERROR: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
@@ -29,6 +30,7 @@ fi
 
 [[ -f "$ENV_FILE" ]] || die "missing env file: $ENV_FILE"
 [[ "$CODEX_PROFILE_DIR" == /* ]] || die "HOST_CODEX_HOME_DIR must be an absolute path"
+[[ "$CLAUDE_CONFIG_DIR" == /* ]] || die "HOST_CLAUDE_CONFIG_DIR must be an absolute path"
 mkdir -p "$LOCAL_DIR"
 chmod 700 "$LOCAL_DIR"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/x1agent-k3s.XXXXXX")"
@@ -144,9 +146,13 @@ kubectl -n "$NAMESPACE" apply -f "$TMP_DIR/api.yaml"
 kubectl -n "$NAMESPACE" apply -f "$TMP_DIR/app.yaml"
 kubectl -n "$NAMESPACE" apply -f "$TMP_DIR/ingress.yaml"
 kubectl -n "$NAMESPACE" set env deployment/api HOST_CODEX_HOME_DIR="$CODEX_PROFILE_DIR" >/dev/null
+kubectl -n "$NAMESPACE" set env deployment/api HOST_CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" >/dev/null
 
 if [[ ! -f "$CODEX_PROFILE_DIR/auth.json" ]]; then
   echo "[install:local:k3s] warning: $CODEX_PROFILE_DIR/auth.json is missing; Codex sessions will need login first" >&2
+fi
+if [[ ! -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]]; then
+  echo "[install:local:k3s] warning: $CLAUDE_CONFIG_DIR/.credentials.json is missing; Claude sessions will need login first" >&2
 fi
 
 echo

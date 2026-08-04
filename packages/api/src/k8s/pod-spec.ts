@@ -97,6 +97,8 @@ export interface SessionPodSpec {
   apiInternalToken: string;
   /** Cluster-internal NATS URL. `nats://nats:4222` on dev. */
   natsUrl: string;
+  /** Dev-only host directory containing Claude Code's .credentials.json. */
+  hostClaudeConfigDir?: string;
   /** Dev-only host path containing a dedicated Codex auth.json profile. */
   hostCodexHomeDir?: string;
   agentImage: string;
@@ -158,15 +160,6 @@ export interface SessionPodSpec {
    * paths keep working without code changes.
    */
   natsClientTlsSecret?: string;
-  /**
-   * Dev-only: host path to `~/.claude` (directory) and `~/.claude.json`
-   * (file). When set, both are hostPath-mounted into the agent container
-   * at /home/agent so Claude Code picks up settings/agents/etc. Expected
-   * form: `/Users/alice`.
-   */
-  /**
-   * Dev-only: absolute host path to a file in Linux credentials format
-   */
   /** K8s namespace the Job lives in. */
   namespace: string;
   /**
@@ -272,6 +265,14 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
     },
     ...(spec.runtimeType
       ? [{ name: "X1_RUNTIME", value: spec.runtimeType }]
+      : []),
+    ...(!isCodex && spec.hostClaudeConfigDir
+      ? [
+          {
+            name: "CLAUDE_AUTH_SOURCE",
+            value: "/var/run/x1agent/claude-auth/.credentials.json",
+          },
+        ]
       : []),
     // Surface Claude Code stderr to the pod log so we can see auth /
     // spawn failures. Dev-only.
@@ -507,6 +508,17 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
           },
           volumes: [
             workspaceVolume,
+            ...(!isCodex && spec.hostClaudeConfigDir
+              ? [
+                  {
+                    name: "claude-auth",
+                    hostPath: {
+                      path: spec.hostClaudeConfigDir,
+                      type: "Directory",
+                    },
+                  },
+                ]
+              : []),
             ...(isCodex && spec.hostCodexHomeDir
               ? [
                   {
@@ -587,6 +599,17 @@ export function buildSessionJob(spec: SessionPodSpec): V1Job {
               env: agentEnv,
               volumeMounts: [
                 { name: "workspace", mountPath: "/workspace" },
+                ...(!isCodex && spec.hostClaudeConfigDir
+                  ? [
+                      {
+                        name: "claude-auth",
+                        mountPath:
+                          "/var/run/x1agent/claude-auth/.credentials.json",
+                        subPath: ".credentials.json",
+                        readOnly: true,
+                      },
+                    ]
+                  : []),
                 ...(isCodex && spec.hostCodexHomeDir
                   ? [
                       {

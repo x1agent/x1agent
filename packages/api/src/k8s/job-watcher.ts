@@ -105,6 +105,8 @@ export interface JobWatcherConfig {
   apiUrl: string;
   apiInternalToken: string;
   natsUrl: string;
+  /** Dev-only host directory containing Claude Code's .credentials.json. */
+  hostClaudeConfigDir?: string;
   /** Dev-only host path containing the dedicated Codex auth profile. */
   hostCodexHomeDir?: string;
   anthropicApiKey?: string;
@@ -558,6 +560,7 @@ async function launchSession(
     apiUrl: cfg.apiUrl,
     apiInternalToken: cfg.apiInternalToken,
     natsUrl: cfg.natsUrl,
+    hostClaudeConfigDir: cfg.hostClaudeConfigDir,
     hostCodexHomeDir: cfg.hostCodexHomeDir,
     agentImage: resolvedAgentImage,
     sidecarImage: cfg.sidecarImage,

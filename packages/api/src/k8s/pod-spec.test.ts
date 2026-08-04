@@ -268,6 +268,49 @@ describe("buildSessionJob — pod shape by agent.kind", () => {
       expect(env.ANTHROPIC_MODEL).toBeUndefined();
     });
 
+    it("copies Claude login from a read-only host projection without exposing it to Codex", () => {
+      const claudeJob = buildSessionJob({
+        ...baseSpec("worker"),
+        runtimeType: "claude_code",
+        hostClaudeConfigDir: "/home/test/.claude",
+      });
+      const pod = claudeJob.spec!.template.spec!;
+      const agent = pod.containers!.find((c) => c.name === "agent")!;
+      const env = Object.fromEntries(
+        (agent.env ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(env.CLAUDE_AUTH_SOURCE).toBe(
+        "/var/run/x1agent/claude-auth/.credentials.json",
+      );
+      expect(
+        pod.volumes!.find((volume) => volume.name === "claude-auth")?.hostPath
+          ?.path,
+      ).toBe("/home/test/.claude");
+      expect(
+        agent.volumeMounts!.find((mount) => mount.name === "claude-auth"),
+      ).toMatchObject({
+        mountPath: "/var/run/x1agent/claude-auth/.credentials.json",
+        subPath: ".credentials.json",
+        readOnly: true,
+      });
+
+      const codexJob = buildSessionJob({
+        ...baseSpec("worker"),
+        runtimeType: "codex",
+        hostClaudeConfigDir: "/home/test/.claude",
+      });
+      const codexPod = codexJob.spec!.template.spec!;
+      const codexAgent = codexPod.containers!.find(
+        (c) => c.name === "agent",
+      )!;
+      expect(
+        (codexAgent.env ?? []).find((entry) => entry.name === "CLAUDE_AUTH_SOURCE"),
+      ).toBeUndefined();
+      expect(
+        codexPod.volumes!.find((volume) => volume.name === "claude-auth"),
+      ).toBeUndefined();
+    });
+
     it("mounts only Codex auth into a session-private home without exposing it to Claude", () => {
       const job = buildSessionJob({
         ...baseSpec("worker"),

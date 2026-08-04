@@ -55,6 +55,7 @@ test("Codex images build from the repository context", () => {
   expect(installer).toContain("packages/agent-codex/Dockerfile");
   expect(installer).not.toContain("packages/agent/Dockerfile");
   expect(installer).toContain('HOST_CODEX_HOME_DIR="$CODEX_PROFILE_DIR"');
+  expect(installer).toContain('HOST_CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"');
 });
 
 test("local Traefik ingress exposes the administrative MCP resource", () => {
