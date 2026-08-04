@@ -1,21 +1,159 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { createAdminMcpRoutes } from "./routes.js";
+import type {
+  AdminMcpOAuthStore,
+  OAuthClient,
+  OAuthPrincipal,
+  OAuthTokenSet,
+} from "./oauth-store.js";
 
 const resourceUrl = "https://x1agent.example.test/mcp";
 const authorizationServerUrl = "https://api.x1agent.example.test";
+const verifier = "codex-test-verifier-that-is-long-enough-for-rfc-7636";
+const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-function app() {
-  return createAdminMcpRoutes({
+class FakeOAuth implements AdminMcpOAuthStore {
+  clients = new Map<string, OAuthClient>();
+  code: Parameters<AdminMcpOAuthStore["authorize"]>[0] | null = null;
+
+  async registerClient(input: {
+    clientName: string | null;
+    redirectUris: string[];
+  }) {
+    const client = {
+      clientId: `x1mcp_${this.clients.size + 1}`,
+      clientName: input.clientName,
+      redirectUris: input.redirectUris,
+    };
+    this.clients.set(client.clientId, client);
+    return client;
+  }
+  async findClient(clientId: string) {
+    return this.clients.get(clientId) ?? null;
+  }
+  async authorize(input: Parameters<AdminMcpOAuthStore["authorize"]>[0]) {
+    this.code = input;
+    return "one-time-code";
+  }
+  async exchangeAuthorizationCode(
+    input: Parameters<AdminMcpOAuthStore["exchangeAuthorizationCode"]>[0],
+  ): Promise<OAuthTokenSet | null> {
+    if (
+      !this.code ||
+      input.code !== "one-time-code" ||
+      input.clientId !== this.code.clientId ||
+      input.redirectUri !== this.code.redirectUri ||
+      input.resource !== this.code.resource ||
+      input.codeVerifier !== verifier
+    )
+      return null;
+    this.code = null;
+    return {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      tokenType: "Bearer",
+      expiresIn: 3600,
+      scope: "x1.workspaces.read",
+    };
+  }
+  async exchangeRefreshToken(): Promise<OAuthTokenSet | null> {
+    return null;
+  }
+  async verifyAccessToken(
+    token: string,
+    resource: string,
+  ): Promise<OAuthPrincipal | null> {
+    return token === "access-token" && resource === resourceUrl
+      ? {
+          userId: "user-1",
+          clientId: "x1mcp_1",
+          scopes: ["x1.workspaces.read"],
+          expiresAt: 2_000_000_000,
+        }
+      : null;
+  }
+  async revoke(): Promise<void> {}
+}
+
+function fixture(signedIn = false) {
+  const oauth = new FakeOAuth();
+  const server = createAdminMcpRoutes({
     resourceUrl,
     authorizationServerUrl,
-    tokenizer: { sign: () => "unused", verify: () => null },
+    enabled: true,
+    oauth,
+    tokenizer: {
+      sign: () => "session-token",
+      verify: (token) =>
+        token === "session-token"
+          ? {
+              userId: "user-1" as never,
+              email: "christian@x1agent.com" as never,
+              name: "Christian",
+              memberships: [],
+              isPlatformAdmin: false,
+            }
+          : null,
+    },
+    workspaces: {
+      listForUser: async () => [
+        {
+          id: "workspace-1",
+          slug: "default",
+          name: "Default",
+          role: "owner",
+          createdAt: "2026-08-03T00:00:00.000Z",
+        },
+      ],
+      getForUser: async (_userId, slug) =>
+        slug === "default"
+          ? {
+              id: "workspace-1",
+              slug: "default",
+              name: "Default",
+              role: "owner",
+              createdAt: "2026-08-03T00:00:00.000Z",
+            }
+          : null,
+    },
+  });
+  const cookie: Record<string, string> = signedIn
+    ? { Cookie: "x1_session=session-token" }
+    : {};
+  return { server, oauth, cookie };
+}
+
+async function register(server: ReturnType<typeof createAdminMcpRoutes>) {
+  const response = await server.request("/oauth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Codex",
+      redirect_uris: ["http://127.0.0.1:49200/callback"],
+    }),
+  });
+  expect(response.status).toBe(201);
+  return (await response.json()) as { client_id: string };
+}
+
+function authParams(clientId: string) {
+  return new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: "http://127.0.0.1:49200/callback",
+    resource: resourceUrl,
+    scope: "x1.workspaces.read",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state: "codex-state",
   });
 }
 
-describe("public administrative MCP OAuth bootstrap", () => {
+describe("public administrative MCP OAuth and transport", () => {
   test("challenges an unauthenticated MCP request with RFC 9728 metadata", async () => {
-    const res = await app().request("/mcp", { method: "POST" });
-
+    const { server } = fixture();
+    const res = await server.request("/mcp", { method: "POST" });
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toContain(
       `${authorizationServerUrl}/.well-known/oauth-protected-resource/mcp`,
@@ -23,12 +161,13 @@ describe("public administrative MCP OAuth bootstrap", () => {
   });
 
   test("publishes protected-resource and authorization-server metadata", async () => {
-    const server = app();
+    const { server } = fixture();
     const resource = await server.request(
       "/.well-known/oauth-protected-resource/mcp",
     );
-    const auth = await server.request("/.well-known/oauth-authorization-server");
-
+    const auth = await server.request(
+      "/.well-known/oauth-authorization-server",
+    );
     expect(await resource.json()).toMatchObject({
       resource: resourceUrl,
       authorization_servers: [authorizationServerUrl],
@@ -36,34 +175,102 @@ describe("public administrative MCP OAuth bootstrap", () => {
     expect(await auth.json()).toMatchObject({
       issuer: authorizationServerUrl,
       authorization_endpoint: `${authorizationServerUrl}/oauth/authorize`,
+      token_endpoint: `${authorizationServerUrl}/oauth/token`,
       registration_endpoint: `${authorizationServerUrl}/oauth/register`,
     });
   });
 
-  test("registers a loopback public client then reaches the browser auth boundary", async () => {
-    const server = app();
-    const registration = await server.request("/oauth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "Codex",
-        redirect_uris: ["http://127.0.0.1:49200/callback"],
-      }),
-    });
-    const client = await registration.json<{ client_id: string }>();
+  test("preserves the OAuth request through sign-in and renders branded consent", async () => {
+    const { server } = fixture();
+    const client = await register(server);
     const auth = await server.request(
-      `/oauth/authorize?${new URLSearchParams({
-        response_type: "code",
+      `/oauth/authorize?${authParams(client.client_id)}`,
+    );
+    const html = await auth.text();
+    expect(auth.status).toBe(200);
+    expect(html).toContain("Sign in to X1Agent");
+    expect(html).toContain("return_to=");
+    expect(html).toContain("x1agent</span>");
+    expect(auth.headers.get("content-security-policy")).toContain(
+      "http://127.0.0.1:*",
+    );
+  });
+
+  test("issues a code, verifies PKCE, and returns opaque bearer tokens", async () => {
+    const { server, cookie } = fixture(true);
+    const client = await register(server);
+    const params = authParams(client.client_id);
+    const consent = await server.request(`/oauth/authorize?${params}`, {
+      headers: cookie,
+    });
+    expect(await consent.text()).toContain("Authorize");
+
+    params.set("decision", "approve");
+    const approved = await server.request("/oauth/authorize", {
+      method: "POST",
+      headers: {
+        ...cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+    expect(approved.status).toBe(302);
+    const callback = new URL(approved.headers.get("location")!);
+    expect(callback.searchParams.get("code")).toBe("one-time-code");
+    expect(callback.searchParams.get("state")).toBe("codex-state");
+
+    const token = await server.request("/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
         client_id: client.client_id,
+        code: callback.searchParams.get("code")!,
         redirect_uri: "http://127.0.0.1:49200/callback",
         resource: resourceUrl,
-        code_challenge: "proof",
-        code_challenge_method: "S256",
-      })}`,
-    );
+        code_verifier: verifier,
+      }),
+    });
+    expect(token.status).toBe(200);
+    expect(await token.json()).toMatchObject({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      token_type: "Bearer",
+      scope: "x1.workspaces.read",
+    });
+  });
 
-    expect(registration.status).toBe(201);
-    expect(auth.status).toBe(200);
-    expect(await auth.text()).toContain("Sign in to X1Agent");
+  test("serves real workspace tools through authenticated streamable HTTP", async () => {
+    const { server } = fixture();
+    const request = await server.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer access-token",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "MCP-Protocol-Version": "2025-11-25",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "workspaces.list", arguments: {} },
+      }),
+    });
+    expect(request.status).toBe(200);
+    const rpc = (await request.json()) as {
+      result: { structuredContent: unknown };
+    };
+    expect(rpc.result.structuredContent).toEqual({
+      workspaces: [
+        {
+          id: "workspace-1",
+          slug: "default",
+          name: "Default",
+          role: "owner",
+          createdAt: "2026-08-03T00:00:00.000Z",
+        },
+      ],
+    });
   });
 });

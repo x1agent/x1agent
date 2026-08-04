@@ -130,6 +130,8 @@ spec:
               value: "https://{{ include "x1agent.apiHost" . }}"
             - name: PUBLIC_URL
               value: "https://{{ include "x1agent.appHost" . }}"
+            - name: ADMIN_MCP_ENABLED
+              value: {{ .Values.api.adminMcpEnabled | default false | quote }}
             - name: PLATFORM_NAME
               value: {{ .Values.config.PLATFORM_NAME | quote }}
             - name: PLATFORM_ADMIN_EMAILS

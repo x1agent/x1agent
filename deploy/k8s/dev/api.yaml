@@ -113,6 +113,8 @@ spec:
               value: x1agent
             - name: NODE_ENV
               value: development
+            - name: ADMIN_MCP_ENABLED
+              value: "true"
             # The in-cluster API server uses a projected self-signed CA.
             # Let the Node Kubernetes client trust it on OrbStack and k3s.
             - name: NODE_EXTRA_CA_CERTS

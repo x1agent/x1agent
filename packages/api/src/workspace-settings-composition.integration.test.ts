@@ -96,7 +96,10 @@ describe("workspace settings JSONB merge", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { settings: unknown };
-    expect(body.settings).toEqual({ oauthMcpsOnOrchestrators: "on" });
+    expect(body.settings).toEqual({
+      oauthMcpsOnOrchestrators: "on",
+      adminMcpEnabled: false,
+    });
   });
 
   it("GET after PATCH returns the same value (no array stringification)", async () => {
@@ -115,7 +118,10 @@ describe("workspace settings JSONB merge", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { settings: unknown };
-    expect(body.settings).toEqual({ oauthMcpsOnOrchestrators: "on_attended" });
+    expect(body.settings).toEqual({
+      oauthMcpsOnOrchestrators: "on_attended",
+      adminMcpEnabled: false,
+    });
   });
 
   it("multiple PATCHes merge cleanly (no array growth)", async () => {
@@ -139,6 +145,7 @@ describe("workspace settings JSONB merge", () => {
     expect(typeof rows[0]!.settings).toBe("object");
     expect(rows[0]!.settings).toEqual({
       oauthMcpsOnOrchestrators: "off",
+      adminMcpEnabled: false,
     });
   });
 });
