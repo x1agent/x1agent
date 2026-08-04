@@ -72,14 +72,16 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
       FROM runtime_models
       WHERE runtime_type = ${runtime} AND enabled = TRUE
         AND (
-          ${runtime} <> 'claude_code' OR EXISTS (
-            SELECT 1 FROM anthropic_model_overrides policy
-            WHERE policy.enabled = TRUE
-              AND (
-                policy.model_id = runtime_models.model_id OR
-                policy.model_id = runtime_models.resolved_model_id
-              )
-          )
+          ${runtime} <> 'claude_code' OR
+          NOT EXISTS (SELECT 1 FROM anthropic_model_overrides) OR
+          EXISTS (
+              SELECT 1 FROM anthropic_model_overrides policy
+              WHERE policy.enabled = TRUE
+                AND (
+                  policy.model_id = runtime_models.model_id OR
+                  policy.model_id = runtime_models.resolved_model_id
+                )
+            )
         )
       ORDER BY is_default DESC, display_name ASC
     `;
@@ -113,14 +115,16 @@ export async function listEnabledRuntimeModels(
     SELECT catalog.model_id FROM runtime_models catalog
     WHERE catalog.runtime_type = ${runtime} AND catalog.enabled = TRUE
       AND (
-        ${runtime} <> 'claude_code' OR EXISTS (
-          SELECT 1 FROM anthropic_model_overrides policy
-          WHERE policy.enabled = TRUE
-            AND (
-              policy.model_id = catalog.model_id OR
-              policy.model_id = catalog.resolved_model_id
-            )
-        )
+        ${runtime} <> 'claude_code' OR
+        NOT EXISTS (SELECT 1 FROM anthropic_model_overrides) OR
+        EXISTS (
+            SELECT 1 FROM anthropic_model_overrides policy
+            WHERE policy.enabled = TRUE
+              AND (
+                policy.model_id = catalog.model_id OR
+                policy.model_id = catalog.resolved_model_id
+              )
+          )
       )
   `;
   return new Set(rows.map((row) => row.model_id));
