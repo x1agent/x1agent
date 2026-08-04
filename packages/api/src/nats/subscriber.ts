@@ -584,14 +584,7 @@ async function refreshRuntimeModelCatalog(
     return [{ id, label, resolvedModel }];
   });
   if (models.length === 0) return;
-  const defaultModel =
-    typeof value.default === "string" &&
-    models.some(
-      (model) =>
-        model.id === value.default || model.resolvedModel === value.default,
-    )
-      ? value.default
-      : null;
+  const defaultModelId = resolveRuntimeModelDefaultId(models, value.default);
 
   await sql.begin(async (tx) => {
     // Only the first trusted bootstrap report after expiry may mutate the
@@ -624,7 +617,7 @@ async function refreshRuntimeModelCatalog(
         VALUES
           (${value.runtime_type}, ${model.id}, ${model.label},
            ${model.resolvedModel}, TRUE,
-           ${model.id === defaultModel || model.resolvedModel === defaultModel},
+          ${model.id === defaultModelId},
            'harness', NOW(), NOW())
         ON CONFLICT (runtime_type, model_id) DO UPDATE SET
           display_name = EXCLUDED.display_name,
@@ -637,4 +630,23 @@ async function refreshRuntimeModelCatalog(
       `;
     }
   });
+}
+
+export function resolveRuntimeModelDefaultId(
+  models: ReadonlyArray<{ id: string; resolvedModel: string | null }>,
+  reportedDefault: unknown,
+): string | null {
+  if (typeof reportedDefault !== "string" || !reportedDefault.trim())
+    return null;
+  const selected = reportedDefault.trim();
+
+  // Prefer an exact harness model id. Claude exposes aliases whose
+  // resolvedModel values can all point at the same concrete model; marking
+  // every matching alias as default violates the one-default-per-runtime
+  // invariant and leaves the entire catalog stale.
+  return (
+    models.find((model) => model.id === selected)?.id ??
+    models.find((model) => model.resolvedModel === selected)?.id ??
+    null
+  );
 }

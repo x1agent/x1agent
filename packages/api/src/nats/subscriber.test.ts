@@ -4,7 +4,33 @@ import {
   deriveWakeKindFromText,
   enrichWakePayload,
   isShareCommentWakePayload,
+  resolveRuntimeModelDefaultId,
 } from "./subscriber";
+
+describe("resolveRuntimeModelDefaultId", () => {
+  const models = [
+    { id: "default", resolvedModel: "claude-sonnet-4-6" },
+    { id: "sonnet", resolvedModel: "claude-sonnet-4-6" },
+    { id: "claude-sonnet-4-6", resolvedModel: "claude-sonnet-4-6" },
+  ];
+
+  it("prefers the exact harness id when aliases resolve to the same model", () => {
+    expect(resolveRuntimeModelDefaultId(models, "claude-sonnet-4-6")).toBe(
+      "claude-sonnet-4-6",
+    );
+  });
+
+  it("selects only the first alias when the reported default is resolved-only", () => {
+    const aliases = models.slice(0, 2);
+    expect(resolveRuntimeModelDefaultId(aliases, "claude-sonnet-4-6")).toBe(
+      "default",
+    );
+  });
+
+  it("rejects an unknown reported default", () => {
+    expect(resolveRuntimeModelDefaultId(models, "made-up-model")).toBeNull();
+  });
+});
 
 /**
  * X1A-103 — the api's NATS subscriber must drop transient indicator
@@ -145,7 +171,13 @@ describe("isShareCommentWakePayload", () => {
   });
 
   it("rejects orchestration wake kinds", () => {
-    for (const k of ["watchdog", "heartbeat", "checkup", "message", "state_change"]) {
+    for (const k of [
+      "watchdog",
+      "heartbeat",
+      "checkup",
+      "message",
+      "state_change",
+    ]) {
       expect(isShareCommentWakePayload({ kind: k })).toBe(false);
     }
   });
