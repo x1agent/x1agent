@@ -63,6 +63,26 @@ export function selectSessionModel(
   return session.modelOverride ?? agent.model ?? fallback;
 }
 
+/**
+ * Resolve the image for a session whose runtime may override the agent's
+ * configured runtime. An unpinned agent must follow the effective session
+ * runtime, not a deployment-wide image that may contain a provider-specific
+ * entrypoint (for example runtime-codex always launches the Codex harness).
+ *
+ * Explicitly pinned images still win because they carry the agent's language
+ * toolchain and may intentionally be custom multi-runtime images.
+ */
+export function selectSessionImage(
+  pinnedImageRef: string | null | undefined,
+  runtimeImageRef: string | null | undefined,
+  deploymentFallback: string,
+): string {
+  const pinned = pinnedImageRef?.trim();
+  if (pinned) return pinned;
+  const runtime = runtimeImageRef?.trim();
+  return runtime || deploymentFallback;
+}
+
 export interface JobWatcherConfig {
   sql: Sql;
   agents: AgentRepository;
@@ -311,24 +331,40 @@ async function launchSession(
   const ws = await cfg.sql<{ slug: string; name: string }[]>`
     SELECT slug, name FROM workspaces WHERE id = ${agent.workspaceId}
   `;
-  // Resolve the agent's configured image if one is set. Falls back to
-  // the deployment-wide default (AGENT_IMAGE env) when the agent has
-  // no image_id pinned — preserves behavior for seeded agents and
-  // agents created before the catalog landed.
-  const imageRow = await cfg.sql<{ built_ref: string }[]>`
-    SELECT i.built_ref
-    FROM agents a
-    JOIN agent_images i ON i.id = a.image_id
-    WHERE a.id = ${agent.id}
+  // Resolve both the agent's explicitly pinned image and the platform image
+  // for the session's *effective* runtime. The latter matters when a user
+  // launches a Claude session from a Codex-default agent (or vice versa):
+  // AGENT_IMAGE may itself be provider-specific, and runtime-codex's
+  // entrypoint unconditionally starts Codex regardless of X1_RUNTIME.
+  const runtimeImageName =
+    runtimeType === "codex" ? "runtime-codex" : "runtime-core";
+  const imageRows = await cfg.sql<
+    { pinned_ref: string | null; runtime_ref: string | null }[]
+  >`
+    SELECT
+      (
+        SELECT i.built_ref
+        FROM agents a
+        JOIN agent_images i ON i.id = a.image_id
+        WHERE a.id = ${agent.id}
+      ) AS pinned_ref,
+      (
+        SELECT i.built_ref
+        FROM agent_images i
+        WHERE i.workspace_id IS NULL
+          AND i.name = ${runtimeImageName}
+        LIMIT 1
+      ) AS runtime_ref
   `;
-  // Empty built_ref means a workspace-authored image whose build hasn't
-  // pushed a digest yet (status=pending/building) or whose latest build
-  // failed. The agent edit dropdown filters those out, but defense in
-  // depth — fall back to the deployment default rather than spawning
-  // a pod with an empty image and ImagePullBackOff'ing.
-  const candidateRef = imageRow[0]?.built_ref ?? "";
-  const resolvedAgentImage =
-    candidateRef.trim().length > 0 ? candidateRef : cfg.agentImage;
+  // Empty refs represent an unbuilt/failed workspace image or an older
+  // installation without the runtime catalog row. Preserve AGENT_IMAGE as
+  // the final compatibility fallback, but never prefer it over a matching
+  // runtime catalog entry.
+  const resolvedAgentImage = selectSessionImage(
+    imageRows[0]?.pinned_ref,
+    imageRows[0]?.runtime_ref,
+    cfg.agentImage,
+  );
   if (ws.length === 0) {
     await cfg.sessions.updateStatus(sessionId, {
       status: "failed",

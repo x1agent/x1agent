@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { selectSessionModel } from "./job-watcher.js";
+import { selectSessionImage, selectSessionModel } from "./job-watcher.js";
 
 /**
  * X1A-40 integration shim — once the orchestrator's spawn passes
@@ -49,5 +49,43 @@ describe("selectSessionModel — precedence (X1A-40)", () => {
         undefined,
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("selectSessionImage — effective runtime image", () => {
+  it("uses the Claude runtime image instead of a Codex deployment fallback", () => {
+    expect(
+      selectSessionImage(
+        null,
+        "docker.io/x1agent/runtime-core:v1",
+        "docker.io/x1agent/runtime-codex:v1",
+      ),
+    ).toBe("docker.io/x1agent/runtime-core:v1");
+  });
+
+  it("uses the Codex runtime image when the effective runtime is Codex", () => {
+    expect(
+      selectSessionImage(
+        null,
+        "docker.io/x1agent/runtime-codex:v1",
+        "docker.io/x1agent/runtime-core:v1",
+      ),
+    ).toBe("docker.io/x1agent/runtime-codex:v1");
+  });
+
+  it("preserves an explicitly pinned custom toolchain image", () => {
+    expect(
+      selectSessionImage(
+        "registry.example/dev360/getdiffr:v7",
+        "docker.io/x1agent/runtime-core:v1",
+        "docker.io/x1agent/runtime-codex:v1",
+      ),
+    ).toBe("registry.example/dev360/getdiffr:v7");
+  });
+
+  it("falls back to AGENT_IMAGE when the catalog row is missing or empty", () => {
+    expect(
+      selectSessionImage("", " ", "x1agent-agent:latest"),
+    ).toBe("x1agent-agent:latest");
   });
 });
