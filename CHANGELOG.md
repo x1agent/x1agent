@@ -1,3 +1,10 @@
+# [1.47.0](https://github.com/x1agent/x1agent/compare/v1.46.0...v1.47.0) (2026-08-04)
+
+
+### Features
+
+* **mise:** add backup restore and k3s operations ([#168](https://github.com/x1agent/x1agent/issues/168)) ([4aca4cc](https://github.com/x1agent/x1agent/commit/4aca4cca31e6b4a6377ee2e0587e3d2ab968bb7c))
+
 # [1.46.0](https://github.com/x1agent/x1agent/compare/v1.45.0...v1.46.0) (2026-08-04)
 
 
