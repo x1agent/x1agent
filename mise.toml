@@ -62,7 +62,7 @@ run = "deploy/scripts/bootstrap-nats-tls.sh"
 [tasks."dev:cluster"]
 description = "Start api + postgres in OrbStack with hot file-sync (blocks)"
 depends = ["dev:setup"]
-run = "devspace dev --namespace x1agent"
+run = "HOST_CLAUDE_CONFIG_DIR=\"${HOST_CLAUDE_CONFIG_DIR:-$HOME/.claude}\" devspace dev --namespace x1agent"
 
 [tasks.quickstart]
 description = "Run the x1agent CLUSTER setup wizard (creates secrets + admin)"
@@ -374,7 +374,7 @@ run = "cd packages/app && bun run dev"
 # deployments down.
 [tasks.dev]
 description = "Full local dev with hot reload (devspace dev, blocks)"
-run = "devspace dev --namespace x1agent"
+run = "HOST_CLAUDE_CONFIG_DIR=\"${HOST_CLAUDE_CONFIG_DIR:-$HOME/.claude}\" devspace dev --namespace x1agent"
 
 # Note: `dev:cold` (devspace deploy without hot reload) and `dev:direct`
 # (plain docker+kubectl, no devspace) were removed — neither was ever
