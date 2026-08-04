@@ -16,13 +16,9 @@ import { RuntimeType } from "@x1agent/domain-agents";
 export interface CapabilitiesRoutesConfig {
   /**
    * Required for /anthropic/models filtering. When set, the endpoint
-   * returns only models an admin has explicitly enabled in
-   * `anthropic_model_overrides`. Empty list means the admin has not
-   * curated yet — the UI surfaces a "ask your admin to enable a model"
-   * empty state. We do NOT fall back to the upstream catalog: Vertex
-   * Model Garden lists models that aren't actually servable in the
-   * deployment's region/project, and showing them in the agent
-   * dropdown produces 4xx errors at session spawn.
+   * returns only models an admin has explicitly enabled once the allowlist
+   * is active. With no enabled rows, the deployment has not been curated
+   * yet and the full authoritative catalog remains available.
    */
   sql?: postgres.Sql<Record<string, unknown>>;
 }
@@ -39,10 +35,9 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
   app.get("/anthropic/models", async (c) => {
     const catalog = await listAnthropicModels();
     const enabled = cfg.sql ? await listEnabledOverrides(cfg.sql) : null;
-    // Strict filter: dropdown shows only what an admin enabled. When
-    // the override table is unavailable (no sql configured — tests),
-    // pass the catalog through.
-    const models = enabled ? catalog.filter((m) => enabled.has(m.id)) : catalog;
+    // The allowlist becomes active only after an admin enables at least one
+    // row. Probe-only and price-only rows are deliberately not policy.
+    const models = applyEnabledModelPolicy(catalog, enabled);
     c.header("Cache-Control", "private, max-age=60");
     return c.json({
       provider: process.env.ANTHROPIC_PROVIDER ?? "api_key",
@@ -73,7 +68,9 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
       WHERE runtime_type = ${runtime} AND enabled = TRUE
         AND (
           ${runtime} <> 'claude_code' OR
-          NOT EXISTS (SELECT 1 FROM anthropic_model_overrides) OR
+          NOT EXISTS (
+            SELECT 1 FROM anthropic_model_overrides WHERE enabled = TRUE
+          ) OR
           EXISTS (
               SELECT 1 FROM anthropic_model_overrides policy
               WHERE policy.enabled = TRUE
@@ -107,6 +104,15 @@ export function capabilitiesRoutes(cfg: CapabilitiesRoutesConfig = {}): Hono {
   return app;
 }
 
+export function applyEnabledModelPolicy<T extends { id: string }>(
+  catalog: readonly T[],
+  enabled: ReadonlySet<string> | null,
+): T[] {
+  return enabled && enabled.size > 0
+    ? catalog.filter((model) => enabled.has(model.id))
+    : [...catalog];
+}
+
 export async function listEnabledRuntimeModels(
   sql: postgres.Sql<Record<string, unknown>>,
   runtime: "claude_code" | "codex",
@@ -116,7 +122,9 @@ export async function listEnabledRuntimeModels(
     WHERE catalog.runtime_type = ${runtime} AND catalog.enabled = TRUE
       AND (
         ${runtime} <> 'claude_code' OR
-        NOT EXISTS (SELECT 1 FROM anthropic_model_overrides) OR
+        NOT EXISTS (
+          SELECT 1 FROM anthropic_model_overrides WHERE enabled = TRUE
+        ) OR
         EXISTS (
             SELECT 1 FROM anthropic_model_overrides policy
             WHERE policy.enabled = TRUE
