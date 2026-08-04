@@ -30,6 +30,7 @@ import {
 import { startImageBuilder } from "./image-catalog/builder.js";
 import { capabilitiesRoutes } from "./capabilities/routes.js";
 import { listAnthropicModels } from "./capabilities/anthropic-models.js";
+import { createAdminMcpRoutes } from "./admin-mcp/routes.js";
 
 /**
  * Resolve the deployment-wide default model id for new session pods.
@@ -498,6 +499,16 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+// Public administrative MCP. This is intentionally mounted before API routes:
+// it is a remote OAuth-protected resource, not the in-pod x1-mcp sidecar.
+app.route(
+  "/",
+  createAdminMcpRoutes({
+    resourceUrl: `${PUBLIC_URL.replace(/\/$/, "")}/mcp`,
+    authorizationServerUrl: API_PUBLIC_URL.replace(/\/$/, ""),
+    tokenizer: composedTokenizer,
+  }),
+);
 app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
 app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
 app.route("/api/admin/workspaces", adminWorkspacesRoutes);
