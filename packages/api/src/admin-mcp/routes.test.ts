@@ -77,7 +77,16 @@ class FakeOAuth implements AdminMcpOAuthStore {
     token: string,
     resource: string,
   ): Promise<OAuthPrincipal | null> {
-    return token === "access-token" && resource === resourceUrl
+    if (resource !== resourceUrl) return null;
+    if (token === "agents-token") {
+      return {
+        userId: "user-1",
+        clientId: "x1mcp_1",
+        scopes: ["x1.agents.read"],
+        expiresAt: 2_000_000_000,
+      };
+    }
+    return token === "access-token"
       ? {
           userId: "user-1",
           clientId: "x1mcp_1",
@@ -116,6 +125,7 @@ function fixture(signedIn = false) {
           slug: "default",
           name: "Default",
           role: "owner",
+          oauthMcpsOnOrchestrators: "on",
           createdAt: "2026-08-03T00:00:00.000Z",
         },
       ],
@@ -126,6 +136,7 @@ function fixture(signedIn = false) {
               slug: "default",
               name: "Default",
               role: "owner",
+              oauthMcpsOnOrchestrators: "on",
               createdAt: "2026-08-03T00:00:00.000Z",
             }
           : null,
@@ -381,16 +392,103 @@ describe("public administrative MCP OAuth and transport", () => {
     const rpc = (await request.json()) as {
       result: { structuredContent: unknown };
     };
-    expect(rpc.result.structuredContent).toEqual({
+    expect(rpc.result.structuredContent).toMatchObject({
+      schema_version: 1,
       workspaces: [
         {
           id: "workspace-1",
           slug: "default",
           name: "Default",
           role: "owner",
+          oauthMcpsOnOrchestrators: "on",
           createdAt: "2026-08-03T00:00:00.000Z",
         },
       ],
     });
+    expect(
+      (rpc.result.structuredContent as { request_id: string }).request_id,
+    ).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("serves built-in guidance resources and the setup prompt", async () => {
+    const { server } = fixture();
+    const headers = {
+      Authorization: "Bearer access-token",
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": "2025-11-25",
+    };
+    const resources = await server.request("/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "resources/list",
+        params: {},
+      }),
+    });
+    expect(resources.status).toBe(200);
+    const resourceRpc = (await resources.json()) as {
+      result: { resources: Array<{ uri: string }> };
+    };
+    expect(resourceRpc.result.resources.map((resource) => resource.uri)).toContain(
+      "x1agent://docs/recipes/agent-setup",
+    );
+
+    const prompt = await server.request("/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompts/get",
+        params: {
+          name: "x1agent.setup_agent",
+          arguments: { goal: "Build a release-notes agent", workspace: "default" },
+        },
+      }),
+    });
+    expect(prompt.status).toBe(200);
+    const promptRpc = (await prompt.json()) as {
+      result: { messages: Array<{ content: { text: string } }> };
+    };
+    expect(promptRpc.result.messages[0]?.content.text).toContain(
+      "Build a release-notes agent",
+    );
+    expect(promptRpc.result.messages[0]?.content.text).toContain(
+      "x1agent://docs/recipes/agent-setup",
+    );
+  });
+
+  test("accepts a least-privilege token and filters tool discovery exactly", async () => {
+    const { server } = fixture();
+    const response = await server.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer agents-token",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "MCP-Protocol-Version": "2025-11-25",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+    expect(response.status).toBe(200);
+    const rpc = (await response.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    expect(rpc.result.tools.map((tool) => tool.name)).toEqual([
+      "agents.list",
+      "agents.get",
+      "agents.context.inspect",
+      "agents.context_files.list",
+      "agents.context_files.get",
+      "agents.validate_configuration",
+    ]);
   });
 });

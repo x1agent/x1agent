@@ -25,4 +25,8 @@ export interface AgentImage {
   lastBuiltAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  sourceKind?: "preset" | "workspace_build" | "external_oci";
+  requestedRef?: string | null;
+  resolvedDigestRef?: string | null;
+  createdBy?: string | null;
 }

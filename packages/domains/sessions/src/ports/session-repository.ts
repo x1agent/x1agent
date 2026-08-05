@@ -29,6 +29,12 @@ export interface CreateSessionInput {
    */
   modelOverride?: string | null;
   runtimeOverride?: RuntimeType | null;
+  validationRun?: boolean;
+  validationTask?: string | null;
+  effectiveRuntimeType?: RuntimeType | null;
+  effectiveModel?: string | null;
+  effectiveImageRef?: string | null;
+  agentConfigurationRevision?: Date | null;
 }
 
 export interface UpdateSessionStatusInput {

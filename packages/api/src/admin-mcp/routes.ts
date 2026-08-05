@@ -4,7 +4,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { SessionTokenizer } from "@x1agent/domain-auth";
 import type {
@@ -14,8 +18,15 @@ import type {
   OAuthTokenSet,
 } from "./oauth-store.js";
 import type { AdminMcpWorkspaceReader } from "./workspace-reader.js";
+import type { AdminMcpControlPlane } from "./control-plane.js";
+import type { AdminMcpOperationStore } from "./operation-store.js";
+import {
+  ADMIN_MCP_SCOPES,
+  AdminMcpTools,
+  DEFAULT_ADMIN_MCP_SCOPE,
+} from "./tools.js";
+import { ADMIN_MCP_GUIDANCE, readGuidance } from "./guidance.js";
 
-const WORKSPACES_READ_SCOPE = "x1.workspaces.read";
 const DCR_BODY_LIMIT_BYTES = 16 * 1024;
 const DCR_WINDOW_MS = 5 * 60 * 1000;
 const DCR_MAX_PER_WINDOW = 20;
@@ -28,6 +39,8 @@ export interface AdminMcpRoutesConfig {
   tokenizer: SessionTokenizer;
   oauth: AdminMcpOAuthStore;
   workspaces: AdminMcpWorkspaceReader;
+  controlPlane?: AdminMcpControlPlane;
+  operationStore?: AdminMcpOperationStore;
   /** Installation kill switch. Keep false unless an operator enables MCP. */
   enabled: boolean;
 }
@@ -142,7 +155,7 @@ async function parseAuthorizationRequest(
   const clientId = values.get("client_id");
   const redirectUri = values.get("redirect_uri");
   const resource = values.get("resource");
-  const requestedScope = values.get("scope") || WORKSPACES_READ_SCOPE;
+  const requestedScope = values.get("scope") || DEFAULT_ADMIN_MCP_SCOPE;
   const scope = [...new Set(requestedScope.split(/\s+/).filter(Boolean))]
     .sort()
     .join(" ");
@@ -162,7 +175,11 @@ async function parseAuthorizationRequest(
     resource.length > 2048 ||
     resource !== cfg.resourceUrl ||
     requestedScope.length > 512 ||
-    scope !== WORKSPACES_READ_SCOPE ||
+    !scope
+      .split(" ")
+      .every((item) =>
+        (ADMIN_MCP_SCOPES as readonly string[]).includes(item),
+      ) ||
     !codeChallenge ||
     !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge) ||
     challengeMethod !== "S256" ||
@@ -184,91 +201,81 @@ function authorizationFields(consentToken: string): string {
   return hidden("consent_token", consentToken);
 }
 
-function toolResult(value: Record<string, unknown>) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
-    structuredContent: value,
-  };
-}
-
 function createMcpServer(
   principal: OAuthPrincipal,
   workspaces: AdminMcpWorkspaceReader,
+  controlPlane?: AdminMcpControlPlane,
+  operationStore?: AdminMcpOperationStore,
 ): Server {
+  const adminTools = new AdminMcpTools(workspaces, controlPlane, operationStore);
   const server = new Server(
-    { name: "x1agent-admin", version: "0.1.0" },
+    { name: "x1agent-admin", version: "0.2.0" },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions:
-        "Use workspaces.list to discover X1Agent workspaces currently enabled for this OAuth identity, then workspaces.get for details. Results always reflect current membership.",
+        "Use workspaces.list before operating on X1Agent resources. Administrative tools act as the authenticated human and re-check current workspace membership, agent permissions, and workspace policy on every call. Never assume an ID belongs to the selected workspace.",
     },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
+    tools: adminTools.list(principal),
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, (request) =>
+    adminTools.call(principal, request.params.name, request.params.arguments),
+  );
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: ADMIN_MCP_GUIDANCE.map((page) => ({
+      uri: page.uri,
+      name: page.uri.replace("x1agent://docs/", ""),
+      title: page.title,
+      description: page.description,
+      mimeType: "text/markdown",
+    })),
+  }));
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const page = readGuidance(request.params.uri);
+    if (!page) throw new Error("documentation resource not found");
+    return {
+      contents: [
+        { uri: page.uri, mimeType: "text/markdown", text: page.text },
+      ],
+    };
+  });
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [
       {
-        name: "workspaces.list",
-        title: "List X1Agent workspaces",
+        name: "x1agent.setup_agent",
+        title: "Set up and validate an X1Agent agent",
         description:
-          "List workspaces that the authenticated user currently belongs to and whose administrators enabled administrative MCP access.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-        },
-      },
-      {
-        name: "workspaces.get",
-        title: "Get an X1Agent workspace",
-        description:
-          "Get one MCP-enabled workspace by slug. Returns not_found when it is absent, disabled, or not visible to the current user.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            slug: { type: "string", description: "Workspace slug" },
-          },
-          required: ["slug"],
-          additionalProperties: false,
-        },
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-        },
+          "Guided discover, configure, validate, test, and inspect workflow.",
+        arguments: [
+          { name: "goal", description: "What the agent should accomplish", required: true },
+          { name: "workspace", description: "Optional preferred workspace slug", required: false },
+        ],
       },
     ],
   }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name === "workspaces.list") {
-      const rows = await workspaces.listForUser(principal.userId);
-      return toolResult({ workspaces: rows });
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    if (request.params.name !== "x1agent.setup_agent") {
+      throw new Error("prompt not found");
     }
-    if (request.params.name === "workspaces.get") {
-      const args = request.params.arguments;
-      const slug =
-        args && typeof args.slug === "string" ? args.slug.trim() : "";
-      if (!slug) {
-        return {
-          content: [{ type: "text", text: "slug is required" }],
-          isError: true,
-        };
-      }
-      const workspace = await workspaces.getForUser(principal.userId, slug);
-      if (!workspace) {
-        return {
-          content: [{ type: "text", text: `workspace not found: ${slug}` }],
-          isError: true,
-        };
-      }
-      return toolResult({ workspace });
-    }
-    throw new Error(`unknown tool: ${request.params.name}`);
+    const args = request.params.arguments ?? {};
+    return {
+      description: "Configure and validate an X1Agent agent safely.",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text:
+              `Goal: ${String(args.goal ?? "")}` +
+              `${args.workspace ? `\nPreferred workspace: ${String(args.workspace)}` : ""}` +
+              "\nFollow x1agent://docs/recipes/agent-setup. Discover dependencies before mutation, use stable idempotency keys, validate configuration, run one bounded validation session, and inspect events, artifacts, and costs.",
+          },
+        },
+      ],
+    };
   });
   return server;
 }
@@ -297,7 +304,7 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
   const metadata = () => ({
     resource: cfg.resourceUrl,
     authorization_servers: [cfg.authorizationServerUrl],
-    scopes_supported: [WORKSPACES_READ_SCOPE],
+    scopes_supported: ADMIN_MCP_SCOPES,
     bearer_methods_supported: ["header"],
   });
 
@@ -322,7 +329,7 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
       grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"],
-      scopes_supported: [WORKSPACES_READ_SCOPE],
+      scopes_supported: ADMIN_MCP_SCOPES,
     });
   });
 
@@ -414,7 +421,7 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
           token_endpoint_auth_method: "none",
           grant_types: ["authorization_code", "refresh_token"],
           response_types: ["code"],
-          scope: WORKSPACES_READ_SCOPE,
+          scope: DEFAULT_ADMIN_MCP_SCOPE,
         },
         201,
       );
@@ -459,7 +466,7 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
 
     return page(
       "X1Agent MCP authorization",
-      `<p>Signed in as ${escapeHtml(String(session.email))}.</p><p>${escapeHtml(request.client.clientName ?? "This MCP client")} requested <code>${WORKSPACES_READ_SCOPE}</code>.</p><p>This permits read-only access to workspaces where you are still a member and an administrator has enabled MCP access.</p><form method="post" action="/oauth/authorize">${authorizationFields(consentToken)}<button class="approve" name="decision" value="approve" type="submit">Authorize</button><button class="deny" name="decision" value="deny" type="submit">Deny</button></form>`,
+      `<p>Signed in as ${escapeHtml(String(session.email))}.</p><p>${escapeHtml(request.client.clientName ?? "This MCP client")} requested <code>${escapeHtml(request.scope)}</code>.</p><p>This permits the listed X1Agent administration capabilities only where you still have matching workspace and resource permissions.</p><form method="post" action="/oauth/authorize">${authorizationFields(consentToken)}<button class="approve" name="decision" value="approve" type="submit">Authorize</button><button class="deny" name="decision" value="deny" type="submit">Deny</button></form>`,
     );
   });
 
@@ -614,11 +621,21 @@ export function createAdminMcpRoutes(cfg: AdminMcpRoutesConfig): Hono {
       match[1]!,
       cfg.resourceUrl,
     );
-    if (!principal || !principal.scopes.includes(WORKSPACES_READ_SCOPE)) {
+    if (
+      !principal ||
+      !principal.scopes.some((scope) =>
+        (ADMIN_MCP_SCOPES as readonly string[]).includes(scope),
+      )
+    ) {
       return unauthorized(c, "invalid_token");
     }
 
-    const server = createMcpServer(principal, cfg.workspaces);
+    const server = createMcpServer(
+      principal,
+      cfg.workspaces,
+      cfg.controlPlane,
+      cfg.operationStore,
+    );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

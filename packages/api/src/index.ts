@@ -33,6 +33,11 @@ import { listAnthropicModels } from "./capabilities/anthropic-models.js";
 import { createAdminMcpRoutes } from "./admin-mcp/routes.js";
 import { PostgresAdminMcpOAuthStore } from "./admin-mcp/oauth-store.js";
 import { PostgresAdminMcpWorkspaceReader } from "./admin-mcp/workspace-reader.js";
+import { DefaultAdminMcpControlPlane } from "./admin-mcp/control-plane.js";
+import { PostgresAdminMcpOperationStore } from "./admin-mcp/operation-store.js";
+import { AdminMcpCollectionControl } from "./admin-mcp/collection-control.js";
+import { AdminMcpContextFileControl } from "./admin-mcp/context-file-control.js";
+import { AdminMcpOciImageControl } from "./admin-mcp/oci-image-control.js";
 
 /**
  * Resolve the deployment-wide default model id for new session pods.
@@ -392,11 +397,20 @@ const {
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
+  githubClient: composedGithubClient,
+  githubInstallations: composedGithubInstallations,
+  imageCatalogService: composedImageCatalogService,
+  previewEnvironments: composedPreviewEnvironments,
+  collectionProviderGateway: composedCollectionProviderGateway,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
   mcpAttachments: composedMcpAttachments,
   mcpCatalog: composedMcpCatalog,
+  mcpAttachmentService: composedMcpAttachmentService,
+  mcpCatalogService: composedMcpCatalogService,
   userTokenService: composedUserTokenService,
+  agentGrants: composedAgentGrants,
+  groups: composedGroups,
   users: composedUsers,
   tickScheduler,
   quietHints: composedQuietHints,
@@ -505,14 +519,72 @@ app.get("/health", (c) => c.json({ ok: true }));
 // it is a remote OAuth-protected resource, not the in-pod x1-mcp sidecar.
 app.route(
   "/",
-  createAdminMcpRoutes({
-    resourceUrl: `${PUBLIC_URL.replace(/\/$/, "")}/mcp`,
-    authorizationServerUrl: API_PUBLIC_URL.replace(/\/$/, ""),
-    tokenizer: composedTokenizer,
-    oauth: new PostgresAdminMcpOAuthStore(composedSql),
-    workspaces: new PostgresAdminMcpWorkspaceReader(composedSql),
-    enabled: process.env.ADMIN_MCP_ENABLED === "true",
-  }),
+  (() => {
+    const workspaces = new PostgresAdminMcpWorkspaceReader(composedSql);
+    const operationStore = new PostgresAdminMcpOperationStore(composedSql);
+    const collectionControl = new AdminMcpCollectionControl(
+      composedSql,
+      composedCollectionProviderGateway,
+    );
+    const contextFiles = new AdminMcpContextFileControl(composedSql);
+    const ociImages = new AdminMcpOciImageControl(
+      composedSql,
+      (process.env.ADMIN_MCP_OCI_REGISTRIES || "ghcr.io,docker.io")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    const collectionProvisionTick = setInterval(() => {
+      void collectionControl.processNext().catch((error: unknown) => {
+        console.error("[admin-mcp] collection provision tick failed", error);
+      });
+    }, 1_000);
+    collectionProvisionTick.unref();
+    const ociValidationTick = setInterval(() => {
+      void ociImages.processNext().catch((error: unknown) => {
+        console.error("[admin-mcp] OCI image validation tick failed", error);
+      });
+    }, 1_000);
+    ociValidationTick.unref();
+    return createAdminMcpRoutes({
+      resourceUrl: `${PUBLIC_URL.replace(/\/$/, "")}/mcp`,
+      authorizationServerUrl: API_PUBLIC_URL.replace(/\/$/, ""),
+      tokenizer: composedTokenizer,
+      oauth: new PostgresAdminMcpOAuthStore(composedSql),
+      workspaces,
+      controlPlane: new DefaultAdminMcpControlPlane({
+        workspaces,
+        agents: composedAgents,
+        agentGrants: composedAgentGrants,
+        groups: composedGroups,
+        memberships: composedMemberships,
+        catalog: composedMcpCatalogService,
+        attachments: composedMcpAttachmentService,
+        attachmentRepository: composedMcpAttachments,
+        installations: composedGithubInstallations,
+        githubClient: composedGithubClient,
+        agentRepos: composedAgentRepos,
+        permissionGrants,
+        operationStore,
+        imageCatalog: composedImageCatalogService,
+        previewEnvironments: composedPreviewEnvironments,
+        collectionControl,
+        collections: composedCollections,
+        sessions: composedSessions,
+        sessionEvents,
+        sessionShares: composedSessionShares,
+        platformAdminGuard: composedPlatformAdminGuard,
+        agentCollaborateResolver: composedAgentCollaborateResolver,
+        tokenUsage: composedTokenUsage,
+        artifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
+        contextFiles,
+        jobTerminator: composedJobTerminator,
+        ociImages,
+      }),
+      operationStore,
+      enabled: process.env.ADMIN_MCP_ENABLED === "true",
+    });
+  })(),
 );
 app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
 app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
