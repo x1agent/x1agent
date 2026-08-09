@@ -1,3 +1,10 @@
+# [1.49.0](https://github.com/x1agent/x1agent/compare/v1.48.0...v1.49.0) (2026-08-09)
+
+
+### Features
+
+* replace ingress-nginx with traefik ([#166](https://github.com/x1agent/x1agent/issues/166)) ([2d0312b](https://github.com/x1agent/x1agent/commit/2d0312b2174fe4b75f032e10a652491b17ff46ff))
+
 # [1.48.0](https://github.com/x1agent/x1agent/compare/v1.47.0...v1.48.0) (2026-08-09)
 
 
