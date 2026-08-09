@@ -1,3 +1,10 @@
+# [1.48.0](https://github.com/x1agent/x1agent/compare/v1.47.0...v1.48.0) (2026-08-09)
+
+
+### Features
+
+* **admin-mcp:** implement full control-plane catalog ([#169](https://github.com/x1agent/x1agent/issues/169)) ([ff6bec4](https://github.com/x1agent/x1agent/commit/ff6bec497fe77f7fe1f2bf4bc161202d82f11891))
+
 # [1.47.0](https://github.com/x1agent/x1agent/compare/v1.46.0...v1.47.0) (2026-08-04)
 
 
