@@ -1,3 +1,10 @@
+## [1.49.1](https://github.com/x1agent/x1agent/compare/v1.49.0...v1.49.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* update patched dependencies ([#165](https://github.com/x1agent/x1agent/issues/165)) ([eabaec9](https://github.com/x1agent/x1agent/commit/eabaec9bfc32e27477664baf05e7355bf002cdb3))
+
 # [1.49.0](https://github.com/x1agent/x1agent/compare/v1.48.0...v1.49.0) (2026-08-09)
 
 
