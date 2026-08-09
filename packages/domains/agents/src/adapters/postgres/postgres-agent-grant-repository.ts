@@ -139,7 +139,12 @@ export class PostgresAgentGrantRepository implements AgentGrantRepository {
     `;
     const set = new Set<AgentVerb>();
     for (const r of rows) {
-      if (r.verb === "view" || r.verb === "invoke" || r.verb === "edit") {
+      if (
+        r.verb === "view" ||
+        r.verb === "invoke" ||
+        r.verb === "collaborate" ||
+        r.verb === "edit"
+      ) {
         set.add(r.verb);
       }
     }

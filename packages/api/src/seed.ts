@@ -104,11 +104,11 @@ export async function seedPlatformPresets() {
     await sql`
       INSERT INTO agent_images
         (workspace_id, name, display_name, description, built_ref,
-         is_preset, dockerfile_source, build_status)
+         is_preset, dockerfile_source, build_status, source_kind)
       VALUES
         (NULL, ${preset.name}, ${preset.display_name},
          ${preset.description}, ${preset.built_ref}, true,
-         ${dockerfileSource}, 'ready')
+         ${dockerfileSource}, 'ready', 'preset')
       ON CONFLICT (name) WHERE workspace_id IS NULL
       DO UPDATE SET
         display_name = EXCLUDED.display_name,
@@ -116,6 +116,7 @@ export async function seedPlatformPresets() {
         built_ref = EXCLUDED.built_ref,
         dockerfile_source = EXCLUDED.dockerfile_source,
         build_status = 'ready',
+        source_kind = 'preset',
         updated_at = now()
     `;
   }

@@ -40,6 +40,22 @@ spec:
     - host: {{ include "x1agent.appHost" . | quote }}
       http:
         paths:
+          # Public administrative MCP: keep the user-facing resource on the
+          # app host while routing its HTTP/OAuth transport to the API.
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+          - path: /.well-known/oauth-protected-resource
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

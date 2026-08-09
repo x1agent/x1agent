@@ -74,6 +74,14 @@ export interface AgentRepository {
 
   listByWorkspace(workspaceId: WorkspaceId): Promise<readonly Agent[]>;
 
+  /** Set-based authorization query for list surfaces such as admin MCP. */
+  listAccessibleByWorkspace(input: {
+    workspaceId: WorkspaceId;
+    userId: UserId;
+    userGroupIds: readonly string[];
+    isWorkspaceAdmin: boolean;
+  }): Promise<readonly Agent[]>;
+
   update(id: AgentId, patch: UpdateAgentInput): Promise<Agent>;
 
   delete(id: AgentId): Promise<void>;

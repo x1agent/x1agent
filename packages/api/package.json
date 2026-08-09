@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.4.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@x1agent/agent-resources": "workspace:*",
     "@x1agent/agent-resources-postgres": "workspace:*",
     "@x1agent/agent-resources-redis": "workspace:*",

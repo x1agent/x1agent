@@ -51,10 +51,13 @@ export interface WorkspaceSettings {
    * runs that hit them. See `OAUTH_MCPS_ON_ORCHESTRATORS_VALUES`.
    */
   oauthMcpsOnOrchestrators: OauthMcpsOnOrchestratorsMode;
+  /** Allow this workspace to appear through the public administrative MCP. */
+  adminMcpEnabled: boolean;
 }
 
 export const WORKSPACE_SETTINGS_DEFAULTS: Readonly<WorkspaceSettings> = {
   oauthMcpsOnOrchestrators: "off",
+  adminMcpEnabled: false,
 };
 
 /**
@@ -62,9 +65,7 @@ export const WORKSPACE_SETTINGS_DEFAULTS: Readonly<WorkspaceSettings> = {
  * fully-populated `WorkspaceSettings`. Unknown keys are ignored.
  * Wrong-typed or unknown-string values fall back to the default.
  */
-export function parseWorkspaceSettings(
-  raw: unknown,
-): WorkspaceSettings {
+export function parseWorkspaceSettings(raw: unknown): WorkspaceSettings {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<
     string,
     unknown
@@ -75,6 +76,10 @@ export function parseWorkspaceSettings(
       typeof mode === "string" && OAUTH_MCPS_ON_ORCHESTRATORS_SET.has(mode)
         ? (mode as OauthMcpsOnOrchestratorsMode)
         : WORKSPACE_SETTINGS_DEFAULTS.oauthMcpsOnOrchestrators,
+    adminMcpEnabled:
+      typeof obj.adminMcpEnabled === "boolean"
+        ? obj.adminMcpEnabled
+        : WORKSPACE_SETTINGS_DEFAULTS.adminMcpEnabled,
   };
 }
 
@@ -98,6 +103,9 @@ export function parseWorkspaceSettingsPatch(
   ) {
     out.oauthMcpsOnOrchestrators =
       obj.oauthMcpsOnOrchestrators as OauthMcpsOnOrchestratorsMode;
+  }
+  if ("adminMcpEnabled" in obj && typeof obj.adminMcpEnabled === "boolean") {
+    out.adminMcpEnabled = obj.adminMcpEnabled;
   }
   return out;
 }

@@ -40,6 +40,9 @@ vars:
   TEST_USER:
     source: env
     default: ""
+  ADMIN_MCP_ENABLED:
+    source: env
+    default: "true"
   GITHUB_APP_ID:
     source: env
     default: ""
@@ -310,6 +313,8 @@ dev:
         value: ${AUTH_BYPASS}
       - name: TEST_USER
         value: ${TEST_USER}
+      - name: ADMIN_MCP_ENABLED
+        value: ${ADMIN_MCP_ENABLED}
       - name: GITHUB_APP_ID
         value: ${GITHUB_APP_ID}
       - name: GITHUB_APP_SLUG

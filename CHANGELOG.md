@@ -1,3 +1,17 @@
+# [1.47.0](https://github.com/x1agent/x1agent/compare/v1.46.0...v1.47.0) (2026-08-04)
+
+
+### Features
+
+* **mise:** add backup restore and k3s operations ([#168](https://github.com/x1agent/x1agent/issues/168)) ([4aca4cc](https://github.com/x1agent/x1agent/commit/4aca4cca31e6b4a6377ee2e0587e3d2ab968bb7c))
+
+# [1.46.0](https://github.com/x1agent/x1agent/compare/v1.45.0...v1.46.0) (2026-08-04)
+
+
+### Features
+
+* **admin-mcp:** add OAuth workspace access ([#167](https://github.com/x1agent/x1agent/issues/167)) ([d82092b](https://github.com/x1agent/x1agent/commit/d82092b9eca47eacb56669bd7b524913f34ab8cd))
+
 # [1.45.0](https://github.com/x1agent/x1agent/compare/v1.44.1...v1.45.0) (2026-08-03)
 
 

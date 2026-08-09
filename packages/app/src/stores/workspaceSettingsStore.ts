@@ -13,6 +13,7 @@ export type OauthMcpsOnOrchestratorsMode = "off" | "on_attended" | "on";
 
 export interface WorkspaceSettings {
   oauthMcpsOnOrchestrators: OauthMcpsOnOrchestratorsMode;
+  adminMcpEnabled: boolean;
 }
 
 export interface Workspace {

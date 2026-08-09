@@ -160,6 +160,29 @@ description = "helm uninstall x1agent from the active deployment (type-to-confir
 env = { KUBECONFIG = "" }
 run = "cd packages/cli && bun run src/index.ts install:destroy"
 
+[tasks."install:prod:destroy-cluster"]
+description = "Delete only the active deployment's GKE cluster and node pools (type-to-confirm)"
+env = { KUBECONFIG = "" }
+run = "deploy/scripts/destroy-prod-cluster.sh"
+
+[tasks."install:local:k3s"]
+description = "Install the local x1agent stack into an existing k3s cluster"
+run = "deploy/scripts/install-local-k3s.sh"
+
+[tasks."install:local:surrealdb"]
+description = "Add SurrealDB graph/vector storage to an existing local k3s install without rebuilding the app stack"
+run = "deploy/scripts/install-local-surrealdb.sh"
+
+[tasks."install:prod:backup"]
+description = "Back up every PostgreSQL database and every SurrealDB database for one explicit deployment"
+env = { KUBECONFIG = "" }
+run = "deploy/scripts/backup-prod.sh"
+
+[tasks."install:prod:restore"]
+description = "Restore one explicit deployment from a timestamped backup (confirmation required)"
+env = { KUBECONFIG = "" }
+run = "deploy/scripts/restore-prod.sh {{arg(name='args', var=true, default='')}}"
+
 # Subsequent ships against an already-installed deployment. Use this
 # (not `install:prod`) once `install:prod` has run at least once.
 # Pass --yes for unattended runs (CI), --tag <sha> to deploy a specific
@@ -408,6 +431,10 @@ run = "cd docs && npm run preview"
 # packages/api/src/seed.ts also needs an entry so the agent_images row
 # is populated on next api boot.
 # ----------------------------------------------------------------------------
+[tasks.images]
+description = "Build + push the local runtime and language images, including Codex"
+run = "mise run images:publish"
+
 [tasks."images:publish"]
 description = "Build + push runtime-core and every language preset to the in-cluster registry"
 run = """
@@ -440,6 +467,18 @@ docker buildx build \\
   .
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:v1"
 docker push "${REGISTRY_LOCAL}/x1agent/runtime-core:latest"
+
+echo "[images] building runtime-codex:v1"
+docker buildx build \\
+  --platform "${PLATFORM}" \\
+  -t x1agent/runtime-codex:v1 \\
+  -t "${REGISTRY_LOCAL}/x1agent/runtime-codex:v1" \\
+  -t "${REGISTRY_LOCAL}/x1agent/runtime-codex:latest" \\
+  -f packages/agent-codex/Dockerfile \\
+  --load \\
+  .
+docker push "${REGISTRY_LOCAL}/x1agent/runtime-codex:v1"
+docker push "${REGISTRY_LOCAL}/x1agent/runtime-codex:latest"
 
 for P in $PRESETS; do
   if [ ! -f "deploy/images/$P/Dockerfile" ]; then
