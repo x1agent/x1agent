@@ -380,7 +380,7 @@ export function buildIngress(inputs: PreviewDeploymentInputs): V1Ingress {
   }));
 
   const annotations: Record<string, string> = {
-    "nginx.ingress.kubernetes.io/ssl-redirect": "true",
+    "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
   };
   // When aliases are present, tell cert-manager's ingress-shim to
   // mint a Certificate for each non-wildcard TLS entry's secretName.
@@ -399,7 +399,7 @@ export function buildIngress(inputs: PreviewDeploymentInputs): V1Ingress {
       annotations,
     },
     spec: {
-      ingressClassName: "nginx",
+      ingressClassName: "traefik",
       tls,
       rules,
     },

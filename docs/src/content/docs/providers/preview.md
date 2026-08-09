@@ -123,8 +123,8 @@ graph TB
       deployments["Deployments<br/>+ Services<br/>+ Ingress"]
       db["Test DB<br/>(emptyDir tmpfs)"]
     end
-    subgraph ingress_ns["ingress-nginx"]
-      ingress["ingress-nginx"]
+    subgraph ingress_ns["traefik"]
+      ingress["Traefik"]
     end
 
     agent -->|sidecar API| sidecar

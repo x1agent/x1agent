@@ -30,7 +30,7 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
     server: {
-      // Served through ingress-nginx at https://app.local.x1agent.dev in
+      // Served through Traefik at https://app.local.x1agent.dev in
       // dev. Vite's host-check (CVE-2025-30208) rejects any Host header
       // it doesn't know, so allowlist the dev-subdomain tree + localhost.
       allowedHosts: [".local.x1agent.dev", "localhost"],

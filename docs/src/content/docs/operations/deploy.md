@@ -151,7 +151,7 @@ Two paths:
 
 - No Terraform changes. Run `mise run install:prod` for those (or `mise run plan:prod` first to see what would change).
 - No GSM rotation. Run `mise run install:prod` (or update GSM out of band).
-- No operator-chart upgrades (ESO, cert-manager, ingress-nginx). Those
+- No operator-chart upgrades (ESO, cert-manager, Traefik). Those
   upgrade independently with `helm upgrade <name>` in their own namespaces.
 
 These are intentional: `deploy:prod` should be safe to run from CI on every

@@ -21,7 +21,7 @@ An orchestrator agent for a small product — let's call it **hirer.co** — own
 - **API** — the Hono service. Owns the `sessions` and `session_events` tables, job watcher, credential minting, the internal routes MCP tools call.
 - **Job watcher** — a loop inside the API that polls pending sessions and creates Kubernetes Jobs for them.
 - **In-cluster registry** — `registry:2` running inside the cluster, holds images built from preview branches.
-- **ingress-nginx** — routes `*.preview.example.dev` traffic to the right Service.
+- **Traefik** — routes `*.preview.example.dev` traffic to the right Service.
 
 ## The arc
 
@@ -36,7 +36,7 @@ sequenceDiagram
     participant S as Sidecar
     participant GH as GitHub
     participant R as In-cluster registry
-    participant IN as ingress-nginx
+    participant IN as Traefik
 
     U->>O: start session
     Note over O: read own repo (charter,<br/>roadmap, prior sessions)
@@ -137,8 +137,8 @@ The orchestrator verifies the branch exists on origin, then triggers a preview d
 
 The ingress terminates TLS using a mkcert-signed wildcard cert for the preview domain. Traffic arrives via two paths:
 
-- **From a browser:** public DNS resolves `*.preview.example.dev` to `127.0.0.1`, which OrbStack (in dev) or the cloud load balancer (in prod) routes to ingress-nginx.
-- **From inside the cluster:** CoreDNS rewrites `*.preview.example.dev` to `ingress-nginx-controller.ingress-nginx.svc.cluster.local`, hitting the same ingress.
+- **From a browser:** public DNS resolves `*.preview.example.dev` to `127.0.0.1`, which OrbStack (in dev) or the cloud load balancer (in prod) routes to Traefik.
+- **From inside the cluster:** CoreDNS rewrites `*.preview.example.dev` to `traefik.traefik.svc.cluster.local`, hitting the same ingress.
 
 Same URL, two routes, same destination. No dev/prod URL drift.
 

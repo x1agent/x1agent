@@ -1,7 +1,7 @@
 # Static IP for the x1agent Ingress + DNS records pointing at it.
 #
 # Regional Network LB IP (not global HTTP(S) LB) — the chart uses
-# ingress-nginx, whose Service is a regional LoadBalancer. ingress-nginx
+# Traefik, whose Service is a regional LoadBalancer. Traefik
 # claims this IP via `controller.service.loadBalancerIP=<ip>` at install.
 #
 # DNS strategy: by default we create a Cloud DNS managed zone for the
@@ -12,7 +12,7 @@
 
 resource "google_compute_address" "ingress" {
   name         = "x1agent-ingress"
-  description  = "Static IP fronting the x1agent ingress-nginx LB."
+  description  = "Static IP fronting the x1agent Traefik LB."
   region       = var.region
   address_type = "EXTERNAL"
 

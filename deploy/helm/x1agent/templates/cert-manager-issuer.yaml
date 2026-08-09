@@ -101,7 +101,7 @@ spec:
     solvers:
       {{- include "x1agent.acmeSolvers" $solverArgs | nindent 6 }}
 ---
-# NOTE: explicit Certificate for app+api removed. ingress-nginx's
+# NOTE: explicit Certificate for app+api removed. cert-manager's
 # cert-manager.io/cluster-issuer annotation on the Ingress causes
 # cert-manager's ingress-shim to auto-create a Certificate named
 # `<Ingress's tls.secretName>` (i.e. `x1agent-app-api-tls`). Having both

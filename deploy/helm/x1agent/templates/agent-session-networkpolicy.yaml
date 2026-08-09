@@ -36,7 +36,7 @@
 # stay in sync with that label set — the same constraint the
 # nats-networkpolicy comments call out.
 #
-# NetworkPolicy requires an enforcing CNI. ingress-nginx + GKE's
+# NetworkPolicy requires an enforcing CNI. Traefik + GKE's
 # default CNI enforce it; OrbStack's kindnet does not, so locally this
 # is a no-op (the loopback bind is the live defense).
 apiVersion: networking.k8s.io/v1

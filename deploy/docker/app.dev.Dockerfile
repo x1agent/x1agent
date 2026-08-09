@@ -4,7 +4,7 @@
 # only provides the runtime + the workspace lockfile + installed deps.
 #
 # The app runs in the cluster (not on the host) so it can be reached
-# through ingress-nginx at https://app.local.x1agent.dev, sharing the
+# through Traefik at https://app.local.x1agent.dev, sharing the
 # cookie domain with the api.
 #
 # Base image choice mirrors app.prod.Dockerfile's `builder` stage:

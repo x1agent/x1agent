@@ -17,7 +17,7 @@ The raw manifests under `deploy/k8s/dev/` are for local OrbStack only.
 ## Prerequisites
 
 - **GKE** standard cluster (1.28+). EKS / AKS / on-prem are not supported in v1.
-- **ingress-nginx** as the ingress controller (the chart's Ingress resources reference `ingressClassName: nginx` by default — see `ingress.className` in [helm-values](/configuration/helm-values)).
+- **Traefik** as the ingress controller (the chart's Ingress resources reference `ingressClassName: traefik` by default — see `ingress.className` in [helm-values](/configuration/helm-values)).
 - **cert-manager** for TLS — the chart provisions Let's Encrypt `ClusterIssuer`s using the DNS-01 challenge against Cloud DNS.
 - **External Secrets Operator** — the chart's secret bindings rely on a `ClusterSecretStore` named `x1agent-gsm` (created by the Terraform module's second-pass apply).
 - **Postgres** — in-cluster by default (`infra.postgres.enabled: true`).

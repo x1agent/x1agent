@@ -22,4 +22,4 @@ metadata:
   namespace: kube-system
 data:
   x1agent-dev.override: |
-    rewrite name regex (.*)\.preview\.local\.x1agent\.dev ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+    rewrite name regex (.*)\.preview\.local\.x1agent\.dev traefik.traefik.svc.cluster.local answer auto
