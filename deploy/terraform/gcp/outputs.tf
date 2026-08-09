@@ -19,12 +19,12 @@ output "cluster_endpoint" {
 
 output "ingress_static_ip" {
   value       = google_compute_address.ingress.address
-  description = "Regional static IP fronting x1agent's ingress-nginx LB. Point app.<base> + api.<base> + *.preview.<base> at this when create_dns_zone=false."
+  description = "Regional static IP fronting x1agent's Traefik LB. Point app.<base> + api.<base> + *.preview.<base> at this when create_dns_zone=false."
 }
 
 output "ingress_static_ip_name" {
   value       = google_compute_address.ingress.name
-  description = "Name of the static IP — used by ingress-nginx via controller.service.loadBalancerIP at install."
+  description = "Name of the static IP — used by Traefik via service.spec.loadBalancerIP at install."
 }
 
 output "dns_nameservers" {
@@ -77,7 +77,7 @@ output "next_steps" {
     terraform apply complete. The orchestrator (`mise run install`) handles
     the remaining install phases automatically:
       - cluster credentials
-      - operator helm installs (ESO, cert-manager, ingress-nginx)
+      - operator helm installs (ESO, cert-manager, Traefik)
       - Workload Identity annotations
       - second terraform apply (ClusterSecretStore + ClusterIssuer)
       - GSM secret population

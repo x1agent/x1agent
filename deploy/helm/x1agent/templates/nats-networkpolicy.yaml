@@ -25,7 +25,7 @@
 # Deployment uses that component label regardless of which domain
 # (messaging, files, graph, etc.) it implements.
 #
-# NetworkPolicy requires a CNI that enforces it. ingress-nginx + the
+# NetworkPolicy requires a CNI that enforces it. Traefik + the
 # default GKE network plugin both do; OrbStack's kindnet does not, so
 # this policy is effectively a no-op locally. The chart still renders
 # it everywhere so prod gets the protection.

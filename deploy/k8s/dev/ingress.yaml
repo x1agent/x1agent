@@ -3,7 +3,7 @@
 # the api/app/preview manifests embed in their env vars.
 #
 # DNS: *.local.x1agent.dev resolves to 127.0.0.1 (public DNS). OrbStack
-# binds ingress-nginx's LoadBalancer Service to localhost ports 80/443,
+# binds Traefik's LoadBalancer Service to localhost ports 80/443,
 # so the browser hits the controller directly.
 #
 # TLS: cert-manager (see cert-manager.yaml) auto-creates the secret
@@ -41,9 +41,9 @@ metadata:
   name: x1agent-dev
   namespace: x1agent
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
 spec:
-  ingressClassName: nginx
+  ingressClassName: traefik
   tls:
     - hosts:
         - app.local.x1agent.dev
