@@ -68,6 +68,12 @@ export interface Session {
   modelOverride: string | null;
   /** Runtime selected for this session; null means the agent default. */
   runtimeOverride?: RuntimeType | null;
+  validationRun?: boolean;
+  validationTask?: string | null;
+  effectiveRuntimeType?: RuntimeType | null;
+  effectiveModel?: string | null;
+  effectiveImageRef?: string | null;
+  agentConfigurationRevision?: Date | null;
 }
 
 export class SessionNotFoundError extends DomainError {

@@ -53,6 +53,22 @@ spec:
     - host: app.local.x1agent.dev
       http:
         paths:
+          # The public administrative MCP is served by the API but uses the
+          # app hostname as its stable canonical resource URL.
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001
+          - path: /.well-known/oauth-protected-resource
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001
           - path: /
             pathType: Prefix
             backend:

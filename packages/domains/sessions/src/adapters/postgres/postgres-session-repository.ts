@@ -36,6 +36,12 @@ interface Row {
   summary_event_seq: number | string | null;
   model_override: string | null;
   runtime_override: string | null;
+  validation_run: boolean;
+  validation_task: string | null;
+  effective_runtime_type: string | null;
+  effective_model: string | null;
+  effective_image_ref: string | null;
+  agent_configuration_revision: Date | string | null;
 }
 
 function toSession(r: Row): Session {
@@ -66,6 +72,16 @@ function toSession(r: Row): Session {
         : Number(r.summary_event_seq),
     modelOverride: r.model_override,
     runtimeOverride: r.runtime_override ? RuntimeType(r.runtime_override) : null,
+    validationRun: r.validation_run,
+    validationTask: r.validation_task,
+    effectiveRuntimeType: r.effective_runtime_type
+      ? RuntimeType(r.effective_runtime_type)
+      : null,
+    effectiveModel: r.effective_model,
+    effectiveImageRef: r.effective_image_ref,
+    agentConfigurationRevision: r.agent_configuration_revision
+      ? new Date(r.agent_configuration_revision)
+      : null,
   };
 }
 
@@ -74,7 +90,9 @@ const SELECT = `
   parent_session_id, parent_agent_id, resumed_from,
   triggered_at, status, completed_at, error_message, created_at,
   summary, summary_updated_at, summary_event_seq,
-  model_override, runtime_override
+  model_override, runtime_override, validation_run, validation_task,
+  effective_runtime_type, effective_model, effective_image_ref,
+  agent_configuration_revision
 `;
 
 function isUniqueViolation(err: unknown): boolean {
@@ -95,14 +113,20 @@ export class PostgresSessionRepository implements SessionRepository {
         INSERT INTO sessions
           (agent_id, triggered_by, triggered_by_user_id,
            parent_session_id, parent_agent_id, resumed_from,
-           triggered_at, model_override, runtime_override)
+           triggered_at, model_override, runtime_override,
+           validation_run, validation_task, effective_runtime_type,
+           effective_model, effective_image_ref, agent_configuration_revision)
         VALUES
           (${input.agentId}, ${input.triggeredBy},
            ${input.triggeredByUserId},
            ${input.parentSessionId}, ${input.parentAgentId},
            ${input.resumedFromSessionId},
            ${input.triggeredAt},
-           ${input.modelOverride ?? null}, ${input.runtimeOverride ?? null})
+           ${input.modelOverride ?? null}, ${input.runtimeOverride ?? null},
+           ${input.validationRun ?? false}, ${input.validationTask ?? null},
+           ${input.effectiveRuntimeType ?? null}, ${input.effectiveModel ?? null},
+           ${input.effectiveImageRef ?? null},
+           ${input.agentConfigurationRevision ?? null})
         RETURNING ${this.sql.unsafe(SELECT)}
       `;
       return toSession(rows[0]!);

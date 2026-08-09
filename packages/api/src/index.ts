@@ -30,6 +30,14 @@ import {
 import { startImageBuilder } from "./image-catalog/builder.js";
 import { capabilitiesRoutes } from "./capabilities/routes.js";
 import { listAnthropicModels } from "./capabilities/anthropic-models.js";
+import { createAdminMcpRoutes } from "./admin-mcp/routes.js";
+import { PostgresAdminMcpOAuthStore } from "./admin-mcp/oauth-store.js";
+import { PostgresAdminMcpWorkspaceReader } from "./admin-mcp/workspace-reader.js";
+import { DefaultAdminMcpControlPlane } from "./admin-mcp/control-plane.js";
+import { PostgresAdminMcpOperationStore } from "./admin-mcp/operation-store.js";
+import { AdminMcpCollectionControl } from "./admin-mcp/collection-control.js";
+import { AdminMcpContextFileControl } from "./admin-mcp/context-file-control.js";
+import { AdminMcpOciImageControl } from "./admin-mcp/oci-image-control.js";
 
 /**
  * Resolve the deployment-wide default model id for new session pods.
@@ -199,10 +207,7 @@ if (g.__x1agentCleanups) {
     try {
       await fn();
     } catch (err) {
-      console.warn(
-        "[hot-reload] cleanup failed:",
-        (err as Error).message,
-      );
+      console.warn("[hot-reload] cleanup failed:", (err as Error).message);
     }
   }
 }
@@ -285,7 +290,9 @@ function deriveReservedDomains(): readonly string[] {
   // dev (the alias feature isn't usable from outside the host anyway)
   // — flag in logs so an operator who left a localhost URL in prod
   // notices.
-  const onlyLocalhost = list.every((h) => h === "localhost" || h === "127.0.0.1");
+  const onlyLocalhost = list.every(
+    (h) => h === "localhost" || h === "127.0.0.1",
+  );
   if (onlyLocalhost) {
     console.warn(
       "[security] reservedDomains=[localhost…] — preview-environment alias gate is effectively open. " +
@@ -303,8 +310,9 @@ const providerNatsUrl = process.env.NATS_URL || "";
 let providerNats: import("nats").NatsConnection | undefined;
 if (providerNatsUrl && process.env.NATS_DISABLED !== "true") {
   try {
-    providerNats = await (await import("./composition/nats-provider-gateway.js"))
-      .connectNats(providerNatsUrl);
+    providerNats = await (
+      await import("./composition/nats-provider-gateway.js")
+    ).connectNats(providerNatsUrl);
     console.log(`[providers] NATS for provider gateway: ${providerNatsUrl}`);
   } catch (err) {
     console.warn(
@@ -389,11 +397,20 @@ const {
   tokenizer: composedTokenizer,
   shareComments: composedShareComments,
   agentRepoStore: composedAgentRepos,
+  githubClient: composedGithubClient,
+  githubInstallations: composedGithubInstallations,
+  imageCatalogService: composedImageCatalogService,
+  previewEnvironments: composedPreviewEnvironments,
+  collectionProviderGateway: composedCollectionProviderGateway,
   agentEnvBindings: composedAgentEnvBindings,
   workspaceSecrets: composedWorkspaceSecrets,
   mcpAttachments: composedMcpAttachments,
   mcpCatalog: composedMcpCatalog,
+  mcpAttachmentService: composedMcpAttachmentService,
+  mcpCatalogService: composedMcpCatalogService,
   userTokenService: composedUserTokenService,
+  agentGrants: composedAgentGrants,
+  groups: composedGroups,
   users: composedUsers,
   tickScheduler,
   quietHints: composedQuietHints,
@@ -498,6 +515,77 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+// Public administrative MCP. This is intentionally mounted before API routes:
+// it is a remote OAuth-protected resource, not the in-pod x1-mcp sidecar.
+app.route(
+  "/",
+  (() => {
+    const workspaces = new PostgresAdminMcpWorkspaceReader(composedSql);
+    const operationStore = new PostgresAdminMcpOperationStore(composedSql);
+    const collectionControl = new AdminMcpCollectionControl(
+      composedSql,
+      composedCollectionProviderGateway,
+    );
+    const contextFiles = new AdminMcpContextFileControl(composedSql);
+    const ociImages = new AdminMcpOciImageControl(
+      composedSql,
+      (process.env.ADMIN_MCP_OCI_REGISTRIES || "ghcr.io,docker.io")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    const collectionProvisionTick = setInterval(() => {
+      void collectionControl.processNext().catch((error: unknown) => {
+        console.error("[admin-mcp] collection provision tick failed", error);
+      });
+    }, 1_000);
+    collectionProvisionTick.unref();
+    const ociValidationTick = setInterval(() => {
+      void ociImages.processNext().catch((error: unknown) => {
+        console.error("[admin-mcp] OCI image validation tick failed", error);
+      });
+    }, 1_000);
+    ociValidationTick.unref();
+    return createAdminMcpRoutes({
+      resourceUrl: `${PUBLIC_URL.replace(/\/$/, "")}/mcp`,
+      authorizationServerUrl: API_PUBLIC_URL.replace(/\/$/, ""),
+      tokenizer: composedTokenizer,
+      oauth: new PostgresAdminMcpOAuthStore(composedSql),
+      workspaces,
+      controlPlane: new DefaultAdminMcpControlPlane({
+        workspaces,
+        agents: composedAgents,
+        agentGrants: composedAgentGrants,
+        groups: composedGroups,
+        memberships: composedMemberships,
+        catalog: composedMcpCatalogService,
+        attachments: composedMcpAttachmentService,
+        attachmentRepository: composedMcpAttachments,
+        installations: composedGithubInstallations,
+        githubClient: composedGithubClient,
+        agentRepos: composedAgentRepos,
+        permissionGrants,
+        operationStore,
+        imageCatalog: composedImageCatalogService,
+        previewEnvironments: composedPreviewEnvironments,
+        collectionControl,
+        collections: composedCollections,
+        sessions: composedSessions,
+        sessionEvents,
+        sessionShares: composedSessionShares,
+        platformAdminGuard: composedPlatformAdminGuard,
+        agentCollaborateResolver: composedAgentCollaborateResolver,
+        tokenUsage: composedTokenUsage,
+        artifactsBucket: process.env.GCS_ARTIFACTS_BUCKET || undefined,
+        contextFiles,
+        jobTerminator: composedJobTerminator,
+        ociImages,
+      }),
+      operationStore,
+      enabled: process.env.ADMIN_MCP_ENABLED === "true",
+    });
+  })(),
+);
 app.route("/api/capabilities", capabilitiesRoutes({ sql: getSql() }));
 app.route("/api/admin/anthropic/models", adminAnthropicModelsRoutes);
 app.route("/api/admin/workspaces", adminWorkspacesRoutes);
@@ -598,10 +686,7 @@ app.route(
   "/api/workspaces/:slug/shared-agent-resources",
   sharedAgentResourcesRoutes,
 );
-app.route(
-  "/api/workspaces/:slug/agent-images",
-  workspaceImageCatalogRoutes,
-);
+app.route("/api/workspaces/:slug/agent-images", workspaceImageCatalogRoutes);
 app.route("/api/workspaces/:slug/members", workspaceMembersRoutes);
 app.route("/api/installations", installationApiRoutes);
 app.route("/api/internal", internalRoutes);
@@ -663,7 +748,8 @@ if (!reaperDisabled) {
     runOnStart: true,
     fn: async () => {
       const n = await permissionGrants.reapDanglingSessionGrants();
-      if (n > 0) console.log(`[grants-reaper] reaped ${n} dangling session grants`);
+      if (n > 0)
+        console.log(`[grants-reaper] reaped ${n} dangling session grants`);
     },
   });
   console.log(`[grants-reaper] registered (interval=${REAPER_INTERVAL_MS}ms)`);
@@ -677,8 +763,7 @@ if (!reaperDisabled) {
 const UPLOADS_CLEANUP_INTERVAL_MS = Number(
   process.env.UPLOADS_CLEANUP_INTERVAL_MS || 60 * 60 * 1000,
 );
-const uploadsCleanupDisabled =
-  process.env.UPLOADS_CLEANUP_DISABLED === "true";
+const uploadsCleanupDisabled = process.env.UPLOADS_CLEANUP_DISABLED === "true";
 if (!uploadsCleanupDisabled) {
   scheduler.register({
     name: "uploads-cleanup",
@@ -687,7 +772,12 @@ if (!uploadsCleanupDisabled) {
     runOnStart: true,
     fn: async () => {
       const r = await tickUploadsCleanup();
-      if (r.expired > 0 || r.objectsDeleted > 0 || r.hardDeleted > 0 || r.errors > 0) {
+      if (
+        r.expired > 0 ||
+        r.objectsDeleted > 0 ||
+        r.hardDeleted > 0 ||
+        r.errors > 0
+      ) {
         console.log(
           `[uploads-cleanup] expired=${r.expired} objects_deleted=${r.objectsDeleted} hard_deleted=${r.hardDeleted} errors=${r.errors}`,
         );
@@ -772,7 +862,8 @@ if (natsUrl && process.env.NATS_DISABLED !== "true") {
         // a GSA with roles/artifactregistry.writer. Defaults to
         // x1agent-preview-build, which the chart already provisions
         // when previews are enabled (same writer permission).
-        buildServiceAccount: process.env.IMAGE_BUILD_SERVICE_ACCOUNT || undefined,
+        buildServiceAccount:
+          process.env.IMAGE_BUILD_SERVICE_ACCOUNT || undefined,
       });
       registerCleanup(() => handle.stop());
     } catch (err) {
@@ -908,10 +999,8 @@ if (process.env.JOB_WATCHER !== "disabled") {
         ? undefined
         : process.env.OPENAI_API_KEY,
       openaiModel: process.env.OPENAI_MODEL || undefined,
-      sessionServiceAccount:
-        process.env.SESSION_SERVICE_ACCOUNT || undefined,
-      natsClientTlsSecret:
-        process.env.SESSION_NATS_TLS_SECRET || undefined,
+      sessionServiceAccount: process.env.SESSION_SERVICE_ACCOUNT || undefined,
+      natsClientTlsSecret: process.env.SESSION_NATS_TLS_SECRET || undefined,
       intervalMs: Number(process.env.JOB_WATCHER_INTERVAL_MS || 5000),
       sharedResources: composedSharedResources,
       sessionEvents,
@@ -934,11 +1023,14 @@ if (process.env.JOB_WATCHER !== "disabled") {
       redisBranches: composedRedisBranches,
       wakePublisher: providerNats
         ? async (session, terminalStatus, completedAt, errorMessage) => {
-            const { publishStateChangeWake } = await import(
-              "./orchestration/wake-publisher.js"
-            );
+            const { publishStateChangeWake } =
+              await import("./orchestration/wake-publisher.js");
             await publishStateChangeWake(
-              { nc: providerNats!, sessions: composedSessions, agents: composedAgents },
+              {
+                nc: providerNats!,
+                sessions: composedSessions,
+                agents: composedAgents,
+              },
               session,
               terminalStatus,
               completedAt,
@@ -971,9 +1063,7 @@ const SESSION_RECONCILE_GRACE_MS = Number(
   process.env.SESSION_RECONCILE_GRACE_MS || 120_000,
 );
 if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
-  const { reconcileSessionStatuses } = await import(
-    "@x1agent/domain-sessions"
-  );
+  const { reconcileSessionStatuses } = await import("@x1agent/domain-sessions");
   const { sessionJobName } = await import("./k8s/pod-spec.js");
   const { systemClock } = await import("@x1agent/kernel");
   const batchApi = sharedKubeConfig.makeApiClient(k8s.BatchV1Api);
@@ -995,8 +1085,9 @@ if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
             });
             return true;
           } catch (err) {
-            const status = (err as { code?: number; statusCode?: number }).code
-              ?? (err as { statusCode?: number }).statusCode;
+            const status =
+              (err as { code?: number; statusCode?: number }).code ??
+              (err as { statusCode?: number }).statusCode;
             if (status === 404) return false;
             // Anything else (5xx, network) → throw so the tick
             // counts it as an error and leaves the row alone.
@@ -1005,9 +1096,8 @@ if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
         },
         notify: async (session, completedAt, errorMessage) => {
           if (!providerNats) return;
-          const { publishStateChangeWake } = await import(
-            "./orchestration/wake-publisher.js"
-          );
+          const { publishStateChangeWake } =
+            await import("./orchestration/wake-publisher.js");
           await publishStateChangeWake(
             {
               nc: providerNats,
@@ -1039,13 +1129,9 @@ if (sharedKubeConfig && process.env.SESSION_RECONCILE_DISABLED !== "true") {
 // past the backoff threshold. Requires NATS to publish wakes;
 // no-op if NATS isn't configured. See
 // docs/architecture/orchestration.md § Server-driven wakes.
-if (
-  providerNats &&
-  process.env.ACTIVITY_WATCHDOG !== "disabled"
-) {
-  const { startActivityWatchdog } = await import(
-    "./orchestration/activity-watchdog.js"
-  );
+if (providerNats && process.env.ACTIVITY_WATCHDOG !== "disabled") {
+  const { startActivityWatchdog } =
+    await import("./orchestration/activity-watchdog.js");
   const watchdog = startActivityWatchdog({
     sql: composedSql,
     agents: composedAgents,
@@ -1062,9 +1148,8 @@ if (
 // parent at 5 min); the reaper is the hard termination after that.
 // Default 30 min silence; configurable via env.
 if (process.env.SILENT_WORKER_REAPER !== "disabled") {
-  const { startSilentWorkerReaper } = await import(
-    "./orchestration/silent-worker-reaper.js"
-  );
+  const { startSilentWorkerReaper } =
+    await import("./orchestration/silent-worker-reaper.js");
   const reaper = startSilentWorkerReaper({
     sql: composedSql,
     agents: composedAgents,
@@ -1072,9 +1157,7 @@ if (process.env.SILENT_WORKER_REAPER !== "disabled") {
     events: sessionEvents,
     jobs: composedJobTerminator,
     quietHints: composedQuietHints,
-    intervalMs: Number(
-      process.env.SILENT_WORKER_REAPER_INTERVAL_MS || 120_000,
-    ),
+    intervalMs: Number(process.env.SILENT_WORKER_REAPER_INTERVAL_MS || 120_000),
     silenceThresholdMs: Number(
       process.env.SILENT_WORKER_REAPER_THRESHOLD_MS || 30 * 60_000,
     ),
@@ -1089,17 +1172,14 @@ if (process.env.SILENT_WORKER_REAPER !== "disabled") {
 // events normally. See docs/architecture/orchestration.md §
 // Server-driven wakes.
 if (providerNats && process.env.CHECKUP_TIMER !== "disabled") {
-  const { startCheckupTimer } = await import(
-    "./orchestration/checkup-timer.js"
-  );
+  const { startCheckupTimer } =
+    await import("./orchestration/checkup-timer.js");
   const checkup = startCheckupTimer({
     sql: composedSql,
     agents: composedAgents,
     nc: providerNats,
     intervalMs: Number(process.env.CHECKUP_TIMER_SWEEP_MS || 60_000),
-    checkupCadenceMs: Number(
-      process.env.CHECKUP_CADENCE_MS || 15 * 60_000,
-    ),
+    checkupCadenceMs: Number(process.env.CHECKUP_CADENCE_MS || 15 * 60_000),
   });
   registerCleanup(() => checkup.stop());
 }
@@ -1118,9 +1198,9 @@ console.log(`[api] listening on :${PORT}`);
 // When NATS is disabled or unreachable at boot, we still want the
 // HTTP surface to come up — so `wsBridge` may be null and any
 // /api/ws upgrade attempt returns 503 from the fetch wrapper.
-let wsBridge:
-  | ReturnType<typeof import("./ws-bridge/index.js").buildWsBridge>
-  | null = null;
+let wsBridge: ReturnType<
+  typeof import("./ws-bridge/index.js").buildWsBridge
+> | null = null;
 if (providerNats) {
   const { buildWsBridge } = await import("./ws-bridge/index.js");
   wsBridge = buildWsBridge({
@@ -1162,23 +1242,16 @@ export default {
   },
   websocket: {
     open(ws: import("bun").ServerWebSocket<unknown>) {
-      wsBridge?.websocket.open(
-        ws as import("bun").ServerWebSocket<never>,
-      );
+      wsBridge?.websocket.open(ws as import("bun").ServerWebSocket<never>);
     },
-    message(
-      ws: import("bun").ServerWebSocket<unknown>,
-      data: string | Buffer,
-    ) {
+    message(ws: import("bun").ServerWebSocket<unknown>, data: string | Buffer) {
       void wsBridge?.websocket.message(
         ws as import("bun").ServerWebSocket<never>,
         data,
       );
     },
     close(ws: import("bun").ServerWebSocket<unknown>) {
-      wsBridge?.websocket.close(
-        ws as import("bun").ServerWebSocket<never>,
-      );
+      wsBridge?.websocket.close(ws as import("bun").ServerWebSocket<never>);
     },
   },
 };

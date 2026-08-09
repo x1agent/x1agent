@@ -125,9 +125,12 @@ images:
 
 api:
   replicas: 1
+  # Public administrative MCP is opt-in at the installation layer. Each
+  # workspace must also enable its own adminMcpEnabled setting.
+  adminMcpEnabled: false
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1,    memory: 1Gi }
+    limits: { cpu: 1, memory: 1Gi }
   serviceAccountName: x1agent-api
   port: 30001
   # Wave 1 of rfcs/jetstream-migration.md, now the default. Durable
@@ -156,8 +159,8 @@ api:
 app:
   replicas: 1
   resources:
-    requests: { cpu: 50m,  memory: 128Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
   port: 4322
 
 # ============================================================================
@@ -354,13 +357,13 @@ providers:
       pullPolicy: Always
     replicas: 1
     resources:
-      requests: { cpu: 50m,  memory: 128Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
     # Backing SurrealDB datastore — single-node v1.
     surrealImage: "surrealdb/surrealdb:v2.3"
     surrealResources:
       requests: { cpu: 100m, memory: 256Mi }
-      limits:   { cpu: 1,    memory: 1Gi }
+      limits: { cpu: 1, memory: 1Gi }
     storageSize: 10Gi
     # Override per cloud — empty leaves storage class to cluster default.
     storageClass: ""
@@ -380,8 +383,8 @@ providers:
       pullPolicy: Always
     replicas: 1
     resources:
-      requests: { cpu: 50m,  memory: 128Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
 
   # Messaging provider — Slack. One Deployment subscribes to
   # x1.provider.messaging.* and posts to Slack via SLACK_BOT_TOKEN
@@ -393,8 +396,8 @@ providers:
       pullPolicy: Always
     replicas: 1
     resources:
-      requests: { cpu: 50m,  memory: 128Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
 
   # Preview provider — receives x1.provider.preview.provision requests,
   # builds the caller's repo with Kaniko, applies a Deployment + Service
@@ -411,13 +414,13 @@ providers:
   #     roles/artifactregistry.writer on the AR repo (so Kaniko can push)
   preview:
     image:
-      repository: ""          # defaults to <artifactRegistry>/preview
-      tag: ""                 # defaults to images.api.tag
+      repository: "" # defaults to <artifactRegistry>/preview
+      tag: "" # defaults to images.api.tag
       pullPolicy: Always
     replicas: 1
     resources:
       requests: { cpu: 50m, memory: 256Mi }
-      limits:   { cpu: 1,   memory: 1Gi }
+      limits: { cpu: 1, memory: 1Gi }
     # Namespace where Kaniko Jobs run. Empty defaults to the install
     # namespace (.Release.Namespace).
     buildNamespace: ""
@@ -471,8 +474,8 @@ monitoring:
     # Resource cap — small enough that a constrained 1-node install can
     # afford it; bump for high-volume deployments.
     resources:
-      requests: { cpu: 50m,  memory: 128Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
     # Inline collector config. Defaults to a minimal pipeline that
     # logs everything to stdout (cheap, zero deps). Replace with a
     # real exporter (gcp / otlphttp / honeycomb) when you set up a
@@ -582,7 +585,7 @@ infra:
     storageClass: standard-rwo
     resources:
       requests: { cpu: 100m, memory: 256Mi }
-      limits:   { cpu: 1,    memory: 1Gi }
+      limits: { cpu: 1, memory: 1Gi }
   nats:
     enabled: true
     image: nats:2.10-alpine
@@ -592,8 +595,8 @@ infra:
     # automatically when replicas > 1. Stream replicas must be <= this.
     replicas: 1
     resources:
-      requests: { cpu: 50m,  memory: 64Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 512Mi }
     # JetStream enables durable, replayable subjects layered over NATS-
     # core. Required by the wake-reliability work in
     # rfcs/jetstream-migration.md. When disabled, the chart still
@@ -628,5 +631,5 @@ infra:
         # Audit subject's 30d retention will live in its own stream
         # in Wave 2 (rfcs/jetstream-migration.md).
         maxAge: 24h
-        maxBytes: 134217728   # 128 MiB
+        maxBytes: 134217728 # 128 MiB
         duplicateWindow: 2m

@@ -46,11 +46,16 @@ const MODE_OPTIONS: readonly ModeOption[] = [
 
 export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
   const ws = useWorkspaceSettingsStore((s) => s.bySlug[slug]);
-  const status = useWorkspaceSettingsStore((s) => s.statusBySlug[slug] ?? "idle");
+  const status = useWorkspaceSettingsStore(
+    (s) => s.statusBySlug[slug] ?? "idle",
+  );
   const load = useWorkspaceSettingsStore((s) => s.load);
   const patch = useWorkspaceSettingsStore((s) => s.patch);
 
-  const [pending, setPending] = useState<OauthMcpsOnOrchestratorsMode | null>(null);
+  const [pending, setPending] = useState<OauthMcpsOnOrchestratorsMode | null>(
+    null,
+  );
+  const [mcpPending, setMcpPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
@@ -60,9 +65,10 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
 
   const current: OauthMcpsOnOrchestratorsMode =
     ws?.settings.oauthMcpsOnOrchestrators ?? "off";
+  const adminMcpEnabled = ws?.settings.adminMcpEnabled ?? false;
 
   async function onPick(value: OauthMcpsOnOrchestratorsMode) {
-    if (!canManage || pending) return;
+    if (!canManage || pending || mcpPending) return;
     if (value === current) return;
     setError(null);
     setPending(value);
@@ -73,6 +79,20 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
       setError((e as Error).message);
     } finally {
       setPending(null);
+    }
+  }
+
+  async function toggleAdminMcp() {
+    if (!canManage || pending || mcpPending) return;
+    setError(null);
+    setMcpPending(true);
+    try {
+      await patch(slug, { adminMcpEnabled: !adminMcpEnabled });
+      setSavedAt(Date.now());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setMcpPending(false);
     }
   }
 
@@ -94,9 +114,9 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
       <Card>
         <CardContent className="space-y-3 py-6 text-sm">
           <p className="text-rose-500">
-            Could not load workspace settings. The displayed state of
-            this policy would be a guess, so the form is hidden until
-            the read succeeds.
+            Could not load workspace settings. The displayed state of this
+            policy would be a guess, so the form is hidden until the read
+            succeeds.
           </p>
           <Button
             variant="outline"
@@ -120,19 +140,51 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
     <div className="space-y-4">
       <Card>
         <CardHeader>
+          <CardTitle>Administrative MCP access</CardTitle>
+          <CardDescription>
+            Allow your signed-in MCP clients, including Codex, to discover this
+            workspace. Access remains read-only for the initial release and is
+            re-checked against current membership on every tool call.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-fg">
+              {adminMcpEnabled ? "Enabled" : "Disabled"}
+            </p>
+            <p className="mt-1 text-xs text-fg-faint">
+              The installation-wide MCP switch must also be enabled by an
+              operator.
+            </p>
+          </div>
+          <Button
+            variant={adminMcpEnabled ? "outline" : "default"}
+            disabled={!canManage || pending !== null || mcpPending}
+            onClick={() => void toggleAdminMcp()}
+          >
+            {mcpPending
+              ? "Saving…"
+              : adminMcpEnabled
+                ? "Disable MCP access"
+                : "Enable MCP access"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>OAuth MCPs on orchestrator agents</CardTitle>
           <CardDescription>
             Whether agents whose kind is <code>orchestrator</code> or{" "}
-            <code>scheduled</code> may attach MCPs that authenticate as
-            the driving user (Mercury, Notion, Google, etc.). Worker
-            agents are never affected — they always have a present
-            user.
+            <code>scheduled</code> may attach MCPs that authenticate as the
+            driving user (Mercury, Notion, Google, etc.). Worker agents are
+            never affected — they always have a present user.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {MODE_OPTIONS.map((opt) => {
             const checked = current === opt.value;
-            const disabled = !canManage || (!!pending && pending !== opt.value);
+            const disabled = !canManage || pending !== null || mcpPending;
             return (
               <label
                 key={opt.value}
@@ -154,9 +206,7 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
                   onChange={() => onPick(opt.value)}
                 />
                 <span className="space-y-1">
-                  <span className="block font-medium text-fg">
-                    {opt.title}
-                  </span>
+                  <span className="block font-medium text-fg">{opt.title}</span>
                   <span className="block text-fg-muted">{opt.blurb}</span>
                 </span>
               </label>
@@ -183,24 +233,27 @@ export function WorkspaceSecurityPoliciesPanel({ slug, canManage }: Props) {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-fg-muted">
           <p>
-            Worker agents always run with a present user driving the
-            session — their OAuth tokens are available for the whole
-            run. Orchestrators don't have that guarantee: they wake on
-            cron schedules, they get spawned by other orchestrators,
-            and they can run for hours with no human in the loop.
+            Worker agents always run with a present user driving the session —
+            their OAuth tokens are available for the whole run. Orchestrators
+            don't have that guarantee: they wake on cron schedules, they get
+            spawned by other orchestrators, and they can run for hours with no
+            human in the loop.
           </p>
           <p>
-            Allowing OAuth MCPs on orchestrators means the platform may
-            be acting on a user's behalf at 3am while the user sleeps.
-            That's the right tradeoff for some workspaces (interactive
-            co-driving, long-form planning sessions) and the wrong one
-            for others (strict-compliance customers, multi-tenant
-            installs). This setting puts the choice on the workspace
-            admin, where it belongs.
+            Allowing OAuth MCPs on orchestrators means the platform may be
+            acting on a user's behalf at 3am while the user sleeps. That's the
+            right tradeoff for some workspaces (interactive co-driving,
+            long-form planning sessions) and the wrong one for others
+            (strict-compliance customers, multi-tenant installs). This setting
+            puts the choice on the workspace admin, where it belongs.
           </p>
           <p>
             <Button variant="link" asChild className="h-auto p-0">
-              <a href="/docs/architecture/sidecar/" target="_blank" rel="noreferrer">
+              <a
+                href="/docs/architecture/sidecar/"
+                target="_blank"
+                rel="noreferrer"
+              >
                 More on the credential proxy →
               </a>
             </Button>

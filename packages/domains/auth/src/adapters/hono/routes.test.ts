@@ -119,6 +119,33 @@ describe("/auth/google initiation", () => {
     expect(stored!.codeVerifier.length).toBeGreaterThanOrEqual(43);
     expect(stored!.usedAt).toBeNull();
   });
+
+  it("persists a bounded MCP continuation and resumes it on the API origin", async () => {
+    const app = makeApp();
+    const returnTo = "/oauth/authorize?client_id=x1mcp_test&state=abc";
+    const init = await app.request(
+      `/google?return_to=${encodeURIComponent(returnTo)}`,
+    );
+    const state = locationStateParam(init);
+    const cookie = getSetCookie(init, "x1_oauth_state")!;
+    expect(loginStates.rows.get(state)?.redirectPath).toBe(returnTo);
+
+    const callback = await app.request(
+      `/google/callback?code=alice-code&state=${state}`,
+      { headers: { Cookie: `x1_oauth_state=${cookie}` } },
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("location")).toBe(`http://api.test${returnTo}`);
+  });
+
+  it("ignores an external return_to value", async () => {
+    const app = makeApp();
+    const init = await app.request(
+      "/google?return_to=https%3A%2F%2Fevil.example%2Fsteal",
+    );
+    const state = locationStateParam(init);
+    expect(loginStates.rows.get(state)?.redirectPath).toBeNull();
+  });
 });
 
 describe("/auth/google/callback", () => {

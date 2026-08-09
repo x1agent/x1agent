@@ -96,7 +96,10 @@ describe("workspace settings JSONB merge", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { settings: unknown };
-    expect(body.settings).toEqual({ oauthMcpsOnOrchestrators: "on" });
+    expect(body.settings).toEqual({
+      oauthMcpsOnOrchestrators: "on",
+      adminMcpEnabled: false,
+    });
   });
 
   it("GET after PATCH returns the same value (no array stringification)", async () => {
@@ -115,7 +118,10 @@ describe("workspace settings JSONB merge", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { settings: unknown };
-    expect(body.settings).toEqual({ oauthMcpsOnOrchestrators: "on_attended" });
+    expect(body.settings).toEqual({
+      oauthMcpsOnOrchestrators: "on_attended",
+      adminMcpEnabled: false,
+    });
   });
 
   it("multiple PATCHes merge cleanly (no array growth)", async () => {
@@ -139,6 +145,33 @@ describe("workspace settings JSONB merge", () => {
     expect(typeof rows[0]!.settings).toBe("object");
     expect(rows[0]!.settings).toEqual({
       oauthMcpsOnOrchestrators: "off",
+    });
+  });
+
+  it("concurrent patches to different keys cannot overwrite each other", async () => {
+    const c = await loginAsAdmin();
+    const request = (body: Record<string, unknown>) =>
+      app.fetch(
+        new Request("http://api.test/api/workspaces/acme/settings", {
+          method: "PATCH",
+          headers: { Cookie: c, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const [oauth, mcp] = await Promise.all([
+      request({ oauthMcpsOnOrchestrators: "on_attended" }),
+      request({ adminMcpEnabled: true }),
+    ]);
+    expect(oauth.status).toBe(200);
+    expect(mcp.status).toBe(200);
+
+    const rows = await dbSql<{ settings: unknown }[]>`
+      SELECT settings FROM workspaces WHERE slug = 'acme'
+    `;
+    expect(rows[0]!.settings).toEqual({
+      oauthMcpsOnOrchestrators: "on_attended",
+      adminMcpEnabled: true,
     });
   });
 });

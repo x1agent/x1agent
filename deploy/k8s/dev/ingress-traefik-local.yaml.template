@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: x1agent-local
+  labels:
+    app.kubernetes.io/part-of: x1agent
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ${APP_HOST}
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001
+          - path: /.well-known/oauth-protected-resource
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 4322
+    - host: ${API_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 30001

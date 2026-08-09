@@ -23,11 +23,16 @@ interface Row {
   last_built_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  source_kind: "preset" | "workspace_build" | "external_oci";
+  requested_ref: string | null;
+  resolved_digest_ref: string | null;
+  created_by: string | null;
 }
 
 const COLS = `id, workspace_id, name, display_name, description, built_ref,
   is_preset, dockerfile_source, build_status, build_log, last_built_at,
-  created_at, updated_at`;
+  created_at, updated_at, source_kind, requested_ref, resolved_digest_ref,
+  created_by`;
 
 function toEntity(row: Row): AgentImage {
   return {
@@ -46,6 +51,10 @@ function toEntity(row: Row): AgentImage {
     lastBuiltAt: row.last_built_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    sourceKind: row.source_kind,
+    requestedRef: row.requested_ref,
+    resolvedDigestRef: row.resolved_digest_ref,
+    createdBy: row.created_by,
   };
 }
 
@@ -91,7 +100,7 @@ export class PostgresAgentImageRepository implements AgentImageRepository {
     const [row] = await this.sql<Row[]>`
       INSERT INTO agent_images
         (workspace_id, name, display_name, description, built_ref,
-         is_preset, dockerfile_source, build_status, build_log)
+         is_preset, dockerfile_source, build_status, build_log, source_kind)
       VALUES (
         ${input.workspaceId},
         ${input.name as unknown as string},
@@ -101,7 +110,8 @@ export class PostgresAgentImageRepository implements AgentImageRepository {
         false,
         ${input.dockerfileSource as unknown as string},
         ${input.buildStatus},
-        ''
+        '',
+        'workspace_build'
       )
       RETURNING ${this.sql.unsafe(COLS)}
     `;

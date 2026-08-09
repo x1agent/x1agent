@@ -168,6 +168,20 @@ function readCookie(
   return m ? m[1]! : null;
 }
 
+/** OAuth continuation paths stay on the API origin and cannot redirect away. */
+function safeApiReturnPath(value: string | undefined): string | null {
+  if (!value || value.length > 4096) return null;
+  if (!value.startsWith("/oauth/authorize?")) return null;
+  try {
+    const parsed = new URL(value, "https://x1agent.invalid");
+    return parsed.origin === "https://x1agent.invalid"
+      ? `${parsed.pathname}${parsed.search}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // Maps known domain errors to HTTP status. Unknown errors are
 // rethrown so Hono's app.onError fires (→ Sentry.captureException).
 function domainErrorStatus(err: unknown): number {
@@ -226,7 +240,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
     const attempt: OAuthLoginState = {
       state: LoginState(state),
       codeVerifier,
-      redirectPath: null,
+      redirectPath: safeApiReturnPath(c.req.query("return_to")),
       createdAt: now,
       expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_SECONDS * 1000),
       usedAt: null,
@@ -294,11 +308,9 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
         redirectUri(),
         { codeVerifier: row.codeVerifier },
       );
-      c.header(
-        "Set-Cookie",
-        cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE),
-        { append: true },
-      );
+      c.header("Set-Cookie", cookieHeader(COOKIE_NAME, token, COOKIE_MAX_AGE), {
+        append: true,
+      });
       // Fresh-install platform admin: they signed in successfully but
       // there's no workspace yet (assertHasMembership exempts admins
       // for exactly this case). Send them to /workspaces/new so they
@@ -312,7 +324,10 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
       const slug = session.memberships[0]?.slug;
       const fallback = slug ? `/workspaces/${slug}` : "/workspaces/new";
       const dest = row.redirectPath ?? fallback;
-      return c.redirect(`${cfg.appUrl}${dest}`);
+      // MCP authorization begins and resumes on the API origin so the
+      // x1_session cookie remains first-party and available to /oauth.
+      const base = row.redirectPath ? cfg.apiUrl : cfg.appUrl;
+      return c.redirect(`${base}${dest}`);
     } catch (err) {
       if (err instanceof NoWorkspaceMembershipError)
         return c.redirect(`${cfg.appUrl}/no-access`);
@@ -472,8 +487,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
       const personId = await persons.findPersonIdForUser(
         UserId(session.userId),
       );
-      if (!personId)
-        return c.json({ error: "no_person_id" }, 400);
+      if (!personId) return c.json({ error: "no_person_id" }, 400);
 
       const { authorizeUrl } = await beginLink(
         { authProvider: cfg.authProvider, linkAttempts, clock },
@@ -538,7 +552,9 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
           };
         }),
       );
-      return c.json({ accounts: rows.filter((r): r is NonNullable<typeof r> => r !== null) });
+      return c.json({
+        accounts: rows.filter((r): r is NonNullable<typeof r> => r !== null),
+      });
     });
 
     app.post("/switch_account", async (c) => {
@@ -550,9 +566,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
       } catch (err) {
         return c.json(domainErrorBody(err), 401);
       }
-      const body = await c.req
-        .json<{ user_id?: string }>()
-        .catch(() => ({}));
+      const body = await c.req.json<{ user_id?: string }>().catch(() => ({}));
       if (!body.user_id) return c.json({ error: "missing_user_id" }, 400);
 
       const personId = await persons.findPersonIdForUser(
@@ -604,9 +618,7 @@ export function createAuthRoutes(cfg: AuthRoutesConfig): Hono {
       } catch (err) {
         return c.json(domainErrorBody(err), 401);
       }
-      const body = await c.req
-        .json<{ user_id?: string }>()
-        .catch(() => ({}));
+      const body = await c.req.json<{ user_id?: string }>().catch(() => ({}));
       if (!body.user_id) return c.json({ error: "missing_user_id" }, 400);
       if (body.user_id === session.userId)
         return c.json({ error: "cannot_unlink_self" }, 400);
