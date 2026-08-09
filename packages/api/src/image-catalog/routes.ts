@@ -24,6 +24,7 @@ export interface ImageCatalogRoutesConfig {
   getActor: (c: import("hono").Context) => { userId: UserId } | null;
   /** Optional override (defaults to NoopBuildQueue while Slice B lands). */
   buildQueue?: BuildQueue;
+  service?: ImageCatalogService;
 }
 
 class PostgresAgentImageUsageReader implements AgentImageUsageReader {
@@ -39,6 +40,17 @@ class PostgresAgentImageUsageReader implements AgentImageUsageReader {
     `;
     return rows.map((r) => r.slug);
   }
+}
+
+export function createImageCatalogService(
+  sql: Sql,
+  buildQueue?: BuildQueue,
+): ImageCatalogService {
+  return new ImageCatalogService(
+    new PostgresAgentImageRepository(sql),
+    buildQueue ?? new NoopBuildQueue(),
+    new PostgresAgentImageUsageReader(sql),
+  );
 }
 
 function serialize(img: AgentImage) {
@@ -78,10 +90,7 @@ export function createWorkspaceImageCatalogRoutes(
   const app = new Hono();
   app.use("*", cfg.requireAuth);
 
-  const repo = new PostgresAgentImageRepository(cfg.sql);
-  const queue = cfg.buildQueue ?? new NoopBuildQueue();
-  const usage = new PostgresAgentImageUsageReader(cfg.sql);
-  const svc = new ImageCatalogService(repo, queue, usage);
+  const svc = cfg.service ?? createImageCatalogService(cfg.sql, cfg.buildQueue);
 
   async function workspaceFromSlug(c: import("hono").Context) {
     const slug = c.req.param("slug")!;

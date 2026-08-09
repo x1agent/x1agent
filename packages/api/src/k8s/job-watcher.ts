@@ -372,7 +372,9 @@ async function launchSession(
   // session-history markdown mounted into /workspace.
   const isScheduled = session.triggeredBy === "scheduler";
   const isResume = session.resumedFromSessionId !== null;
-  const initialPrompt = isResume
+  const initialPrompt = session.validationRun && session.validationTask
+    ? session.validationTask
+    : isResume
     ? SESSION_RESUME_PROMPT
     : isScheduled
       ? agent.heartbeatMd

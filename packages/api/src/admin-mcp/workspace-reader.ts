@@ -7,6 +7,7 @@ export interface AdminMcpWorkspace {
   slug: string;
   name: string;
   role: string;
+  oauthMcpsOnOrchestrators: "off" | "on_attended" | "on";
   createdAt: string;
 }
 
@@ -20,6 +21,7 @@ interface Row {
   slug: string;
   name: string;
   role: string;
+  settings: Record<string, unknown> | null;
   created_at: Date | string;
 }
 
@@ -29,6 +31,11 @@ function toWorkspace(row: Row): AdminMcpWorkspace {
     slug: row.slug,
     name: row.name,
     role: row.role,
+    oauthMcpsOnOrchestrators:
+      row.settings?.oauthMcpsOnOrchestrators === "on" ||
+      row.settings?.oauthMcpsOnOrchestrators === "on_attended"
+        ? row.settings.oauthMcpsOnOrchestrators
+        : "off",
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -39,7 +46,7 @@ export class PostgresAdminMcpWorkspaceReader implements AdminMcpWorkspaceReader 
 
   async listForUser(userId: string): Promise<AdminMcpWorkspace[]> {
     const rows = await this.sql<Row[]>`
-      SELECT w.id, w.slug, w.name, w.created_at, wm.role
+      SELECT w.id, w.slug, w.name, w.settings, w.created_at, wm.role
       FROM workspace_members wm
       JOIN workspaces w ON w.id = wm.workspace_id
       WHERE wm.user_id = ${userId}
@@ -54,7 +61,7 @@ export class PostgresAdminMcpWorkspaceReader implements AdminMcpWorkspaceReader 
     slug: string,
   ): Promise<AdminMcpWorkspace | null> {
     const rows = await this.sql<Row[]>`
-      SELECT w.id, w.slug, w.name, w.created_at, wm.role
+      SELECT w.id, w.slug, w.name, w.settings, w.created_at, wm.role
       FROM workspace_members wm
       JOIN workspaces w ON w.id = wm.workspace_id
       WHERE wm.user_id = ${userId}

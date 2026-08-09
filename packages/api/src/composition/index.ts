@@ -109,6 +109,7 @@ import {
   PostgresCollectionRepository,
   createCollectionRoutes,
   createAgentCollectionRoutes,
+  type ProviderGateway,
   type WorkspaceReader as CollectionsWorkspaceReader,
 } from "@x1agent/domain-collections";
 import {
@@ -169,9 +170,15 @@ import {
 } from "./invitation-adapters.js";
 import { EmailListPlatformAdminGuard } from "./platform-admin-guard.js";
 import { createInternalRoutes } from "../internal/routes.js";
-import { createWorkspaceImageCatalogRoutes } from "../image-catalog/routes.js";
+import {
+  createImageCatalogService,
+  createWorkspaceImageCatalogRoutes,
+} from "../image-catalog/routes.js";
 import { createWorkspaceMembersRoutes } from "../workspace-members/routes.js";
-import { NatsBuildQueue } from "@x1agent/domain-image-catalog";
+import {
+  NatsBuildQueue,
+  type ImageCatalogService,
+} from "@x1agent/domain-image-catalog";
 import {
   createWorkspaceShareRoutes,
   createWorkspaceSharesIndexRoutes,
@@ -286,10 +293,14 @@ export interface Composition {
   /** Zone-3 plumbing — exposed to the job watcher for token resolution. */
   mcpAttachments: PostgresAttachmentRepository;
   mcpCatalog: PostgresCatalogRepository;
+  mcpAttachmentService: AttachmentService;
+  mcpCatalogService: CatalogService;
   userTokenService: UserTokenService;
   /** Exposed for the Job watcher — reads directly without reconnecting. */
   sql: postgres.Sql<Record<string, unknown>>;
   agents: PostgresAgentRepository;
+  agentGrants: PostgresAgentGrantRepository;
+  groups: PostgresGroupRepository;
   sessions: PostgresSessionRepository;
   /** Workspace membership table. Exposed so the WS bridge can build
    * its own AdminGuard / per-connection workspace scope without
@@ -320,6 +331,11 @@ export interface Composition {
   permissionGrants: PostgresPermissionGrantRepository;
   collections: PostgresCollectionRepository;
   agentRepoStore: PostgresAgentRepoStore;
+  githubClient: GitHubAppClient | null;
+  githubInstallations: PostgresInstallationRepository;
+  imageCatalogService: ImageCatalogService;
+  previewEnvironments: PostgresPreviewEnvironmentRepository;
+  collectionProviderGateway: ProviderGateway;
   /** Run one scheduler tick. Exposed so callers can wire it to setInterval. */
   tickScheduler: () => Promise<ScheduleDueSessionsResult>;
   /**
@@ -1575,12 +1591,17 @@ export function compose(env: CompositionEnv): Composition {
   const imageBuildQueue = env.natsConnection
     ? new NatsBuildQueue(env.natsConnection)
     : undefined;
+  const imageCatalogService = createImageCatalogService(
+    env.sql,
+    imageBuildQueue,
+  );
   const workspaceImageCatalogRoutes = createWorkspaceImageCatalogRoutes({
     sql: env.sql,
     resolveWorkspace: async (slug) => resolveWorkspace(slug),
     requireAuth,
     getActor,
     buildQueue: imageBuildQueue,
+    service: imageCatalogService,
   });
 
   const workspaceMembersRoutes = createWorkspaceMembersRoutes({
@@ -1728,18 +1749,27 @@ export function compose(env: CompositionEnv): Composition {
     workspaceSecrets: workspaceSecretsService,
     mcpAttachments: mcpAttachmentRepo,
     mcpCatalog: mcpCatalogRepo,
+    mcpAttachmentService: attachmentService,
+    mcpCatalogService: catalogService,
     userTokenService,
     sql: env.sql,
     agents,
+    agentGrants,
+    groups,
     sessions,
     memberships,
     sessionShares,
     platformAdminGuard,
     agentCollaborateResolver,
+    collectionProviderGateway: providerGateway ?? providerGatewayUnavailable,
     shareComments,
     permissionGrants,
     collections: collectionsRepo,
     agentRepoStore: agentRepos,
+    githubClient,
+    githubInstallations: installations,
+    imageCatalogService,
+    previewEnvironments,
     tickScheduler,
     quietHints,
     uploadRoutes,
